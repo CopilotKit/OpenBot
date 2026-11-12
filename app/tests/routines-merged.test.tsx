@@ -4,11 +4,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
+import {
+  RoutineRoutePage,
+  scheduleWords,
+} from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -107,6 +119,7 @@ function serving({
   checkIns = [] as ReturnType<typeof checkIn>[],
   working = true,
   routinesFail = false,
+  goalsFail = false,
 } = {}) {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -120,7 +133,9 @@ function serving({
       return Response.json({ ok: true });
     }
     if (url === "/api/responsibilities")
-      return Response.json({ responsibilities: goals });
+      return goalsFail
+        ? new Response(null, { status: 500 })
+        : Response.json({ responsibilities: goals });
     if (url === "/api/routines") {
       if (routinesFail) return new Response(null, { status: 500 });
       return Response.json({
@@ -151,20 +166,42 @@ function serving({
   }) as unknown as typeof fetch;
 }
 
-function draw(agentId: string | undefined = "expenses") {
+/** `null` is the every-Bot Routines page. */
+function draw(scope: string | null = "expenses") {
+  const agentId = scope ?? undefined;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // The list, and the page each schedule's row links to, as the app routes them.
+  const root = createRootRoute({ component: Outlet });
+  const schedule = createRoute({
+    getParentRoute: () => root,
+    path: "/routines/schedules/$routineId",
+    component: function SchedulePage() {
+      const { routineId } = schedule.useParams();
+      return <RoutineRoutePage agentId={agentId} routineId={routineId} />;
+    },
+  });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
-    routeTree: createRootRoute({
-      component: () => (
-        <>
-          <NewRoutineButton agentId={agentId} />
-          <RoutinesList agentId={agentId} />
-        </>
-      ),
-    }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => (
+          <>
+            <NewRoutineButton agentId={agentId} />
+            <RoutinesList agentId={agentId} />
+          </>
+        ),
+      }),
+      schedule,
+      createRoute({
+        getParentRoute: () => root,
+        path: "/bots/$agentId/routines",
+        component: () => <RoutinesList agentId={agentId} />,
+      }),
+    ]),
   });
   return render(
     <QueryClientProvider client={client}>
@@ -177,7 +214,7 @@ test("only this Bot's goals are listed, each as a goal with its outcome", async 
   serving();
   const view = draw();
   const title = await view.findByText("Reconcile receipts");
-  const row = title.closest("button") as HTMLElement;
+  const row = title.closest("a, button") as HTMLElement;
   expect(within(row).getByText("Goal")).toBeTruthy();
   expect(
     within(row).getByText("Until: The receipts match the bank."),
@@ -193,13 +230,17 @@ test("a routine, a goal and a check-in are one list, each in four parts", async 
   const view = draw();
   // A routine: what it does, when it starts, and that it acts.
   expect(await view.findByText("Post the standup summary.")).toBeTruthy();
-  expect(view.getByText("Weekdays at 09:00 · UTC · Acts")).toBeTruthy();
+  expect(
+    view.getByText(
+      `${scheduleWords({ schedule: "Weekdays at 09:00", timezone: "UTC" })} · Acts`,
+    ),
+  ).toBeTruthy();
   // A goal, as above.
   expect(view.getByText("Reconcile receipts")).toBeTruthy();
   // A check-in: what it watches, how often, and that it only tells you.
   const checkInRow = view
     .getByText("The launch brief")
-    .closest("button") as HTMLElement;
+    .closest("a, button") as HTMLElement;
   expect(within(checkInRow).getByText("Check-in")).toBeTruthy();
   expect(checkInRow.textContent).toContain("Once a day · Tells you");
   // One list: no heading names a kind.
@@ -218,7 +259,7 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   });
   const view = draw();
   const row = (await view.findByText("Reconcile receipts")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   expect(row.textContent).toContain("Every day at 08:00");
   expect(view.queryByText("Run the goal.")).toBeNull();
@@ -238,10 +279,50 @@ test("a goal's row claims no start when routines couldn't be read", async () => 
   serving({ routinesFail: true });
   const view = draw();
   const row = (await view.findByText("Reconcile receipts")).closest(
-    "button",
+    "a, button",
   ) as HTMLElement;
   await view.findByText("Couldn't load your routines. Reload the page.");
   expect(row.textContent).not.toContain("When you ask");
+});
+
+test("a routine that runs a goal, on a row of its own, says so and never shows the model's instruction", async () => {
+  // Its goal isn't in the goals read (here the read failed), so the routine is a row of its own.
+  serving({
+    goalsFail: true,
+    routines: [
+      routine("r1", "expenses", {
+        goalId: "g1",
+        title: "Reconcile receipts",
+        instruction:
+          'Run the goal "Reconcile receipts" (5f1c2d9e-0000-4000-8000-000000000001) with run_goal.',
+      }),
+      routine("r2", "expenses", {
+        goalId: "g2",
+        title: null,
+        schedule: "Every day at 08:00",
+        instruction:
+          'Run the goal "A goal named past the routine title limit" (5f1c2d9e-0000-4000-8000-000000000002) with run_goal.',
+      }),
+    ],
+  });
+  const view = draw();
+  await view.findByText("Couldn't load your goals. Reload the page.");
+  // Named: the goal's title, as New routine names its routine, and what it does under it.
+  const named = (await view.findByText("Reconcile receipts")).closest(
+    '[data-slot="item"]',
+  ) as HTMLElement;
+  expect(within(named).getByText("Runs a goal")).toBeTruthy();
+  // Unnamed: what it does heads its own row.
+  const unnamed = view
+    .getAllByText("Runs a goal")
+    .map((words) => words.closest('[data-slot="item"]'))
+    .find((item) => item !== named) as HTMLElement;
+  expect(unnamed.textContent).toContain("Schedule");
+  expect(document.body.textContent).not.toContain("run_goal");
+  // Its page says the same, in its title and nowhere the instruction.
+  fireEvent.click(unnamed.closest("a") as HTMLElement);
+  await view.findByRole("heading", { level: 1, name: "Runs a goal" });
+  expect(document.body.textContent).not.toContain("run_goal");
 });
 
 /** The row of the goal titled `title`, once its starts are on it. */
@@ -250,7 +331,8 @@ async function goalRow(
   title: string,
   starts: RegExp,
 ) {
-  const row = (await view.findByText(title)).closest("button") as HTMLElement;
+  // A link to the goal's page.
+  const row = (await view.findByText(title)).closest("a") as HTMLElement;
   await waitFor(() => expect(row.textContent).toMatch(starts));
   return row;
 }
@@ -281,7 +363,7 @@ test("a goal that repeats never says until when, and one that can end does", asy
   const until = "Until: The receipts match the bank.";
   for (const [title, starts] of [
     ["Recurring", /When you ask/],
-    ["On events", /GitHub issues\.opened/],
+    ["On events", /When a GitHub issue opens/],
     ["On a schedule", /Weekdays at 09:00/],
   ] as const)
     expect((await goalRow(view, title, starts)).textContent).not.toContain(
@@ -376,4 +458,209 @@ test("merging keeps a routine whose goal is not listed, and puts working rows fi
     "check-in:c1",
     "routine:paused",
   ]);
+});
+
+test("while the list loads it draws the list's shape, never the empty state", async () => {
+  serving({ goals: [] });
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("status", { name: "Loading your routines" }),
+  ).toBeTruthy();
+  expect(view.queryByText("No routines for this Bot yet")).toBeNull();
+
+  release();
+  expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
+  expect(
+    view.queryByRole("status", { name: "Loading your routines" }),
+  ).toBeNull();
+});
+
+test("a goal's row is a link to the goal's own page, back to the Bot's list it came from", async () => {
+  serving();
+  const view = draw();
+  const row = (await view.findByText("Reconcile receipts")).closest(
+    "a",
+  ) as HTMLAnchorElement;
+  expect(row).not.toBeNull();
+  const href = new URL(row.href, "http://localhost");
+  expect(href.pathname).toMatch(/^\/routines\/goals\/[^/]+$/);
+  expect(href.searchParams.get("agentId")).toBe("expenses");
+  // A page, not a dialog over the list.
+  expect(within(document.body).queryByRole("dialog")).toBeNull();
+});
+
+/*
+ * One row shape for every kind: a schedule opens its details as a goal and a check-in do, and
+ * everything its row used to carry inline is there.
+ */
+async function openSchedule(view: ReturnType<typeof draw>) {
+  const row = (await view.findByText("Post the standup summary.")).closest(
+    "a",
+  ) as HTMLElement;
+  fireEvent.click(row);
+  // Its own page, not a dialog over the list.
+  await view.findByRole("heading", {
+    level: 1,
+    name: "Post the standup summary.",
+  });
+  expect(within(document.body).queryByRole("dialog")).toBeNull();
+  return document.body;
+}
+
+test("every kind of row is one link or button with a chevron, with no control inside it", async () => {
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.querySelector("button, a, input, [role=switch]")).toBeNull();
+    expect(row.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
+  }
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
+});
+
+test("a schedule's page pauses it, runs it, shows its runs and deletes it", async () => {
+  serving({ routines: [routine("r1", "expenses")] });
+  const view = draw();
+  const details = within(await openSchedule(view));
+  expect(details.getByText("UTC")).toBeTruthy();
+
+  fireEvent.click(
+    details.getByRole("switch", {
+      name: "Enable the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      request: "PUT /api/routines/r1/enabled",
+      body: { enabled: false },
+    }),
+  );
+
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Run the routine scheduled Weekdays at 09:00 now",
+    }),
+  );
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "POST /api/routines/r1/run",
+    ),
+  );
+  // Its runs are on the page, so the one Run now started appears there.
+  expect(details.getByRole("heading", { name: "Runs" })).toBeTruthy();
+
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Delete the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  // Delete still asks first.
+  const confirm = await within(document.body).findByRole("dialog", {
+    name: 'Delete "Weekdays at 09:00"?',
+  });
+  expect(writes.map((write) => write.request)).not.toContain(
+    "DELETE /api/routines/r1",
+  );
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "DELETE /api/routines/r1",
+    ),
+  );
+  // Deleted, it goes back to the Bot's list it came from.
+  await waitFor(() =>
+    expect(
+      view.queryByRole("heading", {
+        level: 1,
+        name: "Post the standup summary.",
+      }),
+    ).toBeNull(),
+  );
+});
+
+test("a refused delete is said in its confirmation, and Delete can be pressed again", async () => {
+  serving({ routines: [routine("r1", "expenses")] });
+  const served = global.fetch;
+  let refuse = true;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "DELETE" && refuse)
+      return Response.json({ error: "Couldn't delete it." }, { status: 500 });
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  const details = within(await openSchedule(view));
+  fireEvent.click(
+    details.getByRole("button", {
+      name: "Delete the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  const confirm = within(
+    await within(document.body).findByRole("dialog", {
+      name: 'Delete "Weekdays at 09:00"?',
+    }),
+  );
+  fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
+  expect((await confirm.findByRole("alert")).textContent).toBe(
+    "Couldn't delete it.",
+  );
+
+  refuse = false;
+  fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(writes.map((write) => write.request)).toContain(
+      "DELETE /api/routines/r1",
+    ),
+  );
+});
+
+test("a skipped last run is on the row, and a quiet success is not", async () => {
+  serving({
+    routines: [
+      routine("r1", "expenses", {
+        lastRun: { status: "skipped", at: new Date().toISOString() },
+      }),
+      routine("r2", "expenses", {
+        instruction: "Send the digest.",
+        lastRun: { status: "succeeded", at: new Date().toISOString() },
+      }),
+    ],
+  });
+  const view = draw();
+  const skipped = (await view.findByText("Post the standup summary.")).closest(
+    "a, button",
+  ) as HTMLElement;
+  expect(within(skipped).getByText(/^Skipped /)).toBeTruthy();
+  const quiet = view
+    .getByText("Send the digest.")
+    .closest("a, button") as HTMLElement;
+  expect(within(quiet).queryByText(/^Ran /)).toBeNull();
+});
+
+test("on the every-Bot list a schedule's row names its Bot, and its page leads to that Bot", async () => {
+  serving({ goals: [], routines: [routine("r1", "expenses")] });
+  const view = draw(null);
+  expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();
+  const details = within(await openSchedule(view));
+  expect(
+    details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),
+  ).toBe("/bots/expenses/routines");
 });

@@ -168,11 +168,11 @@ function asDay(iso: string): string {
 }
 
 /** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string): PluginServer {
+function brokeredServer(authScheme: string, title = "Gmail"): PluginServer {
   return {
     authScheme,
     id: APP_KEY,
-    title: "Gmail",
+    title,
     vendor: "Google",
     url: "https://example.invalid/composio",
     summary: "Mail.",
@@ -195,10 +195,11 @@ function brokeredServer(authScheme: string): PluginServer {
 function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
+  title?: string,
 ): PluginsPage {
   return {
     catalogue: [],
-    servers: [brokeredServer(authScheme)],
+    servers: [brokeredServer(authScheme, title)],
     skills: [],
     botsMayCallBack: true,
     redirectUri: null,
@@ -225,6 +226,8 @@ type Deployment = {
   authScheme?: string;
   /** What the app publishes as the things a person types in, for the `API_KEY` schemes. */
   fields?: BrokerField[];
+  /** The app's name on its row. Gmail where it is left off, as every older test here meant. */
+  title?: string;
   /** Where the key comes from, as the server answers it beside the fields. Absent by default. */
   guide?: { steps: string; url: string | null };
   /** Whether a real call was ever made with this key and worked, as this deployment recorded it. */
@@ -649,7 +652,9 @@ function installDeployment(deployment: Deployment): Server {
     }
     if (path.startsWith("/api/agents")) return json({ agents: [] });
     if (path.startsWith("/api/plugins")) {
-      return json(pluginsPage(state.composioConfigured, state.authScheme));
+      return json(
+        pluginsPage(state.composioConfigured, state.authScheme, state.title),
+      );
     }
     return new Response(null, { status: 404 });
   }) as typeof fetch;
@@ -984,7 +989,7 @@ test("a key app's dialog explains the key and links to the provider's page for i
 
   const guide = await view.findByTestId("key-guide");
   expect(guide.textContent).toContain(
-    "Gmail doesn't offer a sign-in here, so it connects with a key from your Gmail account.",
+    "OpenBot connects to Gmail with a key from your Gmail account, not a sign-in.",
   );
   expect(guide.textContent).toContain("Connect server");
   const link = view.getByRole("link", { name: /Get a key from Gmail/ });
@@ -994,6 +999,46 @@ test("a key app's dialog explains the key and links to the provider's page for i
   expect(link.getAttribute("target")).toBe("_blank");
   // The guide sits above the form, which still draws the app's own box.
   expect(await view.findByLabelText("API Key")).toBeTruthy();
+});
+
+/**
+ * THE DIALOG SAYS HOW OPENBOT CONNECTS, AND NEVER THAT THE APP HAS NO SIGN-IN.
+ *
+ * Reported from OpenBot 1.0.2: Connect on Fireflies said "Fireflies doesn't offer a sign-in here",
+ * and Fireflies does offer one, with OAuth, on its own MCP server. Composio publishes only `API_KEY`
+ * for it, so the form is right. The row knows only how OpenBot connects, so that is all the
+ * sentence may say. The field is Fireflies' own, as `server/tests/key-only-apps.test.ts` pins it
+ * from Composio's captured answer.
+ */
+const FIREFLIES_KEY: BrokerField = {
+  name: "generic_api_key",
+  label: "API key",
+  help: "Your Fireflies API key — a secret token that lets OpenBot access your meetings and transcripts. Find it at app.fireflies.ai → Integrations → Fireflies API.",
+  required: true,
+  secret: true,
+};
+
+test("a key app's dialog says OpenBot connects it with a key, not that the app has no sign-in", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [FIREFLIES_KEY],
+    recorded: false,
+    title: "Fireflies",
+  });
+
+  const view = renderAccountScreen(queryClient());
+  await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+
+  const guide = await view.findByTestId("key-guide");
+  expect(guide.textContent).toContain(
+    "OpenBot connects to Fireflies with a key from your Fireflies account, not a sign-in.",
+  );
+  expect(guide.textContent).not.toMatch(/doesn't offer a sign-in/);
+  // And the box is still Fireflies' own, so the connect itself is unchanged.
+  const input = await view.findByLabelText("API key");
+  expect(input.getAttribute("type")).toBe("password");
 });
 
 test("a key app nobody has connected says it will ask for a key, not send you off", async () => {

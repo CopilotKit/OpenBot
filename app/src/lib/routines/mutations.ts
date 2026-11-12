@@ -149,7 +149,12 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
           checkIn.channelId,
           checkIn.subject.trim() || checkIn.focus.trim(),
           async (channelId, saved) => {
-            await createProactiveSetting({ ...checkIn, channelId });
+            // A new one: the server refuses one the Bot already has, should this screen's list of
+            // them be out of date, as Name does while it is typed.
+            await createProactiveSetting(
+              { ...checkIn, channelId },
+              { refuseExisting: true },
+            );
             saved();
           },
         );

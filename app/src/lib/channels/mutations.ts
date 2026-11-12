@@ -115,7 +115,11 @@ export function renameChannelMutationOptions(queryClient: QueryClient) {
       });
     },
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+        // A search found it by its old name, or would find it by its new one.
+        queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+      ]),
   });
 }
 
@@ -141,31 +145,34 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: botLifecycleKeys.attention }),
     onMutate: (channelId) => {
       const now = new Date().toISOString();
-      queryClient.setQueryData(
-        channelKeys.list(),
-        (data: InfiniteData<ChannelPage> | undefined) =>
-          data && {
-            ...data,
-            pages: data.pages.map((page) => ({
-              ...page,
-              channels: page.channels.map((row) =>
-                row.id === channelId
-                  ? {
-                      ...row,
-                      /*
-                       * The later of now and the row's own lastMessageAt: lastMessageAt comes from
-                       * another clock, and a marker stamped "now" by a clock running behind it
-                       * would leave the row still reading as unseen — and the dot still lit.
-                       */
-                      lastReadAt:
-                        row.lastMessageAt && row.lastMessageAt > now
-                          ? row.lastMessageAt
-                          : now,
-                    }
-                  : row,
-              ),
-            })),
-          },
+      const markRead = (data: InfiniteData<ChannelPage> | undefined) =>
+        data && {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            channels: page.channels.map((row) =>
+              row.id === channelId
+                ? {
+                    ...row,
+                    /*
+                     * The later of now and the row's own lastMessageAt: lastMessageAt comes from
+                     * another clock, and a marker stamped "now" by a clock running behind it
+                     * would leave the row still reading as unseen — and the dot still lit.
+                     */
+                    lastReadAt:
+                      row.lastMessageAt && row.lastMessageAt > now
+                        ? row.lastMessageAt
+                        : now,
+                  }
+                : row,
+            ),
+          })),
+        };
+      queryClient.setQueryData(channelKeys.list(), markRead);
+      // The same row in any search that holds it, so the dot does not come back there either.
+      queryClient.setQueriesData(
+        { queryKey: channelKeys.searches() },
+        markRead,
       );
     },
   });
@@ -186,10 +193,13 @@ export function deleteChannelMutationOptions(
         },
       );
     },
-    // The roster only. The open channel's detail query would refetch into the fresh 404 and
-    // flash an error before the navigate-home lands; left alone, it keeps its cache and the
-    // navigation happens with nothing to complain about.
+    // The roster and its searches only. The open channel's detail query would refetch into the
+    // fresh 404 and flash an error before the navigate-home lands; left alone, it keeps its cache
+    // and the navigation happens with nothing to complain about.
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+      ]),
   });
 }

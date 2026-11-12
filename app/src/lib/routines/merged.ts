@@ -106,6 +106,19 @@ export function mergeRoutines({
     .map(({ row }) => row);
 }
 
+/**
+ * What a routine does, in words a person reads. Its instruction, except for a routine that runs a
+ * goal: that instruction is written for the model (`runGoalInstruction` in `plan.ts`), and quotes the
+ * goal's id. Such a routine is a row of its own only when its goal isn't in the goals read (that read
+ * failed, or the goal is past the server's list), so the goal is not known here: it "Runs a goal".
+ * Its own title, when it has one, is the goal's title as New routine names it, and heads the row.
+ */
+export function routineDoes(
+  routine: Pick<RoutineRecord, "instruction" | "goalId">,
+): string {
+  return routine.goalId ? "Runs a goal" : routine.instruction;
+}
+
 /** A check-in's interval, in words. */
 export const CHECK_IN_INTERVALS = [
   { minutes: 60, label: "Every hour" },

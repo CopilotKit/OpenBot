@@ -201,16 +201,16 @@ export type RoutineGoalLink = {
  * Activity, and by the routine store when it names an untitled routine for its goal.
  *
  * BY THE GOAL IT RECORDS. A routine made for a goal records its id, and runs that goal and no other,
- * whatever its instruction quotes; completing that goal switches it off, or, when its instruction
- * doesn't name the goal (`instructionNamesGoal`), unlinks it and leaves it on. An older routine can
- * name several goals, and stays on while one of them is not completed (`switchOffRoutinesOf`).
+ * whatever its instruction quotes. How it came to record it (`goalLinkedByRun`) decides what
+ * completing or deleting the goal does to it (`switchOffRoutinesOf` and `routinesDeletedWith` in the
+ * goal store). An older routine can name several goals, and stays on while one of them is not
+ * completed.
  *
  * FOUND BEFORE 0.3.3: the rule was "the instruction contains the goal's title anywhere", so a goal
  * titled "Email" was run by any routine that mentioned email. Its runs could then never complete it,
  * and Activity listed it with somebody else's schedule. A routine made before routines recorded their
- * goal (`goalByTitle`) is still read from its instruction, but only by the goal's id or its whole
- * title, exactly, between quotes: `Run the goal "Track OpenBot releases"`, never a word inside a
- * sentence.
+ * goal (`goalByTitle`) is still read from its instruction, but only where the instruction clearly
+ * runs that goal (`instructionRunsGoal`).
  */
 export function routineRunsGoal(
   routine: RoutineGoalLink,
@@ -218,24 +218,53 @@ export function routineRunsGoal(
 ): boolean {
   if (routine.goalId) return routine.goalId === goal.id;
   if (!routine.goalByTitle) return false;
-  return instructionNamesGoal(routine.instruction, goal);
+  return instructionRunsGoal(routine.instruction, goal);
+}
+
+/** A letter or digit: what may not touch a goal's quoted title for it to be the whole title. */
+const WORD_CHARACTER = "[\\p{L}\\p{N}]";
+
+function escapeForPattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
- * Whether a routine's instruction names this goal: by its id, or by its whole title between quotes
- * (`TITLE_QUOTES`). What the page writes (`Run the goal "Title" (id) with run_goal.`) and what a Bot
- * writes (`Run the goal "Title"`) both do; a word of the title inside a sentence does not.
+ * Whether a routine's instruction clearly runs this goal: it holds the goal's id, or it names the goal
+ * as a goal, the word "goal" (or `run_goal`) right before its whole title between quotes
+ * (`TITLE_QUOTES`). What the page writes (`Run the goal "Title" (id) with run_goal.`), what a Bot
+ * writes (`Run the goal "Title"`), and `run_goal "Title"` all do. The title must end at its closing
+ * quote: no letter or digit follows it.
+ *
+ * FOUND IN REVIEW: the rule was "the whole title between quotes anywhere", so `Ship "Report"` ran the
+ * goal "Report", and a title with a quote in it ("Bob's report" in single quotes) ran the shorter goal
+ * "Bob". Completing such a goal then switched off a routine that never ran it, and it could not be
+ * switched back on. A routine that only quotes a title is left alone.
  */
-export function instructionNamesGoal(
+export function instructionRunsGoal(
   instruction: string,
   goal: { id: string; title: string },
 ): boolean {
-  return (
-    instruction.includes(goal.id) ||
-    TITLE_QUOTES.some(([open, close]) =>
-      instruction.includes(`${open}${goal.title}${close}`),
-    )
+  if (instruction.includes(goal.id)) return true;
+  if (!goal.title.trim()) return false;
+  return TITLE_QUOTES.some(([open, close]) =>
+    new RegExp(
+      `(?<!${WORD_CHARACTER})[Gg][Oo][Aa][Ll]\\s+${escapeForPattern(`${open}${goal.title}${close}`)}(?!${WORD_CHARACTER})`,
+      "u",
+    ).test(instruction),
   );
+}
+
+/**
+ * The per-Bot lock every write that links, unlinks or switches off a goal's routines takes, in one
+ * order: the goal's row first, then this lock, then the routine rows. Completing or deleting a goal
+ * (the goal store) and linking a routine to the goal its firing ran (`linkGoal` in the routine store)
+ * all take it, so none of them reads which routines run which goal while another changes it.
+ */
+export function goalRoutinesLockKey(
+  ownerUserId: string,
+  agentId: string,
+): string {
+  return `goal-completion-${ownerUserId}-${agentId}`;
 }
 
 /**
@@ -326,8 +355,11 @@ export type ResponsibilityStore = {
     status: ResponsibilityStatus,
   ): Promise<Responsibility>;
   /**
-   * Delete this goal and the routines that record it (`goal_id`): they exist to run it. Its runs and
-   * triggers go with it. Not found for another person's goal.
+   * Delete this goal and the routines that run it (`routineRunsGoal`): they exist to run it. An older
+   * routine that still runs another of its Bot's goals that is not completed stays. A routine its
+   * firing linked to the goal (`goalLinkedByRun`) does other work too, so it is unlinked and kept.
+   * Its runs and triggers go with it, a run in progress too, which then settles as gone
+   * (`settleRun`). Not found for another person's goal.
    */
   delete(ownerUserId: string, id: string): Promise<void>;
   recordProgress(
@@ -348,8 +380,8 @@ export type ResponsibilityStore = {
     title: string,
   ): Promise<boolean>;
   /**
-   * The goals of this Bot that repeat, and why (`repeats`), read together. Any status counts, so a
-   * paused or completed goal can be in it; a goal that is not active never runs, so that is harmless.
+   * The goals of this Bot that repeat, and why (`repeats`), read together. A completed goal is never
+   * in it; a paused one can be, which is harmless, since a goal that is not active never runs.
    */
   repeatingGoals(
     ownerUserId: string,
@@ -361,7 +393,11 @@ export type ResponsibilityStore = {
     runId: string,
     options?: { recovered: boolean },
   ): Promise<ResponsibilityRunContext | null>;
-  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<void>;
+  /**
+   * Record how a run ended. False when the run is gone: its goal was deleted while it ran, so there
+   * is nothing to record and nobody to tell.
+   */
+  settleRun(runId: string, outcome: ResponsibilityRunOutcome): Promise<boolean>;
   /**
    * Put a run that started back in the queue, unrun: its conversation was busy, so nothing happened.
    * False when it is no longer running.

@@ -10,6 +10,7 @@ import {
   unreachedApps,
 } from "./store";
 import {
+  ProactiveConflictError,
   ProactiveNotFoundError,
   ProactiveRefusedError,
   type ProactiveSuggestion,
@@ -79,6 +80,8 @@ export function createProactiveRoutes(
       return context.json({ error: error.message }, 404);
     if (error instanceof ProactiveRefusedError)
       return context.json({ error: error.message }, 400);
+    if (error instanceof ProactiveConflictError)
+      return context.json({ error: error.message }, 409);
     console.error(
       JSON.stringify({
         type: "proactive-route-error",
@@ -106,12 +109,18 @@ export function createProactiveRoutes(
       allowed,
     });
   });
+  /*
+   * `?refuseExisting=true` asks for a new check-in: one on a thing the Bot already watches is a 409
+   * (the New routine screen). Without it, that one is turned back on with what was sent, which is
+   * what accepting a Bot's offer and Turn on check-ins mean.
+   */
   routes.post("/settings", async (context) =>
     context.json(
       {
         setting: await engine.create(
           context.var.actor.id,
           await body(context.req.raw),
+          { refuseExisting: context.req.query("refuseExisting") === "true" },
         ),
       },
       201,

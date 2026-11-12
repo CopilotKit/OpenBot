@@ -771,7 +771,12 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       ).filter((name) => !ownNames.has(name));
       return [...own, ...refusalsFor([...new Set(denied)])];
     },
-    async create(ownerUserId: string, input: unknown) {
+    /** `options` as the store takes them: `refuseExisting` for a caller that asked for a new one. */
+    async create(
+      ownerUserId: string,
+      input: unknown,
+      options: { refuseExisting?: boolean } = {},
+    ) {
       const parsed = input as { agentId?: unknown; channelId?: unknown };
       if (
         typeof parsed?.agentId !== "string" ||
@@ -785,7 +790,12 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         throw new ProactiveRefusedError(
           "Choose one of your Bots and a conversation it's in.",
         );
-      return deps.store.create(ownerUserId, input, deps.mintThreadId());
+      return deps.store.create(
+        ownerUserId,
+        input,
+        deps.mintThreadId(),
+        options,
+      );
     },
     /**
      * Check in now, because the person asked. Either it is queued, or they are told plainly why it

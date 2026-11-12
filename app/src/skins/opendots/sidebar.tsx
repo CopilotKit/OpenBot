@@ -47,6 +47,10 @@ import {
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -551,6 +555,21 @@ function WorkspaceLinks({
           <Count value={memories.data?.length} />
         </Link>
       ) : null}
+      {/* The rail has its own at desktop width. */}
+      <button
+        aria-keyshortcuts={COMMAND_MENU_KEYS}
+        className={cn(row("search"), drawerOnly)}
+        onClick={() => {
+          onNavigate();
+          openCommandMenu();
+        }}
+        type="button"
+      >
+        <IconSearch />
+        <span className="min-w-0 flex-1 truncate text-left">
+          Command palette
+        </span>
+      </button>
       {/* OpenBot's own destinations, from the one list every frame reads. */}
       {navigation.map((item) => (
         <NavigationTarget

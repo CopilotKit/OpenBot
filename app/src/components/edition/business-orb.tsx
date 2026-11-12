@@ -8,8 +8,10 @@ const ORB_COLORS = ORB_PALETTES[2];
  * A Bot's live orb, the one at the top of a conversation, over an endless field of smaller orbs in
  * every Bot colour drifting upwards: one OpenBot, and the many a team runs. The field is CSS, so it
  * costs nothing to load; its animation is in styles.css. Both hold still under reduced motion.
+ *
+ * `orb={false}` draws the field alone, as the backdrop to something placed in front of it.
  */
-export function BusinessOrb() {
+export function BusinessOrb({ orb = true }: { orb?: boolean }) {
   return (
     <div
       aria-hidden="true"
@@ -20,12 +22,14 @@ export function BusinessOrb() {
         className="business-orb-field absolute inset-0"
         style={{ backgroundImage: `url("${FIELD_TILE}")` }}
       />
-      <div className="absolute inset-0 flex items-center justify-center">
-        {/* `.bot-orb-live` gives it the same finish as a Bot's orb in a conversation. */}
-        <span className="bot-orb-live inline-flex rounded-full ring-1 ring-foreground/10">
-          <AgentOrb colors={ORB_COLORS} size="176px" />
-        </span>
-      </div>
+      {orb ? (
+        <div className="absolute inset-0 flex items-center justify-center">
+          {/* `.bot-orb-live` gives it the same finish as a Bot's orb in a conversation. */}
+          <span className="bot-orb-live inline-flex rounded-full ring-1 ring-foreground/10">
+            <AgentOrb colors={ORB_COLORS} size="176px" />
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

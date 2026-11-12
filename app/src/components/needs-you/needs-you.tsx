@@ -19,6 +19,7 @@ import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
+import { readFailure } from "@/lib/read-failure";
 import { type ListedTask, orderTasks } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
@@ -66,6 +67,11 @@ export function useNeedsYou(agentId?: string) {
   return {
     pending: suggestions.isPending || taskList.isPending,
     error: suggestions.error ?? taskList.error,
+    /** Each source's own failure, so a board can say which part may be missing and retry only it. */
+    failures: {
+      tasks: readFailure(taskList),
+      checkIns: readFailure(suggestions),
+    },
     tasks: listed.filter(({ status }) => status !== "resolved"),
     done: listed.filter(({ status }) => status === "resolved"),
     items: (suggestions.data ?? []).filter(mine),

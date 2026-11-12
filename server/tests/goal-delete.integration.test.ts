@@ -80,14 +80,32 @@ afterAll(async () => {
   await database.$client.close();
 });
 
-async function goal(ownerUserId = ownerId) {
+async function goal(ownerUserId = ownerId, title = "Ship the release") {
   return store.create(ownerUserId, {
     agentId: botId,
     channelId,
-    title: "Ship the release",
+    title,
     instruction: "Ship the release",
     successCriteria: "It is out",
   });
+}
+
+/** A routine made before routines recorded their goal, which runs the goals its instruction names. */
+async function olderRoutine(instruction: string) {
+  const id = `routine_${randomUUID()}`;
+  await database.insert(routines).values({
+    id,
+    ownerUserId: ownerId,
+    agentId: botId,
+    channelId,
+    instruction,
+    cron: "0 9 * * *",
+    timezone: "UTC",
+    nextRunAt: new Date(Date.now() + 3_600_000),
+    goalId: null,
+    goalByTitle: true,
+  });
+  return id;
 }
 
 async function routine(goalId: string | null) {
@@ -162,4 +180,40 @@ test("another person's goal, or one that is gone, is not found", async () => {
   expect(await missing.json()).toEqual({
     error: "This goal could not be found.",
   });
+});
+
+test("an older routine that runs the goal by its title goes with it, unless it still runs another open goal", async () => {
+  const title = `Weekly report ${randomUUID()}`;
+  const otherTitle = `Inbox zero ${randomUUID()}`;
+  const target = await goal(ownerId, title);
+  await goal(ownerId, otherTitle);
+  const byTitle = await olderRoutine(`Run the goal "${title}"`);
+  const both = await olderRoutine(
+    `Run the goal "${title}", then the goal "${otherTitle}"`,
+  );
+
+  expect((await remove(ownerId, target.id)).status).toBe(204);
+
+  expect(await routineIds([byTitle, both])).toEqual([both]);
+});
+
+test("a run in progress when its goal is deleted settles as gone", async () => {
+  const target = await goal();
+  const { runIds } = await store.ingestEvent({
+    ownerUserId: ownerId,
+    source: "manual",
+    externalId: randomUUID(),
+    type: "requested",
+    responsibilityId: target.id,
+    payload: {},
+  });
+  const runId = runIds[0];
+  if (!runId) throw new Error("Expected a queued run.");
+  expect(await store.beginRun(runId)).not.toBeNull();
+
+  expect((await remove(ownerId, target.id)).status).toBe(204);
+
+  expect(
+    await store.settleRun(runId, { status: "succeeded", replyText: "Done." }),
+  ).toBe(false);
 });

@@ -102,12 +102,18 @@ export function connectorCount(plugins: GrantedPlugins): number {
  * Bots it may hand work to is on its Setup page (`components/bot-profile/setup.tsx`).
  */
 export function AppsSections({ agent }: { agent: AgentProfile }) {
-  // Every Bot has every connected app in the personal edition, so there is no switch per app here.
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /*
+   * Every Bot has every connected app in the personal edition, so there is no switch per app here.
+   * Nothing until the edition is known, so the personal edition never draws Your apps for a moment.
+   */
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const yourApps =
+    agent.mine &&
+    !capabilities.isPending &&
+    capabilities.data?.edition !== "personal";
   return (
     <>
-      {agent.mine && !personal ? <YourApps agent={agent} /> : null}
+      {yourApps ? <YourApps agent={agent} /> : null}
       <Granted agentId={agent.id} kind="apps" mine={agent.mine} />
     </>
   );
@@ -356,12 +362,25 @@ function Granted({
   mine: boolean;
 }) {
   const me = useQuery(currentUserQueryOptions()).data;
-  const edition =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const edition = capabilities.data?.edition ?? "team";
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
-  const apps = useQuery(botAppsQueryOptions(agentId));
-  // Both, so no row is drawn without its state and then redrawn with one a moment later.
-  if (plugins.isPending || apps.isPending) return null;
+  // Only on the Apps page: the Skills page draws no app, and this read can wait on the app
+  // directory, so the skills waited for it for nothing. A query that is not enabled stays pending.
+  const apps = useQuery({
+    ...botAppsQueryOptions(agentId),
+    enabled: kind === "apps",
+  });
+  /*
+   * Both on the Apps page, so no row is drawn without its state and then redrawn with one a moment
+   * later; and the edition, so the personal edition never shows the team edition's empty state first.
+   */
+  if (
+    plugins.isPending ||
+    (kind === "apps" && apps.isPending) ||
+    capabilities.isPending
+  )
+    return null;
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
@@ -407,9 +426,19 @@ function Granted({
         </PageEmpty>
       ) : count === 0 ? (
         <PageEmpty icon={IconApps} title="No apps yet">
-          {mine
-            ? "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
-            : "An admin has to add them. Until then this Bot can only talk with you."}
+          {/*
+           * The personal edition has no Your apps and no admin: every Bot gets every app you
+           * connect, so the one way in is Connections.
+           */}
+          {edition === "personal" ? (
+            <>
+              Connect one on <Link to="/connections">Connections</Link>.
+            </>
+          ) : mine ? (
+            "Turn one on under Your apps, or ask an admin. Until then this Bot can only talk with you."
+          ) : (
+            "An admin has to add them. Until then this Bot can only talk with you."
+          )}
         </PageEmpty>
       ) : (
         <PageRows>

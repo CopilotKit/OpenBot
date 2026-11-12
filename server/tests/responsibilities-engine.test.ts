@@ -30,6 +30,14 @@ function fixture(
   runTurn: (
     input: ResponsibilityRunContext & { signal: AbortSignal },
   ) => Promise<{ replyText: string }>,
+  options: {
+    /** False: the run is gone when it settles, its goal deleted while it ran. */
+    settles?: boolean;
+    onReply?: (
+      context: ResponsibilityRunContext,
+      text: string,
+    ) => Promise<void>;
+  } = {},
 ) {
   const outcomes: ResponsibilityRunOutcome[] = [];
   const finished: string[] = [];
@@ -53,6 +61,7 @@ function fixture(
       },
       async settleRun(_id, outcome) {
         outcomes.push(outcome);
+        return options.settles ?? true;
       },
       async requeueRun() {
         return false;
@@ -74,6 +83,7 @@ function fixture(
       },
     },
     runTurn,
+    onReply: options.onReply,
   });
   return { engine, outcomes, finished };
 }
@@ -123,6 +133,37 @@ test("runs the selected owned Bot once and preserves its progress reply", async 
     { status: "succeeded", replyText: "The quarterly graph is ready." },
   ]);
   expect(finished).toEqual(["run-1", "run-1"]);
+});
+
+test("a run whose goal was deleted while it ran is skipped, and its reply goes nowhere", async () => {
+  const replies: string[] = [];
+  const { engine, finished } = fixture(
+    async () => ({ replyText: "The quarterly graph is ready." }),
+    {
+      settles: false,
+      onReply: async (_context, text) => {
+        replies.push(text);
+      },
+    },
+  );
+  const report = await engine.dispatch({ owner: "replica-1" });
+  expect(report.skipped).toEqual(["run-1"]);
+  expect(report.succeeded).toEqual([]);
+  expect(replies).toEqual([]);
+  expect(finished).toEqual(["run-1"]);
+});
+
+test("a failed run whose goal was deleted while it ran is skipped, not thrown", async () => {
+  const { engine, finished } = fixture(
+    async () => {
+      throw new Error("The model is unavailable.");
+    },
+    { settles: false },
+  );
+  const report = await engine.dispatch({ owner: "replica-1" });
+  expect(report.skipped).toEqual(["run-1"]);
+  expect(report.failed).toEqual([]);
+  expect(finished).toEqual(["run-1"]);
 });
 
 test("suspension persists the canonical waiting action and does not retry", async () => {

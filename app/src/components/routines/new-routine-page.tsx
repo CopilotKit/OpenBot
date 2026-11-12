@@ -3,7 +3,11 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { PageCard, PageShell } from "@/components/layout/page-shell";
+import {
+  PageCard,
+  PageSection,
+  PageShell,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -28,6 +32,7 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type ProactiveSetting,
   proactiveAllowedQueryOptions,
@@ -83,8 +88,8 @@ const SAME_CHECK_IN =
 /**
  * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
  * check-in this Bot already has. The server counts a check-in with no link and the same subject, in
- * any case, as the same one, and updates that one in place (`proactiveStore.create`): it would keep
- * posting in its own conversation, and the one picked here would stay empty.
+ * any case, as the same one. Asked for a new one, as this screen asks, it refuses that with 409 and
+ * this sentence (`refuseExisting` in `proactiveStore.create`); this check says it while Name is typed.
  */
 function sameCheckIn(
   settings: ProactiveSetting[] | undefined,
@@ -105,6 +110,9 @@ const TELL_OFF =
   "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
 
 type FieldName = keyof RoutineFormValues;
+
+/** The id of a field's message, which its control names in `aria-describedby`. */
+const errorId = (name: FieldName) => `${name}-error`;
 
 /** One message per field: the first rule its answer breaks. */
 type Messages = Partial<Record<FieldName, string>>;
@@ -178,8 +186,8 @@ const EVENT_SOURCE_LABEL: Record<RoutineEventSource, string> = {
   connector: "Connected app",
 };
 
-/** A Bot's Routines list, or every Bot's in Settings when there is no Bot. */
-function routinesOf(agentId: string | undefined) {
+/** The Routines list a page came from: one Bot's, or every Bot's. */
+export function routinesOf(agentId: string | undefined) {
   return agentId
     ? linkOptions({ to: "/bots/$agentId/routines", params: { agentId } })
     : linkOptions({ to: "/routines" });
@@ -217,6 +225,14 @@ export function NewRoutinePage({
   const allowed = useQuery(proactiveAllowedQueryOptions()).data === true;
   // The same request as `allowed`: both read one key.
   const checkIns = useQuery(proactiveSettingsQueryOptions());
+  // FOUND IN REVIEW: Slack was offered as a source in every edition. The personal edition has no
+  // Slack (Connections leaves it out), so a goal woken by a Slack event there never ran, while its
+  // row named the event as if it would.
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const eventSources = personal
+    ? EVENT_SOURCES.filter((source) => source !== "slack")
+    : EVENT_SOURCES;
   const timeZone = browserTimeZone();
   // A write was saved, or its answer was lost. Lock the form to prevent duplicate work.
   const saved = createFromPlan.error instanceof SavedButRefused;
@@ -291,6 +307,27 @@ export function NewRoutinePage({
     { compare: sameMessages },
   );
 
+  /*
+   * Where focus goes. Each press of Create with a message showing moves it to the first field that
+   * has one, in the order the page draws them; a message that comes or goes while the person types
+   * moves nothing. After a partial or uncertain save, Create (which had focus) is replaced by Go to
+   * Routines, so focus moves there instead of falling back to the page.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const goToRoutines = useRef<HTMLElement | null>(null);
+  const attempts = useSelector(form.store, (state) => state.submissionAttempts);
+  const focusedFor = useRef(0);
+  useEffect(() => {
+    if (attempts === focusedFor.current) return;
+    focusedFor.current = attempts;
+    formRef.current
+      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      ?.focus();
+  }, [attempts]);
+  useEffect(() => {
+    if (saved) goToRoutines.current?.focus();
+  }, [saved]);
+
   const botItems = Object.fromEntries(
     (agents.data ?? []).map((agent) => [agent.id, agent.name]),
   ) as Record<string, string>;
@@ -308,277 +345,677 @@ export function NewRoutinePage({
     >
       <form
         noValidate
+        ref={formRef}
         onSubmit={(event) => {
           event.preventDefault();
           form.handleSubmit();
         }}
       >
-        <PageCard
-          footer={
-            <>
-              {/* Cancel says nothing was kept. After a partial or uncertain save the work is kept, and Go to
-                  Routines goes to the same list. */}
-              {saved ? (
-                <Button
-                  render={(props) => (
-                    <Link
-                      {...props}
-                      // The Bot the work was saved for, not the one the picker shows.
-                      {...after(savedFor)}
-                    />
-                  )}
-                  variant="outline"
-                >
-                  Go to Routines
-                </Button>
-              ) : (
-                <>
-                  {createFromPlan.isPending ? (
-                    // Not a link while the writes are on their way: leaving now would hide what they answer.
-                    <Button disabled variant="outline">
-                      Cancel
-                    </Button>
-                  ) : (
-                    <Button
-                      render={(props) => <Link {...props} {...back} />}
-                      variant="outline"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <form.Subscribe selector={(state) => state.isSubmitting}>
-                    {(isSubmitting) => (
-                      <Button
-                        disabled={
-                          Object.keys(shown).length > 0 ||
-                          isSubmitting ||
-                          createFromPlan.isPending
-                        }
-                        type="submit"
-                      >
-                        {isSubmitting || createFromPlan.isPending
-                          ? "Creating…"
-                          : "Create routine"}
-                      </Button>
-                    )}
-                  </form.Subscribe>
-                </>
-              )}
-            </>
-          }
+        {/* Sections rather than one card, as New skill is: who does it and what, when it starts,
+            when it is done, and where it shows up. Each is one decision with room for its words. */}
+        <PageSection
+          className="mt-0"
+          description="Pick the Bot that does the work, and say what one run of it is."
+          title="What it does"
         >
-          <FieldGroup>
-            <form.Field name="agentId">
-              {(field) => {
-                const isInvalid = field.name in shown;
-                return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>Bot</FieldLabel>
-                    <Select
-                      disabled={saved}
-                      items={botItems}
-                      onValueChange={(value) => {
-                        const next = String(value ?? "");
-                        field.handleChange(next);
-                        // Another Bot is in other conversations: start a new one unless this one is shared.
-                        const current = form.getFieldValue("channelId");
-                        if (
-                          !conversationsWith(channels.data, next).some(
-                            (channel) => channel.id === current,
-                          )
-                        ) {
-                          form.setFieldValue("channelId", NEW_CONVERSATION);
-                        }
-                      }}
-                      value={field.state.value || null}
-                    >
-                      <SelectTrigger
-                        aria-invalid={isInvalid}
-                        className="w-full"
-                        id={field.name}
-                      >
-                        <SelectValue placeholder="Choose a Bot" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {(agents.data ?? []).map((agent) => (
-                            <SelectItem key={agent.id} value={agent.id}>
-                              {/* Hidden: the name beside it already says who. */}
-                              <span aria-hidden="true" className="contents">
-                                <AbstractAvatar
-                                  name={agent.name}
-                                  seed={agent.avatarSeed}
-                                  size={18}
-                                />
-                              </span>
-                              {agent.name}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    {isInvalid ? (
-                      <FieldError>{shown[field.name]}</FieldError>
-                    ) : null}
-                  </Field>
-                );
-              }}
-            </form.Field>
-
-            <form.Field name="instruction">
-              {(field) => {
-                const isInvalid = field.name in shown;
-                return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>What to do</FieldLabel>
-                    <FieldDescription>
-                      Write it as one run of the work. Leave the schedule out.
-                    </FieldDescription>
-                    <Textarea
-                      disabled={saved}
-                      aria-invalid={isInvalid}
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
-                      }
-                      placeholder="Send me a summary of yesterday's new leads"
-                      rows={3}
-                      value={field.state.value}
-                    />
-                    {isInvalid ? (
-                      <FieldError>{shown[field.name]}</FieldError>
-                    ) : null}
-                  </Field>
-                );
-              }}
-            </form.Field>
-
-            {/* Not drawn without check-ins: a picker with only Act for you asks nothing. Still drawn
-                for an Only tell you picked before an admin turned them off, to say so. */}
-            <form.Subscribe selector={(state) => state.values.does}>
-              {(does) =>
-                allowed || does === "tell" ? (
-                  <form.Field name="does">
-                    {(field) => {
-                      // Shown without a touch: the person didn't change it, an admin did.
-                      const isInvalid = field.name in shown;
-                      return (
-                        <Field data-invalid={isInvalid}>
-                          <FieldLabel htmlFor={field.name}>
-                            It should
-                          </FieldLabel>
-                          <Select
-                            disabled={saved}
-                            items={DOES_LABEL}
-                            onValueChange={(value) =>
-                              field.handleChange(value as Does)
-                            }
-                            value={field.state.value}
-                          >
-                            <SelectTrigger
-                              aria-invalid={isInvalid}
-                              className="w-full"
-                              id={field.name}
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {/* Once check-ins are off, Only tell you can't be chosen. It stays listed:
-                                    the Select resets a value whose item goes away, which would switch
-                                    it to Act for you without asking. */}
-                                {DOES.map((choice) => (
-                                  <SelectItem
-                                    disabled={choice === "tell" && !allowed}
-                                    key={choice}
-                                    value={choice}
-                                  >
-                                    {DOES_LABEL[choice]}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                          {field.state.value === "tell" ? (
-                            <FieldDescription>
-                              It reads and raises what needs you. It changes
-                              nothing.
-                            </FieldDescription>
-                          ) : null}
-                          {isInvalid ? (
-                            <FieldError>{shown[field.name]}</FieldError>
-                          ) : null}
-                        </Field>
-                      );
-                    }}
-                  </form.Field>
-                ) : null
-              }
-            </form.Subscribe>
-
-            {/* When it starts, what starts it, and when it is done: one group, so a choice that
-                needs none of them can leave the three out together. Only tell you needs none of
-                them, only how often it looks. */}
-            <form.Subscribe
-              selector={(state) => [state.values.does, state.values.starts]}
-            >
-              {([does, starts]) =>
-                does === "tell" ? (
-                  <form.Field name="interval">
-                    {(field) => (
-                      <Field>
-                        <FieldLabel htmlFor={field.name}>How often</FieldLabel>
-                        <Select
-                          disabled={saved}
-                          items={INTERVAL_LABEL}
-                          onValueChange={(value) =>
-                            field.handleChange(String(value))
+          <PageCard className="mt-4">
+            <FieldGroup>
+              <form.Field name="agentId">
+                {(field) => {
+                  const isInvalid = field.name in shown;
+                  return (
+                    <Field data-invalid={isInvalid}>
+                      <FieldLabel htmlFor={field.name}>Bot</FieldLabel>
+                      <Select
+                        disabled={saved}
+                        items={botItems}
+                        onValueChange={(value) => {
+                          const next = String(value ?? "");
+                          field.handleChange(next);
+                          // Another Bot is in other conversations: start a new one unless this one is shared.
+                          const current = form.getFieldValue("channelId");
+                          if (
+                            !conversationsWith(channels.data, next).some(
+                              (channel) => channel.id === current,
+                            )
+                          ) {
+                            form.setFieldValue("channelId", NEW_CONVERSATION);
                           }
-                          value={field.state.value}
+                        }}
+                        value={field.state.value || null}
+                      >
+                        <SelectTrigger
+                          aria-invalid={isInvalid}
+                          aria-describedby={
+                            isInvalid ? errorId(field.name) : undefined
+                          }
+                          className="w-full"
+                          id={field.name}
                         >
-                          <SelectTrigger className="w-full" id={field.name}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {CHECK_IN_INTERVALS.map(({ minutes, label }) => (
-                                <SelectItem
-                                  key={minutes}
-                                  value={String(minutes)}
+                          <SelectValue placeholder="Choose a Bot" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {(agents.data ?? []).map((agent) => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                {/* Hidden: the name beside it already says who. */}
+                                <span aria-hidden="true" className="contents">
+                                  <AbstractAvatar
+                                    name={agent.name}
+                                    seed={agent.avatarSeed}
+                                    size={18}
+                                  />
+                                </span>
+                                {agent.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      {isInvalid ? (
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
+                      ) : null}
+                    </Field>
+                  );
+                }}
+              </form.Field>
+
+              <form.Field name="instruction">
+                {(field) => {
+                  const isInvalid = field.name in shown;
+                  return (
+                    <Field data-invalid={isInvalid}>
+                      <FieldLabel htmlFor={field.name}>What to do</FieldLabel>
+                      <FieldDescription>
+                        Write it as one run of the work. Leave the schedule out.
+                      </FieldDescription>
+                      <Textarea
+                        disabled={saved}
+                        aria-invalid={isInvalid}
+                        aria-describedby={
+                          isInvalid ? errorId(field.name) : undefined
+                        }
+                        id={field.name}
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        placeholder="Send me a summary of yesterday's new leads"
+                        rows={3}
+                        value={field.state.value}
+                      />
+                      {isInvalid ? (
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
+                      ) : null}
+                    </Field>
+                  );
+                }}
+              </form.Field>
+
+              {/* Not drawn without check-ins: a picker with only Act for you asks nothing. Still drawn
+                    for an Only tell you picked before an admin turned them off, to say so. */}
+              <form.Subscribe selector={(state) => state.values.does}>
+                {(does) =>
+                  allowed || does === "tell" ? (
+                    <form.Field name="does">
+                      {(field) => {
+                        // Shown without a touch: the person didn't change it, an admin did.
+                        const isInvalid = field.name in shown;
+                        return (
+                          <Field data-invalid={isInvalid}>
+                            <FieldLabel htmlFor={field.name}>
+                              It should
+                            </FieldLabel>
+                            <Select
+                              disabled={saved}
+                              items={DOES_LABEL}
+                              onValueChange={(value) =>
+                                field.handleChange(value as Does)
+                              }
+                              value={field.state.value}
+                            >
+                              <SelectTrigger
+                                aria-invalid={isInvalid}
+                                aria-describedby={
+                                  isInvalid ? errorId(field.name) : undefined
+                                }
+                                className="w-full"
+                                id={field.name}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  {/* Once check-ins are off, Only tell you can't be chosen. It stays listed:
+                                        the Select resets a value whose item goes away, which would switch
+                                        it to Act for you without asking. */}
+                                  {DOES.map((choice) => (
+                                    <SelectItem
+                                      disabled={choice === "tell" && !allowed}
+                                      key={choice}
+                                      value={choice}
+                                    >
+                                      {DOES_LABEL[choice]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            {field.state.value === "tell" ? (
+                              <FieldDescription>
+                                It reads and raises what needs you. It changes
+                                nothing.
+                              </FieldDescription>
+                            ) : null}
+                            {isInvalid ? (
+                              <FieldError id={errorId(field.name)}>
+                                {shown[field.name]}
+                              </FieldError>
+                            ) : null}
+                          </Field>
+                        );
+                      }}
+                    </form.Field>
+                  ) : null
+                }
+              </form.Subscribe>
+            </FieldGroup>
+          </PageCard>
+        </PageSection>
+
+        <form.Subscribe selector={(state) => state.values.does}>
+          {(does) => (
+            <PageSection
+              description={
+                does === "tell"
+                  ? "It looks this often, and tells you when something needs you."
+                  : "On a schedule, when something happens, or once, now."
+              }
+              title={does === "tell" ? "How often it looks" : "When it starts"}
+            >
+              <PageCard className="mt-4">
+                <FieldGroup>
+                  {/* Only tell you has no start of its own, only how often it looks. */}
+                  <form.Subscribe
+                    selector={(state) => [
+                      state.values.does,
+                      state.values.starts,
+                    ]}
+                  >
+                    {([does, starts]) =>
+                      does === "tell" ? (
+                        <form.Field name="interval">
+                          {(field) => (
+                            <Field>
+                              <FieldLabel htmlFor={field.name}>
+                                How often
+                              </FieldLabel>
+                              <Select
+                                disabled={saved}
+                                items={INTERVAL_LABEL}
+                                onValueChange={(value) =>
+                                  field.handleChange(String(value))
+                                }
+                                value={field.state.value}
+                              >
+                                <SelectTrigger
+                                  className="w-full"
+                                  id={field.name}
                                 >
-                                  {label}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {CHECK_IN_INTERVALS.map(
+                                      ({ minutes, label }) => (
+                                        <SelectItem
+                                          key={minutes}
+                                          value={String(minutes)}
+                                        >
+                                          {label}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                          )}
+                        </form.Field>
+                      ) : (
+                        <>
+                          <form.Field name="starts">
+                            {(field) => (
+                              <Field>
+                                <FieldLabel htmlFor={field.name}>
+                                  Starts
+                                </FieldLabel>
+                                <Select
+                                  disabled={saved}
+                                  items={STARTS_LABEL}
+                                  onValueChange={(value) =>
+                                    field.handleChange(value as Starts)
+                                  }
+                                  value={field.state.value}
+                                >
+                                  <SelectTrigger
+                                    className="w-full"
+                                    id={field.name}
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {STARTS.map((choice) => (
+                                        <SelectItem key={choice} value={choice}>
+                                          {STARTS_LABEL[choice]}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              </Field>
+                            )}
+                          </form.Field>
+
+                          {starts === "schedule" ? (
+                            <Field>
+                              <FieldLabel htmlFor="repeat">When</FieldLabel>
+                              <div className="flex flex-wrap gap-3">
+                                <form.Field name="repeat">
+                                  {(field) => (
+                                    <Select
+                                      disabled={saved}
+                                      items={REPEAT_LABEL}
+                                      onValueChange={(value) =>
+                                        field.handleChange(value as Repeat)
+                                      }
+                                      value={field.state.value}
+                                    >
+                                      <SelectTrigger
+                                        className="min-w-40 flex-1"
+                                        id="repeat"
+                                      >
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectGroup>
+                                          {REPEATS.map((repeat) => (
+                                            <SelectItem
+                                              key={repeat}
+                                              value={repeat}
+                                            >
+                                              {REPEAT_LABEL[repeat]}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectGroup>
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                </form.Field>
+                                <form.Subscribe
+                                  selector={(state) => state.values.repeat}
+                                >
+                                  {(repeat) => (
+                                    <>
+                                      {repeat === "weekly" ? (
+                                        <form.Field name="weekday">
+                                          {(field) => (
+                                            <Select
+                                              disabled={saved}
+                                              items={WEEKDAY_ITEMS}
+                                              onValueChange={(value) =>
+                                                field.handleChange(
+                                                  String(value),
+                                                )
+                                              }
+                                              value={field.state.value}
+                                            >
+                                              <SelectTrigger
+                                                aria-label="Day of the week"
+                                                className="min-w-36 flex-1"
+                                              >
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectGroup>
+                                                  {WEEKDAY_LABEL.map(
+                                                    (label, index) => (
+                                                      <SelectItem
+                                                        key={label}
+                                                        value={String(index)}
+                                                      >
+                                                        {label}
+                                                      </SelectItem>
+                                                    ),
+                                                  )}
+                                                </SelectGroup>
+                                              </SelectContent>
+                                            </Select>
+                                          )}
+                                        </form.Field>
+                                      ) : null}
+                                      {repeat === "monthly" ? (
+                                        <form.Field name="monthDay">
+                                          {(field) => (
+                                            <Select
+                                              disabled={saved}
+                                              items={MONTH_DAY_LABEL}
+                                              onValueChange={(value) =>
+                                                field.handleChange(
+                                                  String(value),
+                                                )
+                                              }
+                                              value={field.state.value}
+                                            >
+                                              <SelectTrigger
+                                                aria-label="Day of the month"
+                                                className="min-w-24"
+                                              >
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectGroup>
+                                                  {MONTH_DAYS.map((day) => (
+                                                    <SelectItem
+                                                      key={day}
+                                                      value={day}
+                                                    >
+                                                      {day}
+                                                    </SelectItem>
+                                                  ))}
+                                                </SelectGroup>
+                                              </SelectContent>
+                                            </Select>
+                                          )}
+                                        </form.Field>
+                                      ) : null}
+                                      {repeat === "hourly" ? null : (
+                                        <form.Field name="time">
+                                          {(field) => {
+                                            const isInvalid =
+                                              field.name in shown;
+                                            return (
+                                              <>
+                                                <Input
+                                                  disabled={saved}
+                                                  aria-invalid={isInvalid}
+                                                  aria-describedby={
+                                                    isInvalid
+                                                      ? errorId(field.name)
+                                                      : undefined
+                                                  }
+                                                  aria-label="Time"
+                                                  className="w-32"
+                                                  onBlur={field.handleBlur}
+                                                  onChange={(event) =>
+                                                    field.handleChange(
+                                                      event.target.value,
+                                                    )
+                                                  }
+                                                  step={900}
+                                                  type="time"
+                                                  value={field.state.value}
+                                                />
+                                                {isInvalid ? (
+                                                  <FieldError
+                                                    id={errorId(field.name)}
+                                                  >
+                                                    {shown[field.name]}
+                                                  </FieldError>
+                                                ) : null}
+                                              </>
+                                            );
+                                          }}
+                                        </form.Field>
+                                      )}
+                                    </>
+                                  )}
+                                </form.Subscribe>
+                              </div>
+                              <form.Subscribe
+                                selector={(state) => state.values}
+                              >
+                                {(values) => (
+                                  <FieldDescription>
+                                    <span className="font-medium text-foreground">
+                                      {scheduleSentence(values)}
+                                    </span>
+                                    , your time ({timeZone}). For anything else,
+                                    like every other Tuesday, ask the Bot in a
+                                    conversation.
+                                  </FieldDescription>
+                                )}
+                              </form.Subscribe>
+                            </Field>
+                          ) : null}
+
+                          {starts === "event" ? (
+                            <form.Subscribe
+                              selector={(state) => state.values.eventSource}
+                            >
+                              {(eventSource) => (
+                                <>
+                                  <form.Field name="eventSource">
+                                    {(field) => (
+                                      <Field>
+                                        <FieldLabel htmlFor={field.name}>
+                                          Source
+                                        </FieldLabel>
+                                        <Select
+                                          disabled={saved}
+                                          items={EVENT_SOURCE_LABEL}
+                                          onValueChange={(value) =>
+                                            field.handleChange(
+                                              value as RoutineEventSource,
+                                            )
+                                          }
+                                          value={field.state.value}
+                                        >
+                                          <SelectTrigger
+                                            className="w-full"
+                                            id={field.name}
+                                          >
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectGroup>
+                                              {eventSources.map((source) => (
+                                                <SelectItem
+                                                  key={source}
+                                                  value={source}
+                                                >
+                                                  {EVENT_SOURCE_LABEL[source]}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectGroup>
+                                          </SelectContent>
+                                        </Select>
+                                        {eventSource === "github" ? (
+                                          <FieldDescription>
+                                            Events come from the repositories
+                                            you connected in{" "}
+                                            <Link to="/connections">
+                                              Connections
+                                            </Link>
+                                            .
+                                          </FieldDescription>
+                                        ) : null}
+                                      </Field>
+                                    )}
+                                  </form.Field>
+                                  <form.Field name="eventType">
+                                    {(field) => {
+                                      const isInvalid = field.name in shown;
+                                      return (
+                                        <Field data-invalid={isInvalid}>
+                                          <FieldLabel htmlFor={field.name}>
+                                            Event
+                                          </FieldLabel>
+                                          <Input
+                                            disabled={saved}
+                                            aria-invalid={isInvalid}
+                                            aria-describedby={
+                                              isInvalid
+                                                ? errorId(field.name)
+                                                : undefined
+                                            }
+                                            id={field.name}
+                                            name={field.name}
+                                            onBlur={field.handleBlur}
+                                            onChange={(event) =>
+                                              field.handleChange(
+                                                event.target.value,
+                                              )
+                                            }
+                                            placeholder={
+                                              eventSource === "github"
+                                                ? "issues.opened"
+                                                : undefined
+                                            }
+                                            value={field.state.value}
+                                          />
+                                          {isInvalid ? (
+                                            <FieldError
+                                              id={errorId(field.name)}
+                                            >
+                                              {shown[field.name]}
+                                            </FieldError>
+                                          ) : null}
+                                        </Field>
+                                      );
+                                    }}
+                                  </form.Field>
+                                </>
+                              )}
+                            </form.Subscribe>
+                          ) : null}
+                        </>
+                      )
+                    }
+                  </form.Subscribe>
+                </FieldGroup>
+              </PageCard>
+            </PageSection>
+          )}
+        </form.Subscribe>
+
+        {/* Only tell you is never done: it looks until you stop it. */}
+        <form.Subscribe
+          selector={(state) => [state.values.does, state.values.starts]}
+        >
+          {([does, starts]) =>
+            does === "tell" ? null : (
+              <PageSection
+                description={
+                  starts === "now"
+                    ? "Optional. Leave it empty and it is done when the work is."
+                    : "Optional. Leave it empty and it keeps going until you stop it."
+                }
+                title="When it's done"
+              >
+                <form.Field name="doneWhen">
+                  {(field) => {
+                    const isInvalid = field.name in shown;
+                    return (
+                      // The box alone, as New skill's instructions are: the section says what it is.
+                      <Field className="mt-4" data-invalid={isInvalid}>
+                        <FieldLabel className="sr-only" htmlFor={field.name}>
+                          Done when (optional)
+                        </FieldLabel>
+                        <Textarea
+                          disabled={saved}
+                          aria-invalid={isInvalid}
+                          aria-describedby={
+                            isInvalid ? errorId(field.name) : undefined
+                          }
+                          id={field.name}
+                          name={field.name}
+                          onBlur={field.handleBlur}
+                          onChange={(event) =>
+                            field.handleChange(event.target.value)
+                          }
+                          placeholder="The report has this quarter's numbers and a source link."
+                          rows={3}
+                          value={field.state.value}
+                        />
+                        {isInvalid ? (
+                          <FieldError id={errorId(field.name)}>
+                            {shown[field.name]}
+                          </FieldError>
+                        ) : null}
                       </Field>
-                    )}
-                  </form.Field>
-                ) : (
-                  <>
-                    <form.Field name="starts">
+                    );
+                  }}
+                </form.Field>
+              </PageSection>
+            )
+          }
+        </form.Subscribe>
+
+        <PageSection
+          description="Where each run posts, and what the Routines page calls it."
+          title="Where it shows up"
+        >
+          <PageCard className="mt-4">
+            <FieldGroup>
+              <form.Subscribe selector={(state) => state.values.agentId}>
+                {(agentId) => {
+                  const shared = conversationsWith(channels.data, agentId);
+                  // The conversation the clock was pressed in, second and called what it is to the
+                  // person who just left it, even when it is past the roster's first page. The server
+                  // still checks the Bot is in it.
+                  const here =
+                    presetChannelId && agentId === presetAgentId
+                      ? { [presetChannelId]: "This conversation" }
+                      : {};
+                  const items: Record<string, string> = {
+                    [NEW_CONVERSATION]: "A new conversation",
+                    ...here,
+                    ...Object.fromEntries(
+                      shared.map((channel) => [
+                        channel.id,
+                        conversationName(channel),
+                      ]),
+                    ),
+                    ...here,
+                  };
+                  const choices = Object.entries(items);
+                  return (
+                    <form.Field name="channelId">
                       {(field) => (
                         <Field>
-                          <FieldLabel htmlFor={field.name}>Starts</FieldLabel>
+                          <FieldLabel htmlFor={field.name}>Posts in</FieldLabel>
+                          <FieldDescription>
+                            {field.state.value === NEW_CONVERSATION
+                              ? "OpenBot starts a conversation for this routine, named after it."
+                              : "Each run posts in this conversation."}
+                          </FieldDescription>
                           <Select
-                            disabled={saved}
-                            items={STARTS_LABEL}
+                            disabled={saved || !agentId}
+                            items={items}
                             onValueChange={(value) =>
-                              field.handleChange(value as Starts)
+                              field.handleChange(String(value))
                             }
-                            value={field.state.value}
+                            value={
+                              field.state.value in items
+                                ? field.state.value
+                                : NEW_CONVERSATION
+                            }
                           >
                             <SelectTrigger className="w-full" id={field.name}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                {STARTS.map((choice) => (
-                                  <SelectItem key={choice} value={choice}>
-                                    {STARTS_LABEL[choice]}
+                                {choices.map(([value, label]) => (
+                                  <SelectItem key={value} value={value}>
+                                    {label}
                                   </SelectItem>
                                 ))}
                               </SelectGroup>
@@ -587,386 +1024,104 @@ export function NewRoutinePage({
                         </Field>
                       )}
                     </form.Field>
+                  );
+                }}
+              </form.Subscribe>
 
-                    {starts === "schedule" ? (
-                      <Field>
-                        <FieldLabel htmlFor="repeat">When</FieldLabel>
-                        <div className="flex flex-wrap gap-3">
-                          <form.Field name="repeat">
-                            {(field) => (
-                              <Select
-                                disabled={saved}
-                                items={REPEAT_LABEL}
-                                onValueChange={(value) =>
-                                  field.handleChange(value as Repeat)
-                                }
-                                value={field.state.value}
-                              >
-                                <SelectTrigger
-                                  className="min-w-40 flex-1"
-                                  id="repeat"
-                                >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    {REPEATS.map((repeat) => (
-                                      <SelectItem key={repeat} value={repeat}>
-                                        {REPEAT_LABEL[repeat]}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
-                            )}
-                          </form.Field>
-                          <form.Subscribe
-                            selector={(state) => state.values.repeat}
-                          >
-                            {(repeat) => (
-                              <>
-                                {repeat === "weekly" ? (
-                                  <form.Field name="weekday">
-                                    {(field) => (
-                                      <Select
-                                        disabled={saved}
-                                        items={WEEKDAY_ITEMS}
-                                        onValueChange={(value) =>
-                                          field.handleChange(String(value))
-                                        }
-                                        value={field.state.value}
-                                      >
-                                        <SelectTrigger
-                                          aria-label="Day of the week"
-                                          className="min-w-36 flex-1"
-                                        >
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectGroup>
-                                            {WEEKDAY_LABEL.map(
-                                              (label, index) => (
-                                                <SelectItem
-                                                  key={label}
-                                                  value={String(index)}
-                                                >
-                                                  {label}
-                                                </SelectItem>
-                                              ),
-                                            )}
-                                          </SelectGroup>
-                                        </SelectContent>
-                                      </Select>
-                                    )}
-                                  </form.Field>
-                                ) : null}
-                                {repeat === "monthly" ? (
-                                  <form.Field name="monthDay">
-                                    {(field) => (
-                                      <Select
-                                        disabled={saved}
-                                        items={MONTH_DAY_LABEL}
-                                        onValueChange={(value) =>
-                                          field.handleChange(String(value))
-                                        }
-                                        value={field.state.value}
-                                      >
-                                        <SelectTrigger
-                                          aria-label="Day of the month"
-                                          className="min-w-24"
-                                        >
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectGroup>
-                                            {MONTH_DAYS.map((day) => (
-                                              <SelectItem key={day} value={day}>
-                                                {day}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectGroup>
-                                        </SelectContent>
-                                      </Select>
-                                    )}
-                                  </form.Field>
-                                ) : null}
-                                {repeat === "hourly" ? null : (
-                                  <form.Field name="time">
-                                    {(field) => {
-                                      const isInvalid = field.name in shown;
-                                      return (
-                                        <>
-                                          <Input
-                                            disabled={saved}
-                                            aria-invalid={isInvalid}
-                                            aria-label="Time"
-                                            className="w-32"
-                                            onBlur={field.handleBlur}
-                                            onChange={(event) =>
-                                              field.handleChange(
-                                                event.target.value,
-                                              )
-                                            }
-                                            step={900}
-                                            type="time"
-                                            value={field.state.value}
-                                          />
-                                          {isInvalid ? (
-                                            <FieldError>
-                                              {shown[field.name]}
-                                            </FieldError>
-                                          ) : null}
-                                        </>
-                                      );
-                                    }}
-                                  </form.Field>
-                                )}
-                              </>
-                            )}
-                          </form.Subscribe>
-                        </div>
-                        <form.Subscribe selector={(state) => state.values}>
-                          {(values) => (
-                            <FieldDescription>
-                              <span className="font-medium text-foreground">
-                                {scheduleSentence(values)}
-                              </span>
-                              , your time ({timeZone}). For anything else, like
-                              every other Tuesday, ask the Bot in a
-                              conversation.
-                            </FieldDescription>
-                          )}
-                        </form.Subscribe>
-                      </Field>
-                    ) : null}
+              <form.Field name="title">
+                {(field) => {
+                  const isInvalid = field.name in shown;
+                  return (
+                    <Field data-invalid={isInvalid}>
+                      <FieldLabel htmlFor={field.name}>Name</FieldLabel>
+                      <FieldDescription>
+                        Optional. The Routines page shows it by this name.
+                      </FieldDescription>
+                      <Input
+                        disabled={saved}
+                        aria-invalid={isInvalid}
+                        aria-describedby={
+                          isInvalid ? errorId(field.name) : undefined
+                        }
+                        id={field.name}
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        placeholder="Morning leads"
+                        value={field.state.value}
+                      />
+                      {isInvalid ? (
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
+                      ) : null}
+                    </Field>
+                  );
+                }}
+              </form.Field>
+            </FieldGroup>
+          </PageCard>
+        </PageSection>
 
-                    {starts === "event" ? (
-                      <form.Subscribe
-                        selector={(state) => state.values.eventSource}
-                      >
-                        {(eventSource) => (
-                          <>
-                            <form.Field name="eventSource">
-                              {(field) => (
-                                <Field>
-                                  <FieldLabel htmlFor={field.name}>
-                                    Source
-                                  </FieldLabel>
-                                  <Select
-                                    disabled={saved}
-                                    items={EVENT_SOURCE_LABEL}
-                                    onValueChange={(value) =>
-                                      field.handleChange(
-                                        value as RoutineEventSource,
-                                      )
-                                    }
-                                    value={field.state.value}
-                                  >
-                                    <SelectTrigger
-                                      className="w-full"
-                                      id={field.name}
-                                    >
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectGroup>
-                                        {EVENT_SOURCES.map((source) => (
-                                          <SelectItem
-                                            key={source}
-                                            value={source}
-                                          >
-                                            {EVENT_SOURCE_LABEL[source]}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectGroup>
-                                    </SelectContent>
-                                  </Select>
-                                  {eventSource === "github" ? (
-                                    <FieldDescription>
-                                      Events come from the repositories you
-                                      connected in{" "}
-                                      <Link to="/connections">Connections</Link>
-                                      .
-                                    </FieldDescription>
-                                  ) : null}
-                                </Field>
-                              )}
-                            </form.Field>
-                            <form.Field name="eventType">
-                              {(field) => {
-                                const isInvalid = field.name in shown;
-                                return (
-                                  <Field data-invalid={isInvalid}>
-                                    <FieldLabel htmlFor={field.name}>
-                                      Event
-                                    </FieldLabel>
-                                    <Input
-                                      disabled={saved}
-                                      aria-invalid={isInvalid}
-                                      id={field.name}
-                                      name={field.name}
-                                      onBlur={field.handleBlur}
-                                      onChange={(event) =>
-                                        field.handleChange(event.target.value)
-                                      }
-                                      placeholder={
-                                        eventSource === "github"
-                                          ? "issues.opened"
-                                          : undefined
-                                      }
-                                      value={field.state.value}
-                                    />
-                                    {isInvalid ? (
-                                      <FieldError>
-                                        {shown[field.name]}
-                                      </FieldError>
-                                    ) : null}
-                                  </Field>
-                                );
-                              }}
-                            </form.Field>
-                          </>
-                        )}
-                      </form.Subscribe>
-                    ) : null}
-
-                    <form.Field name="doneWhen">
-                      {(field) => {
-                        const isInvalid = field.name in shown;
-                        return (
-                          <Field data-invalid={isInvalid}>
-                            <FieldLabel htmlFor={field.name}>
-                              Done when (optional)
-                            </FieldLabel>
-                            <FieldDescription>
-                              {starts === "now"
-                                ? "Leave it empty and it is done when the work is."
-                                : "Leave it empty and it keeps going until you stop it."}
-                            </FieldDescription>
-                            <Textarea
-                              disabled={saved}
-                              aria-invalid={isInvalid}
-                              id={field.name}
-                              name={field.name}
-                              onBlur={field.handleBlur}
-                              onChange={(event) =>
-                                field.handleChange(event.target.value)
-                              }
-                              placeholder="The report has this quarter's numbers and a source link."
-                              rows={3}
-                              value={field.state.value}
-                            />
-                            {isInvalid ? (
-                              <FieldError>{shown[field.name]}</FieldError>
-                            ) : null}
-                          </Field>
-                        );
-                      }}
-                    </form.Field>
-                  </>
-                )
-              }
-            </form.Subscribe>
-
-            <form.Subscribe selector={(state) => state.values.agentId}>
-              {(agentId) => {
-                const shared = conversationsWith(channels.data, agentId);
-                // The conversation the clock was pressed in, second and called what it is to the
-                // person who just left it, even when it is past the roster's first page. The server
-                // still checks the Bot is in it.
-                const here =
-                  presetChannelId && agentId === presetAgentId
-                    ? { [presetChannelId]: "This conversation" }
-                    : {};
-                const items: Record<string, string> = {
-                  [NEW_CONVERSATION]: "A new conversation",
-                  ...here,
-                  ...Object.fromEntries(
-                    shared.map((channel) => [
-                      channel.id,
-                      conversationName(channel),
-                    ]),
-                  ),
-                  ...here,
-                };
-                const choices = Object.entries(items);
-                return (
-                  <form.Field name="channelId">
-                    {(field) => (
-                      <Field>
-                        <FieldLabel htmlFor={field.name}>Posts in</FieldLabel>
-                        <FieldDescription>
-                          {field.state.value === NEW_CONVERSATION
-                            ? "OpenBot starts a conversation for this routine, named after it."
-                            : "Each run posts in this conversation."}
-                        </FieldDescription>
-                        <Select
-                          disabled={saved || !agentId}
-                          items={items}
-                          onValueChange={(value) =>
-                            field.handleChange(String(value))
-                          }
-                          value={
-                            field.state.value in items
-                              ? field.state.value
-                              : NEW_CONVERSATION
-                          }
-                        >
-                          <SelectTrigger className="w-full" id={field.name}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {choices.map(([value, label]) => (
-                                <SelectItem key={value} value={value}>
-                                  {label}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    )}
-                  </form.Field>
-                );
+        {createFromPlan.error ? (
+          <p className="mt-8 text-destructive text-sm" role="alert">
+            {createFromPlan.error.message}
+          </p>
+        ) : null}
+        <div className="mt-8 flex justify-end gap-2">
+          {/* Cancel says nothing was kept. After a partial or uncertain save the work is kept, and Go to
+                  Routines goes to the same list. */}
+          {saved ? (
+            <Button
+              // A link drawn as a button, so the ref is any element.
+              ref={(element: HTMLElement | null) => {
+                goToRoutines.current = element;
               }}
-            </form.Subscribe>
-
-            <form.Field name="title">
-              {(field) => {
-                const isInvalid = field.name in shown;
-                return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>Name</FieldLabel>
-                    <FieldDescription>
-                      Optional. The Routines page shows it by this name.
-                    </FieldDescription>
-                    <Input
-                      disabled={saved}
-                      aria-invalid={isInvalid}
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
-                      }
-                      placeholder="Morning leads"
-                      value={field.state.value}
-                    />
-                    {isInvalid ? (
-                      <FieldError>{shown[field.name]}</FieldError>
-                    ) : null}
-                  </Field>
-                );
-              }}
-            </form.Field>
-          </FieldGroup>
-          {createFromPlan.error ? (
-            <p className="mt-5 text-destructive text-sm" role="alert">
-              {createFromPlan.error.message}
-            </p>
-          ) : null}
-        </PageCard>
+              render={(props) => (
+                <Link
+                  {...props}
+                  // The Bot the work was saved for, not the one the picker shows.
+                  {...after(savedFor)}
+                />
+              )}
+              variant="outline"
+            >
+              Go to Routines
+            </Button>
+          ) : (
+            <>
+              {createFromPlan.isPending ? (
+                // Not a link while the writes are on their way: leaving now would hide what they answer.
+                <Button disabled variant="outline">
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  render={(props) => <Link {...props} {...back} />}
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+              )}
+              {/* Enabled while a message shows: pressing it takes the person to the first one. A
+                  disabled button says nothing about why, and a keyboard can't reach it. */}
+              <form.Subscribe selector={(state) => state.isSubmitting}>
+                {(isSubmitting) => (
+                  <Button
+                    disabled={isSubmitting || createFromPlan.isPending}
+                    type="submit"
+                  >
+                    {isSubmitting || createFromPlan.isPending
+                      ? "Creating…"
+                      : "Create routine"}
+                  </Button>
+                )}
+              </form.Subscribe>
+            </>
+          )}
+        </div>
       </form>
     </PageShell>
   );

@@ -2,10 +2,10 @@ import { IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Trademark } from "@/components/edition/brand-name";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
+import { openTeamFeatures } from "@/components/edition/team-features-dialog";
+import { Button } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { BUSINESS_URL } from "@/lib/openbot-for-business";
-import { cn } from "@/lib/utils";
 
 /**
  * Closed for this session only. The link comes back the next time the app starts, or the next tab:
@@ -25,7 +25,11 @@ function readDismissed(): boolean {
 }
 
 /**
- * The home page's link to OpenBot for Business, in the personal edition only.
+ * The home page's way to OpenBot for Business, in the personal edition only. It opens the OpenBot
+ * for Business dialog, with its calendar, in the app.
+ *
+ * An outlined button with OpenBot's mark, so it reads as an offer at a glance without competing
+ * with the greeting and the composer below it.
  *
  * Hidden until the deployment says which edition it is, so it never flashes on a team deployment.
  */
@@ -36,22 +40,14 @@ export function BusinessLink() {
   if (capabilities?.edition !== "personal" || dismissed) return null;
 
   return (
-    <span className="flex items-center gap-0.5">
-      {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
-      <a
-        className={cn(
-          buttonVariants({ size: "sm", variant: "ghost" }),
-          "text-muted-foreground",
-        )}
-        href={BUSINESS_URL}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
+    <span className="flex items-center gap-1">
+      <Button onClick={openTeamFeatures} size="sm" variant="outline">
+        <OpenBotLogo />
         <span>
           Meet OpenBot for Business
           <Trademark />
         </span>
-      </a>
+      </Button>
       <Button
         aria-label="Close"
         className="text-muted-foreground"

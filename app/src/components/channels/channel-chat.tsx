@@ -7,7 +7,13 @@ import {
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { ConversationAllowances } from "@/components/approvals/conversation-allowances";
 import {
@@ -51,8 +57,14 @@ import {
 } from "@/lib/channels/queries";
 import { runReply } from "@/lib/channels/run-reply";
 import {
+  onRunStartedAway,
   onTurnFinishedAway,
+  onTurnsAwayChanged,
+  runStartedAway,
   turnFinishedAway,
+  turnsGoingAway,
+  turnsLeftRunning,
+  turnsNoLongerAway,
 } from "@/lib/channels/turns-finished-away";
 import { useConversationActivity } from "@/lib/computers/activity";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
@@ -533,7 +545,18 @@ export function ChannelChat({
    */
   const [first] = useState(() => {
     const pending = takeFirstMessage(channel.id);
-    return pending ? { seed: seedMessage(pending.text, newId()) } : null;
+    if (!pending) return null;
+    const attachments = [...pending.attachments];
+    // Drawn with its files, as `deliver` will send it, so they do not appear only once it runs.
+    const seed: Message =
+      attachments.length > 0
+        ? {
+            id: newId(),
+            role: "user",
+            content: toMessageContent(pending.text.trim(), attachments),
+          }
+        : seedMessage(pending.text, newId());
+    return { seed, text: pending.text, attachments };
   });
   const seed = first?.seed ?? null;
 
@@ -784,6 +807,8 @@ export function ChannelChat({
          * opens included, so every read waits for the join to be over.
          */
         await joinedPromise;
+        // Nor while a run of a turn going on in a chat that closed is joined: see `rejoining`.
+        await rejoining.current;
         if (!isCurrent()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
@@ -859,6 +884,38 @@ export function ChannelChat({
     joinedPromise,
     runtimeAgentId,
   ]);
+
+  /*
+   * A RUN OF A TURN GOING ON IN A CHAT THAT CLOSED, JOINED HERE AS IT STARTS. The join above carries a run only if one
+   * was live on the thread when it opened, and the turn left behind is often between runs then: its message still on
+   * its way to the server, or a browser step being taken in this tab. Joined again the moment a run starts, the run
+   * streams in here as it goes, the person's message with it, instead of the conversation sitting empty until the
+   * turn is over. Not over a turn of this chat's own, which streams here already, nor over a join still open.
+   */
+  const rejoining = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    let current = true;
+    const off = onRunStartedAway(channel.id, () => {
+      const previous = rejoining.current;
+      rejoining.current = (async () => {
+        await joinedPromise;
+        await previous;
+        const target = agentRef.current;
+        if (!current || turnsRef.current > 0 || target.isRunning) return;
+        try {
+          await whileObserved(target, () =>
+            copilotkit.connectAgent({ agent: target }),
+          );
+        } catch {
+          // A join that fails leaves the read at the turn's end (`onTurnFinishedAway`) to bring its answer in.
+        }
+      })();
+    });
+    return () => {
+      current = false;
+      off();
+    };
+  }, [channel.id, copilotkit, joinedPromise]);
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
@@ -969,12 +1026,29 @@ export function ChannelChat({
   const turnsRef = useRef(0);
   /** Whether this chat is still on screen, for a turn that finishes after it closed. */
   const onScreen = useRef(true);
+  /** This chat's turns still going, each its own token, for the chat open next (`turns-finished-away.ts`). */
+  const turnTokens = useRef(new Set<object>());
   useEffect(() => {
     onScreen.current = true;
+    // Back on screen before its turns ended: React runs a chat's effects twice in development.
+    turnsNoLongerAway(channel.id, turnTokens.current);
     return () => {
       onScreen.current = false;
+      turnsLeftRunning(channel.id, turnTokens.current);
     };
-  }, []);
+  }, [channel.id]);
+  /**
+   * Turns of this conversation still going in a chat that has closed: this conversation, opened again before they
+   * ended. The Bot is working on them, so this chat says so and holds what is typed until they are over, as it does
+   * for its own.
+   */
+  const turnsAway = useSyncExternalStore(
+    useCallback(
+      (changed: () => void) => onTurnsAwayChanged(channel.id, changed),
+      [channel.id],
+    ),
+    () => turnsGoingAway(channel.id),
+  );
   const [runsInFlight, setRunsInFlight] = useState(0);
 
   /*
@@ -1197,6 +1271,10 @@ export function ChannelChat({
       onRunInitialized: () => {
         started = true;
       },
+      // Live on the thread now: if this chat has closed, the one open for this conversation joins the run.
+      onRunStartedEvent: () => {
+        if (!onScreen.current) runStartedAway(channel.id);
+      },
     });
     streamBroke.current = false;
     setRunsInFlight((count) => count + 1);
@@ -1298,12 +1376,18 @@ export function ChannelChat({
     if (!trimmed && attachments.length === 0) return "";
 
     // Voice and typed requests share this turn boundary, including gaps between frontend tools.
-    if (turnsRef.current > 0 || agentRef.current.isRunning) {
+    if (
+      turnsRef.current > 0 ||
+      agentRef.current.isRunning ||
+      turnsGoingAway(channel.id) > 0
+    ) {
       throw new Error(
         "This Bot is still working on something. Wait for it, or stop it first.",
       );
     }
 
+    const turn = {};
+    turnTokens.current.add(turn);
     turnsRef.current += 1;
     setTurnsInFlight(turnsRef.current);
     if (turnsRef.current === 1) {
@@ -1334,8 +1418,12 @@ export function ChannelChat({
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
       }
+      turnTokens.current.delete(turn);
       // And the conversation open now, if the person came back, reads what this turn stored.
-      if (!onScreen.current) turnFinishedAway(channel.id);
+      if (!onScreen.current) {
+        turnsNoLongerAway(channel.id, [turn]);
+        turnFinishedAway(channel.id);
+      }
     }
   };
 
@@ -1534,9 +1622,7 @@ export function ChannelChat({
     // away. The transcript keeps the seeded message and the notice under it says what happened.
     // A `/` skill is still at the start of its words, where the server finds it.
     void sayRef
-      .current(
-        typeof pending.seed.content === "string" ? pending.seed.content : "",
-      )
+      .current(pending.text, pending.attachments)
       .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
@@ -1616,7 +1702,12 @@ export function ChannelChat({
              * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
              * "Thinking" line exists for. Same value as `pending`, deliberately.
              */
-            busy={agent.isRunning || turnsInFlight > 0 || carryingOn}
+            busy={
+              agent.isRunning ||
+              turnsInFlight > 0 ||
+              turnsAway > 0 ||
+              carryingOn
+            }
             // The `/` menu exposes only skills granted to this Bot.
             commands={skillCommands}
             modelPicker={
@@ -1738,7 +1829,12 @@ export function ChannelChat({
              * middle of an answer: a second turn racing the first on one thread, with a fabricated
              * result stitched over a tool call that is still executing.
              */
-            pending={agent.isRunning || turnsInFlight > 0 || carryingOn}
+            pending={
+              agent.isRunning ||
+              turnsInFlight > 0 ||
+              turnsAway > 0 ||
+              carryingOn
+            }
             /*
              * A channel outlives its turns, so it is the screen where waiting is worth offering. A
              * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the

@@ -1,13 +1,14 @@
 /**
- * The OpenBot for Business page, which has the booking calendar for a call inline. Every Book a
- * call, Book a demo and Meet OpenBot for Business in the app opens this one page, so somebody asking
- * about OpenBot for their organization reaches the people who run it.
+ * The OpenBot for Business page on the website, which has the same booking calendar inline. In the
+ * app every OpenBot for Business entry opens the in-app dialog (`openTeamFeatures`), which embeds
+ * the calendar; this page is where a calendar that can't load in the app sends somebody instead.
  */
 export const BUSINESS_URL = "https://open.bot/business";
 
 /**
  * The OpenBot for Business booking event on Calendly: the same calls the page above books. The
- * onboarding step embeds it, and falls back to {@link BUSINESS_URL} when it can't load.
+ * onboarding step and the OpenBot for Business dialog embed it, and fall back to
+ * {@link BUSINESS_URL} when it can't load.
  */
 export const BOOKING_CALENDAR_URL =
   "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business";

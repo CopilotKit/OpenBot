@@ -36,7 +36,10 @@ function ComputerPage() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const desktop = desktopShell() !== null;
-  // Desktop's Status and the extension's popup open this page at their section.
+  /*
+   * Desktop's Status opens `/settings/this-computer` and the extension's popup `/settings/browsers`;
+   * each redirects here with its section's hash.
+   */
   useScrollToSection();
   return (
     <PageShell

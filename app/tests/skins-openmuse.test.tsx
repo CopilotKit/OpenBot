@@ -24,6 +24,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import type { BotActivity, BotAttention } from "@/lib/bot-lifecycle/queries";
@@ -502,9 +503,18 @@ function renderAt(path: string) {
     path: "/",
     component: Page,
   });
+  // A routine's own page, which its row on Routines links to, drawn in the frame as the app does.
+  const routinePage = createRoute({
+    getParentRoute: () => app,
+    path: "/routines/schedules/$routineId",
+    component: function RoutineScreen() {
+      const { routineId } = routinePage.useParams();
+      return <RoutineRoutePage routineId={routineId} />;
+    },
+  });
   const router = createRouter({
     routeTree: root.addChildren([
-      app.addChildren([home, skinScreen, channelRoute, anything]),
+      app.addChildren([home, skinScreen, channelRoute, routinePage, anything]),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -917,8 +927,14 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
   test("a routine is paused from Routines through OpenBot's own switch", async () => {
     const calls = serve();
     renderAt("/s/goals");
+    // The switch is on the routine's page, opened from its row.
     fireEvent.click(
-      await page().findByRole("switch", {
+      (await page().findByText("Send me the headlines")).closest(
+        "a",
+      ) as HTMLElement,
+    );
+    fireEvent.click(
+      await within(document.body).findByRole("switch", {
         name: "Enable the routine scheduled Every weekday at 9:00",
       }),
     );

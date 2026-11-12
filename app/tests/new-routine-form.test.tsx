@@ -10,6 +10,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewRoutinePage } from "@/components/routines/new-routine-page";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -60,7 +61,10 @@ function serving({
   proactive = { allowed: true, settings: [] } as unknown,
   routines = () => Response.json({ routine: { id: "r1" } }, { status: 201 }),
   goalDeletes = true,
+  edition = "team",
 }: {
+  /** What `GET /api/capabilities` says this deployment is. */
+  edition?: "team" | "personal";
   proactive?: unknown;
   /** How `POST /api/routines` answers. */
   routines?: () => Response | Promise<Response>;
@@ -105,6 +109,7 @@ function serving({
       });
     if (url === "/api/proactive/settings")
       return Response.json(proactiveAnswer);
+    if (url === "/api/capabilities") return Response.json({ edition });
     return Response.json({});
   }) as unknown as typeof fetch;
 }
@@ -225,6 +230,28 @@ test("When something happens asks for a source and an event", async () => {
   expect(writes()).toEqual([]);
 });
 
+test("the personal edition, which has no Slack, offers no Slack event", async () => {
+  for (const edition of ["team", "personal"] as const) {
+    serving({ edition });
+    const view = draw();
+    const user = userEvent.setup({ document });
+    await choose(view, user, "Starts", "When something happens");
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(deploymentCapabilitiesQueryOptions().queryKey)
+          ?.status,
+      ).toBe("success"),
+    );
+    await user.click(await view.findByLabelText("Source"));
+    expect(await view.findByRole("option", { name: "GitHub" })).toBeTruthy();
+    expect(view.queryByRole("option", { name: "Slack" }) !== null).toBe(
+      edition === "team",
+    );
+    view.unmount();
+    queryClient.clear();
+  }
+});
+
 test("When something happens makes a goal with that subscription", async () => {
   serving();
   const view = draw();
@@ -267,14 +294,16 @@ test("Now, once makes a goal and runs it", async () => {
   ]);
 });
 
-test("Done when says when a one-off is done", async () => {
+test("When it's done says when a one-off is done", async () => {
   serving();
   const view = draw();
   const user = userEvent.setup({ document });
   await view.findByLabelText("What to do");
   await choose(view, user, "Starts", "Now, once");
   expect(
-    await view.findByText("Leave it empty and it is done when the work is."),
+    await view.findByText(
+      "Optional. Leave it empty and it is done when the work is.",
+    ),
   ).toBeTruthy();
 });
 
@@ -318,7 +347,7 @@ test("Only tell you offers a schedule only, and no outcome", async () => {
   await settleReactWork();
   const calls = writes();
   expect(calls.map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings",
+    "POST /api/proactive/settings?refuseExisting=true",
   ]);
   expect(calls[0][2]).toMatchObject({
     agentId: "bot-1",
@@ -410,14 +439,11 @@ test("a stale Only tell you is held until the person chooses", async () => {
   // It doesn't turn into an acting routine on its own.
   expect(view.queryByLabelText("Starts")).toBeNull();
   expect(view.queryByLabelText("Done when (optional)")).toBeNull();
-  const create = view.getByRole("button", { name: "Create routine" });
-  expect(create.hasAttribute("disabled")).toBe(true);
-  // The disabled button can't submit, so submit the form itself, as Enter in a field does.
-  const form = view.container.querySelector("form");
-  if (!form) throw new Error("the form is not drawn");
-  fireEvent.submit(form);
+  // Create can still be pressed: it writes nothing, and takes the person to It should.
+  await user.click(view.getByRole("button", { name: "Create routine" }));
   await settleReactWork();
   expect(writes()).toEqual([]);
+  expect(document.activeElement).toBe(does);
   // Only tell you can't be chosen again.
   await user.click(does);
   const tell = await view.findByRole("option", { name: "Only tell you" });
@@ -510,7 +536,7 @@ test("an unnamed Only tell you is made beside the Bot's default check-in, named 
   await settleReactWork();
   expect(view.queryByText(/This Bot already checks in on this/)).toBeNull();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings",
+    "POST /api/proactive/settings?refuseExisting=true",
   ]);
   expect(writes()[0][2]).toMatchObject({
     focus: "Watch   my inbox\nfor invoices",
@@ -557,7 +583,7 @@ test("a named Only tell you is made beside it", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings",
+    "POST /api/proactive/settings?refuseExisting=true",
   ]);
   expect(writes()[0][2]).toMatchObject({ subject: "Inbox" });
 });
@@ -601,11 +627,7 @@ test("a stale Name error goes once check-ins are off", async () => {
   expect(await view.findByText(TELL_OFF)).toBeTruthy();
   await choose(view, user, "It should", "Act for you");
   await waitFor(() =>
-    expect(
-      view
-        .getByRole("button", { name: "Create routine" })
-        .hasAttribute("disabled"),
-    ).toBe(false),
+    expect(view.container.querySelector('[aria-invalid="true"]')).toBeNull(),
   );
   await user.click(view.getByRole("button", { name: "Create routine" }));
   await waitFor(() => expect(writes()).not.toHaveLength(0));
@@ -994,7 +1016,7 @@ async function createButton(view: ReturnType<typeof draw>) {
   })) as HTMLButtonElement;
 }
 
-/** Presses Create and waits for the refusal to be drawn, with Create held. */
+/** Presses Create and waits for the refusal to be drawn. Nothing is written. */
 async function refuse(
   view: ReturnType<typeof draw>,
   user: ReturnType<typeof userEvent.setup>,
@@ -1002,15 +1024,15 @@ async function refuse(
 ) {
   await user.click(await createButton(view));
   await view.findByText(message);
-  await waitFor(async () =>
-    expect((await createButton(view)).disabled).toBe(true),
-  );
+  await settleReactWork();
+  expect(writes()).toEqual([]);
 }
 
+/** Says `message` is gone, and no field says anything: Create would go on. */
 async function expectCleared(view: ReturnType<typeof draw>, message: string) {
   await waitFor(() => expect(view.queryByText(message)).toBeNull());
-  await waitFor(async () =>
-    expect((await createButton(view)).disabled).toBe(false),
+  await waitFor(() =>
+    expect(view.container.querySelector('[aria-invalid="true"]')).toBeNull(),
   );
 }
 
@@ -1201,11 +1223,10 @@ const SAY_WHICH_EVENT = "Say which event starts it.";
 const NAME_TOO_LONG = "Keep the name under 100 characters.";
 const DONE_WHEN_TOO_LONG = "Keep it under 3000 characters.";
 
-/** Says `message` is still drawn after an answer it does not depend on away changed, with Create held. */
+/** Says `message` is still drawn after an answer it does not depend on changed. */
 async function expectStill(view: ReturnType<typeof draw>, message: string) {
   await settleReactWork();
   expect(view.queryByText(message)).toBeTruthy();
-  expect((await createButton(view)).disabled).toBe(true);
 }
 
 test("Time drawn again after Every hour clears its message once a time is chosen", async () => {
@@ -1275,7 +1296,7 @@ test("an Event nobody worked on says nothing when Starts comes back to it", asyn
   expect(
     (await view.findByLabelText("Event")).getAttribute("aria-invalid"),
   ).not.toBe("true");
-  expect((await createButton(view)).disabled).toBe(false);
+  expect(view.container.querySelector('[aria-invalid="true"]')).toBeNull();
 });
 
 test("an empty What to do keeps its message while other answers change", async () => {
@@ -1328,9 +1349,6 @@ test("a Name that still clashes keeps its message when the Bot or It should chan
   await expectCleared(view, SAME_CHECK_IN_TEXT);
   await choose(view, user, "It should", "Only tell you");
   expect(await view.findByText(SAME_CHECK_IN_TEXT)).toBeTruthy();
-  await waitFor(async () =>
-    expect((await createButton(view)).disabled).toBe(true),
-  );
   await user.type(await view.findByLabelText("Name"), "Inbox");
   await expectCleared(view, SAME_CHECK_IN_TEXT);
 });
@@ -1349,9 +1367,6 @@ test("It should follows check-ins: turned back on, Only tell you can go on", asy
   await choose(view, user, "It should", "Only tell you");
   await checkInsTurnOff();
   await view.findByText(TELL_OFF);
-  await waitFor(async () =>
-    expect((await createButton(view)).disabled).toBe(true),
-  );
   await checkInsTurnOn();
   await expectCleared(view, TELL_OFF);
 });
@@ -1367,9 +1382,6 @@ test("Name follows check-ins: turned back on, the clash is back", async () => {
   await waitFor(() => expect(view.queryByText(SAME_CHECK_IN_TEXT)).toBeNull());
   await checkInsTurnOn([watchingInbox]);
   expect(await view.findByText(SAME_CHECK_IN_TEXT)).toBeTruthy();
-  await waitFor(async () =>
-    expect((await createButton(view)).disabled).toBe(true),
-  );
 });
 
 test("an uncertain routine save locks the form and links to the chosen Bot", async () => {
@@ -1392,4 +1404,73 @@ test("an uncertain routine save locks the form and links to the chosen Bot", asy
     ),
   ).toBe(false);
   expect(view.getByRole("alert").textContent).toContain("may have been saved");
+});
+
+/*
+ * Create stays enabled while a message shows. A disabled Create said nothing about why, and the
+ * focus it held was lost: pressing it moves focus to the first field with a message, each message is
+ * tied to its control, and after a partial save focus moves to Go to Routines, which replaces it.
+ */
+
+test("Create stays enabled with a message showing, and pressing it goes to the first field that has one", async () => {
+  serving();
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await clearTime(view);
+  const create = await createButton(view);
+  await user.click(create);
+  await view.findByText(SAY_WHAT);
+  await view.findByText("Choose a time.");
+  await settleReactWork();
+  expect(writes()).toEqual([]);
+  expect(create.disabled).toBe(false);
+  // What to do comes first on the page, so it is where the person is taken.
+  const instruction = view.getByLabelText("What to do");
+  expect(document.activeElement).toBe(instruction);
+  // Fixed, the next press goes to the one left.
+  await user.type(instruction, "Send it");
+  await user.click(await createButton(view));
+  await settleReactWork();
+  expect(document.activeElement).toBe(view.getByLabelText("Time"));
+  expect(writes()).toEqual([]);
+});
+
+test("each message is tied to its control", async () => {
+  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await clearTime(view);
+  await user.click(await createButton(view));
+  const describedBy = (label: string, message: string) => {
+    const ids = (
+      view.getByLabelText(label).getAttribute("aria-describedby") ?? ""
+    ).split(" ");
+    const text = ids
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(text).toContain(message);
+  };
+  await view.findByText(SAY_WHAT);
+  describedBy("What to do", SAY_WHAT);
+  describedBy("Time", "Choose a time.");
+  // On a field whose message comes from what the Bot already has.
+  await user.type(view.getByLabelText("What to do"), "Watch my inbox");
+  await choose(view, user, "It should", "Only tell you");
+  await view.findByText(SAME_CHECK_IN_TEXT);
+  describedBy("Name", SAME_CHECK_IN_TEXT);
+  // A field with nothing to say points at nothing.
+  await user.type(view.getByLabelText("Name"), "Inbox");
+  await waitFor(() =>
+    expect(view.getByLabelText("Name").hasAttribute("aria-describedby")).toBe(
+      false,
+    ),
+  );
+});
+
+test("after a partial save, focus moves to Go to Routines", async () => {
+  serving({ routines: refusedSchedule, goalDeletes: false });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  const goTo = await partialSave(view, user);
+  await waitFor(() => expect(document.activeElement).toBe(goTo));
 });
