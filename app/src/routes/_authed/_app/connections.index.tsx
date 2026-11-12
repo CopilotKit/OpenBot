@@ -6,6 +6,7 @@ import {
   IconChevronRight,
   IconLock,
   IconPlug,
+  IconPlus,
   IconSearch,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -57,6 +58,7 @@ import {
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
+  addedByUrlListedOn,
   brokeredAccountsListedOn,
   serversListedFor,
   sharedAccountsListedOn,
@@ -368,6 +370,7 @@ function RouteComponent() {
         catalogue: plugins.data?.catalogue ?? [],
         added,
         brokered: brokeredAccountsListedOn(listed),
+        byUrl: addedByUrlListedOn(listed),
         connected,
         links: links.data ?? [],
         providers: providers.data,
@@ -376,6 +379,7 @@ function RouteComponent() {
         catalogue: yours,
         brokered: brokeredAccountsListedOn(listed),
         shared: sharedAccountsListedOn(listed),
+        byUrl: addedByUrlListedOn(listed),
         connected,
         links: links.data ?? [],
         providers: providers.data,
@@ -414,6 +418,20 @@ function RouteComponent() {
 
   return (
     <PageShell
+      /*
+       * The page's one verb: an MCP server OpenBot doesn't list, added by its address. Its own screen,
+       * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
+       */
+      action={
+        <Button
+          render={(props) => <Link {...props} to="/connections/new" />}
+          size="sm"
+          variant="outline"
+        >
+          <IconPlus />
+          Add server
+        </Button>
+      }
       className="@container"
       description={
         personal

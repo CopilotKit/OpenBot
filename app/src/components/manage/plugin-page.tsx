@@ -207,6 +207,8 @@ export function connectionKindFor(
 ): CatalogueItem["auth"] | "brokered" | "person-entra" {
   if (server && brokeredProvenance(server.provenance)) return "brokered";
   if (server?.entraScope) return "person-entra";
+  // Added by its address, and it signs each person in: the same shape as a catalogue OAuth vendor.
+  if (server?.signIn) return "user-oauth";
   return auth ?? "deployment-bearer";
 }
 
@@ -438,6 +440,12 @@ export function PluginPage({
   );
 
   const auth = connectionKindFor(server, entry?.auth);
+  /* Added by its address, and it answered with no account at all: nothing is missing here. */
+  const openByUrl =
+    server?.provenance === "custom" &&
+    !server.signIn &&
+    !server.entraScope &&
+    !server.hasCredential;
   const title = entry?.title ?? server?.title ?? key;
 
   /* Bound once because the brokered row below is told it twice — once inside the whole
@@ -863,9 +871,11 @@ export function PluginPage({
                     brokeredConnectionDescription(provider, brokeredApp)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
-                    : personal
-                      ? `What OpenBot sends to ${title}. Your Bots all use it.`
-                      : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                    : openByUrl
+                      ? `${title} answers without an account, so ${personal ? "your Bots use" : "Bots use"} it as it is. Add a key only if ${title} gives you one.`
+                      : personal
+                        ? `What OpenBot sends to ${title}. Your Bots all use it.`
+                        : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
           }
           title="Connection"
         >
@@ -982,7 +992,11 @@ export function PluginPage({
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {server?.hasCredential ? "Saved" : "Not set"}
+                    {server?.hasCredential
+                      ? "Saved"
+                      : openByUrl
+                        ? "None needed"
+                        : "Not set"}
                   </span>
                   <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                 </ItemActions>
@@ -1237,6 +1251,24 @@ export function PluginPage({
                   <ItemActions>
                     <IconExternalLink className="size-4 shrink-0 text-muted-foreground" />
                   </ItemActions>
+                </Item>
+              </>
+            ) : null}
+
+            {/*
+             * A server added by its address has no catalogue entry to say where it is, so the
+             * address itself is shown. Read-only: a server at a different address is another server.
+             */}
+            {server?.provenance === "custom" ? (
+              <>
+                <Separator />
+                <Item size="sm">
+                  <ItemContent>
+                    <ItemTitle>Server address</ItemTitle>
+                    <ItemDescription className="line-clamp-none break-all font-mono text-xs">
+                      {server.url}
+                    </ItemDescription>
+                  </ItemContent>
                 </Item>
               </>
             ) : null}

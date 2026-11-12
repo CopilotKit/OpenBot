@@ -139,6 +139,7 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     lastError: null,
     addedBy: null,
     dynamicClient: false,
+    signIn: false,
     skippedTools: [],
     authScheme: null,
     accountMode: null,

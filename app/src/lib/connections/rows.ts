@@ -89,6 +89,8 @@ export function connectionRows(input: {
   brokered: PluginServer[];
   /** Brokered apps that run on the organisation's account. */
   shared: PluginServer[];
+  /** MCP servers somebody added by their address. Absent reads as none. */
+  byUrl?: PluginServer[];
   /** Server ids the person holds a connection for. */
   connected: ReadonlySet<string>;
   links: LinkedAccount[];
@@ -172,6 +174,7 @@ export function connectionRows(input: {
         mark: { kind: "logo", logo: server.logo },
       }),
     ),
+    ...(input.byUrl ?? []).map((server) => byUrlRow(server, input.connected)),
     ...identity,
   ];
   /*
@@ -204,6 +207,7 @@ export function personalConnectionRows(input: {
   catalogue: CatalogueItem[];
   added: ReadonlySet<string>;
   brokered: PluginServer[];
+  byUrl?: PluginServer[];
   connected: ReadonlySet<string>;
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
@@ -215,6 +219,7 @@ export function personalConnectionRows(input: {
     catalogue: [],
     brokered: input.brokered,
     shared: [],
+    byUrl: input.byUrl,
     connected: input.connected,
     links: input.links,
     providers: input.providers,
@@ -248,4 +253,40 @@ function personalAppRow(
     action: entry.auth === "deployment-bearer" ? "setup" : "add",
     noAccount: true,
   };
+}
+
+/**
+ * A server somebody added by its address. Its line is where it lives, which is how a person tells two
+ * servers apart when nobody gave them a logo. One that signs each person in reads like any app you
+ * connect: Connect until you have, then Connected. One that needs no account is On.
+ */
+function byUrlRow(
+  server: PluginServer,
+  connected: ReadonlySet<string>,
+): ConnectionRow {
+  const host = hostOf(server.url);
+  const base = {
+    key: server.id,
+    title: server.title,
+    mark: { kind: "logo", logo: server.logo } as const,
+  };
+  if (server.signIn) {
+    const yours = connected.has(server.id);
+    return {
+      ...base,
+      summary: host,
+      state: yours ? "connected" : "available",
+      action: "connect",
+      notConnected: !yours,
+    };
+  }
+  return { ...base, summary: host, state: "connected", noAccount: true };
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }

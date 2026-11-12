@@ -63,8 +63,8 @@ export function appAccessTools(options: {
       // No administrator in the personal edition: the card offers the step itself.
       description:
         currentEdition() === "personal"
-          ? "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting it, or setting it up. Call it whenever a question needs an app you hold no tools for or one that needs connecting, instead of only saying it is missing."
-          : "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting their own account, or asking an administrator to switch the app on, grant it to you, or connect its shared account. Call it whenever a question needs an app you hold no tools for, instead of only saying it is missing.",
+          ? "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting it, or setting it up. Call it whenever a question needs an app you hold no tools for or one that needs connecting, instead of only saying it is missing. This includes an MCP server the person names by its address (URL): never say a server cannot be used by its URL, because the person can add one on Connections."
+          : "Show the person a card saying whether they can use one work app through you, and the one thing that would let them: connecting their own account, or asking an administrator to switch the app on, grant it to you, or connect its shared account. Call it whenever a question needs an app you hold no tools for, instead of only saying it is missing. This includes an MCP server the person names by its address (URL): never say a server cannot be used by its URL, because the person can add one on Connections.",
       parameters,
       async execute(args) {
         const parsed = parameters.safeParse(args);
@@ -87,8 +87,13 @@ export function appAccessTools(options: {
          * No card for an app nobody can name. A card about it would have nothing to ask the server
          * and nothing to offer, and the model is better told plainly so it can say so.
          */
+        /*
+         * An app OpenBot doesn't list may still be an MCP server with an address of its own (Figma's,
+         * Fireflies'). The person can add one of those themselves, from Connections, and the model
+         * is told so, so it does not answer that a server can't be used by its URL.
+         */
         if (!inspected)
-          return `This deployment has no app called ${app}, so there is nothing to show. Say so plainly; do not browse to it instead.`;
+          return `This deployment has no app called ${app}, so there is nothing to show. If ${app} has an MCP server address (a URL ending in /mcp, for example), the person can add it on Connections with Add server and connect their account there; once it is added and given to you, its tools are yours to use. Tell them that plainly; do not browse to it instead.`;
         const { access } = inspected;
         return connectAppRefusal({
           serverId: access.key,
