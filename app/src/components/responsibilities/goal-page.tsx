@@ -216,9 +216,11 @@ export function GoalPage({
     title !== goal.title ||
     instruction !== goal.instruction ||
     successCriteria !== goal.successCriteria;
-  const starters = (routines ?? []).some((routine) => routine.enabled)
-    ? "schedules, events and triggers"
-    : "events and triggers";
+  // Not known: the sentence that leaves no schedule out.
+  const starters =
+    routines === undefined || routines.some((routine) => routine.enabled)
+      ? "schedules, events and triggers"
+      : "events and triggers";
   const standing = [
     goal.progress
       ? {
@@ -418,7 +420,7 @@ export function GoalPage({
           >
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor={`${formId}-title`}>Title</FieldLabel>
+                <FieldLabel htmlFor={`${formId}-title`}>Name</FieldLabel>
                 <Input
                   id={`${formId}-title`}
                   maxLength={160}
@@ -429,7 +431,7 @@ export function GoalPage({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${formId}-instruction`}>
-                  Instruction
+                  What to do
                 </FieldLabel>
                 <Textarea
                   id={`${formId}-instruction`}
@@ -440,8 +442,9 @@ export function GoalPage({
                 />
               </Field>
               <Field data-invalid={criteriaMissing ? true : undefined}>
+                {/* As New routine asks it. A goal that ends when met can't leave it empty. */}
                 <FieldLabel htmlFor={`${formId}-criteria`}>
-                  Success criteria
+                  {goal.endsWhenMet ? "Done when" : "Done when (optional)"}
                 </FieldLabel>
                 <Textarea
                   aria-invalid={criteriaMissing ? true : undefined}
@@ -492,8 +495,9 @@ export function GoalPage({
       ) : null}
 
       <GoalSchedules
+        completed={goal.status === "completed"}
         paused={goal.status === "paused"}
-        routines={routines ?? []}
+        routines={routines}
       />
 
       {goal.subscriptions.length > 0 ? (

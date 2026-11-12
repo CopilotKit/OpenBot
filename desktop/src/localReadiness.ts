@@ -16,6 +16,7 @@ import {
   type LocalReason,
   licenceExpiresSoon,
   onInstalledRelease,
+  type PodmanPlan,
   type Shortfall,
 } from "./localEvalCli";
 
@@ -144,7 +145,7 @@ function shortfallSaid(
   // Docker Desktop is where the person raises Docker's limits, so it is named. OpenBot's own Podman
   // machine is OpenBot to them, except in the command that raises its limits.
   const engine = shortfall.podman ? "OpenBot" : "Docker Desktop";
-  // "OpenBot has 2 free CPUs. It needs 4." rather than naming OpenBot twice.
+  // "OpenBot has 2 CPUs. It needs 4." rather than naming OpenBot twice.
   const needsWho = shortfall.podman ? "It needs" : "OpenBot needs";
   const short = (["cpu", "memory", "disk"] as const).filter(
     (resource) => shortfall[resource],
@@ -187,7 +188,8 @@ function shortfallSaid(
   }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
-    cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
+    // The CLI counts every CPU the engine has (its `NCPU`), not the ones left free.
+    cpu: shortfall.cpus && `${shortfall.cpus} CPUs`,
     memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
     disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
@@ -236,25 +238,89 @@ const needed: Record<Resource, string> = {
   disk: "40 GB",
 };
 const neededFully: Record<Resource, string> = {
-  cpu: "4 free CPUs",
+  cpu: "4 CPUs",
   memory: "4 GB of free memory",
   disk: "40 GB of free disk space",
 };
 
 /**
- * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with
- * OpenBot's own containers running.
+ * The CLI's resource check at Start: 4 CPUs in all, and 4 GB of free memory and 40 GB of free disk
+ * with OpenBot's own containers running.
  */
 export function resourcesShortSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
     {
-      cpu: "4 free CPUs",
+      cpu: "4 CPUs",
       memory: "4 GB of free memory",
       disk: "40 GB free",
     },
     "Retry",
   );
+}
+
+/** MiB as the GB a person reads: 6144 is "6", 3277 is "3.2". */
+function gb(mib: number): string {
+  const tenths = Math.floor((mib / 1024) * 10) / 10;
+  return tenths.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * What happened, when setup found the person's Podman machine too small and OpenBot knows its size
+ * (`podmanMachinePlan`): its own size, beside what OpenBot needs. What to do is the fix card's
+ * (`PodmanTooSmall`), so it is not said here. CPUs are the machine's in all, as the CLI counts them;
+ * memory is what is free in it.
+ */
+export function podmanTooSmallSaid(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): string {
+  const has = "Your Podman machine has";
+  if (shortfall.disk) {
+    const short = (["cpu", "memory", "disk"] as const).filter(
+      (resource) => shortfall[resource],
+    );
+    return `Your Podman machine doesn't have enough ${listed(short.map((resource) => resourceName[resource]))} for OpenBot.`;
+  }
+  if (shortfall.cpu && shortfall.memory) {
+    return shortfall.memoryGb
+      ? `${has} ${plan.cpus} CPUs and ${shortfall.memoryGb} GB of free memory. OpenBot needs 4 CPUs and 4 GB of free memory.`
+      : `${has} ${plan.cpus} CPUs and ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 CPUs and 4 GB of free memory.`;
+  }
+  if (shortfall.cpu) return `${has} ${plan.cpus} CPUs. OpenBot needs 4.`;
+  return shortfall.memoryGb
+    ? `${has} ${gb(plan.memoryMib)} GB of memory, and ${shortfall.memoryGb} GB of it is free. OpenBot needs 4 GB free.`
+    : `${has} ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 GB free.`;
+}
+
+/** What OpenBot gives the machine, in words: "6 CPUs and 8 GB of memory". */
+export function podmanRaisedSaid(plan: PodmanPlan): string {
+  const raised = [
+    plan.toCpus > plan.cpus && `${plan.toCpus} CPUs`,
+    plan.toMemoryMib > plan.memoryMib && `${gb(plan.toMemoryMib)} GB of memory`,
+  ].filter((said): said is string => Boolean(said));
+  return listed(raised);
+}
+
+/**
+ * The three commands that make the machine bigger by hand, for when OpenBot can't: stop it, set
+ * what is short, start it. Named by the machine, since `podman machine set` without a name changes
+ * `podman-machine-default`, which may not be the one OpenBot uses.
+ */
+export function podmanResizeCommands(
+  shortfall: Shortfall,
+  plan: PodmanPlan,
+): { stop: string; set: string; start: string } {
+  const flags = [
+    plan.toCpus > plan.cpus && `--cpus ${plan.toCpus}`,
+    plan.toMemoryMib > plan.memoryMib && `--memory ${plan.toMemoryMib}`,
+    shortfall.disk && podmanFlag.disk,
+  ].filter(Boolean);
+  return {
+    stop: `podman machine stop ${plan.machine}`,
+    set: `podman machine set ${flags.join(" ")} ${plan.machine}`,
+    start: `podman machine start ${plan.machine}`,
+  };
 }
 
 /** OpenBot's own check before Start: the engine's totals, with room for its own containers. */

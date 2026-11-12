@@ -11,12 +11,12 @@ import {
 import { workItems } from "../db/schema/work";
 import { RESPONSIBILITY_RUN_KIND } from "./engine";
 import {
+  ENDS_WITHOUT_OUTCOME,
   type GoalRepeats,
+  goalRoutinesLockKey,
   parseResponsibilityEvent,
   parseResponsibilityInput,
   parseResponsibilityPatch,
-  ENDS_WITHOUT_OUTCOME,
-  instructionNamesGoal,
   RECURS_AND_ENDS,
   type Responsibility,
   ResponsibilityNotFoundError,
@@ -30,7 +30,11 @@ import {
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Connection = Database | Transaction;
 /** An enabled routine, with what `routinesRunning` reads to tell which goal it runs. */
-type EnabledRoutine = RoutineGoalLink & { id: string; agentId: string };
+type EnabledRoutine = RoutineGoalLink & {
+  id: string;
+  agentId: string;
+  goalLinkedByRun: boolean;
+};
 export type ResponsibilityTargetResolver = (
   ownerUserId: string,
   agentId: string,
@@ -90,6 +94,7 @@ export function createResponsibilityStore(
         agentId: routines.agentId,
         goalId: routines.goalId,
         goalByTitle: routines.goalByTitle,
+        goalLinkedByRun: routines.goalLinkedByRun,
         instruction: routines.instruction,
       })
       .from(routines)
@@ -108,10 +113,10 @@ export function createResponsibilityStore(
   }
   /**
    * The ids of the enabled routines that run this goal, by `routineRunsGoal`: the goal a routine
-   * records, or for an older routine its id or whole quoted title. The one place the goal store asks
-   * which routines run a goal, so what makes it repeat is what its completion switches off, less a
-   * routine that still runs another open goal, which that goal still repeats by
-   * (`switchOffRoutinesOf`).
+   * records, or for an older routine an instruction that clearly runs it (`instructionRunsGoal`). The
+   * one place the goal store asks which routines run a goal, so what makes it repeat is what its
+   * completion switches off, less a routine that still runs another open goal, which that goal still
+   * repeats by (`switchOffRoutinesOf`).
    *
    * FOUND IN REVIEW: completion switched off only the routines whose `goal_id` named the goal, while
    * `repeatsOf` also counted an older routine that names it in its instruction. That routine stayed
@@ -140,11 +145,22 @@ export function createResponsibilityStore(
       .map((routine) => routine.id);
   }
   /**
-   * Completing a goal switches off the routines that run it (`routinesRunning`), but not one that
-   * still runs another goal of its Bot that is not completed. Only an older routine can: a routine
-   * that records its goal (`goal_id`) runs that goal alone, whatever its instruction quotes
-   * (`routineRunsGoal`), so it is switched off with it. A paused goal is not completed, and can be
-   * resumed, so a routine that runs one stays on.
+   * What completing a goal does to the routines that run it. Called holding the goal's row (`owned`
+   * with `lock`), and takes the per-Bot lock (`goalRoutinesLockKey`) before it reads or writes any
+   * routine, the order `linkGoal` in the routine store and `routinesDeletedWith` follow.
+   *
+   * - A routine its firing linked to the goal (`goalLinkedByRun`) is unlinked and left as it is, on or
+   *   off: it does other work too ("Summarize my inbox, and if a release shipped run the goal").
+   * - A routine made for the goal is switched off.
+   * - An older routine that runs it by its title (`instructionRunsGoal`) is switched off, unless it
+   *   still runs another goal of its Bot that is not completed. A paused goal is not completed, and
+   *   can be resumed, so a routine that runs one stays on.
+   *
+   * FOUND IN REVIEW: completion guessed whether a routine was made for its goal from whether its
+   * instruction still quoted the goal's id or title. A Bot writes `Run the goal "Title"` and records
+   * the goal's id, so once the person renamed the goal its routine looked broad: completing the goal
+   * unlinked it and left it on, firing `run_goal` at a completed goal every day. How a routine got its
+   * goal is now recorded when it gets it, and a rename doesn't change it.
    *
    * FOUND IN REVIEW: completion switched off every routine that ran the goal, including an older
    * routine that also named a second goal ("Weekly report" and "Inbox zero"). The second goal, still
@@ -154,20 +170,13 @@ export function createResponsibilityStore(
    *
    * Serialized per Bot, so two goals one routine runs, completed at once, can't each read the other
    * as still open and both leave it on: the second reads the first as completed, and switches it off.
-   *
-   * FOUND IN REVIEW: a broad routine ("Summarise my inbox, and if a release shipped run the goal")
-   * records the goal its firing ran through run_goal (`linkGoal` in the routine store), though its
-   * instruction never names it. Completing that goal switched the routine off, and switching it back
-   * on was refused as `goal_complete`, so the rest of what it did stopped for good. A routine that
-   * records this goal but whose instruction doesn't name it (`instructionNamesGoal`) is unlinked and
-   * left on; one that names it is switched off.
    */
   async function switchOffRoutinesOf(
     transaction: Transaction,
     goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
   ) {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`goal-completion-${goal.ownerUserId}-${goal.agentId}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${goalRoutinesLockKey(goal.ownerUserId, goal.agentId)}))`,
     );
     const enabled = await enabledRoutines(
       transaction,
@@ -176,24 +185,21 @@ export function createResponsibilityStore(
       [goal.id],
     );
     const running = new Set(await routinesRunning(transaction, goal, enabled));
-    const linkedOnly = enabled.filter(
+    // Unlinked whether on or off: one left recording a completed goal could not be switched on again.
+    await transaction
+      .update(routines)
+      .set({ goalId: null, goalLinkedByRun: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(routines.ownerUserId, goal.ownerUserId),
+          eq(routines.goalId, goal.id),
+          eq(routines.goalLinkedByRun, true),
+        ),
+      );
+    const runs = enabled.filter(
       (routine) =>
         running.has(routine.id) &&
-        routine.goalId === goal.id &&
-        !instructionNamesGoal(routine.instruction, goal),
-    );
-    if (linkedOnly.length > 0)
-      await transaction
-        .update(routines)
-        .set({ goalId: null, updatedAt: new Date() })
-        .where(
-          inArray(
-            routines.id,
-            linkedOnly.map((routine) => routine.id),
-          ),
-        );
-    const runs = enabled.filter(
-      (routine) => running.has(routine.id) && !linkedOnly.includes(routine),
+        !(routine.goalId === goal.id && routine.goalLinkedByRun),
     );
     const stillOpen = runs.some((routine) => !routine.goalId)
       ? await transaction
@@ -223,28 +229,34 @@ export function createResponsibilityStore(
   /**
    * The routines deleting this goal deletes with it, switched on or off: those that run it
    * (`routineRunsGoal`), less an older routine that still runs another goal of its Bot that is not
-   * completed, as completion leaves one on (`switchOffRoutinesOf`). The page draws an older routine
-   * under the goal it still runs (`goalShownFor`), so that one moves to the other goal's row.
+   * completed, as completion leaves one on (`switchOffRoutinesOf`), and less a routine its firing
+   * linked to the goal (`goalLinkedByRun`), which `delete` unlinks and keeps. The page draws an older
+   * routine under the goal it still runs (`goalShownFor`), so that one moves to the other goal's row.
    *
    * FOUND IN REVIEW: delete removed only the routines whose `goal_id` named the goal. An older routine
    * that runs it by its quoted title (`goalByTitle`) was drawn under the goal and named in the delete
    * confirm, but stayed on after it, firing `run_goal` at a goal that was gone.
    *
-   * Serialized per Bot with completion, so a goal deleted while another completes can't each read the
-   * other as still open and leave a routine behind that runs neither.
+   * FOUND IN REVIEW: delete removed every routine that recorded the goal, so a broad routine one of
+   * whose firings had run it ("Summarize my inbox, and if a release shipped run the goal") went with
+   * it, and the person lost the rest of what it did.
+   *
+   * Serialized per Bot with completion and `linkGoal`, so a goal deleted while another completes can't
+   * each read the other as still open and leave a routine behind that runs neither.
    */
   async function routinesDeletedWith(
     transaction: Transaction,
     goal: Pick<Responsibility, "id" | "ownerUserId" | "agentId" | "title">,
   ): Promise<string[]> {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`goal-completion-${goal.ownerUserId}-${goal.agentId}`}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${goalRoutinesLockKey(goal.ownerUserId, goal.agentId)}))`,
     );
     const candidates = await transaction
       .select({
         id: routines.id,
         goalId: routines.goalId,
         goalByTitle: routines.goalByTitle,
+        goalLinkedByRun: routines.goalLinkedByRun,
         instruction: routines.instruction,
       })
       .from(routines)
@@ -261,7 +273,9 @@ export function createResponsibilityStore(
           ),
         ),
       );
-    const runs = candidates.filter((routine) => routineRunsGoal(routine, goal));
+    const runs = candidates.filter(
+      (routine) => !routine.goalLinkedByRun && routineRunsGoal(routine, goal),
+    );
     const stillOpen = runs.some((routine) => !routine.goalId)
       ? await transaction
           .select({ id: responsibilities.id, title: responsibilities.title })
@@ -414,6 +428,18 @@ export function createResponsibilityStore(
         // Its routines exist to run it. Left behind, `goal_id` would clear and each would become a
         // routine of its own, firing `run_goal` at a goal that is gone.
         const ids = await routinesDeletedWith(transaction, goal);
+        // A routine a firing linked to it does other work too, so it stays, unlinked. After
+        // `routinesDeletedWith`, which takes the per-Bot lock.
+        await transaction
+          .update(routines)
+          .set({ goalId: null, goalLinkedByRun: false, updatedAt: new Date() })
+          .where(
+            and(
+              eq(routines.ownerUserId, ownerUserId),
+              eq(routines.goalId, id),
+              eq(routines.goalLinkedByRun, true),
+            ),
+          );
         if (ids.length > 0)
           await transaction.delete(routines).where(inArray(routines.id, ids));
         // Its runs and triggers go with it, by foreign key.

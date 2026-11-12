@@ -92,6 +92,14 @@ export function stoppedRoutinesGuidance(
   return fact;
 }
 
+/**
+ * How often routines and goals are read again while a screen shows them. A Routines row and a goal's
+ * page are built from both reads, and either changes without this screen: a run completes a goal and
+ * the server switches its schedule off, or a Bot gives a goal a schedule. Both reads use this one
+ * interval, so neither stays stale longer than the other.
+ */
+export const ROUTINES_REFETCH_MS = 10_000;
+
 export const routineKeys = {
   all: ["routines"] as const,
   list: () => ["routines", "list"] as const,
@@ -140,5 +148,6 @@ export function routinesQueryOptions() {
         sweep: body.sweep ?? { lastSweptAt: null, working: false },
       };
     },
+    refetchInterval: ROUTINES_REFETCH_MS,
   });
 }

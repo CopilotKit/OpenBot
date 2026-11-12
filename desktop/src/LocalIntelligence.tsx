@@ -6,13 +6,13 @@ import {
   cancelLocalEval,
   chatGate,
   connectLocalEval,
+  heldForRoom,
   type LocalConnection,
   LocalEvalError,
   type LocalFailure,
   type LocalReason,
   type LocalReport,
   type LocalTerms,
-  heldForRoom,
   localEvalDownload,
   localEvalRoom,
   localEvalSteps,
@@ -20,6 +20,7 @@ import {
   localEvalUpdateStep,
   onInstalledRelease,
   runLocalEval,
+  type Shortfall,
   setUpLocalEval,
   signInToCopilotKit,
   updateStepSaid,
@@ -29,7 +30,9 @@ import {
   engineTooSmallSaid,
   localReadiness,
   onInstalledReleaseSaid,
+  podmanTooSmallSaid,
 } from "./localReadiness";
+import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
   asProblem,
   Failure,
@@ -140,7 +143,15 @@ type State = {
   running: boolean;
   /** When the current row began, so its elapsed time survives a change of screen. */
   since: number | null;
-  blocked: { said: string; reason: LocalReason | null } | null;
+  /**
+   * Why the sequence stopped. `shortfall` with `resources-short`: what the CLI found short, so the
+   * window can offer to make a Podman machine bigger (`PodmanTooSmall`).
+   */
+  blocked: {
+    said: string;
+    reason: LocalReason | null;
+    shortfall?: Shortfall;
+  } | null;
   problem: Problem | null;
   /**
    * The agreement version setup was given and still answered "acceptance required" to. The CLI
@@ -745,12 +756,22 @@ export function useLocalSequence({
     });
     const { root } = latest.current;
     let id = latest.current.stack;
-    const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
+    const stop = (reason?: {
+      said: string;
+      reason?: LocalReason | null;
+      shortfall?: Shortfall;
+    }) => {
       if (generation.current !== token) return;
       update({
         running: false,
         ...(reason
-          ? { blocked: { said: reason.said, reason: reason.reason ?? null } }
+          ? {
+              blocked: {
+                said: reason.said,
+                reason: reason.reason ?? null,
+                ...(reason.shortfall ? { shortfall: reason.shortfall } : {}),
+              },
+            }
           : {}),
       });
     };
@@ -825,7 +846,14 @@ export function useLocalSequence({
             report.reason === "eula-acceptance-required" ? carried : null,
         });
         if (report.outcome !== "completed") {
-          return stop({ said: said(report), reason: report.reason });
+          return stop({
+            said: said(report),
+            reason: report.reason,
+            shortfall:
+              report.reason === "resources-short"
+                ? report.shortfall
+                : undefined,
+          });
         }
         if (!report.stack) return stop({ said: said("missing-stack") });
         accepted.current = null;
@@ -1037,6 +1065,8 @@ export function LocalIntelligence({
   open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
+  const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   // While it runs, one journey says what is happening and how far along the whole Start is. The
   // rows then say which part is done and which is left, and nothing twice.
   // Paused for room: its row says so, with Try again, and no time left counts down.
@@ -1057,7 +1087,14 @@ export function LocalIntelligence({
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : sequence.steps;
+      : plan && tooSmall
+        ? // What happened on the row; what to do in the card under it.
+          sequence.steps.map((row) =>
+            row.ok
+              ? row
+              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+          )
+        : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -1073,33 +1110,45 @@ export function LocalIntelligence({
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && <Failure problem={problem} />}
-      <div className="row">
-        {running && at !== "start" && (
-          <button type="button" className="quiet" onClick={sequence.cancel}>
-            Cancel
-          </button>
-        )}
-        {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
+      {plan && tooSmall && !waitingOn && (
+        <PodmanTooSmall
+          key={plan.machine}
+          plan={plan}
+          shortfall={tooSmall}
+          onRetry={sequence.retry}
+        />
+      )}
+      {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
+      {!(plan && tooSmall) && (
+        <div className="row">
+          {running && at !== "start" && (
+            <button type="button" className="quiet" onClick={sequence.cancel}>
+              Cancel
+            </button>
+          )}
+          {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
             starting, which can't be stopped partway. Said where Cancel was, in its height: on
             Windows G Cancel went at step 4 and the card shrank under the rows. */}
-        {running && at === "start" && (
-          <p className="cannot-cancel">
-            {releasing || releaseDue
-              ? "You can't cancel this last step. Stopping it partway could leave the update half done."
-              : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
-          </p>
-        )}
-        {stopped && !waitingOn && !backendLost(sequence) && (
-          <button type="button" onClick={sequence.retry}>
-            Retry
-          </button>
-        )}
-        {offerStart && !running && at === null && (
-          <button type="button" onClick={sequence.start}>
-            Start OpenBot
-          </button>
-        )}
-      </div>
+          {running && at === "start" && (
+            <p className="cannot-cancel">
+              {releasing || releaseDue
+                ? "You can't cancel this last step. Stopping it partway could leave the update half done."
+                : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
+            </p>
+          )}
+          {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
+          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
+            <button type="button" onClick={sequence.retry}>
+              Retry
+            </button>
+          )}
+          {offerStart && !running && at === null && (
+            <button type="button" onClick={sequence.start}>
+              Start OpenBot
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1119,6 +1168,8 @@ export function LocalStatus({
   /** Its download's row too. Off where the background install's row says it already. */
   download?: boolean;
 }) {
+  const tooSmall = sequence.stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   if (!sequence.stopped) {
     // The rest of OpenBot downloads behind the screen in front: say how far, so the wait is visible.
     if (!download || !sequence.running || !sequence.download) return null;
@@ -1164,13 +1215,25 @@ export function LocalStatus({
           <p>
             {openBot
               ? "Everything else is ready. Retry starts OpenBot again."
-              : (sequence.blocked?.said ?? sequence.problem?.said)}
+              : plan && tooSmall
+                ? podmanTooSmallSaid(tooSmall, plan)
+                : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
-          <div className="row">
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          </div>
+          {plan && tooSmall && (
+            <PodmanTooSmall
+              key={plan.machine}
+              plan={plan}
+              shortfall={tooSmall}
+              onRetry={sequence.retry}
+            />
+          )}
+          {!plan && (
+            <div className="row">
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            </div>
+          )}
           <TroubleshootingLogs
             problem={
               sequence.problem ??

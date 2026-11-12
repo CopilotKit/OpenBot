@@ -336,3 +336,25 @@
 :root[data-skin="openmuse"] .openmuse-stage button[data-slot="item"] {
   text-align: start;
 }
+
+/*
+ * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, 20px in
+ * and about 21–37px down, ending 81px in (`TRAFFIC_LIGHTS` in the desktop's main.rs), and the
+ * desktop marks the page `data-desktop-titlebar="overlay"`. OpenBot's sidebar makes room for them
+ * (app/src/styles.css); this frame has no sidebar, so it makes its own. In a window narrow enough
+ * that the header's column reaches the left edge, the menu button moves along its row to start 88px
+ * in, past the buttons. The header sits 20px inside a centred column 40px wider than it, so
+ * `(100vw - 100% - 40px) / 2` is the room left of that column, and a column that clears the corner
+ * leaves the button where it was. An update notice drawn across the top starts past the buttons
+ * too. Outside the desktop nothing changes.
+ */
+:root[data-skin="openmuse"][data-desktop-titlebar="overlay"]
+  .openmuse-frame
+  [data-openmuse-menu] {
+  left: max(0px, calc(68px - (100vw - 100% - 40px) / 2));
+}
+:root[data-skin="openmuse"][data-desktop-titlebar="overlay"]
+  .openmuse-frame
+  > aside {
+  padding-left: 88px;
+}

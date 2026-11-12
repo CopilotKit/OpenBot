@@ -380,12 +380,16 @@ test("the person completing a goal leaves on an older routine that also runs ano
   const doneAndEnded = await olderRoutine(
     `Run goal ${done.id}, then the goal "${ended.title}"`,
   );
-  // Records the goal its firing ran, but its instruction names only the open goal: completing the
-  // recorded goal unlinks it, and it goes on running the goal it names.
+  // Records the goal its firing ran (`goalLinkedByRun`), but its instruction names only the open
+  // goal: completing the recorded goal unlinks it, and it goes on running the goal it names.
   const recordsDone = await routineRunning(done.id);
   await database
     .update(routines)
-    .set({ instruction: `Run the goal "${open.title}"`, goalByTitle: true })
+    .set({
+      instruction: `Run the goal "${open.title}"`,
+      goalByTitle: true,
+      goalLinkedByRun: true,
+    })
     .where(eq(routines.id, recordsDone));
 
   await store.transition(ownerId, done.id, "completed");
@@ -591,7 +595,9 @@ test("an older schedule may be enabled while another named goal remains open", a
     ...valid,
     title: `Open ${randomUUID()}`,
   });
-  const id = await olderRoutine(`Run "${done.title}" and "${open.title}"`);
+  const id = await olderRoutine(
+    `Run the goal "${done.title}" and the goal "${open.title}"`,
+  );
   await store.transition(ownerId, done.id, "completed");
   const schedules = createRoutineStore(database);
   await schedules.setEnabled(ownerId, id, false);

@@ -137,7 +137,7 @@ export function responsibilityTools(
   const tools = [
     tool(
       "create_goal",
-      "Create a lasting goal for this Bot in this conversation. State the instruction and measurable success criteria; optional event subscriptions trigger future runs. Set recurring when the person wants it done again and again, every morning or each time something happens: a recurring goal is never completed by one of its runs. Set endsWhenMet instead when a goal a routine runs or an event wakes has an outcome that ends it: the run that meets its success criteria completes it.",
+      "Create a lasting goal for this Bot in this conversation. State the instruction and measurable success criteria; optional event subscriptions trigger future runs. Set recurring when the person wants it done again and again, every morning or each time something happens: a recurring goal is never completed by one of its runs. Set endsWhenMet instead when a goal a routine runs or an event wakes has an outcome that ends it: the run that meets its success criteria completes it. Never set endsWhenMet for work the person wants done every time, such as telling them what changed every morning: every run would meet its success criteria and end the goal.",
       responsibilityInputSchema
         .omit({ agentId: true, channelId: true })
         .extend({ successCriteria: z.string().trim().min(1).max(3000) }),

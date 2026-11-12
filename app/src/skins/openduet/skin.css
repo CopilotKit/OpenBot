@@ -319,3 +319,26 @@
   div:has(+ div > div > [data-slot="page-header"]) {
   display: none;
 }
+
+/*
+ * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, 20px in
+ * and about 21–37px down, ending 81px in (`TRAFFIC_LIGHTS` in the desktop's main.rs), and the
+ * desktop marks the page `data-desktop-titlebar="overlay"`. OpenBot's sidebar makes room for them
+ * (app/src/styles.css); this frame has no sidebar, so it makes its own. Its header keeps its row,
+ * and the disc on its left starts 88px in, past the buttons, wherever the column reaches the
+ * window's left edge: a page opened over the app always, a conversation with its pane in a narrow
+ * window. `100vw - 100%` is the room either side of the centred column, so a column that sits clear
+ * of the corner keeps its usual 16px. Both sides move, so the orb and the title stay centred. An
+ * update notice drawn across the top starts past the buttons too. Outside the desktop nothing
+ * changes.
+ */
+:root[data-skin="openduet"][data-desktop-titlebar="overlay"]
+  [data-openduet-column]
+  > header {
+  padding-inline: max(16px, calc(88px - (100vw - 100%) / 2));
+}
+:root[data-skin="openduet"][data-desktop-titlebar="overlay"]
+  [data-openduet-frame]
+  > aside {
+  padding-left: 88px;
+}

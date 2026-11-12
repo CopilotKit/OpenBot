@@ -54,7 +54,12 @@ import {
   routineSweeps,
   routines,
 } from "../db/schema";
-import { goalShownFor, routineRunsGoal } from "../responsibilities/types";
+import {
+  goalRoutinesLockKey,
+  goalShownFor,
+  instructionRunsGoal,
+  routineRunsGoal,
+} from "../responsibilities/types";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";
@@ -815,7 +820,7 @@ export function createRoutineStore(database: Database): RoutineStore {
         values.instruction = validInstruction(patch.instruction);
       }
       if (patch.title !== undefined) values.title = validTitle(patch.title);
-      if (patch.goalId !== undefined)
+      if (patch.goalId !== undefined) {
         values.goalId =
           (
             await goalItRuns(
@@ -826,6 +831,9 @@ export function createRoutineStore(database: Database): RoutineStore {
               transaction,
             )
           )?.id ?? null;
+        // Given its goal, it is that goal's routine now, however it was linked before.
+        values.goalLinkedByRun = false;
+      }
       if (patch.channelId !== undefined) {
         values.channelId = await resolveChannel(
           ownerUserId,
@@ -935,9 +943,38 @@ export function createRoutineStore(database: Database): RoutineStore {
      * Counted among the goals that are not completed, as `switchOffRoutinesOf` counts them: a
      * completed goal can't be resumed and its `run_goal` is refused, so linking a routine that also
      * names one changes nothing it runs.
+     *
+     * FOUND IN REVIEW: the person could complete the goal while a firing's `run_goal` was still in
+     * flight. This read the routine, then wrote the link, with nothing holding the goal, so a routine
+     * could be linked to a goal already complete, and could never be switched back on (`goal_complete`).
+     * The goal's row is now held (`for share`) before the per-Bot lock and the routine's row, the
+     * order completing and deleting a goal take them in (`goalRoutinesLockKey`), and only an active
+     * goal is linked.
+     *
+     * How it was linked is recorded (`goalLinkedByRun`): by a run, unless its instruction clearly runs
+     * this goal (`instructionRunsGoal`), when it was made for the goal and only never recorded it.
      */
     async linkGoal(ownerUserId, agentId, routineId, goalId) {
       return database.transaction(async (transaction) => {
+        const [goal] = await transaction
+          .select({
+            id: responsibilities.id,
+            title: responsibilities.title,
+            status: responsibilities.status,
+          })
+          .from(responsibilities)
+          .where(
+            and(
+              eq(responsibilities.id, goalId),
+              eq(responsibilities.ownerUserId, ownerUserId),
+              eq(responsibilities.agentId, agentId),
+            ),
+          )
+          .for("share");
+        if (goal?.status !== "active") return false;
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${goalRoutinesLockKey(ownerUserId, agentId)}))`,
+        );
         const [routine] = await transaction
           .select({
             goalId: routines.goalId,
@@ -972,7 +1009,10 @@ export function createRoutineStore(database: Database): RoutineStore {
         }
         await transaction
           .update(routines)
-          .set({ goalId })
+          .set({
+            goalId,
+            goalLinkedByRun: !instructionRunsGoal(routine.instruction, goal),
+          })
           .where(eq(routines.id, routineId));
         return true;
       });

@@ -18,10 +18,11 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KEY_FROM_OPENBOT } from "@/components/agents/callback-token-panel";
 import { SetupSections } from "@/components/bot-profile/setup";
+import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import {
   ISOLATED_EXPLAINED,
   ISOLATED_MAKING_PUBLIC,
@@ -54,7 +55,12 @@ import { settleReactWork } from "./settle-react-work";
  * the Bot's Setup page draws them.
  */
 
-beforeAll(() => GlobalRegistrator.register());
+// The business dialog's booking calendar keeps its address but never fetches it.
+beforeAll(() =>
+  GlobalRegistrator.register({
+    settings: { navigation: { disableChildFrameNavigation: true } },
+  }),
+);
 afterEach(cleanup);
 afterAll(async () => {
   await settleReactWork();
@@ -219,13 +225,16 @@ test("the personal edition's Setup has no Visibility or Isolated: one person, on
   serve(MANAGED);
   const view = draw("personal");
   expect(await view.findByRole("button", { name: /^Name/ })).toBeTruthy();
+  // It opens the OpenBot for Business dialog in the app, never the website.
+  const business = render(<TeamFeaturesDialog />);
+  fireEvent.click(
+    view.getByRole("button", {
+      name: "Give each Bot its own computer with OpenBot for Business.",
+    }),
+  );
   expect(
-    view
-      .getByRole("link", {
-        name: "Give each Bot its own computer with OpenBot for Business.",
-      })
-      .getAttribute("href"),
-  ).toBe("https://open.bot/business");
+    await business.findByRole("dialog", { name: "OpenBot for Business" }),
+  ).toBeTruthy();
   expect(view.queryByText("Visibility")).toBeNull();
   expect(view.queryByText("Isolated")).toBeNull();
 });
