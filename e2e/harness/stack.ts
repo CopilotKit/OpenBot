@@ -12,7 +12,9 @@ import {
   APP_URL,
   ARTIFACTS,
   COMPOSE_PROJECT,
+  COMPOSIO_URL,
   DUMMY_ANTHROPIC_KEY,
+  DUMMY_COMPOSIO_KEY,
   LOGS,
   PORTS,
   ROOT,
@@ -113,6 +115,15 @@ export function stackEnvironment(): Record<string, string> {
     // OPENBOT_BROKER_PROVIDER the server refuses to start. (A blank COMPOSIO_API_KEY can't be used
     // to switch Composio off: start.sh unsets a blank one so the `.env` key wins.)
     ARCADE_API_KEY: "",
+    // Composio's API is the stub's (`harness/composio-stub.ts`), so Browse apps, Add, Connect and
+    // Disconnect run against a fixed catalogue and never reach a real account. `@composio/core` reads
+    // COMPOSIO_BASE_URL when the server passes no base URL of its own, which it doesn't. A key that
+    // isn't blank, so start.sh keeps it and never provisions a real Composio project for the run.
+    COMPOSIO_BASE_URL: COMPOSIO_URL,
+    COMPOSIO_API_KEY: DUMMY_COMPOSIO_KEY,
+    // The MCP server a journey adds by its address is aimock's, on this machine's loopback over http,
+    // which OpenBot refuses unless this is set (`server/src/plugins/catalogue.ts`). For tests only.
+    OPENBOT_ALLOW_LOOPBACK_MCP: "1",
 
     // Every model provider OpenBot calls, pointed at aimock before the server builds a client.
     BOT_PROVIDER: "openai",

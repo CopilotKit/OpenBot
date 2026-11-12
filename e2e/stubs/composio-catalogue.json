@@ -1,0 +1,3145 @@
+{
+  "toolkits": [
+    {
+      "name": "Gmail",
+      "slug": "gmail",
+      "type": "native",
+      "app": "Gmail",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 2,
+        "tools_count": 4,
+        "description": "Gmail is Google’s email service, featuring spam protection, search functions, and seamless integration with other G Suite apps for productivity",
+        "logo": "https://logos.composio.dev/api/gmail",
+        "app_url": "https://mail.google.com",
+        "categories": [
+          {
+            "id": "email",
+            "name": "email"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261105_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "a90e7d79-4f7a-4ff2-bd7d-19c78640b8f8"
+      }
+    },
+    {
+      "name": "GitHub",
+      "slug": "github",
+      "type": "native",
+      "app": "GitHub",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 46,
+        "tools_count": 4,
+        "description": "GitHub is a code hosting platform for version control and collaboration, offering Git-based repository management, issue tracking, and continuous integration features",
+        "logo": "https://logos.composio.dev/api/github",
+        "app_url": "https://github.com/",
+        "categories": [
+          {
+            "id": "developer-tools",
+            "name": "developer tools"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261112_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "01e22f33-dc3f-46ae-b58d-050e4d2d1909"
+      }
+    },
+    {
+      "name": "Google Calendar",
+      "slug": "googlecalendar",
+      "type": "native",
+      "app": "Google Calendar",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 6,
+        "tools_count": 4,
+        "description": "Google Calendar is a time management tool providing scheduling features, event reminders, and integration with email and other apps for streamlined organization",
+        "logo": "https://logos.composio.dev/api/googlecalendar",
+        "app_url": "https://calendar.google.com",
+        "categories": [
+          {
+            "id": "scheduling-&-booking",
+            "name": "scheduling & booking"
+          }
+        ],
+        "created_at": "2024-05-10T15:48:44.899Z",
+        "updated_at": "2026-11-12T11:30:53.423Z",
+        "version": "20261111_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "3dac6ad0-5ab3-4cb0-9c10-34dc08e89b46"
+      }
+    },
+    {
+      "name": "Notion",
+      "slug": "notion",
+      "type": "native",
+      "app": "Notion",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2", "API_KEY"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 8,
+        "tools_count": 4,
+        "description": "Notion centralizes notes, docs, wikis, and tasks in a unified workspace, letting teams build custom workflows for collaboration and knowledge management",
+        "logo": "https://logos.composio.dev/api/notion",
+        "app_url": "https://www.notion.so",
+        "categories": [
+          {
+            "id": "notes",
+            "name": "notes"
+          },
+          {
+            "id": "documents",
+            "name": "documents"
+          },
+          {
+            "id": "project-management",
+            "name": "project management"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "dbfb6202-e358-4271-8a80-a8b6d53a717b"
+      }
+    },
+    {
+      "name": "Linear",
+      "slug": "linear",
+      "type": "native",
+      "app": "Linear",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2", "API_KEY"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 12,
+        "tools_count": 4,
+        "description": "Linear is a streamlined issue tracking and project planning tool for modern teams, featuring fast workflows, keyboard shortcuts, and GitHub integrations",
+        "logo": "https://logos.composio.dev/api/linear",
+        "app_url": "https://linear.app",
+        "categories": [
+          {
+            "id": "project-management",
+            "name": "project management"
+          },
+          {
+            "id": "task-management",
+            "name": "task management"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "1614fd24-d056-465e-b5a1-714ef9e1a960"
+      }
+    },
+    {
+      "name": "Slack",
+      "slug": "slack",
+      "type": "native",
+      "app": "Slack",
+      "toolkit_type": "api",
+      "auth_schemes": ["OAUTH2"],
+      "composio_managed_auth_schemes": ["OAUTH2"],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 9,
+        "tools_count": 4,
+        "description": "Slack is a channel-based messaging platform. With Slack, people can work together more effectively, connect all their software tools and services, and find the information they need to do their best work - all within a secure, enterprise-grade environment.",
+        "logo": "https://logos.composio.dev/api/slack",
+        "app_url": "https://slack.com/intl/en-in//",
+        "categories": [
+          {
+            "id": "team-chat",
+            "name": "team chat"
+          },
+          {
+            "id": "team-collaboration",
+            "name": "team collaboration"
+          }
+        ],
+        "created_at": "2024-05-03T11:44:32.061Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261112_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "933dfc28-17b1-4764-95b3-ecd134a9bb06"
+      }
+    },
+    {
+      "name": "Bigmailer",
+      "slug": "bigmailer",
+      "type": "native",
+      "app": "Bigmailer",
+      "toolkit_type": "api",
+      "auth_schemes": ["API_KEY"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 0,
+        "tools_count": 4,
+        "description": "BigMailer is an email marketing platform designed for managing multiple brands, offering features like white-labeling, automation, and integration with Amazon SES.",
+        "logo": "https://logos.composio.dev/api/bigmailer",
+        "app_url": "https://www.bigmailer.io/",
+        "categories": [
+          {
+            "id": "email-newsletters",
+            "name": "email newsletters"
+          },
+          {
+            "id": "marketing-automation",
+            "name": "marketing automation"
+          }
+        ],
+        "created_at": "2025-05-21T10:41:39.860Z",
+        "updated_at": "2026-11-12T11:30:53.423Z",
+        "version": "20261101_00"
+      },
+      "no_auth": false,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "14c0a632-7d50-4473-8106-4c1c057166ff"
+      }
+    },
+    {
+      "name": "Hacker News",
+      "slug": "hackernews",
+      "type": "native",
+      "app": "Hacker News",
+      "toolkit_type": "api",
+      "auth_schemes": ["NO_AUTH"],
+      "composio_managed_auth_schemes": [],
+      "is_local_toolkit": false,
+      "meta": {
+        "triggers_count": 0,
+        "tools_count": 4,
+        "description": "Hacker News is a tech-focused news aggregator by Y Combinator, featuring user-submitted stories and discussions on startups, programming, and emerging trends",
+        "logo": "https://logos.composio.dev/api/hackernews",
+        "app_url": "https://news.ycombinator.com/",
+        "categories": [
+          {
+            "id": "news-&-lifestyle",
+            "name": "news & lifestyle"
+          }
+        ],
+        "created_at": "2024-06-14T12:12:24.632Z",
+        "updated_at": "2026-11-12T00:59:01.825Z",
+        "version": "20261101_00"
+      },
+      "no_auth": true,
+      "auth_guide_url": null,
+      "deprecated": {
+        "toolkitId": "7e180336-f7f8-4bb2-a1d5-ed5d8be0c779"
+      }
+    }
+  ],
+  "tools": {
+    "gmail": [
+      {
+        "slug": "GMAIL_DELETE_FILTER",
+        "name": "Delete Gmail filter",
+        "description": "Tool to permanently delete a Gmail filter by its ID. Use when you need to remove an existing email filtering rule.",
+        "available_versions": ["20261105_00"],
+        "version": "20261105_00",
+        "toolkit": {
+          "slug": "gmail",
+          "name": "gmail",
+          "logo": "https://logos.composio.dev/api/gmail"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteFilterRequest",
+          "required": ["filter_id"],
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "title": "User Id",
+              "default": "me",
+              "examples": ["me", "user@example.com"],
+              "description": "User's email address or 'me' for the authenticated user."
+            },
+            "filter_id": {
+              "type": "string",
+              "title": "Filter Id",
+              "examples": [
+                "ANe1Bmhf1zE0KtM6340kAXudxukJADqVJ6jVVA",
+                "ANe1BmjqK9vN_vH9dW1234567890"
+              ],
+              "description": "The ID of the filter to be deleted. Filter IDs can be obtained from GMAIL_LIST_FILTERS action."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteFilterResponse": {
+              "type": "object",
+              "title": "DeleteFilterResponse",
+              "required": ["success"],
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "title": "Success",
+                  "description": "True if the filter was successfully deleted."
+                }
+              }
+            }
+          },
+          "title": "DeleteFilterResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteFilterResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["https://www.googleapis.com/auth/gmail.settings.basic"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["https://www.googleapis.com/auth/gmail.settings.basic"]
+            }
+          ]
+        },
+        "tags": ["destructiveHint", "openWorldHint", "filters"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete Gmail filter",
+          "version": "20261105_00",
+          "available_versions": ["20261105_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/gmail"
+          }
+        }
+      },
+      {
+        "slug": "GMAIL_DELETE_THREAD",
+        "name": "Delete thread",
+        "description": "Tool to immediately and permanently delete a specified thread and all its messages. This operation cannot be undone. Use threads.trash instead for reversible deletion.",
+        "available_versions": ["20261105_00"],
+        "version": "20261105_00",
+        "toolkit": {
+          "slug": "gmail",
+          "name": "gmail",
+          "logo": "https://logos.composio.dev/api/gmail"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteThreadRequest",
+          "required": ["id"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Id",
+              "examples": ["19c8e0ea407b9cf9", "18ea7715b619f09c"],
+              "description": "ID of the Thread to delete."
+            },
+            "user_id": {
+              "type": "string",
+              "title": "User Id",
+              "default": "me",
+              "examples": ["me", "user@example.com"],
+              "description": "User's email address. The special value 'me' refers to the authenticated user."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteThreadResponse": {
+              "type": "object",
+              "title": "DeleteThreadResponse",
+              "required": ["success"],
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "title": "Success",
+                  "description": "Indicates whether the Gmail thread deletion was successful"
+                }
+              }
+            }
+          },
+          "title": "DeleteThreadResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteThreadResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["https://mail.google.com/"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["https://mail.google.com/"]
+            }
+          ]
+        },
+        "tags": ["destructiveHint", "important", "openWorldHint", "gmail"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete thread",
+          "version": "20261105_00",
+          "available_versions": ["20261105_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/gmail"
+          }
+        }
+      },
+      {
+        "slug": "GMAIL_STOP_WATCH",
+        "name": "Stop watch notifications",
+        "description": "Tool to stop receiving push notifications for a Gmail mailbox. Use when you need to disable watch notifications previously set up via the watch endpoint.",
+        "available_versions": ["20261105_00"],
+        "version": "20261105_00",
+        "toolkit": {
+          "slug": "gmail",
+          "name": "gmail",
+          "logo": "https://logos.composio.dev/api/gmail"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "StopWatchRequest",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "title": "User Id",
+              "default": "me",
+              "examples": ["me", "user@example.com"],
+              "description": "The user's email address. The special value 'me' can be used to indicate the authenticated user."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "StopWatchResponse": {
+              "type": "object",
+              "title": "StopWatchResponse",
+              "required": ["success"],
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "title": "Success",
+                  "description": "Indicates whether push notifications were successfully stopped for the mailbox."
+                },
+                "display_url": {
+                  "type": "string",
+                  "title": "Display Url",
+                  "description": "Web UI link for this resource - set by each action's execute()."
+                }
+              },
+              "description": "Empty response indicating successful stop of push notifications."
+            }
+          },
+          "title": "StopWatchResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/StopWatchResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [
+          "https://mail.google.com/",
+          "https://www.googleapis.com/auth/gmail.modify",
+          "https://www.googleapis.com/auth/gmail.readonly"
+        ],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": [
+                "https://mail.google.com/",
+                "https://www.googleapis.com/auth/gmail.modify",
+                "https://www.googleapis.com/auth/gmail.readonly"
+              ]
+            }
+          ]
+        },
+        "tags": ["openWorldHint", "watch", "updateHint", "destructiveHint"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Stop watch notifications",
+          "version": "20261105_00",
+          "available_versions": ["20261105_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/gmail"
+          }
+        }
+      },
+      {
+        "slug": "GMAIL_WHO_AM_I",
+        "name": "Who Am I",
+        "description": "Return the identity (email, name) of the connected Gmail account.",
+        "available_versions": ["20261105_00"],
+        "version": "20261105_00",
+        "toolkit": {
+          "slug": "gmail",
+          "name": "gmail",
+          "logo": "https://logos.composio.dev/api/gmail"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GmailWhoAmIRequest",
+          "properties": {},
+          "description": "Strict request contract for the Gmail identity action."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GmailWhoAmIData": {
+              "type": "object",
+              "title": "GmailWhoAmIData",
+              "required": ["sub"],
+              "properties": {
+                "sub": {
+                  "type": "string",
+                  "title": "Sub",
+                  "description": "Stable Google account id (subject)."
+                },
+                "name": {
+                  "type": "string",
+                  "title": "Name",
+                  "description": "Full name."
+                },
+                "email": {
+                  "type": "string",
+                  "title": "Email",
+                  "description": "Account email address."
+                },
+                "hosted_domain": {
+                  "type": "string",
+                  "title": "Hosted Domain",
+                  "description": "Google Workspace domain, if any."
+                }
+              },
+              "description": "Typed identity details for the connected account."
+            },
+            "WhoAmIResponse_GmailWhoAmIData_": {
+              "type": "object",
+              "title": "WhoAmIResponse[GmailWhoAmIData]",
+              "required": ["data"],
+              "properties": {
+                "data": {
+                  "$ref": "#/$defs/GmailWhoAmIData",
+                  "title": "Data",
+                  "description": "Typed, toolkit-specific identity details."
+                },
+                "display_name": {
+                  "type": "string",
+                  "title": "Display Name",
+                  "description": "Human-readable label identifying the connected account (email, handle, name, …). Null when the provider exposes no usable identifier."
+                }
+              }
+            }
+          },
+          "title": "WhoAmIResponse[GmailWhoAmIData]Wrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/WhoAmIResponse_GmailWhoAmIData_",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": {
+          "all_of": []
+        },
+        "tags": ["important", "readOnlyHint", "idempotentHint", "auth"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Who Am I",
+          "version": "20261105_00",
+          "available_versions": ["20261105_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/gmail"
+          }
+        }
+      }
+    ],
+    "github": [
+      {
+        "slug": "GITHUB_GET_ALL_API_VERSIONS",
+        "name": "Get all API versions",
+        "description": "Retrieves all officially supported, date-based (e.g., \"2022-11-28\") versions of the GitHub REST API from the /versions endpoint.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "github",
+          "name": "github",
+          "logo": "https://logos.composio.dev/api/github"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetAllApiVersionsRequest",
+          "properties": {},
+          "description": "Request model for the GetAllApiVersions action. This action does not require any parameters."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetAllApiVersionsResponse": {
+              "type": "object",
+              "title": "GetAllApiVersionsResponse",
+              "required": ["versions"],
+              "properties": {
+                "versions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Versions"
+                }
+              },
+              "description": "Response model for the GetAllApiVersions action. Returns structured API version data that can be programmatically accessed."
+            }
+          },
+          "title": "GetAllApiVersionsResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetAllApiVersionsResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": [
+          "Repository Management",
+          "readOnlyHint",
+          "idempotentHint",
+          "openWorldHint"
+        ],
+        "no_auth": false,
+        "human_description": "This action retrieves all supported versions of the GitHub REST API. \n    It queries the /versions endpoint and returns the available date-based versions.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get all API versions",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/github"
+          }
+        }
+      },
+      {
+        "slug": "GITHUB_GET_EMOJIS",
+        "name": "Get emojis",
+        "description": "Lists all emojis available for use on GitHub, including custom and Unicode emojis.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "github",
+          "name": "github",
+          "logo": "https://logos.composio.dev/api/github"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetEmojisRequest",
+          "properties": {},
+          "description": "Request schema for the `GetEmojis` action. This action does not require any parameters."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetEmojisResponse": {
+              "type": "object",
+              "title": "GetEmojisResponse",
+              "required": ["emojis"],
+              "properties": {
+                "emojis": {
+                  "type": "object",
+                  "title": "Emojis",
+                  "description": "A mapping of emoji names to their corresponding image URLs. Each key is an emoji name (e.g., '100', '+1', 'heart', 'smile') and each value is a URL pointing to the emoji image file hosted on github.githubassets.com.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Response schema for the `GetEmojis` action. A mapping of emoji names to their corresponding image URLs on GitHub."
+            }
+          },
+          "title": "GetEmojisResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetEmojisResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": [
+          "Content Management",
+          "readOnlyHint",
+          "idempotentHint",
+          "openWorldHint"
+        ],
+        "no_auth": false,
+        "human_description": "This action retrieves a comprehensive list of emojis that can be used on GitHub. It includes both built-in emojis and any custom emojis that may have been added by users.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get emojis",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/github"
+          }
+        }
+      },
+      {
+        "slug": "GITHUB_LIST_GITIGNORE_TEMPLATES",
+        "name": "Get all gitignore templates",
+        "description": "Retrieves all available .gitignore template names from GitHub (e.g., 'Python', 'Node', 'Java'), used for generating .gitignore files.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "github",
+          "name": "github",
+          "logo": "https://logos.composio.dev/api/github"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "ListGitignoreTemplatesRequest",
+          "properties": {},
+          "description": "Request model for retrieving all gitignore templates."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "ListGitignoreTemplatesResponse": {
+              "type": "object",
+              "title": "ListGitignoreTemplatesResponse",
+              "required": ["templates"],
+              "properties": {
+                "templates": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Templates"
+                }
+              },
+              "description": "Response model containing the list of available .gitignore template names from GitHub."
+            }
+          },
+          "title": "ListGitignoreTemplatesResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ListGitignoreTemplatesResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["public_repo"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["public_repo"]
+            }
+          ]
+        },
+        "tags": [
+          "Repository Management",
+          "readOnlyHint",
+          "idempotentHint",
+          "openWorldHint"
+        ],
+        "no_auth": false,
+        "human_description": "This action retrieves all available .gitignore template names from GitHub. Users can fetch various templates suitable for different programming languages and project types.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get all gitignore templates",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/github"
+          }
+        }
+      },
+      {
+        "slug": "GITHUB_STAR_A_GIST",
+        "name": "Star a gist",
+        "description": "Stars a GitHub gist identified by `gist_id`; this action is idempotent and returns a 204 No Content status upon success, even if the gist is already starred.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "github",
+          "name": "github",
+          "logo": "https://logos.composio.dev/api/github"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "StarAGistRequest",
+          "required": ["gist_id"],
+          "properties": {
+            "gist_id": {
+              "type": "string",
+              "title": "Gist Id",
+              "examples": ["5555251", "a1b2c3d4e5f6a7b8"],
+              "description": "The unique identifier of the gist. This ID is the string of characters found at the end of a gist's URL.",
+              "human_parameter_name": "Gist ID",
+              "human_parameter_description": "The ID of the gist you want to star. You can find it at the end of the gist's URL after the last slash."
+            }
+          },
+          "description": "Request schema for `StarAGist`"
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "StarAGistResponse": {
+              "type": "object",
+              "title": "StarAGistResponse",
+              "properties": {},
+              "description": "Response schema for `StarAGist`. Returns 204 No Content with an empty response body on success."
+            }
+          },
+          "title": "StarAGistResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/StarAGistResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["gist"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["gist"]
+            }
+          ]
+        },
+        "tags": ["gists", "idempotentHint", "openWorldHint", "updateHint"],
+        "no_auth": false,
+        "human_description": "This action allows users to star a specific GitHub gist using its unique identifier. Starring a gist can help users keep track of important or interesting gists.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Star a gist",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/github"
+          }
+        }
+      }
+    ],
+    "googlecalendar": [
+      {
+        "slug": "GOOGLECALENDAR_ACL_DELETE",
+        "name": "Delete ACL Rule",
+        "description": "Deletes an access control rule from a Google Calendar. Use when you need to remove sharing permissions for a user, group, or domain.",
+        "available_versions": ["20261111_00"],
+        "version": "20261111_00",
+        "toolkit": {
+          "slug": "googlecalendar",
+          "name": "googlecalendar",
+          "logo": "https://logos.composio.dev/api/googlecalendar"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "AclDeleteRequest",
+          "required": ["calendar_id", "rule_id"],
+          "properties": {
+            "rule_id": {
+              "type": "string",
+              "title": "Rule Id",
+              "examples": [
+                "user:test@example.com",
+                "group:team@example.com",
+                "default"
+              ],
+              "description": "ACL rule identifier."
+            },
+            "calendar_id": {
+              "type": "string",
+              "title": "Calendar Id",
+              "examples": ["primary", "user@example.com"],
+              "description": "Calendar identifier. To retrieve calendar IDs call the calendarList.list method. If you want to access the primary calendar of the currently logged in user, use the \"primary\" keyword."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "ResponseData": {
+              "type": "object",
+              "title": "ResponseData",
+              "required": ["status"],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "success",
+                  "title": "Status",
+                  "description": "Outcome of the delete operation. 'success' indicates the ACL rule was deleted successfully."
+                }
+              },
+              "additionalProperties": false
+            },
+            "AclDeleteResponse": {
+              "type": "object",
+              "title": "AclDeleteResponse",
+              "properties": {
+                "display_url": {
+                  "type": "string",
+                  "title": "Display Url",
+                  "description": "URL to view the resource in Google Calendar web UI. None for ACL delete operations as there is no direct URL for individual ACL rules."
+                },
+                "response_data": {
+                  "$ref": "#/$defs/ResponseData",
+                  "title": "Response Data",
+                  "description": "Optional convenience wrapper returned to indicate the outcome of the delete operation. Not part of the official Google Calendar HTTP response."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "title": "AclDeleteResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AclDeleteResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.acls"
+        ],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": [
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.acls"
+              ]
+            }
+          ]
+        },
+        "tags": [
+          "important",
+          "destructiveHint",
+          "idempotentHint",
+          "openWorldHint",
+          "access_control"
+        ],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete ACL Rule",
+          "version": "20261111_00",
+          "available_versions": ["20261111_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/googlecalendar"
+          }
+        }
+      },
+      {
+        "slug": "GOOGLECALENDAR_CALENDAR_LIST_DELETE",
+        "name": "Remove Calendar from List",
+        "description": "Removes a calendar from the user's calendar list, unsubscribing from it without deleting the calendar itself.",
+        "available_versions": ["20261111_00"],
+        "version": "20261111_00",
+        "toolkit": {
+          "slug": "googlecalendar",
+          "name": "googlecalendar",
+          "logo": "https://logos.composio.dev/api/googlecalendar"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "CalendarListDeleteRequest",
+          "required": ["calendar_id"],
+          "properties": {
+            "calendar_id": {
+              "type": "string",
+              "title": "Calendar Id",
+              "examples": [
+                "primary",
+                "example_calendar_id@group.calendar.google.com"
+              ],
+              "description": "Calendar identifier. To retrieve calendar IDs call the calendarList.list method. If you want to access the primary calendar of the currently logged in user, use the 'primary' keyword.",
+              "human_parameter_name": "Calendar ID",
+              "human_parameter_description": "Enter the ID of the calendar you want to remove from your calendar list. You can use 'primary' for your main calendar or provide a specific calendar ID."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "CalendarListDeleteResponse": {
+              "type": "object",
+              "title": "CalendarListDeleteResponse",
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "title": "Message",
+                  "description": "Optional confirmation message indicating the calendar list entry removal status (e.g., 'Calendar removed from list successfully.'). Not part of the official API response; may be added by client/tooling."
+                }
+              }
+            }
+          },
+          "title": "CalendarListDeleteResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/CalendarListDeleteResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.app.created",
+          "https://www.googleapis.com/auth/calendar.calendarlist"
+        ],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": [
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.app.created",
+                "https://www.googleapis.com/auth/calendar.calendarlist"
+              ]
+            }
+          ]
+        },
+        "tags": [
+          "important",
+          "destructiveHint",
+          "idempotentHint",
+          "openWorldHint",
+          "calendar_list"
+        ],
+        "no_auth": false,
+        "human_description": "This action allows you to remove a calendar from the user's calendar list. When executed, it removes the calendar entry from the list but does not delete the calendar itself.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Remove Calendar from List",
+          "version": "20261111_00",
+          "available_versions": ["20261111_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/googlecalendar"
+          }
+        }
+      },
+      {
+        "slug": "GOOGLECALENDAR_GET_CURRENT_USER",
+        "name": "Get Current Google Calendar User",
+        "description": "Identifies the Google user connected to Calendar from the primary calendar resource. Returns the account identifier, email when available, display name, timezone, and primary calendar ID. This is Calendar identity metadata, not a full Google Account or People profile.",
+        "available_versions": ["20261111_00"],
+        "version": "20261111_00",
+        "toolkit": {
+          "slug": "googlecalendar",
+          "name": "googlecalendar",
+          "logo": "https://logos.composio.dev/api/googlecalendar"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetCurrentUserRequest",
+          "properties": {}
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetCurrentUserResponse": {
+              "type": "object",
+              "title": "GetCurrentUserResponse",
+              "required": ["account_id", "primary_calendar_id"],
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "title": "Email",
+                  "description": "Connected user's email address when the primary calendar ID has email form."
+                },
+                "time_zone": {
+                  "type": "string",
+                  "title": "Time Zone",
+                  "description": "IANA timezone configured for the connected user's primary calendar."
+                },
+                "account_id": {
+                  "type": "string",
+                  "title": "Account Id",
+                  "description": "Identifier of the connected Calendar principal, taken from the primary calendar ID. For a user account this is normally the account email address."
+                },
+                "display_name": {
+                  "type": "string",
+                  "title": "Display Name",
+                  "description": "Display name of the connected user's primary calendar."
+                },
+                "primary_calendar_id": {
+                  "type": "string",
+                  "title": "Primary Calendar Id",
+                  "description": "Identifier of the connected principal's primary calendar."
+                }
+              }
+            }
+          },
+          "title": "GetCurrentUserResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetCurrentUserResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/calendar.readonly",
+          "https://www.googleapis.com/auth/calendar.calendars",
+          "https://www.googleapis.com/auth/calendar.calendars.readonly"
+        ],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": [
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.readonly",
+                "https://www.googleapis.com/auth/calendar.calendars",
+                "https://www.googleapis.com/auth/calendar.calendars.readonly"
+              ]
+            }
+          ]
+        },
+        "tags": ["readOnlyHint", "idempotentHint", "openWorldHint", "profile"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Current Google Calendar User",
+          "version": "20261111_00",
+          "available_versions": ["20261111_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/googlecalendar"
+          }
+        }
+      },
+      {
+        "slug": "GOOGLECALENDAR_SETTINGS_GET",
+        "name": "Get Calendar Setting",
+        "description": "Tool to return a single user setting for the authenticated user. Use when you need to retrieve a specific calendar setting value.",
+        "available_versions": ["20261111_00"],
+        "version": "20261111_00",
+        "toolkit": {
+          "slug": "googlecalendar",
+          "name": "googlecalendar",
+          "logo": "https://logos.composio.dev/api/googlecalendar"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "SettingsGetRequest",
+          "required": ["setting"],
+          "properties": {
+            "setting": {
+              "type": "string",
+              "title": "Setting",
+              "examples": [
+                "timezone",
+                "format24HourTime",
+                "weekStart",
+                "locale",
+                "dateFieldOrder"
+              ],
+              "description": "The identifier of the user setting to retrieve. Valid values include: autoAddHangouts, dateFieldOrder, defaultEventLength, format24HourTime, hideInvitations, hideWeekends, locale, remindOnRespondedEventsOnly, showDeclinedEvents, timezone, useKeyboardShortcuts, weekStart"
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "SettingsGetResponse": {
+              "type": "object",
+              "title": "SettingsGetResponse",
+              "required": ["kind", "etag", "id", "value"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "description": "The id of the user setting"
+                },
+                "etag": {
+                  "type": "string",
+                  "title": "Etag",
+                  "description": "ETag of the resource"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "calendar#setting",
+                  "title": "Kind",
+                  "description": "Type of the resource (always \"calendar#setting\")"
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value",
+                  "description": "Value of the user setting. The format depends on the ID. UTF-8 encoding, up to 1024 characters"
+                },
+                "display_url": {
+                  "type": "string",
+                  "title": "Display Url",
+                  "default": "https://calendar.google.com/calendar/u/0/r/settings",
+                  "description": "Web URL to view this setting in Google Calendar"
+                }
+              }
+            }
+          },
+          "title": "SettingsGetResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SettingsGetResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar.settings.readonly",
+          "https://www.googleapis.com/auth/calendar.readonly",
+          "https://www.googleapis.com/auth/calendar"
+        ],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": [
+                "https://www.googleapis.com/auth/calendar.settings.readonly",
+                "https://www.googleapis.com/auth/calendar.readonly",
+                "https://www.googleapis.com/auth/calendar"
+              ]
+            }
+          ]
+        },
+        "tags": ["readOnlyHint", "openWorldHint", "configuration"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Calendar Setting",
+          "version": "20261111_00",
+          "available_versions": ["20261111_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/googlecalendar"
+          }
+        }
+      }
+    ],
+    "notion": [
+      {
+        "slug": "NOTION_DELETE_VIEW",
+        "name": "Delete Notion view",
+        "description": "Delete a Notion view.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "notion",
+          "name": "notion",
+          "logo": "https://logos.composio.dev/api/notion"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteViewRequest",
+          "required": ["view_id"],
+          "properties": {
+            "view_id": {
+              "type": "string",
+              "title": "View Id",
+              "description": "ID of the Notion view to delete."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "ViewObject": {
+              "type": "object",
+              "title": "ViewObject",
+              "required": ["object", "id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "description": "ID of the Notion view."
+                },
+                "type": {
+                  "enum": [
+                    "table",
+                    "board",
+                    "list",
+                    "calendar",
+                    "timeline",
+                    "gallery",
+                    "form",
+                    "chart",
+                    "map",
+                    "dashboard"
+                  ],
+                  "type": "string",
+                  "title": "Type",
+                  "description": "The view layout type."
+                },
+                "object": {
+                  "type": "string",
+                  "const": "view",
+                  "title": "Object",
+                  "description": "Always 'view'."
+                },
+                "parent": {
+                  "type": "object",
+                  "title": "Parent",
+                  "description": "Parent database, dashboard view, or page context.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "title": "ViewObjectWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ViewObject",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["important", "destructiveHint", "views"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete Notion view",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/notion"
+          }
+        }
+      },
+      {
+        "slug": "NOTION_DELETE_VIEW_QUERY",
+        "name": "Delete Notion view query",
+        "description": "Delete a cached Notion view query.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "notion",
+          "name": "notion",
+          "logo": "https://logos.composio.dev/api/notion"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteViewQueryRequest",
+          "required": ["view_id", "query_id"],
+          "properties": {
+            "view_id": {
+              "type": "string",
+              "title": "View Id",
+              "description": "ID of the Notion view."
+            },
+            "query_id": {
+              "type": "string",
+              "title": "Query Id",
+              "description": "ID of the cached Notion view query."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteViewQueryResponse": {
+              "type": "object",
+              "title": "DeleteViewQueryResponse",
+              "required": ["object", "id", "deleted"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id"
+                },
+                "object": {
+                  "type": "string",
+                  "const": "view_query",
+                  "title": "Object"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "title": "Deleted"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "title": "DeleteViewQueryResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteViewQueryResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["important", "destructiveHint", "views"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete Notion view query",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/notion"
+          }
+        }
+      },
+      {
+        "slug": "NOTION_GET_PLUGIN",
+        "name": "Get plugin",
+        "description": "Get a temporary download URL for one Notion Agent Skills plugin.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "notion",
+          "name": "notion",
+          "logo": "https://logos.composio.dev/api/notion"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetPluginRequest",
+          "required": ["plugin_id"],
+          "properties": {
+            "plugin_id": {
+              "type": "string",
+              "title": "Plugin Id",
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "examples": ["9b4a1d3f-1f0a-4c2a-9f0b-6c1f5a3d2e10"],
+              "maxLength": 200,
+              "minLength": 1,
+              "description": "Plugin ID returned by NOTION_LIST_PLUGINS."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetPluginResponse": {
+              "type": "object",
+              "title": "GetPluginResponse",
+              "required": ["id", "version_id", "url"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "description": "Unique identifier for the plugin directory."
+                },
+                "url": {
+                  "type": "string",
+                  "title": "Url",
+                  "description": "Temporary signed URL for downloading the plugin directory as a gzipped tar archive."
+                },
+                "version_id": {
+                  "type": "string",
+                  "title": "Version Id",
+                  "maxLength": 64,
+                  "minLength": 64,
+                  "description": "Opaque plugin version identifier; compare it for equality to detect directory changes."
+                }
+              }
+            }
+          },
+          "title": "GetPluginResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetPluginResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["read_content"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["read_content"]
+            }
+          ]
+        },
+        "tags": ["readOnlyHint"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get plugin",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/notion"
+          }
+        }
+      },
+      {
+        "slug": "NOTION_RETRIEVE_VIEW",
+        "name": "Retrieve Notion view",
+        "description": "Retrieve a Notion view and its configuration.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "notion",
+          "name": "notion",
+          "logo": "https://logos.composio.dev/api/notion"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "RetrieveViewRequest",
+          "required": ["view_id"],
+          "properties": {
+            "view_id": {
+              "type": "string",
+              "title": "View Id",
+              "description": "ID of the Notion view to retrieve."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "ViewObject": {
+              "type": "object",
+              "title": "ViewObject",
+              "required": ["object", "id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "description": "ID of the Notion view."
+                },
+                "type": {
+                  "enum": [
+                    "table",
+                    "board",
+                    "list",
+                    "calendar",
+                    "timeline",
+                    "gallery",
+                    "form",
+                    "chart",
+                    "map",
+                    "dashboard"
+                  ],
+                  "type": "string",
+                  "title": "Type",
+                  "description": "The view layout type."
+                },
+                "object": {
+                  "type": "string",
+                  "const": "view",
+                  "title": "Object",
+                  "description": "Always 'view'."
+                },
+                "parent": {
+                  "type": "object",
+                  "title": "Parent",
+                  "description": "Parent database, dashboard view, or page context.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "title": "ViewObjectWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ViewObject",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["important", "openWorldHint", "readOnlyHint", "views"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Retrieve Notion view",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/notion"
+          }
+        }
+      }
+    ],
+    "linear": [
+      {
+        "slug": "LINEAR_DELETE_LINEAR_ISSUE",
+        "name": "Delete issue",
+        "description": "Archives an existing Linear issue by its ID, which is Linear's standard way of deleting issues; the operation is idempotent. Archiving is permanent with no built-in undo — confirm the issue identifier and title with the user before executing, especially in bulk operations.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "linear",
+          "name": "linear",
+          "logo": "https://logos.composio.dev/api/linear"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteIssueRequest",
+          "required": ["issue_id"],
+          "properties": {
+            "issue_id": {
+              "type": "string",
+              "title": "Issue Id",
+              "examples": [
+                "PROJ-123",
+                "c5748ccf-c67f-4af4-bd74-fe513dc4c054",
+                "ENG-456"
+              ],
+              "description": "ID of the Linear issue to be archived. Must be in one of two formats: (1) UUID format: a 36-character string with hyphens (e.g., 'c5748ccf-c67f-4af4-bd74-fe513dc4c054'), or (2) Shorthand identifier: team key (alphanumeric, must start with a letter, 1-10 chars) followed by hyphen and issue number (e.g., 'ENG-123', 'MAN8-456'). Note: Plain numeric IDs are NOT valid Linear issue identifiers."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteIssueResponse": {
+              "type": "object",
+              "title": "DeleteIssueResponse",
+              "required": ["success"],
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "title": "Success",
+                  "description": "A boolean flag indicating `true` if the issue was successfully archived, or `false` otherwise."
+                }
+              }
+            }
+          },
+          "title": "DeleteIssueResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteIssueResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["write"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["write"]
+            }
+          ]
+        },
+        "tags": ["destructiveHint", "openWorldHint"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete issue",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/linear"
+          }
+        }
+      },
+      {
+        "slug": "LINEAR_REMOVE_REACTION",
+        "name": "Remove reaction from comment",
+        "description": "Tool to remove a reaction on a comment. Use when you have a reaction ID and need to delete it.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "linear",
+          "name": "linear",
+          "logo": "https://logos.composio.dev/api/linear"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "RemoveReactionRequest",
+          "required": ["reaction_id"],
+          "properties": {
+            "reaction_id": {
+              "type": "string",
+              "title": "Reaction Id",
+              "examples": ["01234567-89ab-cdef-0123-456789abcdef"],
+              "description": "Identifier of the reaction to delete."
+            }
+          },
+          "description": "Defines the request structure for removing a reaction from a comment."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "RemoveReactionResponse": {
+              "type": "object",
+              "title": "RemoveReactionResponse",
+              "required": ["success"],
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "title": "Success",
+                  "description": "True if the reaction was successfully deleted."
+                }
+              },
+              "description": "Contains the result of the remove reaction operation."
+            }
+          },
+          "title": "RemoveReactionResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/RemoveReactionResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["write"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["write"]
+            }
+          ]
+        },
+        "tags": ["destructiveHint", "important", "openWorldHint"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Remove reaction from comment",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/linear"
+          }
+        }
+      },
+      {
+        "slug": "LINEAR_VALIDATE_CREDENTIAL",
+        "name": "Validate credential",
+        "description": "Validates the Linear API credentials by checking if the authentication token can successfully query the current user. Use this action when you need to verify that API credentials are valid before performing other operations, or to confirm that authentication is working correctly. This is particularly useful for connection testing, credential verification flows, or troubleshooting authentication issues.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "linear",
+          "name": "linear",
+          "logo": "https://logos.composio.dev/api/linear"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "ValidateCredentialRequest",
+          "properties": {},
+          "description": "No parameters needed to validate credentials."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "ValidateCredentialResponse": {
+              "type": "object",
+              "title": "ValidateCredentialResponse",
+              "required": ["valid"],
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "title": "Email",
+                  "description": "The email address of the authenticated user if credentials are valid."
+                },
+                "valid": {
+                  "type": "boolean",
+                  "title": "Valid",
+                  "description": "Whether the provided API credentials are valid and authenticated."
+                },
+                "user_id": {
+                  "type": "string",
+                  "title": "User Id",
+                  "description": "The unique identifier of the authenticated user if credentials are valid."
+                }
+              },
+              "description": "Response indicating whether the credentials are valid."
+            }
+          },
+          "title": "ValidateCredentialResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ValidateCredentialResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["read"],
+        "scope_requirements": null,
+        "tags": [
+          "readOnlyHint",
+          "idempotentHint",
+          "openWorldHint",
+          "authentication"
+        ],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Validate credential",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/linear"
+          }
+        }
+      },
+      {
+        "slug": "LINEAR_WHO_AM_I",
+        "name": "Who Am I",
+        "description": "Return the identity (name, email) of the connected Linear account.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "linear",
+          "name": "linear",
+          "logo": "https://logos.composio.dev/api/linear"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "WhoAmIRequest",
+          "properties": {},
+          "description": "The current connected account's identity. Takes no parameters."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "LinearWhoAmIData": {
+              "type": "object",
+              "title": "LinearWhoAmIData",
+              "required": ["id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "description": "Linear user id."
+                },
+                "name": {
+                  "type": "string",
+                  "title": "Name",
+                  "description": "Full name."
+                },
+                "email": {
+                  "type": "string",
+                  "title": "Email",
+                  "description": "Email address."
+                }
+              },
+              "description": "Typed identity details for the connected account."
+            },
+            "WhoAmIResponse_LinearWhoAmIData_": {
+              "type": "object",
+              "title": "WhoAmIResponse[LinearWhoAmIData]",
+              "required": ["data"],
+              "properties": {
+                "data": {
+                  "$ref": "#/$defs/LinearWhoAmIData",
+                  "title": "Data",
+                  "description": "Typed, toolkit-specific identity details."
+                },
+                "display_name": {
+                  "type": "string",
+                  "title": "Display Name",
+                  "description": "Human-readable label identifying the connected account (email, handle, name, …). Null when the provider exposes no usable identifier."
+                }
+              }
+            }
+          },
+          "title": "WhoAmIResponse[LinearWhoAmIData]Wrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/WhoAmIResponse_LinearWhoAmIData_",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": {
+          "all_of": []
+        },
+        "tags": ["important", "readOnlyHint", "idempotentHint", "auth"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Who Am I",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/linear"
+          }
+        }
+      }
+    ],
+    "slack": [
+      {
+        "slug": "SLACK_API_TEST",
+        "name": "Test Slack API connection",
+        "description": "Tool to check API calling code by testing connectivity and authentication to the Slack API. Use when you need to verify that API credentials are valid and the connection is working properly.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "slack",
+          "name": "slack",
+          "logo": "https://logos.composio.dev/api/slack"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "SlackApiTestRequest",
+          "properties": {
+            "foo": {
+              "type": "string",
+              "title": "Foo",
+              "examples": ["bar", "test_value"],
+              "description": "Example property to return in the response. This can be any arbitrary string value to test echo functionality."
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "examples": ["my_error", "test_error"],
+              "description": "Error response to return. Use this parameter to test error handling by simulating various error responses."
+            }
+          },
+          "description": "Request schema for `SlackApiTest`"
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "SlackApiTestResponse": {
+              "type": "object",
+              "title": "SlackApiTestResponse",
+              "required": ["ok"],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "title": "Ok",
+                  "description": "Indicates the API call status. True for successful responses, False when error parameter is used."
+                },
+                "args": {
+                  "type": "object",
+                  "title": "Args",
+                  "description": "Echo of any arguments passed to the API method, including the foo parameter if provided.",
+                  "additionalProperties": true
+                },
+                "error": {
+                  "type": "string",
+                  "title": "Error",
+                  "description": "Error code if the error parameter was used to simulate an error response."
+                }
+              },
+              "description": "Response schema for `SlackApiTest`"
+            }
+          },
+          "title": "SlackApiTestResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SlackApiTestResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": {
+          "all_of": []
+        },
+        "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "test"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Test Slack API connection",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/slack"
+          }
+        }
+      },
+      {
+        "slug": "SLACK_ASSISTANT_SEARCH_INFO",
+        "name": "Check search capabilities",
+        "description": "Check if semantic (AI-powered) search is available on the Slack workspace. Returns whether natural language queries will trigger semantic search in assistant.search.context calls.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "slack",
+          "name": "slack",
+          "logo": "https://logos.composio.dev/api/slack"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "AssistantSearchInfoRequest",
+          "properties": {},
+          "description": "Request schema for `AssistantSearchInfo`"
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "AssistantSearchInfoResponse": {
+              "type": "object",
+              "title": "AssistantSearchInfoResponse",
+              "required": ["ok"],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "title": "Ok",
+                  "description": "Indicates whether the API call was successful."
+                },
+                "error": {
+                  "type": "string",
+                  "title": "Error",
+                  "description": "Error code when ok is false. Common values: access_denied, missing_scope, invalid_auth."
+                },
+                "is_ai_search_enabled": {
+                  "type": "boolean",
+                  "title": "Is Ai Search Enabled",
+                  "description": "Whether semantic (AI-powered) search is available on this workspace."
+                }
+              },
+              "description": "Response schema for `AssistantSearchInfo`"
+            }
+          },
+          "title": "AssistantSearchInfoResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AssistantSearchInfoResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": ["search:read.public", "search:read"],
+        "scope_requirements": {
+          "all_of": [
+            {
+              "any_of": ["search:read.public", "search:read"]
+            }
+          ]
+        },
+        "tags": ["readOnlyHint", "idempotentHint"],
+        "no_auth": false,
+        "human_description": "Check if AI-powered semantic search is available on the Slack workspace. When enabled, natural language questions in search queries will trigger semantic search for more relevant results.",
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Check search capabilities",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/slack"
+          }
+        }
+      },
+      {
+        "slug": "SLACK_GET_AUDIT_ACTION_TYPES",
+        "name": "Get Audit Action Types",
+        "description": "Tool to retrieve information about action types available in the Slack Audit Logs API. Use when you need to know which action types can be used to filter audit logs or understand the categories of auditable actions in Slack.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "slack",
+          "name": "slack",
+          "logo": "https://logos.composio.dev/api/slack"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetAuditActionTypesRequest",
+          "properties": {},
+          "description": "Request schema for retrieving Slack Audit action types.\n\nThis endpoint requires no parameters."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetAuditActionTypesResponse": {
+              "type": "object",
+              "title": "GetAuditActionTypesResponse",
+              "required": ["actions"],
+              "properties": {
+                "actions": {
+                  "type": "object",
+                  "title": "Actions",
+                  "description": "Dictionary mapping category names to lists of action types.",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "description": "Response schema for Slack Audit action types API.\n\nReturns information about the kind of actions that the Audit Logs API returns,\norganized by category."
+            }
+          },
+          "title": "GetAuditActionTypesResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetAuditActionTypesResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": {
+          "all_of": []
+        },
+        "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "audit"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Audit Action Types",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/slack"
+          }
+        }
+      },
+      {
+        "slug": "SLACK_GET_AUDIT_SCHEMAS",
+        "name": "Get Audit Schemas",
+        "description": "Tool to retrieve object schema information from the Slack Audit Logs API. Use when you need to understand the types of objects returned by audit log endpoints. Returns a list of all object types with descriptions.",
+        "available_versions": ["20261112_00"],
+        "version": "20261112_00",
+        "toolkit": {
+          "slug": "slack",
+          "name": "slack",
+          "logo": "https://logos.composio.dev/api/slack"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetAuditSchemasRequest",
+          "properties": {},
+          "description": "Request schema for GetAuditSchemas - no parameters required."
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "SchemaObject": {
+              "type": "object",
+              "title": "SchemaObject",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "title": "Type",
+                  "description": "Type of the schema object (e.g., 'workspace', 'user', 'channel')."
+                }
+              },
+              "description": "Schema object representing a single entity type in the audit logs.",
+              "additionalProperties": true
+            },
+            "GetAuditSchemasResponse": {
+              "type": "object",
+              "title": "GetAuditSchemasResponse",
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "title": "Ok",
+                  "description": "Indicates whether the API call was successful (if present)."
+                },
+                "error": {
+                  "type": "string",
+                  "title": "Error",
+                  "description": "Error message if the request failed (if present)."
+                },
+                "schemas": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/SchemaObject"
+                  },
+                  "title": "Schemas",
+                  "description": "List of schema objects describing entity types returned by the Audit Logs API."
+                }
+              },
+              "description": "Response schema for the Audit Logs API schemas endpoint.\n\nThe response contains information about object types returned by the Audit Logs API.",
+              "additionalProperties": true
+            }
+          },
+          "title": "GetAuditSchemasResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetAuditSchemasResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": {
+          "all_of": []
+        },
+        "tags": ["openWorldHint", "readOnlyHint", "idempotentHint", "audit"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Audit Schemas",
+          "version": "20261112_00",
+          "available_versions": ["20261112_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/slack"
+          }
+        }
+      }
+    ],
+    "bigmailer": [
+      {
+        "slug": "BIGMAILER_DELETE_CONTACT",
+        "name": "Delete Contact",
+        "description": "Delete a contact from a BigMailer brand using its contact ID or email address. The returned identifier echoes the supplied ID or email.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "bigmailer",
+          "name": "bigmailer",
+          "logo": "https://logos.composio.dev/api/bigmailer"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteContactRequest",
+          "required": ["brand_id", "contact_id"],
+          "properties": {
+            "brand_id": {
+              "type": "string",
+              "title": "Brand Id",
+              "examples": ["2d4d0a84-880c-459c-9810-eb876c15bccb"],
+              "description": "ID of the brand to delete the contact from"
+            },
+            "contact_id": {
+              "type": "string",
+              "title": "Contact Id",
+              "examples": ["0196ed04-8d9f-33a4-262d-2d0f976a9eec"],
+              "description": "ID or email address of the contact to delete"
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteContactResponse": {
+              "type": "object",
+              "title": "DeleteContactResponse",
+              "required": ["id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "examples": ["66e60ece-d4e4-4286-8ea6-990cb500aa8e"],
+                  "description": "ID of the contact that was deleted"
+                }
+              }
+            }
+          },
+          "title": "DeleteContactResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteContactResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": [
+          "destructiveHint",
+          "idempotentHint",
+          "openWorldHint",
+          "contacts"
+        ],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete Contact",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/bigmailer"
+          }
+        }
+      },
+      {
+        "slug": "BIGMAILER_DELETE_LIST",
+        "name": "Delete List",
+        "description": "Delete a list from a BigMailer brand without deleting its contacts. Returns the list ID upon success.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "bigmailer",
+          "name": "bigmailer",
+          "logo": "https://logos.composio.dev/api/bigmailer"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteListRequest",
+          "required": ["brand_id", "list_id"],
+          "properties": {
+            "list_id": {
+              "type": "string",
+              "title": "List Id",
+              "examples": ["97693d7a-4503-44c1-839f-0195ace058ad"],
+              "description": "ID of the list to delete"
+            },
+            "brand_id": {
+              "type": "string",
+              "title": "Brand Id",
+              "examples": ["7896c69d-0a5d-47d8-ba96-d9290f6e7b04"],
+              "description": "ID of the brand that owns the list. Use BIGMAILER_LIST_ALL_BRANDS to get valid brand IDs."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteListResponse": {
+              "type": "object",
+              "title": "DeleteListResponse",
+              "required": ["id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "examples": ["66e60ece-d4e4-4286-8ea6-990cb500aa8e"],
+                  "description": "ID of the deleted list"
+                }
+              }
+            }
+          },
+          "title": "DeleteListResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteListResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["destructiveHint", "idempotentHint", "openWorldHint", "lists"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete List",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/bigmailer"
+          }
+        }
+      },
+      {
+        "slug": "BIGMAILER_DELETE_USER",
+        "name": "Delete User",
+        "description": "Delete a BigMailer user by ID and return the ID upon success. The account owner cannot be deleted.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "bigmailer",
+          "name": "bigmailer",
+          "logo": "https://logos.composio.dev/api/bigmailer"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "DeleteUserRequest",
+          "required": ["user_id"],
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "title": "User Id",
+              "examples": ["985586df-e965-4358-930e-cdcc539597aa"],
+              "description": "ID of the user to delete"
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "DeleteUserResponse": {
+              "type": "object",
+              "title": "DeleteUserResponse",
+              "required": ["id"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Id",
+                  "examples": ["66e60ece-d4e4-4286-8ea6-990cb500aa8e"],
+                  "description": "ID of the deleted user"
+                }
+              }
+            }
+          },
+          "title": "DeleteUserResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DeleteUserResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["destructiveHint", "idempotentHint", "openWorldHint", "users"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Delete User",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/bigmailer"
+          }
+        }
+      },
+      {
+        "slug": "BIGMAILER_GET_USER_INFO",
+        "name": "Get User Information",
+        "description": "This tool retrieves information about the authenticated user in BigMailer using the GET /me endpoint. It requires only authentication and no additional parameters, making it ideal for verifying API connectivity and retrieving essential user details.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "bigmailer",
+          "name": "bigmailer",
+          "logo": "https://logos.composio.dev/api/bigmailer"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetUserInfoRequest",
+          "properties": {}
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetUserInfoResponse": {
+              "type": "object",
+              "title": "GetUserInfoResponse",
+              "required": ["email", "company_name"],
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "title": "Email",
+                  "description": "The email address of the user"
+                },
+                "company_name": {
+                  "type": "string",
+                  "title": "Company Name",
+                  "description": "The company name of the user"
+                }
+              }
+            }
+          },
+          "title": "GetUserInfoResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetUserInfoResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["important", "openWorldHint", "readOnlyHint"],
+        "no_auth": false,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get User Information",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/bigmailer"
+          }
+        }
+      }
+    ],
+    "hackernews": [
+      {
+        "slug": "HACKERNEWS_GET_ASK_STORIES",
+        "name": "Get Ask HN Story IDs",
+        "description": "Get up to 200 latest Ask HN story IDs from Hacker News. Returns an array of item IDs for Ask HN posts in ranked order.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "hackernews",
+          "name": "hackernews",
+          "logo": "https://logos.composio.dev/api/hackernews"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetAskStoriesRequest",
+          "properties": {
+            "print": {
+              "enum": ["pretty"],
+              "type": "string",
+              "title": "PrintFormat",
+              "description": "Output format for JSON response."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetAskStoriesResponse": {
+              "type": "object",
+              "title": "GetAskStoriesResponse",
+              "required": ["story_ids"],
+              "properties": {
+                "story_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Story Ids",
+                  "description": "Array of up to 200 Ask HN story IDs, ordered by ranking. Use these IDs with the 'Get Hackernews Item' action to retrieve full story details."
+                }
+              }
+            }
+          },
+          "title": "GetAskStoriesResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetAskStoriesResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["readOnlyHint", "openWorldHint", "story_feeds"],
+        "no_auth": true,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Ask HN Story IDs",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/hackernews"
+          }
+        }
+      },
+      {
+        "slug": "HACKERNEWS_GET_JOB_STORIES",
+        "name": "Get Job Story IDs",
+        "description": "Get up to 200 latest job story IDs from Hacker News. Returns an array of item IDs for job postings that can be used to fetch full job details.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "hackernews",
+          "name": "hackernews",
+          "logo": "https://logos.composio.dev/api/hackernews"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetJobStoriesRequest",
+          "properties": {
+            "print_format": {
+              "type": "string",
+              "title": "Print Format",
+              "pattern": "^pretty$",
+              "description": "Set to 'pretty' for formatted JSON output. If not specified, returns compact JSON."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetJobStoriesResponse": {
+              "type": "object",
+              "title": "GetJobStoriesResponse",
+              "required": ["job_story_ids"],
+              "properties": {
+                "job_story_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Job Story Ids",
+                  "description": "Array of up to 200 item IDs for the latest job story postings on Hacker News. Use these IDs with the get_item_with_id action to fetch full job details."
+                }
+              }
+            }
+          },
+          "title": "GetJobStoriesResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetJobStoriesResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["readOnlyHint", "openWorldHint", "story_feeds"],
+        "no_auth": true,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Job Story IDs",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/hackernews"
+          }
+        }
+      },
+      {
+        "slug": "HACKERNEWS_GET_MAX_ITEM_ID",
+        "name": "Get Max Item ID",
+        "description": "Tool to get the current largest item ID from Hacker News. Use when you need to discover the most recent items or iterate through all items in the system by walking backward from this ID.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "hackernews",
+          "name": "hackernews",
+          "logo": "https://logos.composio.dev/api/hackernews"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetMaxItemIdRequest",
+          "properties": {
+            "print": {
+              "type": "string",
+              "title": "Print",
+              "pattern": "^pretty$",
+              "description": "Set to 'pretty' for formatted JSON output. Leave unset for compact JSON."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetMaxItemIdResponse": {
+              "type": "object",
+              "title": "GetMaxItemIdResponse",
+              "required": ["max_item_id"],
+              "properties": {
+                "max_item_id": {
+                  "type": "integer",
+                  "title": "Max Item Id",
+                  "description": "The current largest item ID in the Hacker News database. You can walk backward from this ID to discover all items in the system."
+                }
+              }
+            }
+          },
+          "title": "GetMaxItemIdResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetMaxItemIdResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["readOnlyHint", "openWorldHint", "items"],
+        "no_auth": true,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Max Item ID",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/hackernews"
+          }
+        }
+      },
+      {
+        "slug": "HACKERNEWS_GET_SHOW_STORIES",
+        "name": "Get Show HN Stories",
+        "description": "Tool to retrieve up to 200 latest Show HN story IDs from Hacker News. Use when you need to find recent Show HN posts where people share their projects, products, or creations.",
+        "available_versions": ["20261101_00"],
+        "version": "20261101_00",
+        "toolkit": {
+          "slug": "hackernews",
+          "name": "hackernews",
+          "logo": "https://logos.composio.dev/api/hackernews"
+        },
+        "input_parameters": {
+          "type": "object",
+          "title": "GetShowStoriesRequest",
+          "properties": {
+            "print_format": {
+              "type": "string",
+              "title": "Print Format",
+              "pattern": "^pretty$",
+              "description": "Set to 'pretty' for formatted JSON output. Leave empty for compact JSON."
+            }
+          }
+        },
+        "output_parameters": {
+          "type": "object",
+          "$defs": {
+            "GetShowStoriesResponse": {
+              "type": "object",
+              "title": "GetShowStoriesResponse",
+              "required": ["story_ids"],
+              "properties": {
+                "story_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Story Ids",
+                  "description": "Array of up to 200 Hacker News item IDs for Show HN stories, ordered by newest first"
+                }
+              }
+            }
+          },
+          "title": "GetShowStoriesResponseWrapper",
+          "required": ["data", "successful"],
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/GetShowStoriesResponse",
+              "title": "Data",
+              "description": "Data from the action execution"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "description": "Error if any occurred during the execution of the action"
+            },
+            "successful": {
+              "type": "boolean",
+              "title": "Successful",
+              "description": "Whether or not the action execution was successful or not"
+            }
+          }
+        },
+        "scopes": [],
+        "scope_requirements": null,
+        "tags": ["readOnlyHint", "openWorldHint", "story_feeds"],
+        "no_auth": true,
+        "is_deprecated": false,
+        "deprecated": {
+          "displayName": "Get Show HN Stories",
+          "version": "20261101_00",
+          "available_versions": ["20261101_00"],
+          "is_deprecated": false,
+          "toolkit": {
+            "logo": "https://logos.composio.dev/api/hackernews"
+          }
+        }
+      }
+    ]
+  }
+}

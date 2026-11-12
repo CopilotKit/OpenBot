@@ -31,6 +31,7 @@ export const PORTS = {
   bot: 46200,
   langgraph: 46201,
   aimock: 46400,
+  composio: 46410,
   postgres: 46432,
   supervisor: 46500,
 } as const;
@@ -38,6 +39,11 @@ export const PORTS = {
 export const APP_URL = `http://127.0.0.1:${PORTS.app}`;
 export const SERVER_URL = `http://127.0.0.1:${PORTS.server}`;
 export const AIMOCK_URL = `http://127.0.0.1:${PORTS.aimock}`;
+/** Where aimock serves the MCP server a journey adds by its address (`harness/aimock-server.ts`). */
+export const MCP_SERVER_PATH = "/mcp/field-notes";
+export const MCP_SERVER_URL = `${AIMOCK_URL}${MCP_SERVER_PATH}`;
+/** The stand-in for Composio's API (`harness/composio-stub.ts`). OpenBot's Composio client is built against it. */
+export const COMPOSIO_URL = `http://127.0.0.1:${PORTS.composio}`;
 
 /**
  * Replay is the default and is strict: a request no fixture answers fails the run. Record mode
@@ -52,6 +58,8 @@ export const RECORDING = process.env.E2E_RECORD === "1";
  */
 export const DUMMY_OPENAI_KEY = "sk-aimock-openbot-e2e";
 export const DUMMY_ANTHROPIC_KEY = "sk-aimock-openbot-e2e";
+/** The Composio key OpenBot is given. Only the stub ever reads it; the real Composio never sees a request. */
+export const DUMMY_COMPOSIO_KEY = "openbot-e2e-composio-stub";
 
 /** A value from the checkout's `.env`, without echoing anything else in it. */
 export function dotenvValue(name: string): string | undefined {

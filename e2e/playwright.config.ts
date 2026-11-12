@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { aimockServer } from "./harness/aimock";
+import { composioStubServer } from "./harness/composio";
 import { APP_URL, ARTIFACTS } from "./harness/config";
 
 /**
@@ -36,8 +37,9 @@ export default defineConfig({
     video: "off",
     viewport: { width: 1440, height: 900 },
   },
-  // aimock starts before any project, so the server's first model call at boot already lands on it.
-  webServer: [aimockServer()],
+  // aimock and the Composio stub start before any project, so the server's first model call and its
+  // Composio client both land on them from boot.
+  webServer: [aimockServer(), composioStubServer()],
   projects: [
     {
       name: "stack",

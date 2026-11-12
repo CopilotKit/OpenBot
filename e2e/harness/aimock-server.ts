@@ -1,8 +1,13 @@
 import { mkdirSync } from "node:fs";
-import { type ChatCompletionRequest, LLMock } from "@copilotkit/aimock";
+import {
+  type ChatCompletionRequest,
+  LLMock,
+  MCPMock,
+} from "@copilotkit/aimock";
 import {
   dotenvValue,
   fixtureDirectories,
+  MCP_SERVER_PATH,
   PORTS,
   RECORDING,
   RECORDING_DIR,
@@ -138,6 +143,30 @@ async function main(): Promise<void> {
       `[e2e] aimock: strict replay of ${directories.length} journey fixture set(s)`,
     );
   }
+
+  // An MCP server a person can add by its address (Connections, Add server), served by aimock at
+  // `MCP_SERVER_PATH`. Its tools answer the same way in replay and in record mode: it is a server
+  // OpenBot calls, not a model.
+  const mcp = new MCPMock({
+    serverInfo: { name: "openbot-e2e-field-notes", version: "1.0.0" },
+  });
+  mcp.addTool({
+    name: "list_field_notes",
+    description: "List the field notes saved in the notebook.",
+    inputSchema: { type: "object", properties: {} },
+  });
+  mcp.onToolCall("list_field_notes", () => "No field notes yet.");
+  mcp.addTool({
+    name: "save_field_note",
+    description: "Save a field note to the notebook.",
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string", description: "The note." } },
+      required: ["text"],
+    },
+  });
+  mcp.onToolCall("save_field_note", () => "Saved.");
+  mock.mount(MCP_SERVER_PATH, mcp);
 
   await mock.start();
   const stop = () => {
