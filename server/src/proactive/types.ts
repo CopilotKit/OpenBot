@@ -245,6 +245,20 @@ export class ProactiveRefusedError extends Error {
     this.name = "ProactiveRefusedError";
   }
 }
+/**
+ * What a person reads when they asked for a new check-in and the Bot already has one on the same
+ * thing. The New routine screen says it on Name as it is typed; this is the same sentence, for an
+ * answer that crossed with a list the screen hadn't read yet.
+ */
+export const SAME_CHECK_IN =
+  "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
+/** A new check-in was asked for and the Bot already has one on that thing (409). */
+export class ProactiveConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProactiveConflictError";
+  }
+}
 export class ProactiveNotFoundError extends Error {
   constructor() {
     super("This could not be found.");

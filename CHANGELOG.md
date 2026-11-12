@@ -284,6 +284,28 @@ every deployment:
   wherever it quotes the title, so completing or deleting a goal no longer switches off or deletes a
   routine that only mentions it. And a Bot is told never to make work you want every time, such as
   "tell me what changed every morning", end when it is met, which ended it after its first run.
+- **Fixes to Routines and New routine.**
+  - A goal made to start **Now, once** with a Done when ends once that is met, as one on a schedule
+    or an event does. When a schedule or a trigger was added to it later, it repeated, and only you
+    could end it.
+  - Routines are read again every 10 seconds, as goals already were. A goal a run had completed
+    still showed its schedule on, and a goal a Bot had given a schedule said it runs when you ask,
+    until the page was opened again. When routines can't be read, a goal's page says it couldn't
+    load its schedules, where it left them out.
+  - New routine no longer takes over a check-in the Bot already has. If the Bot already checks in
+    on the same thing, Create says so and nothing changes. Before, when the screen hadn't read that
+    check-in yet, it changed it in place and kept it in its own conversation. Accepting a Bot's
+    offer still turns a matching check-in back on.
+  - **Create routine** stays enabled while a field has a message. Pressing it moves to the first
+    field with one, and a screen reader reads each message with its field. After a partial save,
+    focus moves to **Go to Routines**.
+  - A routine that runs a goal, listed on its own when its goal isn't, says "Runs a goal" on its
+    row and its page, where it showed the instruction written for the Bot.
+  - A goal's page asks for Name, What to do and Done when, as New routine does, and a schedule's
+    page calls its instruction What to do. A completed goal's schedules have no switch, since they
+    can't be switched back on.
+  - When your browser's time zone isn't one OpenBot knows, New routine says to ask your Bot to set
+    the routine up. It asked you to choose a time zone the screen doesn't offer.
 
 ### Finding things
 

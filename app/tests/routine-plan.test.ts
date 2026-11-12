@@ -95,6 +95,20 @@ describe("planRoutine", () => {
     expect(withOutcome.goal.successCriteria).toBe("Done");
   });
 
+  // A Now goal with a Done when that later gains a schedule or a trigger must still end when met.
+  // It went in with endsWhenMet false, so the server read it as repeating and no run could end it.
+  test("act, now, an outcome: ends when met", () => {
+    const plan = planRoutine(
+      { ...base, starts: "now", doneWhen: "The report is sent" },
+      "UTC",
+    );
+    if (plan.kind !== "goal") throw new Error("expected a goal");
+    expect(plan.runNow).toBe(true);
+    expect(plan.goal.recurring).toBe(false);
+    expect(plan.goal.endsWhenMet).toBe(true);
+    expect(plan.goal.successCriteria).toBe("The report is sent");
+  });
+
   test("tell: a check-in", () => {
     expect(
       planRoutine(

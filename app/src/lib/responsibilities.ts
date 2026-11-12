@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
-import { routineKeys } from "@/lib/routines/queries";
+import { ROUTINES_REFETCH_MS, routineKeys } from "@/lib/routines/queries";
 
 export type ResponsibilityRecord = {
   id: string;
@@ -67,7 +67,8 @@ export function responsibilitiesQueryOptions() {
       client("/api/responsibilities", "responsibilities", {
         fallback: "Couldn't load your goals. Reload the page.",
       }),
-    refetchInterval: 10_000,
+    // The routines' interval: the Routines list builds a goal's row from both reads.
+    refetchInterval: ROUTINES_REFETCH_MS,
   });
 }
 export function responsibilityRunsQueryOptions(id: string) {
@@ -322,7 +323,8 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
       // Completing a goal switches off the routines that serve it, on the server, before this
       // response returns, so only "complete" refreshes them. A run can also complete a goal, but
       // it is accepted (202) and finishes later, so refreshing routines now would see nothing
-      // new. Pause and resume leave routines as they were.
+      // new: the routines' own poll (`ROUTINES_REFETCH_MS`) reads them once it has. Pause and
+      // resume leave routines as they were.
       if (action !== "complete") return goals;
       return Promise.all([
         goals,
