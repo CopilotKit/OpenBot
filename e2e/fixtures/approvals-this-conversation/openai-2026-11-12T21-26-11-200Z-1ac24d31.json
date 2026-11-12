@@ -1,0 +1,37 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Great. Please also buy the lavender seeds at http://host.docker.internal:46600/shop/lavender and give me that order number too.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 10,
+        "hasToolResult": true
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_read",
+            "arguments": "{}",
+            "id": "call_R9HKXqB3RmptysBg2NGQRoRZ"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 690,
+        "interChunkDelaysMs": [
+          35,
+          389,
+          3,
+          145,
+          5,
+          212
+        ],
+        "totalDurationMs": 1479
+      },
+      "metadata": {
+        "systemHash": "67ebaa8c",
+        "toolsHash": "4a353f4d"
+      }
+    }
+  ]
+}

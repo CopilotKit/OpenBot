@@ -518,7 +518,7 @@ test("an update that fails says the step it stopped at and that the data is kept
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
     expect(row(screen, "Updating OpenBot").textContent).toContain(
-      "OpenBot couldn't finish updating, so it runs the version it had. It stopped while pausing OpenBot's services. Your data is kept, and OpenBot tries again the next time it starts.",
+      "OpenBot couldn't finish updating. It stopped while pausing OpenBot's services. Your data is kept. Retry to try the update again.",
     ),
   );
 });
@@ -666,6 +666,276 @@ test("after Quit, the unfinished update starts the stack, and the release it had
     "run_local_eval:status",
     "run_local_eval:update",
     "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+});
+
+/**
+ * Found in a dogfooding report, 0.16.0-rc.10 to rc.11 on a Mac: the update paused the back end's
+ * services (`update-quiesce`) and then failed at `dependencies-install`. The stack was left
+ * running with its checks failing and the update on record. The CLI refuses `start` while the
+ * update is on record, so every Retry asked for status once and stopped, and the update was never
+ * tried again.
+ */
+const leftByUpdate = (() => {
+  const base = report({
+    readiness: "degraded",
+    licence: "valid",
+    checksPassed: false,
+    updateTo: "0.16.0-rc.11",
+  });
+  return {
+    ...base,
+    stack: base.stack && {
+      ...base.stack,
+      installedRelease: "0.16.0-rc.10",
+      step: "update-quiesce",
+      hasFailedStep: true,
+      updateInProgress: true,
+      unfinishedUpdate: {
+        to: "0.16.0-rc.11",
+        prepared: false,
+        stoppedDownloading: false,
+        failedStep: "dependencies-install",
+      },
+      observed: {
+        running: true,
+        services: ["postgres", "redis", "minio"].map((name) => ({
+          name,
+          phase: "Running",
+          ready: true,
+        })),
+      },
+    },
+  };
+})();
+
+const updateStopped = report({
+  outcome: "failed",
+  stack: null,
+  reason: "local-command-failed",
+});
+
+test("a backend an update left not working runs the update again, and opens once it finishes", async () => {
+  const statuses: LocalReport[] = [
+    leftByUpdate,
+    onRelease("0.16.0-rc.11", null),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return onRelease("0.16.0-rc.11", null);
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+  ).toBeNull();
+});
+
+test("an update that stops again is tried once per Start, and Retry tries it once more", async () => {
+  let updates: Array<LocalReport> = [
+    updateStopped,
+    onRelease("0.16.0-rc.11", null),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updates.shift();
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    // Not working until an update finishes.
+    return updates.length === 0
+      ? onRelease("0.16.0-rc.11", null)
+      : leftByUpdate;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  // The failed update's row, and the wait stopped at once: no second update, no start.
+  expect(row(screen, "Updating OpenBot").textContent).toContain(
+    "OpenBot couldn't finish updating. It stopped while updating where OpenBot keeps your data. Your data is kept. Retry to try the update again.",
+  );
+  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+    "runs the version it had",
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "OpenBot is running but not working properly. Retry to start it again.",
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(started).toEqual([]);
+  await userEvent.click(retry);
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  updates = [];
+});
+
+/**
+ * Found on Windows, rc.11 to rc.12: an interrupted update left the services at 0 replicas, its
+ * record `prepared` with no failed step. After the retried update failed, the first answer said
+ * `starting` and the next `degraded`, and the row still said "so it runs the version it had" over a
+ * back end that did not.
+ */
+test("an update that fails again says Retry once the back end settles not working, after a first answer of starting", async () => {
+  const paused = (readiness: "starting" | "degraded") => {
+    const stack = leftByUpdate.stack;
+    return {
+      ...leftByUpdate,
+      readiness,
+      stack: stack && {
+        ...stack,
+        step: "ready",
+        unfinishedUpdate: {
+          to: "0.16.0-rc.12",
+          prepared: true,
+          stoppedDownloading: false,
+        },
+      },
+      updateTo: "0.16.0-rc.12",
+    };
+  };
+  const statuses: LocalReport[] = [
+    paused("degraded"),
+    paused("starting"),
+    paused("degraded"),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updateStopped;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await screen.findByRole("button", { name: "Retry" });
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+  expect(row(screen, "Updating OpenBot").textContent).toContain(
+    "OpenBot couldn't finish updating. Your data is kept. Retry to try the update again.",
+  );
+  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+    "runs the version it had",
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "OpenBot is running but not working properly.",
+  );
+});
+
+/** A back end starting with no update on record and then not working has no update row. */
+test("a back end that starts and then is not working, with no update on record, says nothing about an update", async () => {
+  const statuses: LocalReport[] = [
+    report({ readiness: "starting", licence: "valid" }),
+    report({ readiness: "degraded", licence: "valid" }),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await screen.findByRole("button", { name: "Retry" });
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+  ).toBeNull();
+  expect(screen.queryByText(/couldn't finish updating/)).toBeNull();
+});
+
+/**
+ * The same stack with a disk OpenBot found short: the update downloads the new release's images
+ * and would fail there again, after up to ten minutes. The row says to free space, and nothing is
+ * updated until a Retry finds the disk no longer short.
+ */
+test("a backend an update left not working on a full disk says so, and updates on the Retry after space is freed", async () => {
+  let short = true;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return onRelease("0.16.0-rc.11", null);
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    if (commands().includes("run_local_eval:update"))
+      return onRelease("0.16.0-rc.11", null);
+    return short
+      ? {
+          ...leftByUpdate,
+          shortfall: {
+            podman: false,
+            cpu: false,
+            memory: false,
+            disk: true,
+            diskGb: "2",
+            nearlyFull: true,
+            diskSizeGb: "60",
+          },
+        }
+      : leftByUpdate;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(row(screen, WAIT).textContent).toContain(
+    "Docker Desktop has 2 GB free",
+  );
+  expect(commands()).toEqual(["run_local_eval:status"]);
+  short = false;
+  await userEvent.click(retry);
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:status",
+    "run_local_eval:update",
     "run_local_eval:status",
   ]);
 });

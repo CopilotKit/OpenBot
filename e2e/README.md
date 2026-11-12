@@ -148,6 +148,44 @@ previous step's heading gone), not by sleeping.
 5. The conversation gets its generated name, which is neither the question nor the answer, and the
    sidebar shows it.
 
+## The Bot's computer and approvals
+
+The `computer-*` and `approvals-*` journeys:
+
+| Journey | What a person does |
+| --- | --- |
+| `computer-browse` | Asks a Bot to read a page. The Computer opens on its live screen; the answer comes from the page; Activity lists the page with its time, and still does after a reload; the conversation folds the browsing into one line that opens to its steps. |
+| `computer-take-control` | Opens the Bot's screen full size, takes control, goes somewhere from the address bar, back, forward, reload, opens a tab and closes it, is asked before clearing the browser, and hands it back. Stops and resets the Bot's browser in Settings → Computer. |
+| `computer-terminal` | Asks a Bot to run a command: Activity shows it with what it printed. Takes control of the Terminal, types a command, hands it back. |
+| `computer-form` | Asks a Bot to fill in and send a form from one message, its fields and checkbox in one step: every action runs, the form arrives filled in, and Activity lists each with its time. |
+| `computer-sign-in` | A Bot reaches a password field and hands it over (no standing answer offered). The person takes control, types the password into the Bot's screen, hands back and answers "I did it myself"; the Bot carries on from the signed-in page. |
+| `approvals-allow-once` | A Bot paying asks first. Allow once places that order and the reply arrives whole; the next order asks again, and waits on the Bots page under Needs you too; Deny there places nothing and the Bot says so. |
+| `approvals-this-conversation` | Allow for this conversation: the next order there goes through with no card, the banner says what is allowed, Turn off makes the next order ask again. |
+| `approvals-always` | Always allow here: the Bot pays without asking in its next conversation; the rule is on the Bot's Approvals page, where Remove takes it away. |
+| `approvals-settings` | Settings → Approvals: Extra vigilant, Auto-review and commands on this computer, kept across a reload; a rule for every Bot added, changed, removed, and cancelled. |
+
+Two things they do that other journeys may want to copy:
+
+- **The run's own website.** The pages a Bot reads, the form it fills in and the checkout it pays at
+  are `e2e/site/site.ts`, served on `127.0.0.1:46600` while such a journey runs, never a third-party
+  site. The Bot's browser, in the computer's container, reaches it at
+  `http://host.docker.internal:46600` (Docker Desktop carries that to this machine's loopback). The
+  port is fixed whatever `E2E_PORT_OFFSET` says, because the address is in what the person types and
+  so in every fixture. The site counts the orders placed and the forms sent, so a journey checks what
+  the Bot did, not only what it said.
+- **A Bot of its own for each journey** (`makeBot`, a fixture in `journeys/computer-steps.ts`), made
+  through the API as setup and deleted when the journey ends, pass or fail. A Bot's browser numbers
+  its page snapshots from its first, and a recorded click carries that number: on a Bot another
+  journey had browsed with, it would be out of date. A new Bot's browser starts from the beginning
+  whichever journeys ran first, an answer or a rule one journey gives stays with its Bot, and the
+  journeys after it see only the Bots they expect.
+
+A reply is waited for by what it says (`replyAfter` in `journeys/computer-steps.ts`): a turn that
+uses the computer is several runs, and between two of them the last one has finished with a sentence
+like "I'm opening the page". It is then checked on screen word for word, once, as the Markdown renders.
+Each conversation is also waited for until it has its name, so the naming call is made, and recorded,
+inside the journey that caused it.
+
 ## What is and isn't under aimock
 
 Every model call on this path goes to aimock: `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` point at it

@@ -1,0 +1,37 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Now order the basil seeds too, from http://host.docker.internal:46600/shop/basil, and tell me the order number.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 8,
+        "hasToolResult": true
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_snapshot",
+            "arguments": "{}",
+            "id": "call_4JZ1Tf4C8ZkDa5i2jfzk49Tl"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 764,
+        "interChunkDelaysMs": [
+          19,
+          364,
+          6,
+          330,
+          12,
+          178
+        ],
+        "totalDurationMs": 1673
+      },
+      "metadata": {
+        "systemHash": "800ac84f",
+        "toolsHash": "6d7140c9"
+      }
+    }
+  ]
+}

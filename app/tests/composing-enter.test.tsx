@@ -50,6 +50,9 @@ const originalFetch = global.fetch;
 let writes: { request: string; body: unknown }[] = [];
 
 const PROFILE: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance Operations",

@@ -228,10 +228,15 @@ export const RELEASE_SAID =
  * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
  * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
  * and tries again.
+ *
+ * `runsWhatItHad` false when the update left the back end not working (paused services): then it
+ * does not run the version it had, and Retry is what tries the update again.
  */
-function updateFailedSaid(step: string | null): string {
+function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
   const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
-  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+  return runsWhatItHad
+    ? `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
+    : `OpenBot couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
 }
 
 export type LocalSequence = State & {
@@ -610,6 +615,8 @@ export function useLocalSequence({
     let updatedIntelligence = false;
     // The update ran on a stack found stopped. It starts the cluster itself, so the release the
     // stack had comes back up after a failed one, and is waited on like a stack that is starting.
+    // Not one found degraded: its cluster was already up, and nothing on it comes back by itself
+    // after the update fails again, so waiting would only run out the clock.
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
@@ -638,16 +645,29 @@ export function useLocalSequence({
        * usual, and the update runs on the next answer, when it reports ready.
        *
        * AN UPDATE THAT DID NOT FINISH is tried again the same way, on a stack ready on the release
-       * it had. On a stopped one too: there the CLI refuses `start` while the update is on record,
-       * and `local update` is the only call that starts the stack.
+       * it had. On a stopped or degraded one too: the CLI refuses `start` while the update is on
+       * record, so `local update` is the only call that gets the stack going again. On a stopped
+       * stack it starts the cluster itself. A degraded one is what an update leaves when it fails
+       * after pausing the services (`update-quiesce`): running, its checks failing, and nothing but
+       * the update will bring them back. Found in a dogfooding report, rc.10 to rc.11 stopped at
+       * `dependencies-install`, where every Retry asked for status once and gave up. A stack still
+       * on the release it had (`kept`) is one of these degraded ones.
+       *
+       * Once per wait (`updatedIntelligence`), so an update that keeps failing stops at its row
+       * rather than looping; Retry is the next attempt.
+       *
+       * Not on a degraded stack whose disk OpenBot found short, or still recovering from being
+       * short (`shortfall`): the update downloads the new release's images and fails there again,
+       * after up to ten minutes. The row says to free space, and the Retry after that updates.
        */
       if (
         found.updateTo &&
         found.stack &&
         !updatedIntelligence &&
         (found.readiness === "ready" ||
-          kept !== null ||
-          (found.readiness === "stopped" && unfinished !== null))
+          (unfinished !== null &&
+            (found.readiness === "stopped" ||
+              (found.readiness === "degraded" && !found.shortfall))))
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
@@ -660,10 +680,28 @@ export function useLocalSequence({
       }
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
-      if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedStep) });
+      // A stack the failed update left degraded, its checks failing, does not run the version it
+      // had: its services stay paused until an update finishes. Not one it woke, which comes back
+      // up on that version.
+      const leftNotWorking =
+        failedTo !== null &&
+        !woken &&
+        found.readiness === "degraded" &&
+        found.checksPassed !== true;
+      if (failedTo && (failedStep || leftNotWorking)) {
+        update({
+          updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
+        });
       }
-      failedTo = null;
+      /*
+       * Kept while the back end still says `starting`, and with the update on record: whether it
+       * runs the version it had is known only once it settles. Found on Windows: an update stopped
+       * after pausing the services, the first answer after it said `starting` and the next
+       * `degraded`, and the row kept "so it runs the version it had" over a back end that did not.
+       */
+      if (!(found.readiness === "starting" && unfinished !== null)) {
+        failedTo = null;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });

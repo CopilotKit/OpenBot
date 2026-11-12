@@ -1,0 +1,72 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Open http://host.docker.internal:46600/ and tell me what time the greenhouse opens on Saturdays. Answer in one short sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "I’m opening the garden shop site to check its Saturday greenhouse hours.",
+        "toolCalls": [
+          {
+            "name": "computer_navigate",
+            "arguments": "{\"url\":\"http://host.docker.internal:46600/\"}",
+            "id": "call_a1QYBqvS0OC2LdWNT26ELkC2"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 729,
+        "interChunkDelaysMs": [
+          10,
+          523,
+          304,
+          1,
+          8,
+          4,
+          0,
+          7,
+          4,
+          6,
+          5,
+          7,
+          406,
+          22,
+          30,
+          22,
+          11,
+          17,
+          4,
+          16,
+          60,
+          13,
+          7,
+          11,
+          4,
+          28,
+          25,
+          6,
+          11,
+          25,
+          50,
+          61,
+          7,
+          61,
+          28,
+          46,
+          14,
+          20,
+          11,
+          150
+        ],
+        "totalDurationMs": 2774
+      },
+      "metadata": {
+        "systemHash": "136e55bc",
+        "toolsHash": "a02cfa3f"
+      }
+    }
+  ]
+}

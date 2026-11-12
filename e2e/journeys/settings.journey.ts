@@ -470,7 +470,14 @@ test("Activity: views, search, sort, refresh and a CSV export", async ({
   await test.step("search", async () => {
     const search = main.getByRole("searchbox", { name: "Search events" });
     await search.fill("openai-api-key");
-    await expect(saved.first()).toBeVisible();
+    // Search covers the events loaded, the newest 50 at first. After journeys that make a lot of
+    // events (a Bot browsing does), the core loop's key is further back: load older ones until it is.
+    const older = main.getByRole("button", { name: "Show older events" });
+    await expect(async () => {
+      if ((await saved.count()) === 0 && (await older.isVisible()))
+        await older.click();
+      await expect(saved.first()).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
     await expect(
       table.getByRole("row").filter({ hasText: "Turn on an app" }),
     ).toHaveCount(0);

@@ -7113,6 +7113,16 @@ case "$1" in
     case "$(cat "$S/status")" in
       pending-*) echo "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2; exit 1 ;;
     esac
+    # An upgrade that fails leaves its revision `failed`, as Helm does.
+    case "$*" in
+      *stopped.yaml*)
+        if [ -e "$S/fail-install-once" ]; then
+          rm "$S/fail-install-once"
+          echo failed > "$S/status"
+          echo "Error: UPGRADE FAILED: context deadline exceeded" >&2
+          exit 1
+        fi ;;
+    esac
     case "$*" in
       *stopped.yaml*) echo cpki-app-api > "$S/deployments" ;;
       *) printf 'cpki-app-api\ncpki-learning-reconciler\ncpki-learning-agent\n' > "$S/deployments" ;;
@@ -7371,6 +7381,64 @@ printf '%s' '{completed}'
                 .filter(|call| call.starts_with("cli local update"))
                 .count(),
             2
+        );
+    }
+
+    /**
+    A RELEASE AN UPDATE LEFT `failed` IS NOT REPAIRED, AND THE NEXT UPDATE FINISHES ON IT.
+
+    Found in a dogfooding report, 0.16.0-rc.10 to rc.11: the update's first `helm upgrade`
+    (`dependencies-install`) failed once, after `update-quiesce` had paused the services. Helm marks
+    that revision `failed`, and Helm 3 upgrades such a release from its last deployed revision, so
+    there is nothing to roll back or put back: the update is left to fail as it did, and the
+    window's next one (on Retry) runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_release_an_update_left_failed_is_not_repaired_and_the_next_update_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_release_an_update_left_failed_is_not_repaired_and_the_next_update_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-failed-release");
+        world.set("fail-install-once", "");
+
+        let first = world.update("failed-update", &Cancel::default()).unwrap();
+
+        assert_eq!(first.outcome, Outcome::Failed, "{:?}", world.calls());
+        assert!(!world.finished());
+        let calls = world.calls();
+        assert!(
+            calls.iter().any(|call| call.starts_with("helm list")),
+            "the repair looked at the release: {calls:?}"
+        );
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.starts_with("helm rollback") || call.contains("values.yaml")),
+            "a failed release is neither rolled back nor re-applied: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            1,
+            "nothing repaired, so not retried here: {calls:?}"
+        );
+
+        let next = world.update("next-update", &Cancel::default()).unwrap();
+
+        assert_eq!(next.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        assert!(
+            !world
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("helm rollback")),
+            "{:?}",
+            world.calls()
         );
     }
 
