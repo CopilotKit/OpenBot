@@ -19,16 +19,16 @@ import { channelListQueryOptions } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
 import { chooseBot } from "./chosen-bot";
-import { useMuse } from "./context";
+import { useFuse } from "./context";
 import { mainChannel, tabFor } from "./model";
-import { Divider, ErrorNotice, LinkRow, MuseSheet, museText } from "./ui";
+import { Divider, ErrorNotice, LinkRow, FuseSheet, fuseText } from "./ui";
 
 /**
  * Who sits at the centre of the frame. This look has one agent; OpenBot has a roster, so this is the
  * one place the difference shows, and it stays a sheet behind the name rather than a fixture.
  */
 export function BotsSheet({ onClose }: { onClose: () => void }) {
-  const { bot: centre, userId } = useMuse();
+  const { bot: centre, userId } = useFuse();
   const agents = useQuery(agentListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -49,7 +49,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <MuseSheet
+    <FuseSheet
       onClose={onClose}
       subtitle={`Choose who is at the centre of ${appConfig.brand.productName}.`}
       title="Your Bots"
@@ -58,7 +58,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
         {agents.isPending ? null : agents.error ? (
           <ErrorNotice error="Couldn't load your Bots. Reload the page." />
         ) : agents.data.length === 0 ? (
-          <p className={museText.muted}>You don't have a Bot yet.</p>
+          <p className={fuseText.muted}>You don't have a Bot yet.</p>
         ) : (
           <div className="flex flex-col">
             {agents.data.map((agent) => {
@@ -72,9 +72,9 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                 <Item
                   aria-pressed={selected}
                   className={cn(
-                    "flex-nowrap gap-3.5 rounded-[18px] border-0 px-2 py-2 text-left hover:bg-[var(--openmuse-pressed)]",
+                    "flex-nowrap gap-3.5 rounded-[18px] border-0 px-2 py-2 text-left hover:bg-[var(--openfuse-pressed)]",
                     selected &&
-                      "bg-[var(--openmuse-sky)] hover:bg-[var(--openmuse-sky)]",
+                      "bg-[var(--openfuse-sky)] hover:bg-[var(--openfuse-sky)]",
                   )}
                   key={agent.id}
                   render={
@@ -87,10 +87,10 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                     size={44}
                   />
                   <ItemContent className="min-w-0 gap-0.5">
-                    <ItemTitle className={cn(museText.body, "font-medium")}>
+                    <ItemTitle className={cn(fuseText.body, "font-medium")}>
                       {agent.name}
                     </ItemTitle>
-                    <span className={cn(museText.small, "line-clamp-1")}>
+                    <span className={cn(fuseText.small, "line-clamp-1")}>
                       {asks
                         ? `Needs you · ${summary}`
                         : summary ||
@@ -101,12 +101,12 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                   {selected ? (
                     <IconCheck
                       aria-hidden="true"
-                      className="size-[18px] shrink-0 text-[var(--openmuse-accent)]"
+                      className="size-[18px] shrink-0 text-[var(--openfuse-accent)]"
                     />
                   ) : summary ? (
                     <span
                       aria-hidden="true"
-                      className="size-2 shrink-0 rounded-full bg-[var(--openmuse-accent)]"
+                      className="size-2 shrink-0 rounded-full bg-[var(--openfuse-accent)]"
                     />
                   ) : null}
                 </Item>
@@ -148,6 +148,6 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
           />
         </div>
       </div>
-    </MuseSheet>
+    </FuseSheet>
   );
 }

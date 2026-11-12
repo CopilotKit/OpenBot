@@ -104,15 +104,15 @@ test("the narration choice is kept in the database beside the others", async () 
 
 test("the skin is saved on the account and survives a new store", async () => {
   const id = await person();
-  expect(await store.patch(id, { skin: "openmuse" })).toEqual({
+  expect(await store.patch(id, { skin: "openfuse" })).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
     narration: null,
-    skin: "openmuse",
+    skin: "openfuse",
     proactive: "on",
   });
   expect((await createUserPreferencesStore(database).read(id)).skin).toBe(
-    "openmuse",
+    "openfuse",
   );
 });
 

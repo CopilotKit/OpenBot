@@ -212,8 +212,8 @@ test("a skin the account could not save is put back, and the picker says so", as
   const picker = view.getByRole("combobox", { name: "Skin" });
   await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
   await user.click(picker);
-  await user.click(await view.findByRole("option", { name: /^OpenMuse/ }));
-  await waitFor(() => expect(getSkinId()).toBe("openmuse"));
+  await user.click(await view.findByRole("option", { name: /^OpenFuse/ }));
+  await waitFor(() => expect(getSkinId()).toBe("openfuse"));
 
   await act(async () => {
     save.resolve(Response.json({ error: "Storage down" }, { status: 503 }));
@@ -234,11 +234,11 @@ test("a skin the account could not save is put back, and the picker says so", as
 test("the account's skin wins over a different one this browser cached", async () => {
   signedIn();
   // What a reload paints first: the cached skin, before the preferences have answered.
-  setSkin("openmuse");
+  setSkin("openfuse");
   const read = Promise.withResolvers<Response>();
   answers.set("GET /api/settings/preferences", () => read.promise);
   const { view } = renderSettings();
-  expect(view.getByLabelText("Drawn skin").textContent).toBe("openmuse");
+  expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse");
 
   await act(async () => {
     read.resolve(Response.json({ preferences: preferences("opendots") }));

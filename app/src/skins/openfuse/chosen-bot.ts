@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
  * own default Bot rather than the last person's choice. Choosing a Bot changes nothing on the server.
  */
 export function chosenBotKey(userId: string): string {
-  return `openmuse-bot:${userId}`;
+  return `openfuse-bot:${userId}`;
 }
 
 const choices = new Map<string, string | null>();

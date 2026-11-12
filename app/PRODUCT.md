@@ -26,7 +26,7 @@ Bots are coworkers, and you own them. Each Bot has a computer of its own (a real
 - The web app in `app/` is the main surface. A Tauri desktop app and a mobile client use the same frame.
 - Main areas: chat with a chosen Bot, the Bot's own computer and browser, Bots, skills, routines, connections, memory, approvals, audit, admin and settings.
 - OpenBot is a template. Companies clone the repository and rename it through `brand.yaml`.
-- A person can pick a skin per account: the default `openbot` skin, OpenDuet, OpenDots or OpenMuse.
+- A person can pick a skin per account: the default `openbot` skin, OpenDuet, OpenDots or OpenFuse.
 
 ## Capabilities and Constraints
 
@@ -40,7 +40,7 @@ Bots are coworkers, and you own them. Each Bot has a computer of its own (a real
 
 - The new look is opinionated. When a company renames OpenBot, it swaps the name and logo. The visual world stays.
 - The design must move away from the generic shadcn look (gray neutrals, Inter, default components).
-- The user named Grok and Muse as references for simplicity, polish and elegance. The result must be unique, not a copy of either.
+- The user named Grok and OpenFuse as references for simplicity, polish and elegance. The result must be unique, not a copy of either.
 - Binding brand input (pinned 2026-10-28): take the pixelation and color schemes of copilotkit.ai. Pixelation means square-pixel dither fields. The colors are periwinkle `#7480F1` to mint `#23D5A2`, sky `#8DC1F1` to violet `#686FDF`, lilac `#BEC2FF`, pale lavender `#EDEDF5` and deep plum `#35295F`. The rest of that website is not a reference.
 - Direction rounds 1 and 2 were rejected as generic. The user likes bold directions, except extreme ones such as a hand-drawn newsprint catalog.
 
