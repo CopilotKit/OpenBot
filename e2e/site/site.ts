@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { BIND_HOST } from "../harness/config";
 
 /**
  * A small website the Bots browse in the computer journeys: a garden shop with a page to read, a
@@ -10,7 +11,8 @@ import { createServer, type Server } from "node:http";
  *
  * WHERE THE BOT REACHES IT. The Bot's browser runs in the computer's container, which reaches this
  * machine as `host.docker.internal` (docker-compose.yml gives the computer that name). Docker
- * Desktop carries it to this machine's loopback, so the site listens on 127.0.0.1 only.
+ * Desktop carries it to this machine's loopback, so the site listens on loopback only, unless the
+ * run names another address (`BIND_HOST`, for a Linux engine).
  *
  * A FIXED PORT, whatever `E2E_PORT_OFFSET` says, because the address is in what the person asks
  * the Bot ("open http://host.docker.internal:46600/…"), and that is what a fixture is matched on. A
@@ -210,7 +212,7 @@ function isItem(value: string): value is Item {
   return Object.hasOwn(ITEMS, value);
 }
 
-/** Start the site on 127.0.0.1:46600. Fails if the port is taken, rather than serve someone else's pages. */
+/** Start the site on port 46600. Fails if the port is taken, rather than serve someone else's pages. */
 export async function startSite(): Promise<Site> {
   const orders: Item[] = [];
   const applications: Application[] = [];
@@ -275,7 +277,7 @@ export async function startSite(): Promise<Site> {
   });
   await new Promise<void>((settle, fail) => {
     server.once("error", fail);
-    server.listen(SITE_PORT, "127.0.0.1", () => settle());
+    server.listen(SITE_PORT, BIND_HOST, () => settle());
   });
   return {
     orders,

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { COMPOSIO_URL, E2E, PORTS } from "./config";
+import { BIND_HOST, COMPOSIO_URL, E2E, PORTS } from "./config";
 
 /**
  * A stand-in for Composio's API, so Browse apps, Add, Connect and Disconnect run end to end without
@@ -399,7 +399,7 @@ async function route(request: Request, url: URL): Promise<Response | null> {
 }
 
 Bun.serve({
-  hostname: "127.0.0.1",
+  hostname: BIND_HOST,
   port: PORTS.composio,
   async fetch(request) {
     const url = new URL(request.url);

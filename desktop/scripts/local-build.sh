@@ -7,9 +7,12 @@
 #      https://github.com/CopilotKit/OpenBot/archive/<commit>.tar.gz (deployment::fetch_pinned), so
 #      the commit has to be on GitHub. Never main, never forced.
 #   2. A registry runs in Docker on 127.0.0.1 only (container `openbot-local-registry`).
-#   3. The images a Claude-plan install runs are built from HEAD for linux/arm64 and pushed to it.
-#   4. container-images.json is written: those images by their pushed digest, every other image at
-#      the latest release's ghcr digest, `version` local-<12 char commit>, `commit` HEAD.
+#   3. The images a Claude-plan install runs that this tree builds are built from HEAD for
+#      linux/arm64 and pushed to it.
+#   4. container-images.json is written: those images by their pushed digest; the server, computer,
+#      supervisor and all-in-one images at the digest of the tag in backend-images.env, as a release
+#      pins them; every other image at the latest release's ghcr digest; `version`
+#      local-<12 char commit>, `commit` HEAD.
 #   5. The app is built pinned to that manifest (OPENBOT_PINNED_DEPLOYMENT), with the bundled CLI,
 #      ad-hoc signed, and copied out of the shared target directory. Its path is printed.
 #
@@ -21,8 +24,9 @@
 # local build installed on Podman fails at the pull.
 #
 # Settings, all optional:
-#   OPENBOT_LOCAL_IMAGES         Images to build from HEAD, space separated. Unset: the four a Claude
-#                                plan runs. Empty: none, every image comes from the base release.
+#   OPENBOT_LOCAL_IMAGES         Images to build from HEAD, space separated. Unset: the harness a
+#                                Claude plan runs. Empty: none, every image comes from the base release
+#                                and backend-images.env.
 #   OPENBOT_LOCAL_BASE_RELEASE   Release whose images fill in the rest. Default: the latest release.
 #   OPENBOT_LOCAL_REGISTRY_PORT  Default 5050.
 #   OPENBOT_LOCAL_BUILD_DIR      Where manifests, logs and apps go. Default ~/.openbot-local-build.
@@ -36,9 +40,10 @@ REGISTRY_NAME="openbot-local-registry"
 REGISTRY_PORT="${OPENBOT_LOCAL_REGISTRY_PORT:-5050}"
 REGISTRY="127.0.0.1:${REGISTRY_PORT}"
 STATE="${OPENBOT_LOCAL_BUILD_DIR:-$HOME/.openbot-local-build}"
-# server (server, migrate, worker), supervisor, agent-computer, and agent-claude-sdk (the harness a
-# Claude plan picks and the sign-in image). `docker ps` on a Claude-plan install shows these four.
-DEFAULT_IMAGES="server supervisor agent-computer agent-claude-sdk"
+# agent-claude-sdk, the harness a Claude plan picks and the sign-in image. The server (server,
+# migrate, worker), supervisor and agent-computer a Claude-plan install also runs are the published
+# OpenBot images, at the tag in backend-images.env.
+DEFAULT_IMAGES="agent-claude-sdk"
 IMAGES=()
 for image in ${OPENBOT_LOCAL_IMAGES-$DEFAULT_IMAGES}; do IMAGES+=("$image"); done
 
@@ -84,7 +89,7 @@ docker info > /dev/null 2>&1 || die "Docker is not running"
 # The images come from `git archive HEAD` and the deployment from GitHub, so uncommitted work only
 # reaches the build through what the app compiles from the working tree: these paths. A change
 # there is refused; a change anywhere else is left out of the build, and said so.
-APP_INPUTS=(desktop shared scripts docker-compose.yml package.json bun.lock .github)
+APP_INPUTS=(desktop shared scripts docker-compose.yml backend-images.env package.json bun.lock .github)
 if [ -n "$(git status --porcelain -- "${APP_INPUTS[@]}")" ]; then
   git status --short -- "${APP_INPUTS[@]}" >&2
   die "uncommitted changes in what the app is built from. Commit them first: the images and the deployment the app downloads are the commit, so the app has to be too."
@@ -202,14 +207,28 @@ if [ ! -s "$base" ]; then
   gh release download "$BASE" -R "$REPOSITORY" -p container-images.json -O "$base.tmp"
   mv "$base.tmp" "$base"
 fi
+# The server, computer, supervisor and all-in-one images this commit runs, by the digest the tag in
+# backend-images.env names now, under the names a release's manifest gives them.
+BACKEND_TAG="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+[ -n "$BACKEND_TAG" ] || die "backend-images.env names no OPENBOT_BACKEND_TAG"
+PINNED="{}"
+for pair in openbot:openbot server:openbot-server agent-computer:openbot-agent-computer supervisor:openbot-supervisor; do
+  name="${pair%%:*}"
+  repository="ghcr.io/copilotkit/${pair#*:}"
+  digest="$(docker buildx imagetools inspect "$repository:$BACKEND_TAG" --format '{{.Manifest.Digest}}')" \
+    || die "could not read $repository:$BACKEND_TAG"
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "$repository:$BACKEND_TAG has no digest"
+  PINNED="$(jq --arg name "$name" --arg repository "$repository" --arg digest "$digest" \
+    '. + {($name): {repository: $repository, digest: $digest, reference: ($repository + "@" + $digest)}}' <<< "$PINNED")"
+done
 MANIFEST="$STATE/manifests/container-images-$SHORT.json"
-jq --arg version "$VERSION" --arg commit "$COMMIT" --argjson built "$BUILT" \
-  '.version = $version | .commit = $commit | .images += $built' "$base" > "$MANIFEST"
+jq --arg version "$VERSION" --arg commit "$COMMIT" --argjson built "$BUILT" --argjson pinned "$PINNED" \
+  '.version = $version | .commit = $commit | .images += $pinned | .images += $built' "$base" > "$MANIFEST"
 # Every image the published list names must be pinned, or the app refuses the manifest at Install.
 jq -e --slurpfile names .github/published-images.json \
   '[$names[0][] as $n | .images[$n].reference // "" | test("@sha256:[0-9a-f]{64}$")] | all' \
   "$MANIFEST" > /dev/null || die "$MANIFEST does not pin every published image"
-echo "$MANIFEST (others from $BASE)"
+echo "$MANIFEST (OpenBot images at $BACKEND_TAG, others from $BASE)"
 stage_done
 
 # --- 5. Docker can pull what the app will ask for ------------------------------------------------

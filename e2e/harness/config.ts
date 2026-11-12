@@ -57,6 +57,14 @@ export const PORTS = {
   supervisor: 46500 + PORT_OFFSET,
 } as const;
 
+/**
+ * Where the run's own stand-ins listen (aimock, the Composio stub, the test site). Loopback, which is
+ * where Docker Desktop and Podman on a Mac carry `host.docker.internal` from the server's container.
+ * A Linux engine reaches this machine at its bridge address instead, so CI there names every
+ * interface (`E2E_BIND_HOST=0.0.0.0`) on a runner nothing else can reach.
+ */
+export const BIND_HOST = process.env.E2E_BIND_HOST?.trim() || "127.0.0.1";
+
 export const APP_URL = `http://127.0.0.1:${PORTS.app}`;
 export const SERVER_URL = `http://127.0.0.1:${PORTS.server}`;
 export const AIMOCK_URL = `http://127.0.0.1:${PORTS.aimock}`;

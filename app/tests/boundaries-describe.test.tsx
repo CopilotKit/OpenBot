@@ -63,7 +63,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** What the real endpoint answered for this description (server/tests/fixtures). */
+/** What the real endpoint answered for this description, as recorded from the server. */
 const SOCIAL: PolicyTranslation = {
   rule: 'intent == "navigate" && (page.host == "facebook.com" || matches(page.host, "[.]facebook[.]com$"))',
   effect: "deny",

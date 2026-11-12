@@ -4,8 +4,8 @@ The real OpenBot, in a real browser, against a real local stack, as a person use
 call OpenBot makes is answered by [aimock](https://aimock.copilotkit.dev) from recorded fixtures,
 so a run is the same every time, needs no model key and costs nothing.
 
-These run on a developer's machine, not in GitHub: the machine already has the licence, the keys in
-`.env`, and Docker or Podman.
+They run on a developer's machine and in CI (the `end to end` check), against the published OpenBot
+images at the tag in `backend-images.env`.
 
 ## Run
 
@@ -15,8 +15,8 @@ bun run test:e2e
 ```
 
 Needs `.env` with the Intelligence licence (`CPK_INTELLIGENCE_API_KEY` or `INTELLIGENCE_API_KEY`),
-as `scripts/start.sh` does. No model key is used in replay. The first run on a machine builds the
-server and computer images, which takes several minutes; after that a run takes under a minute.
+as `scripts/start.sh` does. No model key is used in replay. The first run on a machine pulls the
+OpenBot server and computer images, which takes a few minutes; after that a run takes under a minute.
 
 What it does:
 
@@ -25,8 +25,8 @@ What it does:
 2. Brings up **its own, fresh stack** with `scripts/start.sh`: the personal edition (one person, no
    sign-in, the Personal Assistant) in the compose project `openbot-e2e`, on ports 46xxx, with a new
    database every run. It never reuses or touches a stack you already have running (OpenBot Desktop,
-   a dev stack on 3001/3010, another worktree), builds its images under their own tags, and writes
-   its logs to `e2e/.artifacts/logs/` rather than `.logs/`. Every setting it makes is in
+   a dev stack on 3001/3010, another worktree), and writes its logs to `e2e/.artifacts/logs/`
+   rather than `.logs/`. Every setting it makes is in
    `harness/stack.ts`; your `.env` supplies only the rest (the licence, the encryption key).
 3. Runs the journeys in Chromium, then stops the stack.
 
@@ -45,7 +45,7 @@ Results, all gitignored, in `e2e/.artifacts/`:
 | Playwright report (traces on failure) | `report/` (`bunx playwright show-report e2e/.artifacts/report`) |
 | aimock's log | `logs/aimock.log` |
 | Every model request a journey made, matched or not | `logs/<journey>.model-requests.txt` (and `.json`) |
-| The stack's logs | `logs/start.log`, `logs/server.log`, `logs/app.log` |
+| The stack's logs | `logs/start.log`, `logs/app.log`; the server's is `docker compose -p openbot-e2e logs server` |
 | Every request the Composio stub answered | `logs/composio-stub.log` |
 
 **Look at every screenshot.** A journey that passes with a broken layout has found a bug: overlap,

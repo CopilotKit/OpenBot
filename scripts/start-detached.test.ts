@@ -11,6 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "./update-local";
 
+/**
+ * The app is the one service start.sh runs on the host, in the background, and it has to outlive the
+ * script without holding the updater's pipes. The server and the routine worker are containers.
+ */
 test("startup closes updater pipes while its background services remain live", async () => {
   const root = await mkdtemp(join(tmpdir(), "openbot-start-detached-"));
   const bin = join(root, "bin");
@@ -22,7 +26,7 @@ test("startup closes updater pipes while its background services remain live", a
     await chmod(path, 0o755);
   };
   onTestFinished(async () => {
-    for (const role of ["server", "worker", "app"]) {
+    for (const role of ["app"]) {
       const file = Bun.file(join(root, `${role}.pid`));
       if (await file.exists()) {
         const pid = Number(await file.text());
@@ -47,11 +51,20 @@ test("startup closes updater pipes while its background services remain live", a
   await Promise.all(
     ["bin", "scripts", "server", "app"].map((path) => mkdir(join(root, path))),
   );
-  for (const name of ["start.sh", "require-bash.sh", "processes.sh"])
+  for (const name of [
+    "start.sh",
+    "require-bash.sh",
+    "processes.sh",
+    "server-env.ts",
+  ])
     await writeFile(
       join(root, "scripts", name),
       await readFile(`scripts/${name}`),
     );
+  await writeFile(
+    join(root, "backend-images.env"),
+    "OPENBOT_BACKEND_TAG=sha-pinned-for-the-test\n",
+  );
   await writeFile(
     join(root, ".env"),
     [
@@ -85,7 +98,6 @@ test("startup closes updater pipes while its background services remain live", a
     "curl",
     `case "$*" in
   *"/api/copilotkit/info"*)
-    [ -f "$TEST_ROOT/server.pid" ] || exit 7
     printf '{"licenseStatus":"valid","mode":"test","agents":{"test":{}}}' ;;
   *"http://localhost:3010/"*)
     [ -f "$TEST_ROOT/app.pid" ] || exit 7
@@ -95,9 +107,8 @@ esac`,
   await executable(
     "bun",
     `if [ "$1" = run ] && [ "$2" = - ]; then exec "$REAL_BUN" "$@"; fi
+if [ "$2" = scripts/server-env.ts ]; then exec "$REAL_BUN" "$@"; fi
 case "$*" in
-  *"src/production-entry.ts"*) role=server ;;
-  *"worker/src/index.ts"*) role=worker ;;
   *"run dev"*) role=app ;;
   *) exit 0 ;;
 esac
@@ -122,9 +133,7 @@ exec "$REAL_BUN" "$TEST_ROOT/service.ts" "$role"`,
   while (
     !(
       await Promise.all(
-        ["server", "worker", "app"].map((role) =>
-          Bun.file(join(root, `${role}.pid`)).exists(),
-        ),
+        ["app"].map((role) => Bun.file(join(root, `${role}.pid`)).exists()),
       )
     ).every(Boolean)
   ) {
@@ -136,7 +145,7 @@ exec "$REAL_BUN" "$TEST_ROOT/service.ts" "$role"`,
     invocation.then((stdout) => ({ stdout })),
     Bun.sleep(1000).then(() => undefined),
   ]);
-  for (const role of ["server", "worker", "app"]) {
+  for (const role of ["app"]) {
     const pid = Number(await readFile(join(root, `${role}.pid`), "utf8"));
     pids.push(pid);
     expect(() => process.kill(pid, 0)).not.toThrow();

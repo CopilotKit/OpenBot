@@ -59,6 +59,17 @@ setting() {
   printf '%s' "${value:-$fallback}"
 }
 
+# The tag of the OpenBot images the server, worker, migrations, computer and supervisor run from:
+# backend-images.env, unless the environment or .env names another build. Compose reads it as
+# OPENBOT_BACKEND_TAG. Without it Compose would ask for a tag that does not exist.
+BACKEND_TAG_PINNED="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' "$ROOT/backend-images.env" 2>/dev/null | tail -1 || true)"
+OPENBOT_BACKEND_TAG="$(setting OPENBOT_BACKEND_TAG "$BACKEND_TAG_PINNED")"
+if [ -z "$OPENBOT_BACKEND_TAG" ]; then
+  printf '\033[31m%s\033[0m\n' "backend-images.env names no OPENBOT_BACKEND_TAG, so there is no OpenBot image to run."
+  exit 1
+fi
+export OPENBOT_BACKEND_TAG
+
 APP_PORT="$(setting APP_PORT 3010)"
 SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
@@ -222,7 +233,7 @@ wait_for_openbot() {
   done
   red "  $name never answered as OpenBot on port $port"
   red "  Either it failed to start, or that port belongs to another process."
-  red "  Log: $LOGS/${name}.log"
+  red "  Log: $(log_of "$name")"
   exit 1
 }
 
@@ -233,10 +244,19 @@ wait_for() {
     sleep 1
   done
   red "  $name never became ready at $url"
-  red "  Log: $LOGS/${name}.log"
+  red "  Log: $(log_of "$name")"
   exit 1
 }
 
+# Where a service's output is: the app's in this run's log folder, everything else in Compose.
+log_of() {
+  case "$1" in
+    app) printf '%s' "$LOGS/$1.log" ;;
+    *) printf '%s' "docker compose logs $1" ;;
+  esac
+}
+
+# A server an earlier start ran on the host from source, by the command it was started with.
 stop_server_processes_for_restart() {
   stop_matching "bun --env-file=../.env src/production-entry.ts"
   stop_matching "bun --env-file=../.env src/index.ts"
@@ -247,8 +267,8 @@ echo "OpenBot"
 echo "======="
 
 # Provision the installation's Composio project with the existing CLI sign-in, independently of
-# Learning. The helper preserves supplied keys and Arcade. The server reads the resulting .env on
-# launch. Bun preserves exported values over .env, including empty strings. A child cannot change
+# Learning. The helper preserves supplied keys and Arcade. The server is started with the resulting
+# .env below. Bun preserves exported values over .env, including empty strings. A child cannot change
 # this shell's environment, so clear only blank overrides before setup and later server processes.
 #
 # Best-effort, like Learning below. It used to run bare under `set -e`, so a checkout with no key
@@ -267,6 +287,19 @@ fi
 # Whatever the helper reported, a key that is new in .env must reach a server that is already up.
 if [ -z "$COMPOSIO_BEFORE" ] && [ -n "$(setting COMPOSIO_API_KEY "")" ]; then
   SECRETS_ROTATED=true
+fi
+
+# The server runs in a container on the Compose network, below, so the Bots and the supervisor are
+# told where it is before they start: the Bots call their tools back through it there.
+OPENBOT_TOOL_URL="$(setting OPENBOT_TOOL_URL "http://server:3001/api/agent-tools/call")"
+export OPENBOT_TOOL_URL
+# Per-Bot computers on that network too, where the server can open them, or no supervisor at all.
+if [ "$ONE_COMPUTER_EACH" = "true" ]; then
+  COMPOSE_PROJECT="$(docker compose config --format json 2>/dev/null | bun -e 'process.stdout.write(JSON.parse(await Bun.stdin.text()).name ?? "")' 2>/dev/null || true)"
+  COMPUTER_NETWORK="$(setting COMPUTER_NETWORK "${COMPOSE_PROJECT:-openbot}_default")"
+  export COMPUTER_NETWORK
+else
+  export COMPUTER_SUPERVISOR_CONTAINER_URL=""
 fi
 
 info "1/4  Docker services"
@@ -309,8 +342,13 @@ export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
 # variable rather than `--progress`, because a Compose too old to know the flag refuses it, and one
 # too old to know the variable ignores it.
-COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null
-if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
+# `--build` for the Bots, which are built from this checkout. The computer and the supervisor are
+# pulled at OPENBOT_BACKEND_TAG.
+if ! COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null; then
+  red "  The Docker services did not start. The OpenBot images are at $OPENBOT_BACKEND_TAG (backend-images.env)."
+  exit 1
+fi
+if ! docker compose run --rm migrate >"$LOGS/migrate.log" 2>&1; then
   red "  Migrations did not apply. The database is not the schema this server expects."
   red "  Log: $LOGS/migrate.log"
   exit 1
@@ -327,7 +365,7 @@ for table in agent_profiles agent_preferences; do
   if ! docker compose exec -T postgres \
        psql -U openbot -d openbot -tAc "select to_regclass('public.$table')" 2>/dev/null \
        | grep -q "^$table$"; then
-    red "  $table is missing. Run: bun run --cwd server db:migrate"
+    red "  $table is missing. Run: docker compose --env-file backend-images.env --env-file .env run --rm migrate"
     exit 1
   fi
 done
@@ -348,8 +386,8 @@ MANAGED_ENDPOINT_LINE="none (the personal edition's Bot runs in the server)"
 green "  managed coworker endpoint: ${MANAGED_AGENT_AG_UI_URL:-$MANAGED_ENDPOINT_LINE}"
 
 # Automatic Learning collects nothing until a container is assigned. The server assigns this
-# project's `openbot` container on its own once it exists (server/src/learning/auto-assign.ts), but
-# the runtime key it holds cannot create one. A CopilotKit CLI login can, whether or not a project is
+# project's `openbot` container on its own once it exists, but on an older Intelligence the runtime
+# key it holds cannot create one. A CopilotKit CLI login can, whether or not a project is
 # selected here, and so can INTELLIGENCE_SERVICE_TOKEN on a local evaluation install, so make sure the
 # container exists before the server looks. Never fatal and never interactive: one line, whatever
 # happens, and with nothing that can create it the line says exactly what to run.
@@ -361,163 +399,77 @@ if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \
   info "  ${LEARNING_LINE:-Automatic Learning: the container check did not run. Log: $LOGS/learning-setup.log}"
 fi
 
-# The personal edition's own browser: the person's installed Chrome or Edge, as a window on their
-# desktop with the Recorder in it (docs/personal-edition.md). It runs on the host and runs nobody
-# else's (`COMPUTER_PEOPLE_ONLY=on`). OpenBot Desktop does not do this: it shows the person's browser
-# in the page, on the one computer. The server finds it through `OPENBOT_BROWSER_URL`, exported so the
-# server started below reads it over .env. Never fatal: without Chrome or Edge, or with a Recorder
-# that will not build, OpenBot starts without the person's browser and the line says why.
-#
-# OPENBOT_PERSON_BROWSER=off starts OpenBot without it, as OpenBot Desktop runs: the end-to-end run
-# (e2e/) sets it, so a test run never opens a Chrome window on the desktop of whoever runs it.
-PERSON_BROWSER="$(setting OPENBOT_PERSON_BROWSER on)"
-if [ "$EDITION" = "personal" ] && [ "$PERSON_BROWSER" = "off" ]; then
-  info "  your browser: off (OPENBOT_PERSON_BROWSER=off)"
-elif [ "$EDITION" = "personal" ]; then
-  BROWSER_PORT="$(setting BROWSER_PORT 4101)"
-  if [ ! -f extension/dist/manifest.json ]; then
-    info "  building the Recorder for your browser"
-    (cd extension && bun install --frozen-lockfile && bun scripts/build.ts) >"$LOGS/recorder-build.log" 2>&1 \
-      || red "  Recorder: the build failed. Log: $LOGS/recorder-build.log"
-  fi
-  if [ ! -f extension/dist/manifest.json ]; then
-    :
-  elif identifies_as_openbot "$BROWSER_PORT" browser; then
-    info "  your browser: already up on $BROWSER_PORT"
-  else
-    (cd "$ROOT" && COMPUTER_TOKEN="$COMPUTER_TOKEN" \
-      COMPUTER_PEOPLE_ONLY=on \
-      OPENBOT_RECORDER_DIR="$ROOT/extension/dist" \
-      PORT="$BROWSER_PORT" \
-      bun scripts/start-local-chrome-computer.ts >"$LOGS/browser.log" 2>&1 &)
-    for _ in $(seq 1 20); do
-      identifies_as_openbot "$BROWSER_PORT" browser && break
-      sleep 1
-    done
-  fi
-  if identifies_as_openbot "$BROWSER_PORT" browser; then
-    export OPENBOT_BROWSER_URL="http://127.0.0.1:$BROWSER_PORT"
-    green "  your browser: Chrome or Edge on this computer, with the Recorder"
-  else
-    red "  your browser: did not start, so Browser is hidden. Log: $LOGS/browser.log"
-  fi
-fi
+# The personal edition's own browser shows in the page, on the one computer its Bots run on, as in
+# OpenBot Desktop: the server offers it there whenever OPENBOT_BROWSER_URL names no other.
 
 info "2/4  Server"
-require_free_or_ours "$SERVER_PORT" server
+# The server and the routine worker run from the OpenBot server image, as Compose services, and the
+# app below is this checkout's, served by Vite with its `/api` proxied to the server's port.
 #
-# A running server is left alone UNLESS this run minted a secret, because it read its environment
-# once at startup and has no way to notice the file changed underneath it.
-#
-# Skipping it on "already answering" is the same mistake the Bot containers had: answering proves the
-# process is alive, not that it agrees with the deployment. A server holding the previous
-# `AGENT_TOOL_TOKEN` refuses every callback its own Bots make, which reaches a person as "no results"
-# rather than as an error.
+# A server an earlier start ran on the host from source, still holding the port: stopped, with its
+# routine worker, the way a restart always stopped them, so the container can have the port. Only a
+# host `bun` that answers as OpenBot; anything else on the port is reported and left alone.
+if [ -z "$(docker compose ps -q server 2>/dev/null)" ]; then
+  SERVER_HOLDER="$(holder "$SERVER_PORT")"
+  if [[ "$SERVER_HOLDER" == bun* ]] && identifies_as_openbot "$SERVER_PORT" server; then
+    info "  server: stopping the one an earlier start ran on the host ($SERVER_HOLDER)"
+    stop_server_processes_for_restart
+    stop_matching "bun worker/src/index.ts"
+    sleep 1
+  fi
+  require_free_or_ours "$SERVER_PORT" server
+fi
+
+# The folder the server's sign-in file is mounted from, which Compose does not create (see
+# docker-compose.yml). Empty unless somebody signs a model in with OAuth.
+mkdir -p "$ROOT/.openbot"
+
+# What the server is started with: `.env`, with whatever this environment sets winning over it, as it
+# did when the server ran on the host and Bun read the two that way. Written to a private file for
+# Compose, which reads it when it creates the container, and removed straight after.
+SERVER_ENV="$(mktemp "${TMPDIR:-/tmp}/openbot-server-env.XXXXXX")"
+trap 'rm -f "$SERVER_ENV"' EXIT
+# `--no-env-file`: the file is the argument, and its own reading of the environment must not be
+# `.env` loaded a second time behind it.
+bun --no-env-file scripts/server-env.ts "$ROOT/.env" "$SERVER_ENV"
+export OPENBOT_SERVER_ENV_FILE="$SERVER_ENV"
+
+# Addresses on this machine, as the server's container reaches them. A loopback address in `.env`
+# names the container itself in there, so each one that needs it gets a container address of its
+# own, unless one is already set: `host.docker.internal`, which Compose maps to this machine.
+in_container() {
+  printf '%s' "$1" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)(localhost|127\.0\.0\.1|\[::1\])([:/]|$)#\1host.docker.internal\3#'
+}
+for pair in OPENAI_BASE_URL:OPENAI_CONTAINER_BASE_URL \
+            INTELLIGENCE_API_URL:INTELLIGENCE_CONTAINER_API_URL \
+            INTELLIGENCE_GATEWAY_WS_URL:INTELLIGENCE_CONTAINER_GATEWAY_WS_URL \
+            PICKED_HARNESS_URL:PICKED_HARNESS_CONTAINER_URL; do
+  host_name="${pair%%:*}" container_name="${pair##*:}"
+  if [ -z "$(setting "$container_name" "")" ] && [ -n "$(setting "$host_name" "")" ]; then
+    export "$container_name=$(in_container "$(setting "$host_name" "")")"
+  fi
+done
+# An agent somebody registers on their own loopback is dialled on this machine, not in the container.
+export OPENBOT_THIS_MACHINE_CONTAINER_HOST="${OPENBOT_THIS_MACHINE_CONTAINER_HOST:-host.docker.internal}"
+# The app is this checkout's, on APP_PORT, so the server's own copy of it is published nowhere fixed.
+export SERVER_APP_PORT=""
+
+# Every run, like the services above: Compose recreates the containers when their settings or the
+# image changed, and leaves them alone otherwise. A secret minted this run is a change it is told about.
+RECREATE=()
 if [ "$SECRETS_ROTATED" = "true" ]; then
   info "  a secret was generated this run, so the server is restarted to pick it up"
-  stop_server_processes_for_restart
-  sleep 1
+  RECREATE=(--force-recreate)
 fi
-#
-# A server that answers as OpenBot can still be one no worker can hand a routine to. The worker
-# below is started unconditionally with this run's WORKER_SHARED_SECRET, and every dispatch it makes
-# is one POST to this server's /internal/routines/run — a door that a server started from an older
-# checkout does not have (404), and that a server started before this secret existed in its
-# environment holds shut (401, `workerSharedSecret` undefined or different). Either way routines
-# never fire, and nothing at start time says why.
-#
-# So before keeping a running server, ask it the one thing only a compatible one answers well: POST
-# the handoff route with this run's secret and a deliberately empty body. In server/src/app.ts the
-# secret is checked before the body is parsed, so a server holding this same secret rejects the
-# empty body with 400 — the healthy answer. 401 means it does not hold this secret; 404 means it
-# predates the route. Both are cured by a restart into this run's environment, so fall through to
-# the launch below. Anything else — including a probe that could not connect at all — keeps the
-# philosophy of leaving an answering server alone.
-if identifies_as_openbot "$SERVER_PORT" server; then
-  HANDOFF_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
-    -X POST "http://localhost:$SERVER_PORT/internal/routines/run" \
-    -H "Authorization: Bearer $WORKER_SHARED_SECRET" \
-    -H "Content-Type: application/json" --data '{}' 2>/dev/null || true)"
-  case "$HANDOFF_STATUS" in
-    401)
-      info "  server: up, but refuses the worker's secret (401), so it is restarted to pick it up"
-      stop_server_processes_for_restart
-      sleep 1
-      ;;
-    404)
-      info "  server: up, but has no /internal/routines/run (404: an older checkout), so it is restarted"
-      stop_server_processes_for_restart
-      sleep 1
-      ;;
-  esac
-  # A personal edition server started before the browser of its person was: it has no address for
-  # it, and says so by offering no browser. The edition is single-user, so this answers without
-  # signing in. (No apostrophe in this comment: bash 3.2 misreads one in a comment after esac.)
-  if [ -n "${OPENBOT_BROWSER_URL:-}" ]; then
-    OFFERED="$(curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/browser" 2>/dev/null || true)"
-    if ! printf '%s' "$OFFERED" | grep -q '"available":true'; then
-      info "  server: up, but without your browser, so it is restarted to pick it up"
-      stop_server_processes_for_restart
-      sleep 1
-    fi
-  fi
+if ! COMPOSE_PROGRESS=quiet docker compose up -d --no-deps ${RECREATE[@]+"${RECREATE[@]}"} server worker >/dev/null; then
+  red "  The server did not start from ghcr.io/copilotkit/openbot-server:$OPENBOT_BACKEND_TAG."
+  red "  Log: docker compose logs server"
+  exit 1
 fi
-# Redirect the whole background group. Redirecting only Bun inside `(command &)` leaves its
-# waiting Bash wrapper holding the updater's captured stdout/stderr open after this script exits.
-if ! identifies_as_openbot "$SERVER_PORT" server; then
-  if [ "$ONE_COMPUTER_EACH" = "true" ]; then
-    (cd server && PORT="$SERVER_PORT" \
-      COMPUTER_SUPERVISOR_URL="http://localhost:$SUPERVISOR_PORT" \
-      SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
-      COMPUTER_TOKEN="$COMPUTER_TOKEN" \
-      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
-  else
-    (cd server && PORT="$SERVER_PORT" \
-      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/production-entry.ts) >"$LOGS/server.log" 2>&1 &
-  fi
-fi
-wait_for_openbot "$SERVER_PORT" server
-
-# The worker: a local stand-in for the routines CronJob, looping the same sweep
-# (`offerDueRoutines`/`dispatchClaimedRoutines`) a cluster would run on a schedule instead. Started
-# only now, because dispatching a claimed routine is one HTTP call to this server's own
-# /internal/routines/run, and the wait_for above is what confirms that call has somewhere to land.
-#
-# Scoped to this checkout's working directory: another local installation can run the same command.
-# The worker has no HTTP endpoint, so a process match plus its cwd is the ownership signal.
-# Unknown ownership refuses startup before another worker can be launched.
-#
-# Launched from `$ROOT` with `bun worker/src/index.ts`, not `cd worker && bun src/index.ts`: on a
-# Linux host, container processes are visible too and several services run `bun src/index.ts`.
-# Relative imports resolve from the importing file, so running the worker from `$ROOT` is safe.
-worker_running=false
-if running_here "bun worker/src/index.ts" "$ROOT"; then
-  worker_running=true
-else
-  ownership_status=$?
-  if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
-fi
-if [ "$worker_running" = false ]; then
-  WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
-  (cd "$ROOT" && \
-    DATABASE_URL="$WORKER_DATABASE_URL" \
-    SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
-    WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun worker/src/index.ts) >"$LOGS/worker.log" 2>&1 &
-  info "  worker: started (routine sweep loop)"
-  sleep 1
-  if running_here "bun worker/src/index.ts" "$ROOT"; then
-    :
-  else
-    ownership_status=$?
-    if [ "$ownership_status" -ne 1 ]; then exit "$ownership_status"; fi
-    red "  worker: did not stay up, check $LOGS/worker.log"
-  fi
-else
-  info "  worker: already running"
-fi
+rm -f "$SERVER_ENV"
+unset OPENBOT_SERVER_ENV_FILE
+wait_for_openbot "$SERVER_PORT" server 90
+info "  worker: running (routine sweep loop)"
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
@@ -569,11 +521,12 @@ Try:
   3. Review browser/file actions in /admin/audit.
   4. Add a deny rule in /admin/boundaries, then retry the same action.
 
-Logs: $LOGS
-  Routine sweep worker: $LOGS/worker.log
+Logs: $LOGS (the app)
+  The server and the routine worker: docker compose logs server worker
+  Images: ghcr.io/copilotkit/openbot-server:$OPENBOT_BACKEND_TAG and the rest, from backend-images.env
 
 Stop all of it: bash scripts/stop.sh
-  The app, the worker, the API server, the Docker services, and each Bot's computer, which compose
+  The app, the server and worker, the Docker services, and each Bot's computer, which compose
   does not own because the supervisor makes it. Pass --keep-computers to leave the browsers signed
   in. Nothing is deleted either way: the database, the files and the browser profiles are volumes.
 EOF

@@ -77,7 +77,6 @@ test("the gate decides with release-ci-gate.ts, and re-runs the checks that read
     "bun run format:check",
     "bun run lint",
     "bun desktop/scripts/desktop-version.ts check",
-    "charts/openbot/Chart.yaml",
     "-e CHANGELOG.md -e release-policy.json",
   ]) {
     expect(runs).toContain(check);

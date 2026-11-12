@@ -248,22 +248,12 @@ test("a self-hosted OpenBot, in a browser with no Desktop around it, draws nothi
 
 /**
  * Nothing a Helm or Compose deployment runs knows the Desktop update feed: only OpenBot Desktop's
- * own shell reads it. A server, worker or page that named it would be a self-hosted OpenBot
- * reaching downloads.copilotkit.ai, which is never wanted.
+ * own shell reads it. A page or Compose file that named it would be a self-hosted OpenBot reaching
+ * downloads.copilotkit.ai, which is never wanted.
  */
 test("no code a self-hosted deployment runs names the Desktop update feed", () => {
   const root = join(import.meta.dir, "..", "..");
-  const shipped = [
-    "app/src",
-    "server/src",
-    "worker",
-    "shared",
-    "supervisor",
-    "charts",
-    "docker",
-    "docker-compose.yml",
-    "Dockerfile",
-  ];
+  const shipped = ["app/src", "shared", "docker-compose.yml"];
   const named: string[] = [];
   const visit = (path: string) => {
     const stat = statSync(path);

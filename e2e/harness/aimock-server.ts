@@ -5,6 +5,7 @@ import {
   MCPMock,
 } from "@copilotkit/aimock";
 import {
+  BIND_HOST,
   dotenvValue,
   fixtureDirectories,
   MCP_SERVER_PATH,
@@ -93,7 +94,8 @@ function describe(request: ChatCompletionRequest): string {
 
 async function main(): Promise<void> {
   const mock = new LLMock({
-    host: "127.0.0.1",
+    // See BIND_HOST: where the server's container reaches this machine.
+    host: BIND_HOST,
     port: PORTS.aimock,
     logLevel: "info",
     // Replay: a request no fixture answers is refused (503), never passed on.
