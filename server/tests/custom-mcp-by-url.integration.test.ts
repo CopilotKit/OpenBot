@@ -194,7 +194,24 @@ describe("adding an MCP server by URL", () => {
     ]) {
       const refused = await addByUrl({ title: "Anything", url });
       expect({ url, status: refused.status }).toEqual({ url, status: 400 });
+      // Said to the person adding it, in their words: never the admin's "deployment" or "token field".
+      const { error } = (await refused.json()) as { error: string };
+      expect(error).not.toMatch(/deployment|token field|rather than/);
     }
+    const local = await addByUrl({
+      title: "Anything",
+      url: "https://192.168.1.10/mcp",
+    });
+    expect(((await local.json()) as { error: string }).error).toBe(
+      "OpenBot can't reach that address. Use the server's public address, for example https://mcp.example.com/mcp.",
+    );
+    const keyed = await addByUrl({
+      title: "Anything",
+      url: "https://mcp.example.com/mcp?api_key=x",
+    });
+    expect(((await keyed.json()) as { error: string }).error).toBe(
+      "Take the key out of the address and put it in the Key field.",
+    );
     const rows = await database
       .select({ id: mcpServers.id })
       .from(mcpServers)

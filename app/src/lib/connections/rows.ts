@@ -276,7 +276,11 @@ function byUrlRow(
       ...base,
       summary: host,
       state: yours ? "connected" : "available",
-      action: "connect",
+      /*
+       * No press-to-connect here, unlike a catalogue app: the tile opens the server's own page,
+       * which offers Connect beside the switch that takes the server away again. A server added by
+       * its address has no other way back to that switch.
+       */
       notConnected: !yours,
     };
   }

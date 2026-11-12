@@ -14,7 +14,10 @@ export const addServerFormSchema = z.object({
     .string()
     .trim()
     .min(1, "Enter the server's address.")
-    .refine((value) => URL.canParse(value), "Enter a full address.")
+    .refine(
+      (value) => URL.canParse(value),
+      "Enter the full address, starting with https://.",
+    )
     .refine(
       (value) =>
         !URL.canParse(value) || /^https?:$/.test(new URL(value).protocol),

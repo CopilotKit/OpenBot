@@ -65,7 +65,7 @@ export const guardedFetch = async (
   const refusal = customUrlRefusal(address);
   if (refusal) {
     throw new RemoteServerRefusedError(
-      `The server pointed OpenBot at ${safeHost(address)}, which OpenBot won't reach. ${refusal}`,
+      `The server pointed OpenBot at ${safeHost(address)}, which OpenBot won't reach.`,
     );
   }
   return fetch(address, {

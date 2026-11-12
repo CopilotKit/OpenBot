@@ -987,7 +987,9 @@ export function PluginPage({
                 <ItemContent>
                   <ItemTitle>Access token</ItemTitle>
                   <ItemDescription>
-                    Sent with every call to this vendor.
+                    {openByUrl
+                      ? "Nothing is sent. Add one if the server gives you a key."
+                      : "Sent with every call to this vendor."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -1359,8 +1361,11 @@ export function PluginPage({
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {toolsListError(server.lastError, { title, personal }) ??
-                "Refresh tools to check again."}
+              {/* A server that signs each person in lists its tools once somebody has. */}
+              {server.signIn && !youConnected
+                ? `Connect your ${title} account to see its tools.`
+                : (toolsListError(server.lastError, { title, personal }) ??
+                  "Refresh tools to check again.")}
             </PageEmpty>
           ) : (
             <PageRows>

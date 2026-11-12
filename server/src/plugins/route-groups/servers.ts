@@ -275,7 +275,8 @@ export function mountServerRoutes({
       return context.json({ error: "Keep the name under 60 characters." }, 400);
     }
     const refusal = customUrlRefusal(url);
-    if (refusal) return context.json({ error: refusal }, 400);
+    if (refusal)
+      return context.json({ error: addressRefusalFor(refusal) }, 400);
 
     const isAdmin = context.var.actor.role === "admin";
     if (token && !isAdmin) {
@@ -840,4 +841,21 @@ export function serverIdFor(title: string, taken: ReadonlySet<string>): string {
     if (!taken.has(candidate)) return candidate;
   }
   return `${base}-${Date.now().toString(36)}`;
+}
+
+/**
+ * The address floor's refusal, in words for the person adding a server from Connections.
+ *
+ * `customUrlRefusal` is written for the admin's API ("this deployment", "token field"); this route is
+ * open to everybody, so each reason becomes the step they can take. Anything the floor adds later
+ * that is not mapped here gets the general sentence, never the admin one.
+ */
+export function addressRefusalFor(refusal: string): string {
+  if (refusal === "That is not a URL.")
+    return "Enter the full address, starting with https://.";
+  if (refusal === "An MCP server must be reached over https.")
+    return "Use the server's https address. OpenBot doesn't send your data over plain http.";
+  if (refusal.startsWith("Put the credential in the token field"))
+    return "Take the key out of the address and put it in the Key field.";
+  return "OpenBot can't reach that address. Use the server's public address, for example https://mcp.example.com/mcp.";
 }
