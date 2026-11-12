@@ -115,7 +115,8 @@ test("Compose reads every line back as the value it was given", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+  // Compose's first start on a fresh runner takes seconds.
+}, 30_000);
 
 /**
  * Run as start.sh runs it, from a directory with a `.env` of its own: what it writes comes from the
