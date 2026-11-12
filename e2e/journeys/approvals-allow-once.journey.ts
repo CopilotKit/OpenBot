@@ -1,5 +1,5 @@
-import { ITEMS, SITE } from "../site/site";
-import { answer, approvalCard, expectAsksToPay } from "./approval-steps";
+import { ITEMS, SITE, SITE_HOST } from "../site/site";
+import { answer, approvalCard, expectAsksToPay, PAYS } from "./approval-steps";
 import {
   expect,
   expectWholeReply,
@@ -9,7 +9,6 @@ import {
   runsSoFar,
   send,
   serveSite,
-  settingsRow,
   test,
   turnOver,
 } from "./computer-steps";
@@ -70,14 +69,29 @@ test("Allow once places one order and the next one asks again; Deny buys nothing
 
     // The same request waits on the Bots page, under Needs you, and can be answered there.
     await page.getByRole("link", { name: /^Bots/ }).click();
-    const waiting = settingsRow(page, "Fernhill Buyer wants to");
-    await expect(waiting).toContainText("Place order");
-    await expect(waiting).toContainText(
-      "Paying, buying or moving money asks you first.",
-    );
+    const board = page.getByRole("main");
+    await expect(
+      board.getByRole("heading", { name: "Waiting on you" }),
+    ).toBeVisible();
+    await expect(
+      board.getByRole("button", { name: /^Click the button “Place order”/ }),
+    ).toContainText(SITE_HOST);
+    await expect(board.getByText(PAYS)).toBeVisible();
+    // Allow and Deny on the row; the standing answers in its menu.
+    const more = board.getByRole("button", {
+      name: "More for click the button “Place order”",
+    });
+    await more.click();
+    for (const choice of ["Allow for this conversation", "Always allow here"]) {
+      await expect(page.getByRole("menuitem", { name: choice })).toBeVisible();
+    }
     await shot("waiting-on-the-bots-page");
-    await waiting.getByRole("button", { name: "Deny" }).click();
-    await expect(waiting).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await board.getByRole("button", { name: "Deny", exact: true }).click();
+    await expect(
+      board.getByRole("heading", { name: "Waiting on you" }),
+    ).toHaveCount(0);
 
     // Answered there, the conversation's card is gone and the Bot has said what came of it.
     await page.goto(`/channel/${channelId}`);
