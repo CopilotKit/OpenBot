@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { agents, credentials, users } from "./core";
 import { jsonb } from "./json";
+import type { RemoteOAuthConfig } from "./remote-oauth-config";
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -155,6 +156,14 @@ export const mcpServers = pgTable(
      * one credential the deployment holds for it, as every server added by URL always was.
      */
     entraScope: text("entra_scope"),
+    /**
+     * How a server added by URL signs each person in, when it answered OpenBot with an OAuth
+     * challenge (the MCP authorization spec): its authorization server's metadata, the resource to
+     * ask a token for, and the scope it named. Set, the server is reached as the person asking, on
+     * their own token; null, it is reached on its own key or with nothing. Discovered when the
+     * server is added and never taken from a request. See `plugins/remote-oauth.ts`.
+     */
+    oauth: jsonb("oauth").$type<RemoteOAuthConfig>(),
     /** What the deployment last heard back from it. `null` until the first successful listing. */
     toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
     /** The last failure, kept so the Plugins page can say why a server has no tools. */

@@ -147,6 +147,11 @@ export type ServerRecord = {
    */
   dynamicClient: boolean;
   /**
+   * A server added by URL that signs each person in: it answered with an OAuth challenge when it was
+   * added, so each person connects their own account and every call runs on their token.
+   */
+  signIn: boolean;
+  /**
    * How this server's authorization config was created, for the brokered rows that have one.
    *
    * WHAT WAS WRITTEN DOWN WHEN SOMEBODY ENABLED THE APP, NOT WHAT THE CATALOGUE PUBLISHES TODAY.
@@ -1128,7 +1133,16 @@ export const TOKEN_TIMEOUT_MS = 10_000;
  * show — a deliberate duplication of something that is not a secret, so that a screen listing what
  * the deployment holds does not have to decrypt anything to name it.
  */
-export type OAuthClient = { clientId: string; clientSecret: string };
+export type OAuthClient = {
+  clientId: string;
+  clientSecret: string;
+  /**
+   * How the client proves itself at the token endpoint, as the authorization server registered it.
+   * Only a server added by URL records one (`remote-oauth.ts`); the catalogue's vendors are reached
+   * the one way their entry was reviewed for.
+   */
+  authMethod?: string;
+};
 
 /**
  * Whether a value read back out of the vault is a client this deployment can actually present.

@@ -12,6 +12,7 @@ import {
   actionRecords,
   capabilitySettings,
   enterpriseSettings,
+  mcpServers,
   modelUsage,
   networkPolicies,
   scimGroups,
@@ -321,6 +322,16 @@ export function createEnterpriseStore(database: Database) {
       }
       for (const row of provisioned) names.add(row.name);
       return [...names].sort((a, b) => a.localeCompare(b));
+    },
+
+    /**
+     * Every server's id and address, so an address on the MCP allowlist can be read as the servers
+     * standing at it. See `addressApprovedServers` in `controls.ts`.
+     */
+    async serverAddresses(): Promise<{ id: string; url: string }[]> {
+      return database
+        .select({ id: mcpServers.id, url: mcpServers.url })
+        .from(mcpServers);
     },
 
     async networkPolicies(): Promise<NetworkPolicyRow[]> {
