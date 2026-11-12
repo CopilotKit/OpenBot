@@ -5,17 +5,17 @@ import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 
 /*
- * The rules OpenMuse's frame runs on, kept apart from the components so each one is a plain function
+ * The rules OpenFuse's frame runs on, kept apart from the components so each one is a plain function
  * of OpenBot's own data. None of them decides anything the server already decided: they only choose
  * which of OpenBot's records to put where.
  */
 
-export type MuseTab = "chat" | "activity" | "ideas" | "goals" | "apps";
+export type FuseTab = "chat" | "activity" | "ideas" | "goals" | "apps";
 
 /**
  * The Bot at the centre of the frame.
  *
- * OpenMuse is one agent. OpenBot has many, so the centre follows, in order: the Bot of the
+ * OpenFuse is one agent. OpenBot has many, so the centre follows, in order: the Bot of the
  * conversation on screen, the Bot the person last chose, and OpenBot's own default Bot — the same
  * `defaultAgentProfile` the home screen and `/bot` fall back to.
  */
@@ -56,7 +56,7 @@ export function mainChannel(
  * routes; Apps is OpenBot's Connections, the apps a Bot uses as you. A Bot's page, Routines,
  * Capabilities and the rest light no tab, because they are not that tab's screen.
  */
-export function tabFor(pathname: string): MuseTab | null {
+export function tabFor(pathname: string): FuseTab | null {
   if (pathname === "/s/activity") return "activity";
   if (pathname === "/s/ideas") return "ideas";
   if (pathname === "/s/goals") return "goals";
@@ -75,7 +75,7 @@ export function tabFor(pathname: string): MuseTab | null {
 }
 
 /**
- * Whether the page stays in OpenMuse's 760px column on a wide screen. A tab's own screen does. Every
+ * Whether the page stays in OpenFuse's 760px column on a wide screen. A tab's own screen does. Every
  * other OpenBot page, and a conversation with its Bot's computer or settings open beside it, gets
  * OpenBot's own width, so its wide layouts and side panels have the room they were built for.
  */
@@ -87,7 +87,7 @@ const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
- * The line under the Bot's name: what it is doing right now, in OpenMuse's own words.
+ * The line under the Bot's name: what it is doing right now, in OpenFuse's own words.
  *
  * Something waiting on the person outranks work in progress, because it is the one thing on this
  * line they can act on. Work comes from the roster the channel socket keeps live, so the line

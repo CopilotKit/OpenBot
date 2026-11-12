@@ -36,7 +36,7 @@ every deployment:
 
 - **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
   close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
-  button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
+  button of every page opened over the app. OpenDots and OpenFuse had their own controls under them
   too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
   In a browser and on Windows nothing moves.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
@@ -3315,11 +3315,11 @@ channel, with shorter text that says what to do next. Text written for the model
 - A Bot's page shows at most three things running or scheduled; the full lists move to its Activity
   page. A conversation's gear panel gains Pin and Delete, and Home's @ menu opens at the caret.
 
-### Each person can pick a skin: OpenDuet, OpenDots or OpenMuse
+### Each person can pick a skin: OpenDuet, OpenDots or OpenFuse
 
 Settings → Preferences → Skin changes how OpenBot looks for you, not what it does: OpenDuet (one
 phone-width column), OpenDots (a rail, a sidebar of Bots, the Bot's computer beside the chat) or
-OpenMuse (one Bot at the centre). Each draws an open-source template's layout over OpenBot's own
+OpenFuse (one Bot at the centre). Each draws an open-source template's layout over OpenBot's own
 features and keeps the name from `brand.yaml`. The choice is saved on your account. Template
 features with no OpenBot server, such as OpenDots' Spaces, are left out.
 

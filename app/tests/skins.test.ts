@@ -47,8 +47,8 @@ describe("skin preference", () => {
     const setRootSkin = (id: string | null) => roots.push(id);
 
     expect(reconcileSkin("retired-skin", { setRootSkin })).toBe(DEFAULT_SKIN);
-    expect(reconcileSkin("openmuse", { setRootSkin })).toBe("openmuse");
-    expect(roots).toEqual([null, "openmuse"]);
+    expect(reconcileSkin("openfuse", { setRootSkin })).toBe("openfuse");
+    expect(roots).toEqual([null, "openfuse"]);
   });
 
   test("every skin is registered under its own id", () => {

@@ -39,7 +39,7 @@ const NARROWEST_WIDTH = 720;
 
 type Case = {
   name: string;
-  skin: "openduet" | "opendots" | "openmuse";
+  skin: "openduet" | "opendots" | "openfuse";
   path: string;
   width: number;
   /** Whether the desktop app offers an update, so the update notice is drawn across the top. */
@@ -140,15 +140,15 @@ const CASES: Case[] = [
     corner: ['[data-testid="opendots-wordmark"]'],
   },
   {
-    name: "openmuse-narrowest",
-    skin: "openmuse",
+    name: "openfuse-narrowest",
+    skin: "openfuse",
     path: "/",
     width: NARROWEST_WIDTH,
     corner: ['button[aria-label="Open conversations and menu"]'],
   },
   {
-    name: "openmuse-update",
-    skin: "openmuse",
+    name: "openfuse-update",
+    skin: "openfuse",
     path: "/",
     width: NARROWEST_WIDTH,
     update: true,
@@ -403,10 +403,10 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
       "opendots-narrowest-drawer": {
         '[data-testid="opendots-wordmark"]': { x: 12, y: 23 },
       },
-      "openmuse-narrowest": {
+      "openfuse-narrowest": {
         'button[aria-label="Open conversations and menu"]': { x: 20, y: 16 },
       },
-      "openmuse-update": {
+      "openfuse-update": {
         '[aria-label="OpenBot update"] p': { x: 16, y: 11 },
       },
     };
