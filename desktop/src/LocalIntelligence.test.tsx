@@ -991,23 +991,23 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
 });
 
 /**
- * 1.0.2 on a Mac with the person's own 4-CPU Podman machine: "OpenBot has 3.9 free CPUs. It needs
- * 4. Stop your Podman machine, run podman machine set --cpus 6, start it again, then Retry." The CLI
- * counts free CPUs, the machine's less what already runs in it, so the 4-CPU machine measured 3.9.
- * The row now says that, and OpenBot offers to make the machine bigger and sets up again after.
+ * A person's own Podman machine with fewer CPUs than the CLI's 4 used to stop at one sentence with
+ * a command crammed into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman
+ * machine set --cpus 6, start it again, then Retry." The row now says what happened, and OpenBot
+ * offers to make the machine bigger and sets up again after.
  */
 const cpuShortOnPodman = report({
   outcome: "failed",
   stack: null,
   reason: "resources-short",
-  // As `local_eval.rs` reads "Docker available resources: 3.9124 CPUs (requires 4), 5.2 GiB RAM
-  // available (requires 4), 51 GiB free storage (requires 40)." on Podman.
+  // As `local_eval.rs` reads the rc.12 CLI's "Docker available resources: 2 CPUs (requires 4),
+  // 5.2 GiB RAM available (requires 4), 51 GiB free storage (requires 40)." on Podman.
   shortfall: {
     podman: true,
     cpu: true,
     memory: false,
     disk: false,
-    cpus: "3.9",
+    cpus: "2",
     memoryGb: "5.2",
     diskGb: "51",
   },
@@ -1015,14 +1015,14 @@ const cpuShortOnPodman = report({
 // `machine_size::plan` for that machine on a 10-CPU Mac.
 const resizeToSix = {
   machine: "podman-machine-default",
-  cpus: 4,
+  cpus: 2,
   memoryMib: 6144,
   toCpus: 6,
   toMemoryMib: 6144,
   forThem: true,
 };
 
-test("a 4-CPU Podman machine measured at 3.9 free CPUs says why, and Resize makes it bigger and sets up again", async () => {
+test("a 2-CPU Podman machine says so, and Resize makes it bigger and sets up again", async () => {
   invokeHandler = answers({
     set_up_local_eval: [cpuShortOnPodman, report()],
     podman_machine_plan: [resizeToSix],
@@ -1043,7 +1043,7 @@ test("a 4-CPU Podman machine measured at 3.9 free CPUs says why, and Resize make
     name: "OpenBot can fix this for you",
   });
   expect(row(screen, SETUP).textContent).toContain(
-    "Your Podman machine has 4 CPUs, and what's already running in it uses some, so 3.9 are free. OpenBot needs 4 free.",
+    "Your Podman machine has 2 CPUs. OpenBot needs 4.",
   );
   // The command is not crammed into the sentence any more.
   expect(row(screen, SETUP).textContent).not.toContain("podman machine set");

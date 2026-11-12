@@ -1,11 +1,9 @@
 //! A Podman machine too small for local setup, made bigger for the person on a Mac once they say so.
 //!
-//! **Why a 4-CPU machine fails "4 CPUs".** The CLI's resource check at `local setup` measures free
-//! CPUs, not the machine's size: the engine's `NCPU` less what the containers running in it use
-//! over a one-second sample (`measureLocalResources` in the CLI's `local-resources.ts`). A machine
-//! with 4 CPUs and anything at all running in it, the person's own containers included, measures
-//! 3.9 or so and is refused against a requirement of 4. Only a bigger machine passes, so that is
-//! what is offered: enough CPUs that what is running now still leaves 4 free, with one to spare.
+//! **What the CLI asks of it.** Its resource check at `local setup` wants 4 CPUs in all (the
+//! engine's `NCPU`, whatever runs in it) and 4 GiB of memory free for new containers, measured inside
+//! the machine (`measureLocalResources` in the CLI's `local-resources.ts`). A machine short of either
+//! is raised to at least 6 CPUs, or to enough memory for what runs in it plus the 4 GiB free.
 //!
 //! **What Podman allows, in Podman 6.1.** `podman machine set --cpus N --memory MiB NAME` changes
 //! a machine's size, and only while it is stopped: applehv and libkrun answer "unable to change
@@ -27,8 +25,8 @@ use serde_json::Value;
 
 use crate::acquire::{self, Containers, MACHINE};
 
-/// What the CLI needs free: CPUs, and GiB of memory available to new containers.
-const FREE_CPUS: f64 = 4.0;
+/// What the CLI needs: CPUs in all, and memory available to new containers.
+const NEEDED_CPUS: u64 = 4;
 const FREE_MEMORY_MIB: f64 = 4.0 * 1024.0;
 /// The least a too-small machine is raised to, as the manual step always said.
 pub const CPUS: u64 = 6;
@@ -46,8 +44,7 @@ pub struct Short {
     pub memory: bool,
     #[serde(default)]
     pub disk: bool,
-    /// What it measured free, as the window says it: "3.9".
-    pub cpus: Option<String>,
+    /// The GiB of memory it measured free, as the window says it: "2.9".
     pub memory_gb: Option<String>,
     #[serde(default)]
     pub wsl: bool,
@@ -105,10 +102,10 @@ pub fn inspected(listing: &str, name: &str) -> Result<(Size, bool), String> {
 /**
 How big `machine` would have to be for what the CLI found short, on a computer of size `host`.
 
-CPUs: what runs now (its size less what the CLI found free) plus the 4 the CLI wants free, plus
-one to spare, and never under `CPUS`. Memory likewise in whole GiB, with 2 GiB to spare for what
-the machine keeps for itself, never under `MEMORY_MIB`, and never so much that the Mac keeps less
-than `LEFT_FOR_THE_MAC_MIB`. Neither goes past this computer, nor below what the machine has.
+CPUs: `CPUS`, as the CLI counts every CPU the machine has. Memory: what runs in it now (its size
+less what the CLI found free) plus the 4 GiB the CLI wants free, in whole GiB with 2 to spare for
+what the machine keeps for itself, never under `MEMORY_MIB`, and never so much that the Mac keeps
+less than `LEFT_FOR_THE_MAC_MIB`. Neither goes past this computer, nor below what the machine has.
 
 `None` when making it bigger is no answer: nothing it could be given is short, a WSL machine, or
 this computer has no more to give.
@@ -120,10 +117,7 @@ pub fn plan(machine: &str, size: Size, host: Size, short: &Short, mac: bool) -> 
     let measured =
         |said: &Option<String>| said.as_deref().and_then(|said| said.parse::<f64>().ok());
     let to_cpus = if short.cpu {
-        let free = measured(&short.cpus).unwrap_or(0.0);
-        let used = (size.cpus as f64 - free).max(0.0);
-        let wanted = (used + FREE_CPUS).ceil() as u64 + 1;
-        wanted.max(CPUS).min(host.cpus).max(size.cpus)
+        CPUS.min(host.cpus).max(size.cpus)
     } else {
         size.cpus
     };
@@ -138,8 +132,8 @@ pub fn plan(machine: &str, size: Size, host: Size, short: &Short, mac: bool) -> 
     } else {
         size.memory_mib
     };
-    let raised =
-        (!short.cpu || to_cpus > size.cpus) && (!short.memory || to_memory_mib > size.memory_mib);
+    let raised = (!short.cpu || to_cpus >= NEEDED_CPUS.max(size.cpus + 1))
+        && (!short.memory || to_memory_mib > size.memory_mib);
     raised.then(|| Plan {
         machine: machine.to_string(),
         cpus: size.cpus,
@@ -325,12 +319,12 @@ mod tests {
         )
     }
 
-    /// The report's shortfall for the CLI's "3.9 CPUs (requires 4), 5.2 GiB RAM available
+    /// The report's shortfall for the rc.12 CLI's "2 CPUs (requires 4), 5.2 GiB RAM available
     /// (requires 4), 51 GiB free storage (requires 40)", as `local_eval::shortfall_of` reads it.
-    fn cpu_short(free: &str) -> Short {
+    /// The CLI counts every CPU the machine has.
+    fn cpu_short() -> Short {
         Short {
             cpu: true,
-            cpus: Some(free.to_string()),
             memory_gb: Some("5.2".to_string()),
             ..Short::default()
         }
@@ -341,63 +335,43 @@ mod tests {
         memory_mib: 16 * 1024,
     };
 
-    /// The reported case: a 4-CPU machine with containers of the person's running in it measured
-    /// 3.9 free against 4. Not a rounding slip: anything running leaves a 4-CPU machine short.
-    /// Raised to 6, which leaves 5.9 free.
+    const TWO: Size = Size {
+        cpus: 2,
+        memory_mib: 6144,
+    };
+
+    /// A 2-CPU machine, short of the CLI's 4, is raised to 6 and nothing else about it changes.
     #[test]
-    fn a_four_cpu_machine_measured_at_3_9_free_is_raised_to_6() {
-        let mine = Size {
-            cpus: 4,
-            memory_mib: 6144,
-        };
-        let plan = plan("podman-machine-default", mine, MAC, &cpu_short("3.9"), true)
+    fn a_two_cpu_machine_is_raised_to_6() {
+        let plan = plan("podman-machine-default", TWO, MAC, &cpu_short(), true)
             .expect("a bigger machine fixes it");
         assert_eq!(
             plan,
             Plan {
                 machine: "podman-machine-default".to_string(),
-                cpus: 4,
+                cpus: 2,
                 memory_mib: 6144,
                 to_cpus: 6,
                 to_memory_mib: 6144,
                 for_them: true,
             }
         );
-        // What the CLI then measures with the same containers running: 6 less the same 0.1.
-        assert!(plan.to_cpus as f64 - (4.0 - 3.9) >= FREE_CPUS);
+        assert!(plan.to_cpus >= NEEDED_CPUS);
     }
 
-    /// The CLI's other numbers, from `local_eval`'s own fixtures: busier machines get what they need.
+    /// Never past this computer: a 4-CPU Mac gives 4, which is enough. A Mac with fewer than 4 CPUs
+    /// can never give the machine 4, so nothing is offered and the row's sentence stands alone.
     #[test]
-    fn a_busy_machine_gets_enough_for_what_runs_in_it() {
-        let six = Size {
-            cpus: 6,
-            memory_mib: 8192,
-        };
-        // 6 CPUs, 2.5 used, 3.5 free: 2.5 + 4 = 6.5, so 7, and one to spare.
+    fn cpus_never_go_past_this_mac_and_too_few_offers_nothing() {
+        let four_mac = Size { cpus: 4, ..MAC };
         assert_eq!(
-            plan("m", six, MAC, &cpu_short("3.5"), true)
+            plan("m", TWO, four_mac, &cpu_short(), true)
                 .unwrap()
                 .to_cpus,
-            8
+            4
         );
-        // Never past this computer: an 8-CPU Mac gives 8.
-        let small_mac = Size { cpus: 8, ..MAC };
-        assert_eq!(
-            plan("m", six, small_mac, &cpu_short("1.2"), true)
-                .unwrap()
-                .to_cpus,
-            8
-        );
-        // A 4-CPU Mac has no more to give: nothing to offer, the sentence alone.
-        let four = Size {
-            cpus: 4,
-            memory_mib: 6144,
-        };
-        assert_eq!(
-            plan("m", four, Size { cpus: 4, ..MAC }, &cpu_short("3.9"), true),
-            None
-        );
+        let three_mac = Size { cpus: 3, ..MAC };
+        assert_eq!(plan("m", TWO, three_mac, &cpu_short(), true), None);
     }
 
     /// "Docker memory: 7.6 GiB total, 2.9 GiB available to new containers (requires 4 GiB
@@ -445,19 +419,15 @@ mod tests {
         };
         let with_disk = Short {
             disk: true,
-            ..cpu_short("3.9")
+            ..cpu_short()
         };
-        assert!(!plan("m", four, MAC, &with_disk, true).unwrap().for_them);
-        assert!(
-            !plan("m", four, MAC, &cpu_short("3.9"), false)
-                .unwrap()
-                .for_them
-        );
+        assert!(!plan("m", TWO, MAC, &with_disk, true).unwrap().for_them);
+        assert!(!plan("m", TWO, MAC, &cpu_short(), false).unwrap().for_them);
         let wsl = Short {
             wsl: true,
-            ..cpu_short("3.9")
+            ..cpu_short()
         };
-        assert_eq!(plan("m", four, MAC, &wsl, true), None);
+        assert_eq!(plan("m", TWO, MAC, &wsl, true), None);
         assert_eq!(plan("m", four, MAC, &Short::default(), true), None);
     }
 
@@ -541,7 +511,7 @@ mod tests {
     /// containers running again, with nothing else of theirs touched.
     #[test]
     fn resizing_the_persons_machine_brings_it_and_its_containers_back_bigger() {
-        let mut podman = FakePodman::new("podman-machine-default", 4, 6144);
+        let mut podman = FakePodman::new("podman-machine-default", 2, 6144);
         resize_with(
             "podman-machine-default",
             Size {
@@ -579,7 +549,7 @@ mod tests {
     /// the refusal is the answer.
     #[test]
     fn a_refused_size_still_starts_the_machine_again() {
-        let mut podman = FakePodman::new("mine", 4, 6144);
+        let mut podman = FakePodman::new("mine", 2, 6144);
         let refused = resize_with(
             "mine",
             Size {
@@ -597,7 +567,7 @@ mod tests {
         assert_eq!(
             podman.size,
             Size {
-                cpus: 4,
+                cpus: 2,
                 memory_mib: 6144
             }
         );
@@ -661,11 +631,11 @@ mod tests {
     #[test]
     fn the_windows_shortfall_reads() {
         let short: Short = serde_json::from_str(
-            r#"{"podman":true,"cpu":true,"memory":false,"disk":false,"cpus":"3.9","memoryGb":"5.2","diskGb":"51"}"#,
+            r#"{"podman":true,"cpu":true,"memory":false,"disk":false,"cpus":"2","memoryGb":"5.2","diskGb":"51"}"#,
         )
         .unwrap();
         assert!(short.cpu && !short.memory && !short.disk && !short.wsl);
-        assert_eq!(short.cpus.as_deref(), Some("3.9"));
+        assert_eq!(short.memory_gb.as_deref(), Some("5.2"));
     }
 
     #[test]

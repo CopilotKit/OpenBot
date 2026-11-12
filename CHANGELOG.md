@@ -34,17 +34,18 @@ every deployment:
 
 ### OpenBot Desktop
 
-- **A Podman machine too small for setup is resized for you on a Mac.** Setup needs 4 free CPUs,
-  counted as the machine's CPUs less what is already running in it, so a 4-CPU machine with any of
-  your containers running measured 3.9 and stopped with "OpenBot has 3.9 free CPUs. It needs 4."
-  and a command squeezed into the sentence. The row now says your machine's size and why less is
-  free, and OpenBot offers **Resize my Podman**: once you click it, it stops your machine, raises
-  whichever of its CPUs and memory is short to what setup needs (at least 6 CPUs or 8 GB, never
-  more than your Mac has),
-  starts it again with the containers that were running in it, and carries on setting up. Nothing
-  else about your machine changes. Where OpenBot can't do it (your disk is short too, or Podman
-  refused the change), the same fix is three numbered steps, each command in its own block with
-  Copy, then Retry.
+- **A Podman machine too small for setup is resized for you on a Mac.** Setup needs 4 CPUs and
+  4 GB of free memory. A Podman machine with less stopped at one sentence with a command squeezed
+  into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman machine set
+  --cpus 6, start it again, then Retry." The row now says only what happened ("Your Podman machine
+  has 2 CPUs. OpenBot needs 4."), and OpenBot offers **Resize my Podman**: once you click it, it
+  stops your machine, raises whichever of its CPUs and memory is short to what setup needs (at
+  least 6 CPUs or 8 GB, never more than your Mac has), starts it again with the containers that
+  were running in it, and carries on setting up. Nothing else about your machine changes. Where
+  OpenBot can't do it (your disk is short too, or Podman refused the change), the same fix is three
+  numbered steps, each command in its own block with Copy, then Retry. Setup's other messages about
+  CPUs now count them as setup does, in all: "Docker Desktop has 2 CPUs. OpenBot needs 4.", where
+  they said "free CPUs".
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start

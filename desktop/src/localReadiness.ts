@@ -145,7 +145,7 @@ function shortfallSaid(
   // Docker Desktop is where the person raises Docker's limits, so it is named. OpenBot's own Podman
   // machine is OpenBot to them, except in the command that raises its limits.
   const engine = shortfall.podman ? "OpenBot" : "Docker Desktop";
-  // "OpenBot has 2 free CPUs. It needs 4." rather than naming OpenBot twice.
+  // "OpenBot has 2 CPUs. It needs 4." rather than naming OpenBot twice.
   const needsWho = shortfall.podman ? "It needs" : "OpenBot needs";
   const short = (["cpu", "memory", "disk"] as const).filter(
     (resource) => shortfall[resource],
@@ -188,7 +188,8 @@ function shortfallSaid(
   }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
-    cpu: shortfall.cpus && `${shortfall.cpus} free CPUs`,
+    // The CLI counts every CPU the engine has (its `NCPU`), not the ones left free.
+    cpu: shortfall.cpus && `${shortfall.cpus} CPUs`,
     memory: shortfall.memoryGb && `${shortfall.memoryGb} GB of free memory`,
     disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
@@ -237,20 +238,20 @@ const needed: Record<Resource, string> = {
   disk: "40 GB",
 };
 const neededFully: Record<Resource, string> = {
-  cpu: "4 free CPUs",
+  cpu: "4 CPUs",
   memory: "4 GB of free memory",
   disk: "40 GB of free disk space",
 };
 
 /**
- * The CLI's resource check at Start: 4 free CPUs, 4 GB of free memory and 40 GB of free disk, with
- * OpenBot's own containers running.
+ * The CLI's resource check at Start: 4 CPUs in all, and 4 GB of free memory and 40 GB of free disk
+ * with OpenBot's own containers running.
  */
 export function resourcesShortSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
     {
-      cpu: "4 free CPUs",
+      cpu: "4 CPUs",
       memory: "4 GB of free memory",
       disk: "40 GB free",
     },
@@ -266,11 +267,9 @@ function gb(mib: number): string {
 
 /**
  * What happened, when setup found the person's Podman machine too small and OpenBot knows its size
- * (`podmanMachinePlan`). What to do is the fix card's (`PodmanTooSmall`), so it is not said here.
- *
- * The CLI counts free CPUs: the machine's, less what is already running in it. A 4-CPU machine
- * with anything running measures 3.9, and "OpenBot has 3.9 free CPUs. It needs 4." read as a
- * mistake to the person who reported it. So the machine's own size is said, and why less is free.
+ * (`podmanMachinePlan`): its own size, beside what OpenBot needs. What to do is the fix card's
+ * (`PodmanTooSmall`), so it is not said here. CPUs are the machine's in all, as the CLI counts them;
+ * memory is what is free in it.
  */
 export function podmanTooSmallSaid(
   shortfall: Shortfall,
@@ -284,15 +283,11 @@ export function podmanTooSmallSaid(
     return `Your Podman machine doesn't have enough ${listed(short.map((resource) => resourceName[resource]))} for OpenBot.`;
   }
   if (shortfall.cpu && shortfall.memory) {
-    return shortfall.cpus && shortfall.memoryGb
-      ? `${has} ${shortfall.cpus} free CPUs and ${shortfall.memoryGb} GB of free memory. OpenBot needs 4 free CPUs and 4 GB of free memory.`
-      : `${has} ${plan.cpus} CPUs and ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 free CPUs and 4 GB of free memory.`;
+    return shortfall.memoryGb
+      ? `${has} ${plan.cpus} CPUs and ${shortfall.memoryGb} GB of free memory. OpenBot needs 4 CPUs and 4 GB of free memory.`
+      : `${has} ${plan.cpus} CPUs and ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 CPUs and 4 GB of free memory.`;
   }
-  if (shortfall.cpu) {
-    return shortfall.cpus && Number(shortfall.cpus) < plan.cpus
-      ? `${has} ${plan.cpus} CPUs, and what's already running in it uses some, so ${shortfall.cpus} are free. OpenBot needs 4 free.`
-      : `${has} ${plan.cpus} CPUs. OpenBot needs 4 free.`;
-  }
+  if (shortfall.cpu) return `${has} ${plan.cpus} CPUs. OpenBot needs 4.`;
   return shortfall.memoryGb
     ? `${has} ${gb(plan.memoryMib)} GB of memory, and ${shortfall.memoryGb} GB of it is free. OpenBot needs 4 GB free.`
     : `${has} ${gb(plan.memoryMib)} GB of memory. OpenBot needs 4 GB free.`;
