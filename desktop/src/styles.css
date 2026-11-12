@@ -1897,6 +1897,31 @@ main > .sheet > * {
 }
 
 /*
+ * The first screen at the window's smallest height (720 by 560): its three places, the booking line
+ * and Install fit without scrolling, the rows and gaps a step tighter. Taller windows keep their room.
+ */
+@media (max-height: 640px) {
+  main > .sheet:has(> fieldset.picker.places) {
+    padding-block: 24px;
+  }
+  .sheet:has(> fieldset.picker.places) .lockup {
+    margin-bottom: 16px;
+  }
+  fieldset.picker.places {
+    gap: 6px;
+  }
+  fieldset.picker.places .tile {
+    padding-block: 8px;
+  }
+  .sheet:has(> fieldset.picker.places) > .footnote {
+    margin-top: 12px;
+  }
+  .sheet:has(> fieldset.picker.places) > .row {
+    margin-top: 16px;
+  }
+}
+
+/*
  * A setup step's foot stays in view: its actions and the background install's row, pinned to the
  * bottom of the card's visible area while the step scrolls above them (`StepFooter`). On Windows F
  * the AI step was taller than the window and the background row sat below the fold; with only the
