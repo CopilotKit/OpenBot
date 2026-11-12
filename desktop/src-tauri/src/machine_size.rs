@@ -638,6 +638,38 @@ mod tests {
         assert_eq!(short.memory_gb.as_deref(), Some("5.2"));
     }
 
+    /// A machine that stays running when its size is set (its stop did nothing, say) is refused as
+    /// applehv refuses it, and is left running, its size as it was.
+    #[test]
+    fn a_machine_still_running_at_set_is_refused_and_left_running() {
+        let mut podman = FakePodman::new("mine", 2, 6144);
+        let refused = resize_with(
+            "mine",
+            Size {
+                cpus: 6,
+                memory_mib: 6144,
+            },
+            &mut |args: &[&str]| match args {
+                ["machine", "stop", _] => Ok(String::new()),
+                ["machine", "start", machine] if podman.running => Err(format!(
+                    "Error: unable to start \"{machine}\": already running"
+                )),
+                _ => podman.run(args),
+            },
+            |_| panic!("not OpenBot's own machine"),
+        )
+        .expect_err("set on a running machine");
+        assert!(refused.contains("unless vm is stopped"), "{refused}");
+        assert_eq!(
+            podman.size,
+            Size {
+                cpus: 2,
+                memory_mib: 6144
+            }
+        );
+        assert!(podman.running);
+    }
+
     #[test]
     fn a_real_inspect_reads() {
         let (size, running) =
@@ -650,5 +682,170 @@ mod tests {
             }
         );
         assert!(!running);
+    }
+}
+
+/**
+The button's whole path on a real Mac, against a throwaway rootful machine only (`OPENBOT_LIVE_RESIZE`,
+running, 2 CPUs and 4 GiB, with a container running in each of its engines). OpenBot is pointed at it
+through its `-root` connection as the app points the CLI at its engine; the default connection and
+every other machine are left alone. Run by hand:
+
+```text
+podman machine init obot-resize-test --cpus 2 --memory 4096 --rootful --now
+podman --connection obot-resize-test-root run -d docker.io/library/alpine:3.20 sleep infinity
+podman --connection obot-resize-test run -d docker.io/library/alpine:3.20 sleep infinity
+OPENBOT_LIVE_RESIZE=obot-resize-test \
+  cargo test --lib machine_size::live -- --ignored --nocapture --test-threads=1
+podman machine rm -f obot-resize-test
+```
+*/
+#[cfg(all(test, target_os = "macos"))]
+mod live {
+    use super::*;
+
+    fn podman(args: &[&str]) -> String {
+        acquire::podman(args).unwrap_or_else(|error| panic!("podman {args:?}: {error}"))
+    }
+
+    fn default_connection() -> String {
+        podman(&[
+            "system",
+            "connection",
+            "list",
+            "--format",
+            "{{if .Default}}{{.Name}}{{end}}",
+        ])
+    }
+
+    /// The machine as `podman machine inspect` has it, less what a restart changes by itself.
+    fn inspected_whole(name: &str) -> Value {
+        let mut listing: Value =
+            serde_json::from_str(&podman(&["machine", "inspect", name])).unwrap();
+        let machine = listing.get_mut(0).unwrap().as_object_mut().unwrap();
+        machine.remove("LastUp");
+        machine.clone().into()
+    }
+
+    fn without_size(machine: &Value) -> Value {
+        let mut machine = machine.clone();
+        let resources = machine["Resources"].as_object_mut().unwrap();
+        resources.remove("CPUs");
+        resources.remove("Memory");
+        machine
+    }
+
+    fn sorted(mut containers: Containers) -> Containers {
+        for (_, ids) in &mut containers {
+            ids.sort();
+        }
+        containers.sort();
+        containers
+    }
+
+    #[test]
+    #[ignore = "stops, resizes and starts the throwaway Podman machine named in OPENBOT_LIVE_RESIZE"]
+    fn the_button_resizes_a_real_machine_and_a_refusal_leaves_it_as_it_was() {
+        let name = std::env::var("OPENBOT_LIVE_RESIZE").expect("OPENBOT_LIVE_RESIZE");
+        let default_before = default_connection();
+        let before = inspected_whole(&name);
+        println!("[live] before: {before}");
+        assert_eq!(before["State"], "running", "start {name} first");
+        assert_eq!(
+            before["Rootful"], true,
+            "{name} must be rootful, as OpenBot's machine is"
+        );
+        let containers = sorted(acquire::running_containers(&name));
+        println!("[live] containers running in {name}: {containers:?}");
+        assert!(!containers.is_empty(), "start a container in {name} first");
+
+        // OpenBot points the CLI at the machine's rootful connection, as the app does.
+        crate::local_eval::use_engine(&crate::engine::Address::new(
+            crate::engine::Engine::Podman,
+            Some(acquire::connection_for(&name, true)),
+        ));
+        assert_eq!(
+            crate::local_eval::engine_machine().as_deref(),
+            Some(name.as_str())
+        );
+
+        // What the CLI found: 2 CPUs of 4, and too little memory free in a 4 GiB machine.
+        let short = Short {
+            cpu: true,
+            memory: true,
+            memory_gb: Some("2.9".to_string()),
+            ..Short::default()
+        };
+        let host = host().expect("this Mac's size");
+        let plan = plan_here(&short).expect("a bigger machine is the answer");
+        println!("[live] this Mac: {host:?}; plan: {plan:?}");
+        assert_eq!(plan.machine, name);
+        assert_eq!((plan.cpus, plan.memory_mib), (2, 4096));
+        assert_eq!(plan.to_cpus, CPUS.min(host.cpus));
+        assert!(plan.to_memory_mib >= MEMORY_MIB);
+        assert!(plan.for_them);
+
+        // Yes: stopped, set, started, its containers running again.
+        let started = std::time::Instant::now();
+        resize_here(Size {
+            cpus: plan.to_cpus,
+            memory_mib: plan.to_memory_mib,
+        })
+        .expect("resized");
+        println!("[live] resized in {:?}", started.elapsed());
+        let after = inspected_whole(&name);
+        println!("[live] after: {after}");
+        assert_eq!(after["State"], "running");
+        assert_eq!(after["Resources"]["CPUs"], plan.to_cpus);
+        assert_eq!(after["Resources"]["Memory"], plan.to_memory_mib);
+        assert_eq!(
+            without_size(&after),
+            without_size(&before),
+            "only CPUs and memory change"
+        );
+        assert_eq!(sorted(acquire::running_containers(&name)), containers);
+        let root = acquire::connection_for(&name, true);
+        let cpus_inside = podman(&["--connection", &root, "info", "--format", "{{.Host.CPUs}}"]);
+        println!("[live] CPUs the engine sees now: {cpus_inside}");
+        assert_eq!(cpus_inside, plan.to_cpus.to_string());
+
+        // Refused by Podman: more CPUs than this Mac has. Started again as it was.
+        let refused = resize_here(Size {
+            cpus: host.cpus + 1,
+            memory_mib: plan.to_memory_mib,
+        })
+        .expect_err("more CPUs than this Mac has");
+        println!("[live] refused: {refused}");
+        assert!(
+            refused.contains("greater than number of host CPUs"),
+            "{refused}"
+        );
+        assert_eq!(inspected_whole(&name), after, "a refusal changes nothing");
+        assert_eq!(sorted(acquire::running_containers(&name)), containers);
+
+        // Refused by Podman: still running when its size is set. Left running as it was.
+        let refused = resize_with(
+            &name,
+            Size {
+                cpus: plan.to_cpus + 1,
+                memory_mib: plan.to_memory_mib,
+            },
+            &mut |args: &[&str]| match args {
+                ["machine", "stop", _] => Ok(String::new()),
+                _ => acquire::podman(args),
+            },
+            |_| panic!("not OpenBot's own machine"),
+        )
+        .expect_err("set on a running machine");
+        println!("[live] refused while running: {refused}");
+        assert!(refused.contains("unless vm is stopped"), "{refused}");
+        assert_eq!(inspected_whole(&name), after, "a refusal changes nothing");
+        assert_eq!(sorted(acquire::running_containers(&name)), containers);
+
+        assert_eq!(
+            default_connection(),
+            default_before,
+            "the default connection is left alone"
+        );
     }
 }

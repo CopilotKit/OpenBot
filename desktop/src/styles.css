@@ -1652,6 +1652,12 @@ a:hover {
   flex: none;
 }
 
+/* "Restarting your Podman machine" keeps the gap the buttons it replaces had under the paragraph:
+   `.local-alert p` takes every margin off, the status line's own included. */
+.podman-too-small .status-line {
+  margin-top: 12px;
+}
+
 /*
  * On the first screen the line keeps the height of its tallest state, the line, the bar and the
  * bytes under it, whatever it says: the usage-data text under it never moves (`EarlyDownloadsLine`).
