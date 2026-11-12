@@ -1563,6 +1563,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "the other writer is the server's own lock, which runs in the OpenBot server image"]
     fn credential_lock_excludes_bun_in_both_directions_and_recovers_after_kill() {
         use std::process::Stdio;
         let root = crate::test_support::temp_root("provider-oauth-cross-writer");
@@ -1610,6 +1611,7 @@ mod tests {
     /// PowerShell starts 20 seconds late and Bun still takes the lock and gives it back.
     #[cfg(windows)]
     #[test]
+    #[ignore = "the other writer is the server's own lock, which runs in the OpenBot server image"]
     fn credential_lock_waits_for_a_windows_powershell_that_starts_slowly() {
         use std::process::Stdio;
         let root = crate::test_support::temp_root("provider-oauth-slow-powershell");
