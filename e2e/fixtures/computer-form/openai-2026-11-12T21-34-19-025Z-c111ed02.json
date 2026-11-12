@@ -1,0 +1,73 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Go to http://host.docker.internal:46600/volunteer and fill in the volunteer form for me in one go: full name Robin Okafor, email robin.okafor@example.org, preferred shift Saturday morning, and tick the code of conduct box. Fill in all three fields and tick the box together, in a single step from one snapshot. Then submit it and tell me the reference number in one plain sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "I’m opening the volunteer form and will complete the requested details.",
+        "toolCalls": [
+          {
+            "name": "computer_navigate",
+            "arguments": "{\"url\":\"http://host.docker.internal:46600/volunteer\"}",
+            "id": "call_0szWOYa5xj2R0ky4x9YTMIV6"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 840,
+        "interChunkDelaysMs": [
+          5,
+          569,
+          163,
+          0,
+          5,
+          2,
+          3,
+          4,
+          2,
+          2,
+          5,
+          2,
+          1,
+          0,
+          0,
+          0,
+          5,
+          23,
+          111,
+          5,
+          3,
+          5,
+          0,
+          0,
+          2,
+          0,
+          0,
+          9,
+          3,
+          1,
+          0,
+          3,
+          1,
+          4,
+          1,
+          29,
+          0,
+          3,
+          133,
+          8,
+          194
+        ],
+        "totalDurationMs": 2146
+      },
+      "metadata": {
+        "systemHash": "7a8bda2d",
+        "toolsHash": "6d7140c9"
+      }
+    }
+  ]
+}

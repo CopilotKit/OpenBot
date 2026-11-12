@@ -1,0 +1,36 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Order the marigold seeds from http://host.docker.internal:46600/shop/marigold for me, then reply with just the order number.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 5,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "FH-2043"
+      },
+      "recordedTimings": {
+        "ttftMs": 620,
+        "interChunkDelaysMs": [
+          5,
+          1054,
+          9,
+          3,
+          4,
+          16,
+          0,
+          70,
+          2,
+          22,
+          233
+        ],
+        "totalDurationMs": 2038
+      },
+      "metadata": {
+        "systemHash": "86bf5553",
+        "toolsHash": "128a9f57"
+      }
+    }
+  ]
+}

@@ -21,19 +21,40 @@ export const LOGS = join(ARTIFACTS, "logs");
 /** Recorded fixtures, one directory per journey. */
 export const FIXTURES = join(E2E, "fixtures");
 
-export const COMPOSE_PROJECT = "openbot-e2e";
+/**
+ * A second run on the same machine, from another checkout, gets a stack of its own with
+ * `E2E_PORT_OFFSET=1000` (or 2000, …): every port below moves up by it, and the compose project is
+ * `openbot-e2e-1000`, so neither run sees, reuses or stops the other's stack. A multiple of 1000,
+ * so one run's ports never land on another's. Unset, the run is on 46xxx in `openbot-e2e`.
+ */
+const PORT_OFFSET = portOffset(process.env.E2E_PORT_OFFSET);
+
+function portOffset(value: string | undefined): number {
+  if (!value) return 0;
+  const offset = Number(value);
+  if (!Number.isInteger(offset) || offset < 0 || offset % 1000 !== 0) {
+    throw new Error(
+      `E2E_PORT_OFFSET must be a multiple of 1000, such as 1000 or 2000; it is "${value}".`,
+    );
+  }
+  return offset;
+}
+
+export const COMPOSE_PROJECT = PORT_OFFSET
+  ? `openbot-e2e-${PORT_OFFSET}`
+  : "openbot-e2e";
 
 export const PORTS = {
-  server: 46001,
-  app: 46010,
-  computer: 46100,
-  browser: 46101,
-  bot: 46200,
-  langgraph: 46201,
-  aimock: 46400,
-  composio: 46410,
-  postgres: 46432,
-  supervisor: 46500,
+  server: 46001 + PORT_OFFSET,
+  app: 46010 + PORT_OFFSET,
+  computer: 46100 + PORT_OFFSET,
+  browser: 46101 + PORT_OFFSET,
+  bot: 46200 + PORT_OFFSET,
+  langgraph: 46201 + PORT_OFFSET,
+  aimock: 46400 + PORT_OFFSET,
+  composio: 46410 + PORT_OFFSET,
+  postgres: 46432 + PORT_OFFSET,
+  supervisor: 46500 + PORT_OFFSET,
 } as const;
 
 export const APP_URL = `http://127.0.0.1:${PORTS.app}`;
