@@ -239,10 +239,17 @@ export type ProactiveChange =
   | { kind: "remove" }
   | { kind: "interval"; minutes: number };
 
+/** Every change to a check-in, Remove included, so its page can tell it was removed from there. */
+export const changeProactiveSettingMutationKey = [
+  ...proactiveKeys.settings,
+  "change",
+] as const;
+
 export const changeProactiveSettingMutationOptions = (
   queryClient: QueryClient,
 ) =>
   mutationOptions({
+    mutationKey: changeProactiveSettingMutationKey,
     /** Run now's answer, for the row to say what became of it; nothing for any other change. */
     mutationFn: async ({
       setting,

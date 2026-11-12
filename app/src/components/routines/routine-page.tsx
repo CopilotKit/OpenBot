@@ -20,7 +20,10 @@ import {
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
 import { routinesOf } from "@/components/routines/new-routine-page";
-import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
+import {
+  RoutineDetailMissing,
+  useDeletedHere,
+} from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +48,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
+  deleteRoutineMutationKey,
   deleteRoutineMutationOptions,
   runRoutineNowMutationOptions,
   setRoutineEnabledMutationOptions,
@@ -239,12 +243,17 @@ export function RoutineRoutePage({
   const routines = useQuery(routinesQueryOptions());
   const bots = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
+  const deleted = useDeletedHere<string>(
+    deleteRoutineMutationKey,
+    (id) => id === routineId,
+  );
   const back = routinesOf(agentId);
   const routine = routines.data?.routines.find((row) => row.id === routineId);
   if (!routine)
     return (
       <RoutineDetailMissing
         back={back}
+        deleted={deleted}
         icon={IconCalendarTime}
         kind="routine"
         read={routines}
@@ -531,7 +540,9 @@ export function RoutinePage({
               disabled={remove.isPending}
               onClick={() =>
                 remove.mutate(routine.id, {
-                  onSuccess: () => navigate(back),
+                  // Usually the route has gone back already, on the list without it. This is
+                  // for a list that couldn't be read again.
+                  onSuccess: () => navigate({ ...back, replace: true }),
                 })
               }
               size="sm"

@@ -351,11 +351,11 @@ test("a person creates a routine with every field, pauses it, runs it now and de
       .click();
     await dialog.getByRole("button", { name: "Delete" }).click();
     await expect(dialog).toBeHidden();
-    // Where Delete leaves the person is the known failure below; the list is what is checked here.
-    await page.getByRole("link", { name: "Routines", exact: true }).click();
+    // Delete goes back to Routines on its own, and the routine is gone from it.
     await expect(
       page.getByRole("heading", { name: "Routines", level: 1 }),
     ).toBeVisible();
+    await expect(main.getByText("This routine isn't here")).toHaveCount(0);
     await expect(row).toHaveCount(0);
     await expect(main.getByText("No routines yet")).toBeVisible();
     await shot("routine-deleted");
@@ -366,10 +366,6 @@ test("Delete takes a person back to the Routines list", async ({
   page,
   shot,
 }) => {
-  test.fail(
-    true,
-    "KNOWN BUG: after Delete, the routine's page says \"This routine isn't here\" instead of returning to Routines. The list refetch unmounts the page before the delete's onSuccess runs, and TanStack Query drops a mutate() callback once its component is gone, so the navigation never happens.",
-  );
   const main = page.getByRole("main");
   await page.goto("/routines/new");
   await main.getByRole("combobox", { name: "Bot" }).click();
@@ -389,11 +385,12 @@ test("Delete takes a person back to the Routines list", async ({
   const dialog = page.getByRole("dialog", { name: /^Delete "/ });
   await dialog.getByRole("button", { name: "Delete" }).click();
   await expect(dialog).toBeHidden();
-  await shot("after-delete");
-  await expect(main.getByText("This routine isn't here")).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Routines", level: 1 }),
-  ).toBeVisible({
-    timeout: 10_000,
-  });
+  ).toBeVisible();
+  await expect(main.getByText("This routine isn't here")).toHaveCount(0);
+  await expect(
+    main.getByRole("link", { name: new RegExp(`^${SECOND}`) }),
+  ).toHaveCount(0);
+  await shot("after-delete");
 });

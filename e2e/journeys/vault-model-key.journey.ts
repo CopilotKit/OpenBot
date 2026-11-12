@@ -139,15 +139,10 @@ test("a person with no model key adds one from Setup, and the Personal Assistant
     await expect(aiModel).toContainText(
       "The key is set but hasn't been checked.",
     );
-    // Pressed until it checks, as a person would: a Check again within 10 s of the last check
-    // does nothing (the known failure below).
-    await expect(async () => {
-      await main.getByRole("button", { name: "Check again" }).click();
-      await expect(aiModel).toContainText(
-        "The key is set. OpenBot can't check a custom endpoint.",
-        { timeout: 2_000 },
-      );
-    }).toPass({ timeout: 30_000 });
+    await main.getByRole("button", { name: "Check again" }).click();
+    await expect(aiModel).toContainText(
+      "The key is set. OpenBot can't check a custom endpoint.",
+    );
     await shot("setup-key-set");
   });
 
@@ -169,10 +164,6 @@ test("a person with no model key adds one from Setup, and the Personal Assistant
 });
 
 test("Check again checks a key added a moment ago", async ({ page, shot }) => {
-  test.fail(
-    true,
-    'KNOWN BUG: Check again is limited to one round every 10 s (RECHECK_INTERVAL_MS in server/src/setup/checklist.ts), and opening Setup starts a round. Pressed within 10 s of the last one, it answers from that older round, so a key added a moment ago stays "set but hasn\'t been checked" while the row says to press Check again, and nothing says to wait.',
-  );
   const main = page.getByRole("main");
   const aiModel = main
     .getByRole("list", { name: "Setup" })
@@ -203,10 +194,10 @@ test("Check again checks a key added a moment ago", async ({ page, shot }) => {
   await expect(aiModel).toContainText(
     "The key is set but hasn't been checked.",
   );
+  // Seconds after the last check, which asked about no key: it asks about this one.
   await main.getByRole("button", { name: "Check again" }).click();
-  await shot("check-again-right-after");
   await expect(aiModel).toContainText(
     "The key is set. OpenBot can't check a custom endpoint.",
-    { timeout: 5_000 },
   );
+  await shot("check-again-right-after");
 });
