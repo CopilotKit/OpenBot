@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **On a Mac, the window's buttons no longer cover a skin's controls.** With the OpenDuet skin the
+  close, minimise and zoom buttons sat on the "OpenBot" name at the top of the menu, and on the back
+  button of every page opened over the app. OpenDots and OpenMuse had their own controls under them
+  too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
+  In a browser and on Windows nothing moves.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start
