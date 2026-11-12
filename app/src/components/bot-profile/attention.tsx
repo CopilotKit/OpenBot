@@ -13,6 +13,7 @@ import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
+import { cn } from "@/lib/utils";
 
 /**
  * Questions, approvals and stalled hand-offs: the things only the person can move forward, answered
@@ -238,8 +239,11 @@ function usePingNotifications(
  * screen and always reading this.
  *
  * Renders nothing when nothing is waiting, so a quiet day costs the sidebar nothing.
+ *
+ * `onIcon` draws it to sit on an icon's corner rather than at the end of a row: the count in a
+ * 16px circle that a second digit widens, small enough to leave an 18px icon readable under it.
  */
-export function BotsNavBadge() {
+export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
   const attention = useQuery(botAttentionQueryOptions());
   const lastPing = useQuery(lastPingQueryOptions());
   useAttentionNotifications(attention.data);
@@ -250,7 +254,12 @@ export function BotsNavBadge() {
     return (
       <span
         aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
-        className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums"
+        className={cn(
+          "rounded-full bg-primary font-medium text-primary-foreground tabular-nums",
+          onIcon
+            ? "grid h-4 min-w-4 place-items-center px-1 text-[10px] leading-none"
+            : "ml-auto px-1.5 text-[11px]",
+        )}
         role="img"
       >
         {waiting}
@@ -265,7 +274,7 @@ export function BotsNavBadge() {
             ? "Unread messages"
             : "Your check-ins found something"
         }
-        className="ml-auto size-2 rounded-full bg-primary"
+        className={cn("size-2 rounded-full bg-primary", !onIcon && "ml-auto")}
         role="img"
       />
     );
