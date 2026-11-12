@@ -129,8 +129,10 @@ previous step's heading gone), not by sleeping.
 
 1. First-run setup: Welcome, OpenBot for Business (Not now), the person's name.
 2. The AI connection, as the web app offers it: Settings, Setup says the AI model needs a key and
-   links to the Vault, where the person adds an OpenAI key (a dummy; aimock answers). Choosing a
-   provider in a setup window is OpenBot Desktop's, driven in a later slice.
+   links to the Vault's Add key form, where the person pastes an OpenAI key (a dummy; aimock
+   answers) and types nothing else: the form starts on the provider the Personal Assistant runs on,
+   and the key is filed under the name it reads. Choosing a provider in a setup window is OpenBot
+   Desktop's, driven in a later slice.
 3. A question to the Personal Assistant, from the home page.
 4. The answer renders whole: the text on screen is exactly what the run streamed (the conversation's
    own events), once. One run: one `RUN_STARTED` in the conversation's events, one `run-model` line
