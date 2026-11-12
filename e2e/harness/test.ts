@@ -19,6 +19,7 @@ import {
   dotenvValue,
   FIXTURES,
   LOGS,
+  MCP_SERVER_PATH,
   RECORDING,
   RECORDING_DIR,
   SCREENSHOTS,
@@ -115,6 +116,11 @@ function keepRecordings(journey: string): string[] {
   return kept;
 }
 
+/** The journeys whose fixtures this run has already cleared to re-record (one worker, one run). */
+const rerecorded = new Set<string>();
+/** How many screenshots each journey has taken this run. */
+const shotsTaken = new Map<string, number>();
+
 export const test = base.extend<{
   aimock: { requests: () => Promise<JournalEntry[]> };
   shot: (name: string) => Promise<void>;
@@ -124,15 +130,21 @@ export const test = base.extend<{
     // biome-ignore lint/correctness/noEmptyPattern: Playwright requires an object pattern here.
     async ({}, use, testInfo) => {
       const journey = journeyOf(testInfo);
-      if (RECORDING) {
-        // A re-recording replaces the journey's fixtures rather than adding to them.
+      if (RECORDING && !rerecorded.has(journey)) {
+        // A re-recording replaces the journey's fixtures rather than adding to them. Once per run,
+        // on its first test: a journey with several tests keeps what each of them recorded.
         rmSync(join(FIXTURES, journey), { recursive: true, force: true });
+        rerecorded.add(journey);
       }
       await fetch(`${AIMOCK_URL}/__aimock/reset/journal`, { method: "POST" });
       await use({ requests: journal });
 
+      // Model requests only: aimock's own routes are internal, and the MCP server it serves for the
+      // Connections journey (`MCP_SERVER_PATH`) is a server OpenBot calls, not a model.
       const entries = (await journal()).filter(
-        (entry) => entry.response.source !== "internal",
+        (entry) =>
+          entry.response.source !== "internal" &&
+          !entry.path.startsWith(MCP_SERVER_PATH),
       );
       const lines = entries.map(
         (entry) =>
@@ -179,17 +191,24 @@ export const test = base.extend<{
   ],
 
   shot: async ({ page }, use, testInfo) => {
-    const folder = join(SCREENSHOTS, journeyOf(testInfo));
-    rmSync(folder, { recursive: true, force: true });
+    const journey = journeyOf(testInfo);
+    const folder = join(SCREENSHOTS, journey);
+    // Cleared once per run, and numbered on across a journey's tests, so a journey with several
+    // tests keeps every test's screenshots rather than only its last test's.
+    if (!shotsTaken.has(journey)) {
+      rmSync(folder, { recursive: true, force: true });
+      shotsTaken.set(journey, 0);
+    }
     mkdirSync(folder, { recursive: true });
-    let taken = 0;
     await use(async (name: string) => {
-      taken += 1;
+      const taken = (shotsTaken.get(journey) ?? 0) + 1;
+      shotsTaken.set(journey, taken);
       const path = join(
         folder,
         `${String(taken).padStart(2, "0")}-${name}.png`,
       );
-      await page.screenshot({ path, fullPage: true });
+      // Animations finished first: a dialog or list caught mid-fade reads as a broken layout.
+      await page.screenshot({ path, fullPage: true, animations: "disabled" });
       await testInfo.attach(name, { path, contentType: "image/png" });
     });
   },

@@ -20,7 +20,8 @@ server and computer images, which takes several minutes; after that a run takes 
 
 What it does:
 
-1. Starts aimock on `127.0.0.1:46400` in **strict replay**, with the fixtures in `e2e/fixtures/`.
+1. Starts aimock on `127.0.0.1:46400` in **strict replay**, with the fixtures in `e2e/fixtures/`,
+   and the Composio stub on `127.0.0.1:46410` (see below).
 2. Brings up **its own, fresh stack** with `scripts/start.sh`: the personal edition (one person, no
    sign-in, the Personal Assistant) in the compose project `openbot-e2e`, on ports 46xxx, with a new
    database every run. It never reuses or touches a stack you already have running (OpenBot Desktop,
@@ -36,11 +37,12 @@ Results, all gitignored, in `e2e/.artifacts/`:
 
 | What | Where |
 | --- | --- |
-| Screenshots, one per step | `screenshots/<journey>/NN-<step>.png` |
+| Screenshots, one per step, numbered on across a journey's tests | `screenshots/<journey>/NN-<step>.png` |
 | Playwright report (traces on failure) | `report/` (`bunx playwright show-report e2e/.artifacts/report`) |
 | aimock's log | `logs/aimock.log` |
 | Every model request a journey made, matched or not | `logs/<journey>.model-requests.txt` (and `.json`) |
 | The stack's logs | `logs/start.log`, `logs/server.log`, `logs/app.log` |
+| Every request the Composio stub answered | `logs/composio-stub.log` |
 
 **Look at every screenshot.** A journey that passes with a broken layout has found a bug: overlap,
 clipping, a misaligned row, wrong copy, an empty panel. Fix it like any other failure.
@@ -68,7 +70,9 @@ which only ever holds an `sk-aimock-` dummy key that aimock swaps on the way out
 command line, in a log or in a fixture; a recording that contains it is deleted and the test fails.
 
 Every journey in the run is re-recorded, including the ones it depends on (`--grep` one journey and
-the core loop is re-recorded too). Then run `bun run test:e2e` to check the new fixtures replay, and
+the core loop is re-recorded too; put back what you didn't mean to change with
+`git checkout -- e2e/fixtures/core-loop`). A journey's fixtures are cleared once, on its first test,
+so every test in the file keeps what it recorded. Then run `bun run test:e2e` to check the new fixtures replay, and
 read the fixture diff before committing: fixtures hold no keys and no personal data (journeys use
 made-up names). Re-record when a journey's words or OpenBot's prompts change.
 
@@ -94,6 +98,10 @@ made-up names). Re-record when a journey's words or OpenBot's prompts change.
 - OpenBot's model list comes from aimock, which lists the models the fixtures name, so in replay the
   composer offers one model (gpt-5.6-terra) and no model picker. A journey about the model picker
   needs fixtures that name more than one model.
+- **A tool call that names a record by its id can't be replayed.** A recorded fixture holds the id
+  the record had in the recording run; the one a replay makes has another. Changing a routine by
+  asking a Bot (`update_routine`) is one: replayed, the change is refused while the replayed answer
+  says it was made. Keep such a step out of a journey rather than assert half of it.
 
 ## Add a journey
 
@@ -149,6 +157,41 @@ Personal Assistant's run (`POST /v1/responses`), the skill chooser and the conve
 fixtures). Model capability data from models.dev is switched off.
 
 Not mocked, because they are not model calls: CopilotKit Intelligence (the licence, and the thread
-the conversation is stored in, which the run reads its events from), and an app broker if `.env` has
-a Composio key. Automatic Learning, which would send conversations to Intelligence's own models, is
-not set up for the run (`OPENBOT_LEARNING_AUTO_ASSIGN=false`).
+the conversation is stored in, which the run reads its events from). Automatic Learning, which would
+send conversations to Intelligence's own models, is not set up for the run
+(`OPENBOT_LEARNING_AUTO_ASSIGN=false`).
+
+## Composio, and an MCP server of the run's own
+
+**Composio is the stub's** (`harness/composio-stub.ts`, started like aimock, before the stack).
+OpenBot's Composio client reads `COMPOSIO_BASE_URL`, which `harness/stack.ts` points at the stub, and
+holds a dummy key; your `.env`'s Composio key is never used and no real Composio project is touched.
+The stub answers the endpoints OpenBot was seen calling on the real API (v3.1: toolkits, tools, auth
+configs, connected accounts and their connect links) in the real answers' shapes; its catalogue,
+`stubs/composio-catalogue.json`, is eight real apps with four of their real tools each. A connect link
+opens the stub's own page for the app's consent screen: Allow marks the account active and returns
+to OpenBot with `status=success`, as Composio's hosted page does, so a journey goes past the hand-off
+to a connected app without any third-party sign-in. A request the stub has no answer for gets a 501
+and is kept in its journal (`GET /__stub/journal`), which the Connections journey checks is clean.
+
+**An MCP server to add by its address** is aimock's (`MCPMock`, mounted at
+`MCP_SERVER_URL`: `http://127.0.0.1:46400/mcp/field-notes`). OpenBot refuses a plain-http or
+loopback server unless `OPENBOT_ALLOW_LOOPBACK_MCP=1`, which the stack sets for tests. Its requests
+are not model requests, so the strict-replay check leaves them out.
+
+## Apps, routines and settings
+
+| Journey | What a person does |
+| --- | --- |
+| `connections` | Searches Connections and Browse apps; adds Gmail (its sign-in opens in a new tab, OpenBot stays put and waits), closes the tab, connects again and allows; sees it connected in Browse apps and Your apps, its page and tools; disconnects; turns it off. Adds an MCP server by address (refused over plain http first), sees its tools, turns it off. |
+| `routines` | New routine with every field (Bot, what to do, act or only tell, each kind of start, when, posts in, name, and what's missing on an empty Create); its page; pause and resume; Run now, which succeeds with nothing left saying it runs, and the answer in its conversation; Delete, asked first. |
+| `routine-kinds` | A goal (a routine with Done when): its page, paused, completed, deleted. A goal started by an event. A check-in (Only tell you): how often, switched off, removed. |
+| `settings` | General (name, standing instructions, dark theme, skin, sidebar emphasis, shortcuts and the command palette, and no Privacy section outside OpenBot Desktop), Notifications, Vault (a connector key added, replaced and revoked), Computer, Approvals (both switches, commands on your computer, a rule added, changed and removed), Activity (views, search, sort, filters, refresh, CSV export), Setup and Check again, the Components gallery. |
+| `skills` | Writes a skill (what's missing said first), turns it off and on for a Bot, changes it, deletes it; review of new skills on and off; Teach a Bot opened from Skills. |
+| `vault-model-key` | With no model key, adds one from Setup's link: the form starts on the provider the Bots run on, says when they won't use a key, and files it where they read it; Setup then says the key is set. |
+
+Each puts back what it changed (a name, standing instructions, a rule, an app, a routine and its
+conversation), because the next journey's model calls read them.
+
+A test marked `test.fail` is a product bug the suite has found and pins until it is fixed: it fails
+today, at the assertion of what should happen, and the marker comes off with the fix.
