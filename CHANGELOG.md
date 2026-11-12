@@ -422,6 +422,10 @@ every deployment:
 
 ### Smaller changes
 
+- In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
+  off the button's corner, past the icon and almost on the rail's edge. A count is now a smaller
+  circle, so the icon still shows under it. The badge on the menu button in a narrow window
+  sits the same way.
 - The OpenMuse skin is now called OpenFuse. Anyone who picked it keeps it, with nothing to
   choose again.
 - New Bot's first screen ends with a **Bring your own agent** card showing the mark of every

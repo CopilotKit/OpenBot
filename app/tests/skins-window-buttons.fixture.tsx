@@ -17,13 +17,35 @@ import type { SkinId } from "@/skins/types";
  * skins-window-buttons.test.tsx to bundle and load in Chromium. OpenBot's API is a fake that
  * answers in the shapes the real endpoints return, and the live socket never connects.
  *
- * `?skin=<id>&path=<path>` picks the skin and the page the frame opens on.
+ * `?skin=<id>&path=<path>` picks the skin and the page the frame opens on. `&attention=dot` gives
+ * one Bot an unread message, so the Bots badge is a dot, and `&attention=<n>` gives it n things
+ * waiting on the person, so the badge is a count.
  */
 const params = new URLSearchParams(location.search);
 const skinId = (params.get("skin") ?? "openduet") as SkinId;
 const path = params.get("path") ?? "/";
 
 const now = "2026-10-27T10:00:00.000Z";
+
+/** What the Bots badge reads: nothing waiting, an unread message, or n things waiting on you. */
+function attention(asked: string | null) {
+  if (!asked) return [];
+  const waiting = asked === "dot" ? 0 : Number(asked);
+  return [
+    {
+      agentId: "b-1",
+      name: "Inbox Bot",
+      questions: 0,
+      approvals: 0,
+      handoffs: 0,
+      unread: asked === "dot" ? 1 : 0,
+      paused: false,
+      notify: "all",
+      items: 0,
+      tasks: { needsInput: 0, ready: waiting, failed: 0 },
+    },
+  ];
+}
 
 function channel(id: string, agentIds: string[], summary: string) {
   return {
@@ -66,7 +88,10 @@ const bodies: Record<string, unknown> = {
     ],
     nextCursor: null,
   },
-  "/api/bots/attention": { bots: [], lastPingId: null },
+  "/api/bots/attention": {
+    bots: attention(params.get("attention")),
+    lastPingId: null,
+  },
   "/api/agents": {
     agents: [
       { id: "b-1", name: "Inbox Bot" },
