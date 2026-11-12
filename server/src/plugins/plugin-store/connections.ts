@@ -32,6 +32,11 @@ import {
   sharedAccountOnlySentence,
 } from "../deployment-clients";
 import { type AccountRef, filedUnderPerson } from "../shared-accounts";
+import {
+  type RemoteTokenSet,
+  registerRemoteClient,
+  serializeTokenSet,
+} from "../remote-oauth";
 import type { StoreContext } from "./context";
 import {
   attemptNamed,
@@ -115,7 +120,42 @@ export function connectionMethods(context: StoreContext) {
       const stored = await storedOAuthClient(serverId);
       if (stored) return stored;
 
-      const { entry } = await requireServer(serverId);
+      const { entry, row } = await requireServer(serverId);
+      /*
+       * A server added by URL that signs people in registers OpenBot at the registration endpoint its
+       * own authorization server published, through the MCP SDK (`remote-oauth.ts`). Its refusal is a
+       * sentence for the person pressing Connect, so it is thrown rather than flattened to null.
+       */
+      const remote = !entry && row.oauth ? row.oauth : null;
+      if (remote) {
+        if (!options.redirectUri) return null;
+        const remoteRedirect = options.redirectUri;
+        const outcome = await withOAuthClientLock(
+          serverId,
+          async (transaction) => {
+            const held = await heldOAuthClient(transaction, serverId);
+            if (held)
+              return { client: held, registered: false, replaced: false };
+            const registered = await registerRemoteClient({
+              config: remote,
+              redirectUri: remoteRedirect,
+              serverTitle: row.title,
+            });
+            const { replaced } = await writeOAuthClient(
+              { serverId, client: registered },
+              transaction,
+            );
+            return { client: registered, registered: true, replaced };
+          },
+        );
+        if (outcome?.registered) {
+          await recordClientRegistered(
+            { serverId, client: outcome.client, by },
+            outcome.replaced,
+          );
+        }
+        return outcome?.client ?? null;
+      }
       if (
         entry?.auth.kind !== "user-oauth" ||
         entry.auth.clientRegistration !== "dynamic" ||
@@ -196,6 +236,35 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /** A failed Connect client lookup, attributed to the authenticated person and never to raw errors. */
+    /**
+     * Record one person's sign-in to a server added by URL: their whole token set, in the vault, as
+     * the catalogue's connections are recorded. See `remote-oauth.ts` for why it is a set.
+     */
+    async recordRemoteConnection(input: {
+      serverId: string;
+      userId: string;
+      tokens: RemoteTokenSet;
+      scope: string;
+    }): Promise<void> {
+      const { replaced } = await swapUserCredential({
+        serverId: input.serverId,
+        userId: input.userId,
+        refreshToken: serializeTokenSet(input.tokens),
+        scope: input.scope,
+      });
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.account_connected",
+        targetType: "mcp_server",
+        targetId: input.serverId,
+        payload: {
+          actor: input.userId,
+          server: input.serverId,
+          scope: input.scope,
+          reconnected: replaced,
+        },
+      });
+    },
+
     async recordOAuthClientReadFailure(input: {
       serverId: string;
       actorId: string;

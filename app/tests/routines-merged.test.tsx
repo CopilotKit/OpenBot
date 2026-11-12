@@ -119,6 +119,7 @@ function serving({
   checkIns = [] as ReturnType<typeof checkIn>[],
   working = true,
   routinesFail = false,
+  goalsFail = false,
 } = {}) {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -132,7 +133,9 @@ function serving({
       return Response.json({ ok: true });
     }
     if (url === "/api/responsibilities")
-      return Response.json({ responsibilities: goals });
+      return goalsFail
+        ? new Response(null, { status: 500 })
+        : Response.json({ responsibilities: goals });
     if (url === "/api/routines") {
       if (routinesFail) return new Response(null, { status: 500 });
       return Response.json({
@@ -280,6 +283,46 @@ test("a goal's row claims no start when routines couldn't be read", async () => 
   ) as HTMLElement;
   await view.findByText("Couldn't load your routines. Reload the page.");
   expect(row.textContent).not.toContain("When you ask");
+});
+
+test("a routine that runs a goal, on a row of its own, says so and never shows the model's instruction", async () => {
+  // Its goal isn't in the goals read (here the read failed), so the routine is a row of its own.
+  serving({
+    goalsFail: true,
+    routines: [
+      routine("r1", "expenses", {
+        goalId: "g1",
+        title: "Reconcile receipts",
+        instruction:
+          'Run the goal "Reconcile receipts" (5f1c2d9e-0000-4000-8000-000000000001) with run_goal.',
+      }),
+      routine("r2", "expenses", {
+        goalId: "g2",
+        title: null,
+        schedule: "Every day at 08:00",
+        instruction:
+          'Run the goal "A goal named past the routine title limit" (5f1c2d9e-0000-4000-8000-000000000002) with run_goal.',
+      }),
+    ],
+  });
+  const view = draw();
+  await view.findByText("Couldn't load your goals. Reload the page.");
+  // Named: the goal's title, as New routine names its routine, and what it does under it.
+  const named = (await view.findByText("Reconcile receipts")).closest(
+    '[data-slot="item"]',
+  ) as HTMLElement;
+  expect(within(named).getByText("Runs a goal")).toBeTruthy();
+  // Unnamed: what it does heads its own row.
+  const unnamed = view
+    .getAllByText("Runs a goal")
+    .map((words) => words.closest('[data-slot="item"]'))
+    .find((item) => item !== named) as HTMLElement;
+  expect(unnamed.textContent).toContain("Schedule");
+  expect(document.body.textContent).not.toContain("run_goal");
+  // Its page says the same, in its title and nowhere the instruction.
+  fireEvent.click(unnamed.closest("a") as HTMLElement);
+  await view.findByRole("heading", { level: 1, name: "Runs a goal" });
+  expect(document.body.textContent).not.toContain("run_goal");
 });
 
 /** The row of the goal titled `title`, once its starts are on it. */

@@ -16,6 +16,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
   - [Arcade](plugins/arcade.md): the other broker, and the setup an Arcade project needs that Composio does not.
   - [Google Drive](plugins/google-drive.md)
   - [Notion](plugins/notion.md)
+  - [MCP servers added by URL](plugins/mcp-by-url.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
 - [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.

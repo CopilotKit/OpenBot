@@ -134,6 +134,14 @@ export const routines = pgTable(
       onDelete: "set null",
     }),
     /**
+     * How it got `goalId`. True when its firing ran the goal with `run_goal` and its instruction
+     * doesn't run that goal (`linkGoal` in the routine store): a broad routine that runs the goal on
+     * some days and does other work every day. False when it was made for the goal. Completing the
+     * goal switches off a routine made for it and unlinks one linked by a run, leaving it on; deleting
+     * the goal deletes the first and unlinks the second.
+     */
+    goalLinkedByRun: boolean("goal_linked_by_run").notNull().default(false),
+    /**
      * Made before routines recorded their goal. Its goal, if any, is found from its instruction: the
      * goal's id, or its whole title in quotes. False for every routine made since.
      */

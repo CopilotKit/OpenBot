@@ -401,3 +401,32 @@ test("a refused delete is said in the confirmation, and the confirmation stays",
     view.getByRole("dialog", { name: 'Delete "Watch the queue"?' }),
   ).toBeTruthy();
 });
+
+test("a goal whose routines couldn't be read says its schedules couldn't be loaded", async () => {
+  // A failed read is not "no schedules": the section says so, and the Active row leaves none out.
+  const view = open(undefined);
+  await triggersLoaded();
+  await view.findByText(
+    "Couldn't load this goal's schedules. Reload the page.",
+  );
+  await view.findByText("Its schedules, events and triggers start it.");
+});
+
+test("a completed goal's schedules have no switch, and say why", async () => {
+  // Completing a goal switches its schedules off, and the server refuses to switch one back on.
+  const view = open([routine({ enabled: false })], "completed");
+  await triggersLoaded();
+  await view.findByText(
+    "The goal is completed, so this schedule won't start it again.",
+  );
+  expect(view.queryByRole("switch")).toBeNull();
+  // What is left to do with it: its history, and Delete.
+  expect(
+    view.getByRole("button", {
+      name: "Run history for the schedule Weekdays at 09:00",
+    }),
+  ).toBeTruthy();
+  expect(
+    view.getByRole("button", { name: "Delete the schedule Weekdays at 09:00" }),
+  ).toBeTruthy();
+});

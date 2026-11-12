@@ -58,3 +58,12 @@ export function sharedAccountsListedOn(
     (server) => isBrokered(server) && server.accountMode === "shared",
   );
 }
+
+/**
+ * Servers somebody added by their address, from Connections or an admin's API call. Each is its own
+ * tile on Connections: one that signs each person in reads like any app you connect, and one that
+ * needs no account reads On.
+ */
+export function addedByUrlListedOn(servers: PluginServer[]): PluginServer[] {
+  return servers.filter((server) => server.provenance === "custom");
+}

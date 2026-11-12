@@ -369,9 +369,20 @@ Beside the eight:
 | `/admin/credentials` | Admin → Vault: write-only encrypted credentials for the deployment. |
 | `/admin/people`, `/admin/permissions`, `/admin/identity-providers`, `/admin/providers` | Admin → Team: who can sign in, what they may do, and which models Bots use. |
 
-Old addresses (`/capabilities/*`, `/routines`, `/bots/:id/responsibilities`, `/bots/:id/access`,
-`/settings/passwords`, `/settings/credentials`, `/settings/browsers`, `/settings/this-computer`,
-`/settings/learning`) redirect to the pages above.
+Old addresses redirect to the pages above:
+
+| Old address | Opens |
+| --- | --- |
+| `/capabilities`, `/capabilities/skills`, `/settings/skills`, `/settings/learning` | `/skills` |
+| `/settings/skills/new`, `/settings/skills/:slug` (personal edition) | `/skills/new`, `/skills/:slug` |
+| `/capabilities/memory`, `/settings/memory` | `/memory`, which opens `/bots` in the personal edition |
+| `/responsibilities` | `/routines` |
+| `/bots/:id/responsibilities` | `/bots/:id/routines` |
+| `/bots/:id/access` | `/bots/:id/apps` |
+| `/settings/passwords`, `/settings/credentials` | `/settings/vault` |
+| `/settings/credentials/new` | `/settings/vault/new` in the personal edition, `/settings/vault` in the team edition |
+| `/settings/this-computer` | `/settings/computer#this-computer` |
+| `/settings/browsers` | `/settings/computer#browsers` |
 
 ## Features
 

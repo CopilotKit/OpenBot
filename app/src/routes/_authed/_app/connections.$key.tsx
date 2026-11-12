@@ -2,6 +2,7 @@ import {
   IconAppsOff,
   IconArrowUpRight,
   IconChevronDown,
+  IconPlug,
   IconPlugOff,
   IconUsers,
 } from "@tabler/icons-react";
@@ -577,18 +578,43 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * administrator has not enabled cannot be consented to — there is no OAuth client behind it. Both
    * say which it is rather than drawing a switch that cannot work.
    */
-  if (entry?.auth !== "user-oauth") {
+  /*
+   * A server added by its address has no catalogue entry, so the page reads the same three facts off
+   * the server: its name, where it lives, and whether each person signs in to it.
+   */
+  const app =
+    entry ??
+    (server?.provenance === "custom"
+      ? {
+          title: server.title,
+          vendor: hostOf(server.url),
+          summary: "",
+          auth: server.signIn ? ("user-oauth" as const) : ("none" as const),
+        }
+      : undefined);
+
+  if (app && server?.provenance === "custom" && app.auth !== "user-oauth") {
+    return (
+      <PageShell backButton={back} title={app.title}>
+        <PageEmpty icon={IconPlug} title="No account needed">
+          {`Bots use ${app.title} as it is, the same for everybody. It's at ${app.vendor}.`}
+        </PageEmpty>
+      </PageShell>
+    );
+  }
+
+  if (app?.auth !== "user-oauth") {
     return (
       <PageShell
         backButton={back}
         description="You don't connect this app yourself."
-        title={entry?.title ?? key}
+        title={app?.title ?? key}
       >
         <PageEmpty
-          icon={entry ? IconUsers : IconAppsOff}
-          title={entry ? "Shared account" : "App not found"}
+          icon={app ? IconUsers : IconAppsOff}
+          title={app ? "Shared account" : "App not found"}
         >
-          {entry
+          {app
             ? "Bots use one shared account for this app, the same for everybody."
             : "OpenBot has no app by that name."}
         </PageEmpty>
@@ -599,8 +625,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   return (
     <PageShell
       backButton={back}
-      description={entry.summary}
-      title={entry.title}
+      description={app.summary || undefined}
+      title={app.title}
     >
       {notice ? (
         <p className="break-words text-destructive text-sm" role="alert">
@@ -621,7 +647,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                   ? "Not available yet. An admin has to turn this on first."
                   : connection
                     ? "Bots you allow use this as you, and see only what you can see."
-                    : `No Bot can use this as you. Connecting takes you to ${entry.vendor} to approve access.`}
+                    : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -663,13 +689,13 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                          * had not, which is the one outcome worse than not offering it.
                          */
                         setNotice(
-                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${entry.vendor} account's third-party access settings.`,
+                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
                         )
                       }
                       className="whitespace-nowrap"
                       variant="destructive"
                     >
-                      Disconnect your {entry.title} account
+                      Disconnect your {app.title} account
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -702,7 +728,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
 
       {connection ? (
         <PageSection
-          description={`Review the permissions recorded by ${entry.vendor}. They may include fewer permissions than OpenBot requested.`}
+          description={`Review the permissions recorded by ${app.vendor}. They may include fewer permissions than OpenBot requested.`}
           title="Access"
         >
           <PageRows>
@@ -710,7 +736,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
               <ItemContent>
                 <ItemTitle>Allowed</ItemTitle>
                 <ItemDescription className="line-clamp-none">
-                  {connection.scope || `${entry.vendor} didn't say.`}
+                  {connection.scope || `${app.vendor} didn't say.`}
                 </ItemDescription>
               </ItemContent>
             </Item>
@@ -730,4 +756,12 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
       ) : null}
     </PageShell>
   );
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }

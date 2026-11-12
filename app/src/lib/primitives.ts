@@ -14,7 +14,7 @@ import {
 
 /**
  * The eight things a Bot has, in the one order every list of them keeps: on a Bot's page, in
- * Settings, in Admin, in the docs and in the tour. See `docs/how-openbot-works.md`.
+ * Settings, in Admin and in the docs. See `docs/how-openbot-works.md`.
  *
  * The order is not a quota. A list leaves out a primitive that has nothing to set where it is
  * drawn (Conversations is never a settings row; Memory only where OpenBot offers it), and never
