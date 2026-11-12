@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
+  menu, it could seem to do nothing for a few seconds and then close the app, after saving the
+  file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
+  right place, and a Finder that can't open is noted in the log. While the logs are gathered, the
+  menu says Gathering Logs… and the item can't be chosen again.
 - **A Podman machine too small for setup is resized for you on a Mac.** Setup needs 4 CPUs and
   4 GB of free memory. A Podman machine with less stopped at one sentence with a command squeezed
   into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman machine set
