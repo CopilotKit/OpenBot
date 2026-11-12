@@ -1,6 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { inArray, sql } from "drizzle-orm";
-import { SKIN_IDS } from "@openbot/shared/user-preferences";
+import {
+  SKIN_IDS,
+  type UserPreferences,
+} from "@openbot/shared/user-preferences";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -71,10 +74,9 @@ describe("the carry-retired-skin migration", () => {
           await tx.insert(users).values({
             id: row.id,
             email: `${row.id}@example.com`,
+            // A retired id is exactly what the type no longer allows, so it is written as stored data.
+            preferences: row.preferences as Partial<UserPreferences>,
           });
-          await tx.execute(
-            sql`UPDATE "users" SET "preferences" = ${JSON.stringify(row.preferences)}::jsonb WHERE "id" = ${row.id}`,
-          );
         }
 
         for (const statement of migration.split("--> statement-breakpoint")) {
