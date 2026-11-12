@@ -31,6 +31,12 @@
   },
   "overrides": [
     {
+      "includes": ["app/src/lib/api/generated/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["**/tests/**", "**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {

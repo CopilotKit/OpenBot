@@ -1,6 +1,6 @@
 ---
 name: openbot-data-access
-description: Governs how the OpenBot browser app reads and writes server data — every request goes through `client` in app/src/lib/client.ts, every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write is a mutationOptions factory in app/src/lib/<entity>/mutations.ts, and components consume them through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or for the AG-UI stream itself, which the runtime carries rather than the client.
+description: Governs how the OpenBot browser app reads and writes server data. An operation in api/openapi.yaml is called only through the client generated from it (app/src/lib/api/generated), anything else through `client` in app/src/lib/client.ts; every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write a mutationOptions factory in app/src/lib/<entity>/mutations.ts, consumed through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, changing api/openapi.yaml, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or for the AG-UI stream itself, which the runtime carries rather than the client.
 ---
 
 # OpenBot Data Access
@@ -8,21 +8,51 @@ description: Governs how the OpenBot browser app reads and writes server data �
 ## When To Use
 
 This skill applies to any change under `app/src` that moves data between the browser and the API
-server. It fires on new screens, new endpoints, new query keys, and on any diff that introduces
-`fetch` anywhere but `app/src/lib/client.ts`.
+server. It fires on new screens, new endpoints, new query keys, on any change to `api/openapi.yaml`,
+and on any diff that introduces `fetch` anywhere but `app/src/lib/client.ts`.
 
 It does not cover server handlers under `server/`, zod form schemas (`lib/<entity>/form.ts`), or page
 layout. It does cover `lib/copilot/`: the conversation itself streams over AG-UI, but the tool calls a
 Bot makes during a turn are ordinary authenticated requests and go through the client like everything
 else.
 
+## API First
+
+OpenBot's API is described in `api/openapi.yaml` (OpenAPI 3.1), and that file is the single source of
+truth: the browser's client, its types, the server's types, the docs and the contract tests all come
+from it. It follows CopilotKit Intelligence's v2 conventions so the two read as one API: every
+resource under `/api/v2/organizations/{organizationId}/`, errors as `application/problem+json`, lists
+paged with `cursor` and `limit` (answering `nextCursor`), and an `Idempotency-Key` on every write.
+
+Resources move into the spec one at a time. Bots are in it (list, create, read, change, delete);
+everything else is still reached the older way, through `client`, until its turn. So there are two
+kinds of request, and which one a call is depends only on whether its operation is in the spec:
+
+1. **An operation in the spec** is called through the function Orval generated for it
+   (`listBots`, `createBot`, …, in `@/lib/api/generated/<tag>/<tag>`), with types from
+   `@/lib/api/generated/model`. Never `client(path, …)`, never a hand-written type for its payload.
+2. **Anything else** goes through `client` exactly as described below.
+
+The generated functions all run through `apiRequest` in `lib/api/request.ts` (Orval's mutator), which
+is built on `clientRequest` in `lib/client.ts`: the same session cookie, and a refusal is the same
+`ClientError` carrying the server's own sentence (`error` today, `detail` in problem details) or the
+`fallback` the caller passes. A screen cannot tell which kind of request it made.
+
+The generated code is checked in. CI regenerates it and fails when it differs, lints the spec, and
+fails a pull request that breaks a client of the base branch's spec (oasdiff).
+
 ## The Shape
 
 Every entity the browser knows about owns a directory under `app/src/lib/`:
 
 ```
+api/openapi.yaml           # the contract
 app/src/lib/
-  client.ts      # the only fetch in the app
+  client.ts                # the only fetch in the app
+  api/
+    request.ts             # Orval's mutator: apiRequest, ORGANIZATION_ID, idempotencyKey()
+    served-today.ts        # where today's server answers a spec operation, until it serves /api/v2
+    generated/             # Orval's output: functions, hooks, types, Zod schemas, MSW handlers
   <entity>/
     queries.ts   # read types, key factory, queryOptions factories
     mutations.ts # input type, mutationOptions factories
@@ -69,7 +99,37 @@ before writing a new one.
 **The one rule that matters:** a React component never calls `fetch`. If a component file contains
 `fetch`, the change is wrong regardless of whether it works.
 
+**And its companion:** a component never imports from `lib/api/generated` either. The generated
+functions are called from the entity's factories, which give the result the entity's own cache key.
+The generated `use*` hooks and `get*QueryOptions` key their cache by URL, which no `<entity>Keys.all`
+invalidation reaches, so a screen on a generated hook shows a second, stale copy of data the
+factories already hold.
+
 ## Procedures
+
+### Procedure 0: Add or change an operation in the spec
+
+1. Write it in `api/openapi.yaml` first, before any client or server code. Copy the shape of an
+   operation already there: the shared `OrganizationId`, `Limit`, `Cursor` and `IdempotencyKey`
+   parameters, a `Problem` response for every 4xx and 5xx, `security` naming who may call it. Describe
+   what the server does; never invent a field it does not return.
+2. `bun run api:lint`. It refuses a path outside `/api/v2/organizations/{organizationId}/`, a path
+   Intelligence already serves (`api/intelligence-reserved.yaml`), a write with no `Idempotency-Key`,
+   an error that is not problem details, and a list that does not page.
+3. `bun run api:generate`, and commit the spec and `app/src/lib/api/generated` together. Never edit a
+   generated file: change the spec and generate again.
+4. Call the new function from the entity's factory (Procedures 1 and 2): pass `ORGANIZATION_ID`, a
+   `fallback` sentence, and on a write `{ "Idempotency-Key": idempotencyKey() }`. Unwrap the
+   envelope (`.bot`, `.bots`) in the factory, so components see the payload. A list reads every page
+   until `nextCursor` is null (`everyBot` in `lib/agents/queries.ts`).
+5. Make the entity's type the generated one (`export type AgentProfile = Bot`), so the browser's type
+   and the spec cannot drift. Test fixtures typed with it then need every field the spec requires.
+6. If today's server still answers the operation at an older address, add it to the table in
+   `lib/api/served-today.ts`: its address there and how to put its answer in the spec's shape. That
+   table goes, entry by entry, as the back end serves `/api/v2` itself.
+7. Changing a published operation: removing or renaming a field, making a request field required, or
+   removing an operation fails CI's breaking-change check. Add instead: a new optional field, a new
+   operation.
 
 ### Procedure 1: Add a read
 
@@ -99,7 +159,15 @@ before writing a new one.
 6. Export a factory function returning `queryOptions({ queryKey, queryFn })`, named
    `<subject>QueryOptions`. Existing spellings: `agentListQueryOptions`, `agentQueryOptions`,
    `agentComponentsQueryOptions`, `activePackageQueryOptions`.
-7. Inside `queryFn`, call `client` with the path, the envelope key, and a `fallback` sentence. It
+7. Inside `queryFn`, call the generated function when the operation is in the spec (Procedure 0,
+   step 4):
+
+   ```ts
+   queryFn: async (): Promise<AgentProfile> =>
+     (await getBot(ORGANIZATION_ID, agentId, { fallback: "Couldn't load this Bot." })).bot,
+   ```
+
+   Otherwise call `client` with the path, the envelope key, and a `fallback` sentence. It
    sends the credentials, checks the status, raises the server's message when there is one, and
    unwraps the key so the caller receives the payload rather than the wrapper:
 
@@ -120,7 +188,20 @@ before writing a new one.
 1. Create or open `app/src/lib/<entity>/mutations.ts`.
 2. Declare the input type as `<Entity>Input` — the shape the API accepts, which is not the form's
    shape. Mapping between them is `form.ts`'s job (`agentInputFrom`).
-3. Call `client`. Do **not** write a per-entity request helper — `agentRequest`,
+3. Call the generated function when the operation is in the spec, with a fresh `Idempotency-Key`
+   for each write a person asks for:
+
+   ```ts
+   mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
+     (await createBot(ORGANIZATION_ID, input, { "Idempotency-Key": idempotencyKey() }, {
+       fallback: FALLBACK,
+     })).bot,
+   ```
+
+   `idempotencyKey()`, never `crypto.randomUUID()`: the latter exists only in a secure context, and a
+   self-hosted OpenBot opened at a plain-HTTP address is not one.
+
+   Otherwise call `client`. Do **not** write a per-entity request helper — `agentRequest`,
    `componentRequest` and two others each owned a private copy of the same credentials, headers and
    error extraction, and one of the four had quietly dropped the extraction. `client` owns it now:
 
@@ -223,8 +304,24 @@ before writing a new one.
    same singleton `main.tsx` put there. No import needed at those two call sites; everywhere else,
    import it.
 
+### Procedure 5: Test a screen against the spec
+
+1. Existing tests stub `global.fetch` at today's addresses (`/api/agents`), and keep working: the
+   generated client reaches those through `served-today.ts`, as the app does.
+2. To prove a screen reads and writes through the generated client, serve it the spec's own mocks:
+   `setupServer(...get<Tag>Mock())` from `@/lib/api/generated/<tag>/<tag>.msw`, with
+   `todayRoutes.on = false` for the file (restored in `afterAll`) and happy-dom given a page address
+   (`GlobalRegistrator.register({ url: "http://openbot.invalid/" })`) so relative requests resolve.
+   `app/tests/bots-generated-client.test.tsx` is the reference.
+3. Use `msw` 2. MSW 3 intercepts at Node's socket layer, which Bun's `fetch` does not go through, so
+   under `bun test` its handlers never run.
+4. To prove the spec describes what the server answers, run the real route handlers behind the
+   generated client and parse each answer with the generated Zod schema
+   (`app/tests/bots-api-today.test.ts`).
+
 ## Decision Tree
 
+- Adding or changing an operation the API should offer → Procedure 0 first, then 1 or 2.
 - Adding a screen that displays server data → Procedure 1, then Procedure 3.
 - Adding a create, update, delete, or toggle → Procedure 2, then Procedure 3.
 - The data decides whether the person is allowed on the page at all → Procedure 4.
@@ -239,6 +336,12 @@ before writing a new one.
 | Signal | What it means | Do instead |
 |--------|---------------|------------|
 | `fetch(` anywhere but `lib/client.ts` | Either the read has no key and nothing can invalidate it, or the transport has been rewritten by hand | Move it into `lib/<entity>/` behind a factory, and call `client` |
+| `client("/api/agents…")` for an operation that is in `api/openapi.yaml` | A second, hand-written path to something the generated client already reaches | Call the generated function (`getBot`, `updateBot`, …) |
+| A hand-written type for a payload the spec describes | Drifts from the contract the first time the spec changes | `import type { Bot } from "@/lib/api/generated/model"` |
+| An edit inside `app/src/lib/api/generated` | Overwritten by the next `api:generate`, and CI's drift check fails | Change `api/openapi.yaml`, then `bun run api:generate` |
+| A component importing `@/lib/api/generated` or calling a generated `use*` hook | A second cache keyed by URL that no `<entity>Keys` invalidation reaches | Call the entity's factory |
+| A write with no `Idempotency-Key`, or one built with `crypto.randomUUID()` | The spec requires one; `randomUUID` throws outside a secure context | `{ "Idempotency-Key": idempotencyKey() }` |
+| A new path whose first name after the organization is one Intelligence serves (threads, memories, projects, learning-…) | Two servers answering one address | Pick another name; `api/intelligence-reserved.yaml` lists Intelligence's |
 | A module-private `<entity>Request` helper | Superseded. Four of these existed and one had lost its `body.error` extraction | Call `client` |
 | `client` on an endpoint whose refusal is an answer | Turns the boundary working into an exception the caller has to catch | `tryClient`, and read the status |
 | `body: JSON.stringify(x)` at a call site | Double-encoded; the client serialises | Pass the object |
