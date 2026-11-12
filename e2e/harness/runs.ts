@@ -1,6 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
 import type { APIRequestContext } from "@playwright/test";
-import { SERVER_LOG } from "./stack";
+import { serverLog } from "./stack";
 
 /**
  * How many runs a message started, counted the two ways a release gate counts them.
@@ -15,16 +14,12 @@ import { SERVER_LOG } from "./stack";
 
 /** Where the server log ends now, so a later read sees only what came after. */
 export function serverLogMark(): number {
-  try {
-    return statSync(SERVER_LOG).size;
-  } catch {
-    return 0;
-  }
+  return serverLog().length;
 }
 
 /** The run ids the server logged since `mark` for one Bot. */
 export function runsLoggedSince(mark: number, agentId: string): string[] {
-  const text = readFileSync(SERVER_LOG).subarray(mark).toString("utf8");
+  const text = serverLog().slice(mark);
   const runs: string[] = [];
   for (const line of text.split("\n")) {
     if (!line.startsWith("{") || !line.includes('"run-model"')) continue;

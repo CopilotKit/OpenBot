@@ -262,7 +262,7 @@ jobs:
       - name: Preview
         if: inputs.dry_run
         run: |
-          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock desktop/intelligence-cli.json
+          git --no-pager diff -- package.json CHANGELOG.md desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock desktop/intelligence-cli.json
           cat /tmp/pr-body.md
 
       # The first candidate or beta needs its branch before a PR can target it. It is made through

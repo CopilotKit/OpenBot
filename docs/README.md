@@ -18,7 +18,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
   - [Notion](plugins/notion.md)
   - [MCP servers added by URL](plugins/mcp-by-url.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
-- [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
+- Kubernetes: the Helm chart published with each release, whose guide (`helm show readme`) covers what a cluster needs before it and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
 - [Releases and upstream integration](upstream-upgrades.md): integrating upstream into customer source, kept separate from deploying an accepted release.
 - [Explicit local updates](local-updates.md): `bun scripts/update.ts local`, which updates a known source checkout at a maintenance boundary.

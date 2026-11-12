@@ -1,2 +1,0 @@
-ALTER TABLE "recorder_connect_codes" ADD COLUMN "organization_session_expires_at" timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "recorder_connections" ADD COLUMN "organization_session_expires_at" timestamp with time zone;

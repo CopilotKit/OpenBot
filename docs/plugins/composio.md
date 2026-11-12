@@ -118,9 +118,10 @@ everywhere else here, from "the app advertises nothing".
 COMPOSIO_API_KEY=... bun run composio:smoke -- --user <id> [--call]
 ```
 
-`scripts/composio-smoke.ts` is the one command to run when Composio misbehaves and nothing on screen
-says why. It ships inside the container image, so it is run where the key is — in the deployment,
-not on a laptop — and it answers the question no page can: whether *this* key opens *this* project. A
+`bun run composio:smoke` is the one command to run when Composio misbehaves and nothing on screen
+says why. It is a command of the server image (`openbot composio-smoke`), which the script runs in a
+one-off server container with this checkout's `.env`, and in a deployment it runs where the key is.
+It answers the question no page can: whether *this* key opens *this* project. A
 key with no project behind it, a project with no authorization config for the app, and a person who
 never finished the consent page all leave a product that looks configured and answers nothing.
 

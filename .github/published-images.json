@@ -1,9 +1,6 @@
 [
-  "agent-computer",
-  "supervisor",
   "agent-bot",
   "agent-langgraph",
-  "server",
   "agent-crewai",
   "agent-llamaindex",
   "agent-agno",

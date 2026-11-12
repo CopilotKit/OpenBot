@@ -19,8 +19,7 @@ here noticing:
 - **Before this page was first written (2026-10-12)**, with a throwaway script that is not in this
   repository: the toolkit classification counts, GitHub's 43 of 43, Google's first 11 of 30, and the
   default-verifier failure below.
-- **Once, on 2026-10-13**, with `server/tests/arcade-live.test.ts` (`ARCADE_API_KEY=… bun run
-  test:live-arcade`), which drives this deployment's Arcade adapter against the real API with a
+- **Once, on 2026-10-13**, with the server's live Arcade suite, which drives this deployment's Arcade adapter against the real API with a
   stand-in for its verify route, and needs a person at a browser to consent: the `provider_id`
   shapes, the shared Google connection, Google's 0 → 11 of 30, and the wrong-user answer. That run
   came back 9 passed, 3 failed — all three the suite's own mistakes, corrected afterwards from what

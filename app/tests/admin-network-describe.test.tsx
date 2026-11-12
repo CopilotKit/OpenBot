@@ -25,7 +25,7 @@ import type {
 } from "@/lib/enterprise/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
-import recorded from "../../server/tests/fixtures/network-allowlist-recorded.json";
+import recorded from "./fixtures/network-allowlist-recorded.json";
 import { settleReactWork } from "./settle-react-work";
 
 /*

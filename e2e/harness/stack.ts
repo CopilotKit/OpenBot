@@ -1,16 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import {
   AIMOCK_URL,
   APP_URL,
-  ARTIFACTS,
   COMPOSE_PROJECT,
   COMPOSIO_URL,
   DUMMY_ANTHROPIC_KEY,
@@ -27,8 +20,9 @@ import {
  *
  * What makes it the run's own, rather than whatever is already on this machine:
  *
- * - its own compose project (`openbot-e2e`), so its containers and volumes are separate, and its
- *   own image tags, so building it never replaces an image another stack runs;
+ * - its own compose project (`openbot-e2e`), so its containers and volumes are separate. The
+ *   server, worker, computer and supervisor are the published OpenBot images at the tag in
+ *   backend-images.env, which never moves, so sharing them with another stack changes nothing;
  * - its own ports (46xxx), so OpenBot Desktop or a dev stack on the defaults is never touched;
  * - a fresh database every run (`down -v` first), so a journey starts where a new person does.
  *
@@ -37,10 +31,7 @@ import {
  * is not set here: the Intelligence licence and the encryption key.
  */
 
-const STATE = join(ARTIFACTS, "stack.json");
 export const START_LOG = join(LOGS, "start.log");
-/** The API server's own log, which start.sh writes into OPENBOT_LOG_DIR. */
-export const SERVER_LOG = join(LOGS, "server.log");
 
 /** Fixed per-run secrets, so start.sh never generates one and never writes to `.env`. */
 const E2E_SECRETS = {
@@ -74,11 +65,9 @@ export function stackEnvironment(): Record<string, string> {
     COMPOSE_PROJECT_NAME: COMPOSE_PROJECT,
     // start.sh writes the server, app and migration logs here instead of the checkout's .logs.
     OPENBOT_LOG_DIR: LOGS,
-    // Image tags of its own: `openbot-agent-computer:latest` and the rest are shared by every
-    // compose project on the machine, and `--build` would replace them under another stack.
-    SERVER_IMAGE: "openbot-e2e-server:latest",
-    COMPUTER_IMAGE: "openbot-e2e-agent-computer:latest",
-    SUPERVISOR_IMAGE: "openbot-e2e-supervisor:latest",
+    // Image tags of its own for the Bots built from this checkout: `openbot-agent-bot:latest` and
+    // the other is shared by every compose project on the machine, and `--build` would replace it
+    // under another stack. The server, computer and supervisor are pulled, at backend-images.env.
     BOT_IMAGE: "openbot-e2e-agent-bot:latest",
     LANGGRAPH_IMAGE: "openbot-e2e-agent-langgraph:latest",
 
@@ -105,9 +94,6 @@ export function stackEnvironment(): Record<string, string> {
     COMPUTER_SUPERVISOR_URL: "",
     COMPUTER_RUNTIME: "",
     AUDIT_RETENTION_DAYS: "90",
-    // No Chrome window on the developer's desktop: the person's own browser is Teach a Bot's, which
-    // a later slice drives. OpenBot Desktop runs without one too.
-    OPENBOT_PERSON_BROWSER: "off",
     // Nobody signs in to the personal edition, and the server refuses to start with a sign-in
     // provider configured. A developer's `.env` is usually a team one, so these are blanked.
     ...Object.fromEntries(SIGN_IN_SETTINGS.map((name) => [name, ""])),
@@ -183,6 +169,10 @@ function listener(port: number): Listener | undefined {
   return { pid, cwd: cwd ?? "", command };
 }
 
+/** The container engine's own port forwarders, which `docker compose down` takes care of. */
+const ENGINE_PROXY =
+  /com\.docker|vpnkit|docker-proxy|gvproxy|rootlessport|slirp4netns/;
+
 /**
  * Stop what holds one of the run's own host ports, but only a process started from this checkout.
  * Docker's proxy (the compose services) is left to `docker compose down`.
@@ -190,8 +180,7 @@ function listener(port: number): Listener | undefined {
 function stopOwnListener(port: number): void {
   const held = listener(port);
   if (!held) return;
-  if (held.command.includes("com.docker") || held.command.includes("vpnkit"))
-    return;
+  if (ENGINE_PROXY.test(held.command)) return;
   if (!held.cwd.startsWith(ROOT)) {
     throw new Error(
       `Port ${port} is held by a process outside this checkout (pid ${held.pid}, ${held.cwd}). The end-to-end run uses ports 46xxx of its own; stop that process or free the port.`,
@@ -200,42 +189,20 @@ function stopOwnListener(port: number): void {
   process.kill(held.pid, "SIGTERM");
 }
 
-/** The host routine workers started from this checkout, by pid. */
-function workersHere(): number[] {
-  let pids: number[];
-  try {
-    pids = execFileSync("pgrep", ["-f", "bun worker/src/index.ts"], {
-      encoding: "utf8",
-    })
-      .trim()
-      .split("\n")
-      .map(Number)
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-  return pids.filter((pid) => {
-    try {
-      return execFileSync(
-        "lsof",
-        ["-a", "-p", String(pid), "-d", "cwd", "-Fn"],
-        {
-          encoding: "utf8",
-        },
-      ).includes(`n${ROOT}\n`);
-    } catch {
-      return false;
-    }
+function compose(args: string[]): string {
+  return execFileSync("docker", ["compose", "-p", COMPOSE_PROJECT, ...args], {
+    cwd: ROOT,
+    env: stackEnvironment(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 300_000,
+    maxBuffer: 256 * 1024 * 1024,
   });
 }
 
-function compose(args: string[]): void {
-  execFileSync("docker", ["compose", "-p", COMPOSE_PROJECT, ...args], {
-    cwd: ROOT,
-    env: stackEnvironment(),
-    stdio: ["ignore", "ignore", "pipe"],
-    timeout: 300_000,
-  });
+/** Everything the server's container has written so far, which is the server's log. */
+export function serverLog(): string {
+  return compose(["logs", "--no-color", "--no-log-prefix", "server"]);
 }
 
 async function waitUntilFree(port: number): Promise<void> {
@@ -251,17 +218,8 @@ export async function stopStack({
 }: {
   volumes: boolean;
 }): Promise<void> {
-  for (const port of [PORTS.app, PORTS.server, PORTS.browser])
-    stopOwnListener(port);
-  let started: number[] = [];
-  try {
-    started = JSON.parse(readFileSync(STATE, "utf8")).workers ?? [];
-  } catch {}
-  for (const pid of started) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {}
-  }
+  // The app is the one host process; the server and everything else are the compose project's.
+  stopOwnListener(PORTS.app);
   compose(["down", "--remove-orphans", ...(volumes ? ["-v"] : [])]);
   await waitUntilFree(PORTS.app);
   await waitUntilFree(PORTS.server);
@@ -271,7 +229,6 @@ export async function stopStack({
 export async function startStack(): Promise<void> {
   mkdirSync(LOGS, { recursive: true });
   await stopStack({ volumes: true });
-  const before = new Set(workersHere());
   const log = openSync(START_LOG, "w");
   const code = await new Promise<number | null>((settle, fail) => {
     const child = spawn("bash", ["scripts/start.sh"], {
@@ -279,7 +236,7 @@ export async function startStack(): Promise<void> {
       env: stackEnvironment(),
       stdio: ["ignore", log, log],
     });
-    // The first run builds the server and computer images, which takes minutes.
+    // The first run pulls the OpenBot images, which takes minutes on a slow line.
     const deadline = setTimeout(() => child.kill("SIGTERM"), 20 * 60_000);
     child.on("error", fail);
     child.on("exit", (exit) => {
@@ -288,11 +245,9 @@ export async function startStack(): Promise<void> {
     });
   });
   closeSync(log);
-  const workers = workersHere().filter((pid) => !before.has(pid));
-  writeFileSync(STATE, JSON.stringify({ workers }, null, 2));
   if (code !== 0) {
     throw new Error(
-      `scripts/start.sh exited ${code}. Its output is in ${START_LOG}; the server's in ${SERVER_LOG}.`,
+      `scripts/start.sh exited ${code}. Its output is in ${START_LOG}; the server's is \`docker compose -p ${COMPOSE_PROJECT} logs server\`.`,
     );
   }
 }

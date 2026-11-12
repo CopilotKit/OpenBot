@@ -509,7 +509,6 @@ anything, and fails if anything else changed. The allowed difference is:
 
 - the `version` in `package.json`
 - `CHANGELOG.md`
-- `appVersion` in `charts/openbot/Chart.yaml`
 - the `openbot-desktop` version in `desktop/src-tauri/Cargo.toml` and `Cargo.lock`
 
 A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
@@ -828,8 +827,8 @@ wants the `build` sections overridden away rather than this variable alone.
 A tag can be moved to point at a different image; a digest cannot. The same digest that CI smoke
 tested is the one that runs, and rolling back is the same command with an earlier version.
 
-On Kubernetes the chart takes the same digest as `image.digest`; see
-[charts/openbot/README.md](../charts/openbot/README.md#pin-the-image-by-digest).
+On Kubernetes the chart takes the same digest as `image.digest`; see "Pin the image by digest" in
+the Helm guide that comes with the chart.
 
 Before deploying, you can check an image is the one this repository built. Every published image
 carries its own attestation:
@@ -874,8 +873,7 @@ release commit:
   (its first parent), and main's CI passed on that commit, they do not. That commit's tree has been
   through all of them already. The release files are `CHANGELOG.md` and `release-policy.json`, which
   may change freely, and the `version` in `package.json`, the `openbot-desktop` version line in
-  `desktop/src-tauri/Cargo.toml` and `Cargo.lock` and `appVersion` in `charts/openbot/Chart.yaml`,
-  which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
+  `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
   skips `image` unless it was labelled. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and
