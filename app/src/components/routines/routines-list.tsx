@@ -29,7 +29,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { describeEvent } from "@/lib/routines/events";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import {
@@ -37,7 +36,13 @@ import {
   responsibilitiesQueryOptions,
   triggersQueryOptions,
 } from "@/lib/responsibilities";
-import { goalCanEnd, goalStarts, mergeRoutines } from "@/lib/routines/merged";
+import { describeEvent } from "@/lib/routines/events";
+import {
+  goalCanEnd,
+  goalStarts,
+  mergeRoutines,
+  routineDoes,
+} from "@/lib/routines/merged";
 import {
   nothingIsFiring,
   type RoutineRecord,
@@ -51,7 +56,7 @@ type BotDirectory = Map<string, AgentProfile>;
 
 /**
  * A scheduled routine's row, the same shape as a goal's and a check-in's: what it does (its title,
- * else its instruction), when it starts, that it acts, and a last run worth knowing about. The
+ * else `routineDoes`), when it starts, that it acts, and a last run worth knowing about. The
  * whole row links to its page, where it is switched, run, read back and deleted.
  */
 function RoutineItem({
@@ -67,6 +72,7 @@ function RoutineItem({
 }) {
   const lastRun = lastRunLabel(routine.lastRun);
   const outcome = routine.lastRun?.status;
+  const does = routineDoes(routine);
   const line = [
     botName,
     routine.enabled
@@ -93,18 +99,14 @@ function RoutineItem({
       <ItemContent className={routine.enabled ? "" : "opacity-60"}>
         {/* The clamp is on the words: on the title itself it undid the gap before the kind label. */}
         <ItemTitle>
-          <span className="line-clamp-2">
-            {routine.title ?? routine.instruction}
-          </span>
+          <span className="line-clamp-2">{routine.title ?? does}</span>
           <span className="font-normal text-muted-foreground text-xs">
             Schedule
           </span>
         </ItemTitle>
         <ItemDescription>{line}</ItemDescription>
-        {routine.title ? (
-          <ItemDescription className="line-clamp-1">
-            {routine.instruction}
-          </ItemDescription>
+        {routine.title && routine.title !== does ? (
+          <ItemDescription className="line-clamp-1">{does}</ItemDescription>
         ) : null}
         {/* Only a last run worth stopping for: a quiet success is in the details. */}
         {outcome === "failed" || outcome === "skipped" ? (

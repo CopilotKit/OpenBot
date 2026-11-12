@@ -101,7 +101,7 @@ const goalFields = {
   endsWhenMet: {
     type: "boolean",
     description:
-      "True when the goal has an outcome that ends it even though it runs on a schedule or on an event. A run that meets the success criteria may then complete it. Never with recurring.",
+      "True when the goal has an outcome that ends it even though it runs on a schedule or on an event. A run that meets the success criteria may then complete it. Never with recurring. Never set this for work the person wants done every time, such as telling them what changed every morning: every run would meet its success criteria and end the goal.",
   },
 } as const;
 const goalId = {
@@ -132,7 +132,9 @@ export const GOAL_TOOLS: readonly McpToolShape[] = Object.freeze([
       "happens. A goal that repeats, because it is `recurring`, a routine runs it or an event wakes it, is",
       "never completed by one of its runs. Each run reports its result, and only the person ends it. Set",
       "`endsWhenMet` instead when a goal a routine runs or an event wakes has an outcome that ends it: it",
-      "doesn't repeat, and the run that meets its success criteria completes it.",
+      "doesn't repeat, and the run that meets its success criteria completes it. Never set `endsWhenMet`",
+      "for work the person wants done every time, such as telling them what changed every morning: every",
+      "run would meet its success criteria and end the goal.",
       "",
       "Its runs post into this conversation. Leave `channelId` out, or empty, for this conversation, and",
       "pass one only when the person asks for a different conversation you share. It takes no owner and",

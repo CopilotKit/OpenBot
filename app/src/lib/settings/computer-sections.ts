@@ -4,8 +4,8 @@ import { useEffect } from "react";
 /**
  * The sections of Settings → Computer an address can open at, by the hash it carries. OpenBot
  * Desktop's tray Status opens `/settings/this-computer`, and the browser extension's popup opens
- * `/settings/computer#browsers` (older ones `/settings/browsers`); the old addresses redirect here
- * with the hash, and the page scrolls to the section.
+ * `/settings/browsers`; both old addresses redirect here with the hash, and the page scrolls to the
+ * section.
  */
 export const COMPUTER_SECTION = {
   thisComputer: "this-computer",

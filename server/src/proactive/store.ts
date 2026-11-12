@@ -21,6 +21,7 @@ import { createPingStore } from "./ping";
 import { PROACTIVE_INITIATOR_PREFIX } from "./restriction";
 import {
   HIDDEN_DAYS,
+  ProactiveConflictError,
   ProactiveNotFoundError,
   ProactiveRefusedError,
   type ProactiveRunStatus,
@@ -29,6 +30,7 @@ import {
   parseWith,
   proactiveSettingInputSchema,
   proactiveSettingPatchSchema,
+  SAME_CHECK_IN,
   sameThing,
   titleKey,
 } from "./types";
@@ -407,11 +409,16 @@ export function createProactiveStore(database: Database) {
      * A Bot watches each thing once. Accepting an offer for something it already watches (the same
      * link, or with no link the same subject) turns that one back on with the interval chosen now,
      * rather than adding a second that reads the same page twice.
+     *
+     * `refuseExisting` is for a caller that asked for a new one (the New routine screen): the same
+     * thing is refused with `SAME_CHECK_IN` instead of changed. Changing it in place there would
+     * leave it posting in its own conversation, with the one the person picked left empty.
      */
     async create(
       owner: string,
       input: unknown,
       threadId: string,
+      options: { refuseExisting?: boolean } = {},
     ): Promise<ProactiveSetting> {
       const parsed = parseWith(proactiveSettingInputSchema, input);
       const sourceLink = parsed.sourceLink ?? null;
@@ -433,6 +440,8 @@ export function createProactiveStore(database: Database) {
             : !row.sourceLink &&
               row.subject.toLowerCase() === parsed.subject.toLowerCase(),
         );
+        if (same && options.refuseExisting)
+          throw new ProactiveConflictError(SAME_CHECK_IN);
         if (same)
           return update(
             owner,

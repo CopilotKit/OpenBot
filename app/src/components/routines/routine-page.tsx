@@ -18,8 +18,8 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { routinesOf } from "@/components/routines/new-routine-page";
 import { DeleteRow } from "@/components/routines/delete-row";
+import { routinesOf } from "@/components/routines/new-routine-page";
 import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +43,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { relativeTime } from "@/lib/relative-time";
+import { routineDoes } from "@/lib/routines/merged";
 import {
   deleteRoutineMutationOptions,
   runRoutineNowMutationOptions,
@@ -290,6 +291,7 @@ export function RoutinePage({
   const [confirming, setConfirming] = useState(false);
   const lastRun = lastRunLabel(routine.lastRun);
   const next = nextRunWords(routine);
+  const does = routineDoes(routine);
   const facts = [
     {
       key: "schedule",
@@ -326,7 +328,7 @@ export function RoutinePage({
           ? `${routine.schedule} · ${routine.timezone} · Acts`
           : "Paused. Nothing starts it until you turn it on."
       }
-      title={routine.title ?? routine.instruction}
+      title={routine.title ?? does}
     >
       {/* What can be done to it now. The page title names it, so this section has no heading. */}
       <PageSection>
@@ -481,14 +483,15 @@ export function RoutinePage({
               </Item>
             </Fragment>
           ))}
-          {routine.title ? (
+          {routine.title && routine.title !== does ? (
             <>
               <Separator />
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>Instruction</ItemTitle>
+                  {/* New routine's word for it. */}
+                  <ItemTitle>What to do</ItemTitle>
                   <ItemDescription className="line-clamp-none">
-                    {routine.instruction}
+                    {does}
                   </ItemDescription>
                 </ItemContent>
               </Item>

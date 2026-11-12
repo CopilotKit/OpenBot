@@ -143,9 +143,16 @@ export function planRoutine(
     };
   }
 
+  // A Done when ends the goal when met, as it does under a schedule or an event, so a schedule or a
+  // trigger added later does not turn it into a goal that repeats and no run can complete.
   return {
     kind: "goal",
-    goal: { ...goal, subscriptions: [], recurring: false, endsWhenMet: false },
+    goal: {
+      ...goal,
+      subscriptions: [],
+      recurring: false,
+      endsWhenMet: !!doneWhen,
+    },
     schedule: null,
     runNow: true,
   };

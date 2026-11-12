@@ -156,10 +156,12 @@ test("a goal run now: the goal, then POST /api/responsibilities/g1/run", async (
   ]);
 });
 
-test("a check-in: one POST /api/proactive/settings", async () => {
+test("a check-in: one POST /api/proactive/settings, asking for a new one", async () => {
   const calls = stub();
   await run(checkInPlan("c1"));
-  expect(methodsAndPaths(calls)).toEqual(["POST /api/proactive/settings"]);
+  expect(methodsAndPaths(calls)).toEqual([
+    "POST /api/proactive/settings?refuseExisting=true",
+  ]);
   expect(calls[0]?.[2]).toEqual({
     agentId: "a1",
     channelId: "c1",
@@ -184,11 +186,29 @@ test("a new conversation is started first and used by every write", async () => 
 
 test("a refused write takes the new conversation back", async () => {
   const calls = stub({
-    "POST /api/proactive/settings": { status: 400, body: { error: "x" } },
+    "POST /api/proactive/settings?refuseExisting=true": {
+      status: 400,
+      body: { error: "x" },
+    },
   });
   const { error } = await run(checkInPlan(NEW_CONVERSATION));
   expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
   expect(error?.message).toBe("x");
+});
+
+test("a check-in the Bot already has is refused, says so, and takes the new conversation back", async () => {
+  const same =
+    "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
+  const calls = stub({
+    "POST /api/proactive/settings?refuseExisting=true": {
+      status: 409,
+      body: { error: same },
+    },
+  });
+  const { error } = await run(checkInPlan(NEW_CONVERSATION));
+  expect(error).not.toBeInstanceOf(SavedButRefused);
+  expect(error?.message).toBe(same);
+  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
 });
 
 const refusedSchedule = {
@@ -392,7 +412,7 @@ for (const kind of ["routine", "goal", "check-in"] as const) {
           ? "/api/routines"
           : kind === "goal"
             ? "/api/responsibilities"
-            : "/api/proactive/settings";
+            : "/api/proactive/settings?refuseExisting=true";
       const calls = stub({
         [`POST ${path}`]: { status: 503, body: { error: "Unavailable" } },
       });

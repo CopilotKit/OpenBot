@@ -28,11 +28,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { untitledLine } from "@/lib/channels/label";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type ProactiveSetting,
   proactiveAllowedQueryOptions,
@@ -88,8 +88,8 @@ const SAME_CHECK_IN =
 /**
  * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
  * check-in this Bot already has. The server counts a check-in with no link and the same subject, in
- * any case, as the same one, and updates that one in place (`proactiveStore.create`): it would keep
- * posting in its own conversation, and the one picked here would stay empty.
+ * any case, as the same one. Asked for a new one, as this screen asks, it refuses that with 409 and
+ * this sentence (`refuseExisting` in `proactiveStore.create`); this check says it while Name is typed.
  */
 function sameCheckIn(
   settings: ProactiveSetting[] | undefined,
@@ -110,6 +110,9 @@ const TELL_OFF =
   "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
 
 type FieldName = keyof RoutineFormValues;
+
+/** The id of a field's message, which its control names in `aria-describedby`. */
+const errorId = (name: FieldName) => `${name}-error`;
 
 /** One message per field: the first rule its answer breaks. */
 type Messages = Partial<Record<FieldName, string>>;
@@ -304,6 +307,27 @@ export function NewRoutinePage({
     { compare: sameMessages },
   );
 
+  /*
+   * Where focus goes. Each press of Create with a message showing moves it to the first field that
+   * has one, in the order the page draws them; a message that comes or goes while the person types
+   * moves nothing. After a partial or uncertain save, Create (which had focus) is replaced by Go to
+   * Routines, so focus moves there instead of falling back to the page.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const goToRoutines = useRef<HTMLElement | null>(null);
+  const attempts = useSelector(form.store, (state) => state.submissionAttempts);
+  const focusedFor = useRef(0);
+  useEffect(() => {
+    if (attempts === focusedFor.current) return;
+    focusedFor.current = attempts;
+    formRef.current
+      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      ?.focus();
+  }, [attempts]);
+  useEffect(() => {
+    if (saved) goToRoutines.current?.focus();
+  }, [saved]);
+
   const botItems = Object.fromEntries(
     (agents.data ?? []).map((agent) => [agent.id, agent.name]),
   ) as Record<string, string>;
@@ -321,6 +345,7 @@ export function NewRoutinePage({
     >
       <form
         noValidate
+        ref={formRef}
         onSubmit={(event) => {
           event.preventDefault();
           form.handleSubmit();
@@ -361,6 +386,9 @@ export function NewRoutinePage({
                       >
                         <SelectTrigger
                           aria-invalid={isInvalid}
+                          aria-describedby={
+                            isInvalid ? errorId(field.name) : undefined
+                          }
                           className="w-full"
                           id={field.name}
                         >
@@ -385,7 +413,9 @@ export function NewRoutinePage({
                         </SelectContent>
                       </Select>
                       {isInvalid ? (
-                        <FieldError>{shown[field.name]}</FieldError>
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
                       ) : null}
                     </Field>
                   );
@@ -404,6 +434,9 @@ export function NewRoutinePage({
                       <Textarea
                         disabled={saved}
                         aria-invalid={isInvalid}
+                        aria-describedby={
+                          isInvalid ? errorId(field.name) : undefined
+                        }
                         id={field.name}
                         name={field.name}
                         onBlur={field.handleBlur}
@@ -415,7 +448,9 @@ export function NewRoutinePage({
                         value={field.state.value}
                       />
                       {isInvalid ? (
-                        <FieldError>{shown[field.name]}</FieldError>
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
                       ) : null}
                     </Field>
                   );
@@ -446,6 +481,9 @@ export function NewRoutinePage({
                             >
                               <SelectTrigger
                                 aria-invalid={isInvalid}
+                                aria-describedby={
+                                  isInvalid ? errorId(field.name) : undefined
+                                }
                                 className="w-full"
                                 id={field.name}
                               >
@@ -475,7 +513,9 @@ export function NewRoutinePage({
                               </FieldDescription>
                             ) : null}
                             {isInvalid ? (
-                              <FieldError>{shown[field.name]}</FieldError>
+                              <FieldError id={errorId(field.name)}>
+                                {shown[field.name]}
+                              </FieldError>
                             ) : null}
                           </Field>
                         );
@@ -705,6 +745,11 @@ export function NewRoutinePage({
                                                 <Input
                                                   disabled={saved}
                                                   aria-invalid={isInvalid}
+                                                  aria-describedby={
+                                                    isInvalid
+                                                      ? errorId(field.name)
+                                                      : undefined
+                                                  }
                                                   aria-label="Time"
                                                   className="w-32"
                                                   onBlur={field.handleBlur}
@@ -718,7 +763,9 @@ export function NewRoutinePage({
                                                   value={field.state.value}
                                                 />
                                                 {isInvalid ? (
-                                                  <FieldError>
+                                                  <FieldError
+                                                    id={errorId(field.name)}
+                                                  >
                                                     {shown[field.name]}
                                                   </FieldError>
                                                 ) : null}
@@ -813,6 +860,11 @@ export function NewRoutinePage({
                                           <Input
                                             disabled={saved}
                                             aria-invalid={isInvalid}
+                                            aria-describedby={
+                                              isInvalid
+                                                ? errorId(field.name)
+                                                : undefined
+                                            }
                                             id={field.name}
                                             name={field.name}
                                             onBlur={field.handleBlur}
@@ -829,7 +881,9 @@ export function NewRoutinePage({
                                             value={field.state.value}
                                           />
                                           {isInvalid ? (
-                                            <FieldError>
+                                            <FieldError
+                                              id={errorId(field.name)}
+                                            >
                                               {shown[field.name]}
                                             </FieldError>
                                           ) : null}
@@ -877,6 +931,9 @@ export function NewRoutinePage({
                         <Textarea
                           disabled={saved}
                           aria-invalid={isInvalid}
+                          aria-describedby={
+                            isInvalid ? errorId(field.name) : undefined
+                          }
                           id={field.name}
                           name={field.name}
                           onBlur={field.handleBlur}
@@ -888,7 +945,9 @@ export function NewRoutinePage({
                           value={field.state.value}
                         />
                         {isInvalid ? (
-                          <FieldError>{shown[field.name]}</FieldError>
+                          <FieldError id={errorId(field.name)}>
+                            {shown[field.name]}
+                          </FieldError>
                         ) : null}
                       </Field>
                     );
@@ -981,6 +1040,9 @@ export function NewRoutinePage({
                       <Input
                         disabled={saved}
                         aria-invalid={isInvalid}
+                        aria-describedby={
+                          isInvalid ? errorId(field.name) : undefined
+                        }
                         id={field.name}
                         name={field.name}
                         onBlur={field.handleBlur}
@@ -991,7 +1053,9 @@ export function NewRoutinePage({
                         value={field.state.value}
                       />
                       {isInvalid ? (
-                        <FieldError>{shown[field.name]}</FieldError>
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
                       ) : null}
                     </Field>
                   );
@@ -1011,6 +1075,10 @@ export function NewRoutinePage({
                   Routines goes to the same list. */}
           {saved ? (
             <Button
+              // A link drawn as a button, so the ref is any element.
+              ref={(element: HTMLElement | null) => {
+                goToRoutines.current = element;
+              }}
               render={(props) => (
                 <Link
                   {...props}
@@ -1037,14 +1105,12 @@ export function NewRoutinePage({
                   Cancel
                 </Button>
               )}
+              {/* Enabled while a message shows: pressing it takes the person to the first one. A
+                  disabled button says nothing about why, and a keyboard can't reach it. */}
               <form.Subscribe selector={(state) => state.isSubmitting}>
                 {(isSubmitting) => (
                   <Button
-                    disabled={
-                      Object.keys(shown).length > 0 ||
-                      isSubmitting ||
-                      createFromPlan.isPending
-                    }
+                    disabled={isSubmitting || createFromPlan.isPending}
                     type="submit"
                   >
                     {isSubmitting || createFromPlan.isPending
