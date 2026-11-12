@@ -30,9 +30,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { matchingChannels } from "@/lib/channels/order";
-import {
-  channelListQueryOptions,
-} from "@/lib/channels/queries";
+import { channelListQueryOptions } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";

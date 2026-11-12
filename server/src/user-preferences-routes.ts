@@ -1,4 +1,7 @@
-import { SIDEBAR_SECTION_IDS, SKIN_IDS } from "@openbot/shared/user-preferences";
+import {
+  SIDEBAR_SECTION_IDS,
+  SKIN_IDS,
+} from "@openbot/shared/user-preferences";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "./auth/guards";

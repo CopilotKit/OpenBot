@@ -31,7 +31,10 @@ export function createProjectMutationOptions(queryClient: QueryClient) {
 
 export function renameProjectMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { projectId: string; name: string }): Promise<Project> =>
+    mutationFn: (variables: {
+      projectId: string;
+      name: string;
+    }): Promise<Project> =>
       client(`/api/projects/${variables.projectId}`, "project", {
         method: "PATCH",
         body: { name: variables.name },

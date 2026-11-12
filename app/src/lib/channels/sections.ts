@@ -42,9 +42,11 @@ export const SECTION_EMPTY: Record<SidebarSectionId, string> = {
  * person who has never made a folder is the one who needs to read it.
  */
 export const SECTION_EMPTY_HINT: Record<SidebarSectionId, string> = {
-  group: "A conversation with more than one Bot, or with somebody else in it, appears here.",
+  group:
+    "A conversation with more than one Bot, or with somebody else in it, appears here.",
   direct: "Your one-to-one conversations appear here.",
-  projects: "Folders of your own: make one with +, then file a conversation into it from its menu.",
+  projects:
+    "Folders of your own: make one with +, then file a conversation into it from its menu.",
 };
 
 /**
@@ -96,7 +98,9 @@ export function conversationSections(
   };
 
   for (const channel of channels ?? []) {
-    const folder = channel.projectId ? folders.get(channel.projectId) : undefined;
+    const folder = channel.projectId
+      ? folders.get(channel.projectId)
+      : undefined;
     if (folder) {
       folder.channels.push(channel);
     } else if (isGroupChat(channel)) {
@@ -173,10 +177,7 @@ export function collapsedSections(
  * in it is only dropped while searching, where "No group chats yet" beside a box full of a
  * colleague's name would be the wrong sentence about the wrong thing.
  */
-export function sectionVisible(
-  count: number,
-  searching: boolean,
-): boolean {
+export function sectionVisible(count: number, searching: boolean): boolean {
   return count > 0 || !searching;
 }
 

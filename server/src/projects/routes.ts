@@ -48,7 +48,9 @@ export function parseProjectName(input: unknown): Parsed<{ name: string }> {
 }
 
 /** `{ projectId: string | null }`, which is what "move" and "remove from project" both send. */
-export function parseProjectMove(input: unknown): Parsed<{ projectId: string | null }> {
+export function parseProjectMove(
+  input: unknown,
+): Parsed<{ projectId: string | null }> {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, error: "Move input must be a JSON object." };
   }
@@ -56,14 +58,16 @@ export function parseProjectMove(input: unknown): Parsed<{ projectId: string | n
   if (!("projectId" in body)) {
     return {
       ok: false,
-      error: "projectId must be a project id, or null to take the conversation out.",
+      error:
+        "projectId must be a project id, or null to take the conversation out.",
     };
   }
   if (body.projectId === null) return { ok: true, value: { projectId: null } };
   if (typeof body.projectId !== "string" || body.projectId.trim() === "") {
     return {
       ok: false,
-      error: "projectId must be a project id, or null to take the conversation out.",
+      error:
+        "projectId must be a project id, or null to take the conversation out.",
     };
   }
   return { ok: true, value: { projectId: body.projectId.trim() } };

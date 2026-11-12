@@ -9,7 +9,12 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { AgentActor } from "../agents/profile-types";
 import type { Database } from "../db/client";
-import { channelMemberships, channelProjects, channels, projects } from "../db/schema";
+import {
+  channelMemberships,
+  channelProjects,
+  channels,
+  projects,
+} from "../db/schema";
 
 /** A folder as the sidebar needs it: its name, its order, and which conversations it holds. */
 export type ProjectSummary = {
@@ -58,7 +63,11 @@ export type ProjectStore = {
   list(actor: AgentActor): Promise<ProjectSummary[]>;
   create(actor: AgentActor, name: string): Promise<ProjectSummary>;
   /** Renames a folder. Throws `ProjectNotFoundError` for anybody but its owner. */
-  rename(actor: AgentActor, projectId: string, name: string): Promise<ProjectSummary>;
+  rename(
+    actor: AgentActor,
+    projectId: string,
+    name: string,
+  ): Promise<ProjectSummary>;
   /**
    * Deletes a folder and its filing, leaving every conversation in it untouched: the rows in
    * `channel_projects` go with the project, and the channels return to Group/Direct on the next
@@ -85,7 +94,9 @@ export function createProjectStore(database: Database): ProjectStore {
     const [row] = await database
       .select({ id: projects.id })
       .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.ownerUserId, actor.id)))
+      .where(
+        and(eq(projects.id, projectId), eq(projects.ownerUserId, actor.id)),
+      )
       .limit(1);
     if (!row) throw new ProjectNotFoundError(projectId);
     return row;
@@ -115,7 +126,10 @@ export function createProjectStore(database: Database): ProjectStore {
       )
       /* A deleted conversation is not there to be listed in a folder either. */
       .where(
-        and(eq(channelProjects.ownerUserId, userId), isNull(channels.deletedAt)),
+        and(
+          eq(channelProjects.ownerUserId, userId),
+          isNull(channels.deletedAt),
+        ),
       );
 
     const byProject = new Map<string, string[]>();
@@ -139,7 +153,11 @@ export function createProjectStore(database: Database): ProjectStore {
         })
         .from(projects)
         .where(eq(projects.ownerUserId, actor.id))
-        .orderBy(asc(projects.sortOrder), asc(projects.createdAt), asc(projects.id));
+        .orderBy(
+          asc(projects.sortOrder),
+          asc(projects.createdAt),
+          asc(projects.id),
+        );
 
       const byProject = await filedByProject(actor.id);
 

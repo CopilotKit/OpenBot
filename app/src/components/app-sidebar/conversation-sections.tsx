@@ -32,7 +32,10 @@ import {
 import { isUnread } from "@/lib/channels/unread";
 import { untitledLine } from "@/lib/channels/label";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { createProjectMutationOptions, renameProjectMutationOptions } from "@/lib/projects/mutations";
+import {
+  createProjectMutationOptions,
+  renameProjectMutationOptions,
+} from "@/lib/projects/mutations";
 import type { Project } from "@/lib/projects/queries";
 import { relativeTimeShort } from "@/lib/relative-time";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";

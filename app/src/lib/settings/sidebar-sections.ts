@@ -14,7 +14,10 @@ import {
   mergeSidebarSections,
   toggledSidebarSection,
 } from "@/lib/channels/sections";
-import { useUserPreferences, userPreferencesQueryOptions } from "./message-list";
+import {
+  useUserPreferences,
+  userPreferencesQueryOptions,
+} from "./message-list";
 
 /**
  * Which sidebar sections this person has folded, saved on their account.
@@ -32,7 +35,9 @@ export function saveSidebarSectionsMutationOptions(
 ) {
   const queryKey = userPreferencesQueryOptions(userId).queryKey;
   return mutationOptions({
-    mutationFn: (sidebarSections: SidebarSections): Promise<UserPreferences> => {
+    mutationFn: (
+      sidebarSections: SidebarSections,
+    ): Promise<UserPreferences> => {
       if (!userId) throw new Error("Sign in to save your sidebar.");
       return client("/api/settings/preferences", "preferences", {
         method: "PATCH",
@@ -47,7 +52,8 @@ export function saveSidebarSectionsMutationOptions(
      */
     onMutate: (sidebarSections) => {
       const previous = queryClient.getQueryData(queryKey);
-      if (previous) queryClient.setQueryData(queryKey, { ...previous, sidebarSections });
+      if (previous)
+        queryClient.setQueryData(queryKey, { ...previous, sidebarSections });
       return { previous };
     },
     onError: (_error, _sections, context) => {
@@ -61,7 +67,9 @@ export function saveSidebarSectionsMutationOptions(
 export function useSidebarSections() {
   const { userId, data: preferences } = useUserPreferences();
   const queryClient = useQueryClient();
-  const save = useMutation(saveSidebarSectionsMutationOptions(queryClient, userId));
+  const save = useMutation(
+    saveSidebarSectionsMutationOptions(queryClient, userId),
+  );
   const sections = mergeSidebarSections(preferences?.sidebarSections);
   return {
     sections,

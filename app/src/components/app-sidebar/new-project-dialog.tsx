@@ -66,8 +66,8 @@ export function NewProjectDialog({
         <DialogHeader>
           <DialogTitle>New project</DialogTitle>
           <DialogDescription>
-            A folder for conversations of your own. Nobody else sees it, and moving a
-            conversation into it changes nothing about who can open it.
+            A folder for conversations of your own. Nobody else sees it, and
+            moving a conversation into it changes nothing about who can open it.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
