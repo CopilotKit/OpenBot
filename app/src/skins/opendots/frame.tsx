@@ -195,10 +195,12 @@ function Rail({
     /*
      * In OpenBot Desktop on macOS the window's buttons sit over the rail's top, about 21–37px down
      * (`data-desktop-titlebar`, macOS only), so the rail then starts 32px lower, below them, and
-     * the sidebar beside it moves down with it.
+     * the sidebar beside it moves down with it. A press on the rail itself, outside its buttons,
+     * moves the window there (`data-desktop-drag`, read by the desktop on macOS only).
      */
     <nav
       aria-label="Workspace navigation"
+      data-desktop-drag=""
       data-opendots-chrome
       className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-(--opendots-line) bg-(--opendots-rail) px-[5px] py-4 max-md:hidden in-data-[desktop-titlebar=overlay]:pt-12"
     >
@@ -310,7 +312,12 @@ function Topbar({
   const agents = useQuery(agentListQueryOptions());
   const name = botName(agents.data, place.botId);
   return (
+    /*
+     * The bar is the window's title bar in OpenBot Desktop on macOS: a press anywhere on it but a
+     * button moves the window (`data-desktop-drag`, read by the desktop on macOS only).
+     */
     <header
+      data-desktop-drag="deep"
       data-opendots-chrome
       className={cn(
         "flex h-16 shrink-0 items-center gap-4 border-b border-(--opendots-line) bg-(--opendots-topbar) px-[22px] max-md:pr-[15px] max-md:pl-12",

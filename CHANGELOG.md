@@ -56,6 +56,10 @@ every deployment:
   button of every page opened over the app. OpenDots and OpenFuse had their own controls under them
   too, in some window sizes. Each skin now leaves that corner clear, as OpenBot's own sidebar does.
   In a browser and on Windows nothing moves.
+- **On a Mac, a skin's top bar moves the window.** With OpenDots, OpenDuet or OpenFuse, only a few
+  pixels at the top of the window could drag it, and a press on the bar selected its text. Now a
+  press anywhere along the top, outside a button or link, moves the window, and a double-click
+  zooms it, as in OpenBot's own layout.
 - **An OpenBot whose saved data is gone says so, and starts fresh.** When OpenBot's Podman machine
   was removed (`podman machine reset`, a WSL unregister, or an older version uninstalled with its
   data), its backend and database went with it, but the installation still named them. Every start

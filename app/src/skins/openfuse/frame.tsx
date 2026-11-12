@@ -139,8 +139,17 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
       >
         <UpdateBanner />
         <SelfHostBanner />
-        <div className="mx-auto w-full max-w-[760px] shrink-0">
-          <header className="relative mx-5 h-[122px] shrink-0 pt-0.5 min-[900px]:h-[146px] min-[900px]:pt-3.5">
+        {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}
+        <div
+          className="mx-auto w-full max-w-[760px] shrink-0"
+          data-desktop-drag=""
+        >
+          {/* The window's title bar in OpenBot Desktop on macOS: a press on it outside its buttons
+              moves the window (`data-desktop-drag`, read by the desktop on macOS only). */}
+          <header
+            className="relative mx-5 h-[122px] shrink-0 pt-0.5 min-[900px]:h-[146px] min-[900px]:pt-3.5"
+            data-desktop-drag="deep"
+          >
             <div className="absolute top-4 left-0" data-openfuse-menu="">
               <RoundButton
                 icon={IconMenu2}

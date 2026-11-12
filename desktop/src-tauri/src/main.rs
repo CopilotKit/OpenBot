@@ -6769,7 +6769,8 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+itself while the sidebar is hidden, onboarding's header, which has no sidebar beside it, and every
+place a skin marks `data-desktop-drag` (its top bar, its rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
@@ -6780,6 +6781,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
+    }
+    // A skin draws its own frame, with no sidebar header, and names its own handles: its top bar,
+    // and the rail and sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
+    // value: "deep" drags from anywhere inside but a button or link, bare from the element itself.
+    for (const handle of document.querySelectorAll(`[data-desktop-drag]:not([${DRAG}])`)) {
+      handle.setAttribute(DRAG, handle.dataset.desktopDrag);
     }
     // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
     // the header's own, so it drags while Back and the steps inside it stay buttons.
