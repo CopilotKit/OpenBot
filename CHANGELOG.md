@@ -360,6 +360,11 @@ every deployment:
 
 ### Conversations
 
+- **A Bot no longer does an app change twice after you answer an approval.** When a built-in Bot
+  asked for several app changes at once and one of them waited for your Allow, the others that
+  needed no approval still went ahead, but the Bot was told they had not run. It then did them
+  again: a Google Sheet ended up with each new tab twice, as "Summary" and "Summary_2". The Bot is
+  now told what those changes did, and the conversation shows them as done.
 - **A file you attach stays a file once the Bot answers.** On a Bot OpenBot runs in a harness, such
   as the Personal Assistant on LangChain, a text file you sent turned into one giant block of its
   own contents when the answer finished, and an image's thumbnail disappeared. A reload showed the
