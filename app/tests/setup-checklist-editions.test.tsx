@@ -162,8 +162,9 @@ test("the personal edition's Setup speaks of no memory and no admin", async () =
       "You can connect more apps than the ones OpenBot comes with.",
     ),
   ).toBeTruthy();
-  // The pages it links are the ones its Settings sidebar names.
-  expect(linkTo(row("model"), "Vault")).toBe("/settings/vault");
+  // The pages it links are the ones its Settings sidebar names. The model key goes straight to
+  // the Vault's Add key form, which files it under the name the Bots read.
+  expect(linkTo(row("model"), "Vault")).toBe("/settings/vault/new");
   expect(linkTo(row("computer"), "Computer")).toBe("/settings/computer");
   expect(view.container.textContent).not.toMatch(/remember|memory|admin/i);
   expect(view.container.innerHTML).not.toContain("/admin/");
@@ -200,7 +201,7 @@ test("a team deployment's Setup keeps memory, its admin, and the Admin pages", a
       "People can connect more apps than the ones an admin adds.",
     ),
   ).toBeTruthy();
-  expect(linkTo(row("model"), "Vault")).toBe("/admin/credentials");
+  expect(linkTo(row("model"), "Vault")).toBe("/admin/credentials/new");
   expect(linkTo(row("computer"), "Computers")).toBe("/admin/computers");
 });
 

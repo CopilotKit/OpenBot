@@ -1,10 +1,12 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import {
   createCredential,
+  createCredentialAdminService,
   createCredentialStore,
   decryptCredentialForUse,
   decryptSecret,
@@ -15,6 +17,7 @@ import {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { credentials } from "../src/db/schema";
+import { loadTenantPackage } from "../src/tenant-package";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
@@ -863,6 +866,128 @@ describe("admin credential API", () => {
     expect(revoke.status).toBe(200);
     expect(calls).toEqual(["rotate:credential-old", "revoke:credential-new"]);
     expect(await rotate.text()).not.toContain("rotated-secret");
+  });
+});
+
+/**
+ * A model key a person adds in the Vault is the one the Personal Assistant answers with.
+ *
+ * The Bots read one entry: the provider they run on, under the key name in the tenant package
+ * (`openai-api-key`). The Add key form asked for a free-text provider and key ID with "OpenAI" and
+ * "production" as placeholders, so a person who followed them saved a key nothing reads. The form
+ * now sends the provider the person picked and no name, and the server files the key under the
+ * name the Bots read.
+ */
+describe("a model key added in the Vault", () => {
+  const personal = loadTenantPackage(
+    join(import.meta.dir, "../../examples/personal"),
+  );
+
+  async function vaultApp() {
+    const { model } = await personal;
+    const store = createCredentialStore(database);
+    const app = createApp(
+      config,
+      {
+        handler: () => new Response(null, { status: 204 }),
+        api: {
+          getSession: async () => ({
+            user: { id: "person", email: "person@openbot.test" },
+          }),
+        },
+      },
+      { rolesForUser: async () => ["admin"] },
+      undefined,
+      createCredentialAdminService(
+        key,
+        store,
+        { insert: async () => {} },
+        { provider: model.provider, keyId: model.credentialSecretRef },
+      ),
+    );
+    return { app, store, model };
+  }
+
+  test("is the key the Personal Assistant answers with, saved the way the Add key form sends it", async () => {
+    const { app, store, model } = await vaultApp();
+
+    // What the form sends for a model key: the provider picked from the list, and the secret.
+    const response = await app.request(
+      "http://openbot.local/api/admin/credentials",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "model",
+          provider: "openai",
+          plaintext: "sk-vault-added-by-a-person",
+          metadata: {},
+        }),
+      },
+    );
+    expect(response.status).toBe(201);
+    const { credential } = (await response.json()) as {
+      credential: { id: string; keyId: string };
+    };
+    credentialIds.push(credential.id);
+    expect(credential.keyId).toBe(model.credentialSecretRef);
+
+    // The Personal Assistant's key, resolved as every built-in Bot's run resolves it.
+    await expect(
+      resolveModelApiKey({
+        encryptionKey: key,
+        reader: store,
+        provider: model.provider,
+        keyId: model.credentialSecretRef,
+        environment: {},
+      }),
+    ).resolves.toBe("sk-vault-added-by-a-person");
+  });
+
+  test("tells the form which provider the Bots run on and the key they read", async () => {
+    const { app, model } = await vaultApp();
+
+    const response = await app.request(
+      "http://openbot.local/api/admin/credentials",
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      modelKey: { provider: "openai", keyId: model.credentialSecretRef },
+    });
+  });
+
+  test("still saves a model key under a name given by an older client", async () => {
+    const { app, store, model } = await vaultApp();
+
+    const response = await app.request(
+      "http://openbot.local/api/admin/credentials",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "model",
+          provider: "openai",
+          keyId: model.credentialSecretRef,
+          plaintext: "sk-vault-exact-name",
+          metadata: {},
+        }),
+      },
+    );
+    expect(response.status).toBe(201);
+    credentialIds.push(
+      ((await response.json()) as { credential: { id: string } }).credential.id,
+    );
+
+    await expect(
+      resolveModelApiKey({
+        encryptionKey: key,
+        reader: store,
+        provider: model.provider,
+        keyId: model.credentialSecretRef,
+        environment: {},
+      }),
+    ).resolves.toBe("sk-vault-exact-name");
   });
 });
 

@@ -1385,7 +1385,11 @@ export function createApp(
       );
     }
 
-    return context.json({ credentials: await credentialService.list() });
+    return context.json({
+      credentials: await credentialService.list(),
+      // So the Add key form offers the provider the Bots run on, and knows which key a save replaces.
+      modelKey: credentialService.modelKey,
+    });
   });
   app.post("/api/admin/credentials", requireUser, async (context) => {
     const denied = requireAdmin(context);
@@ -1400,7 +1404,11 @@ export function createApp(
     }
 
     const body = await context.req.json().catch(() => null);
-    const input = credentialInput(body, context.var.actor.id);
+    const input = credentialInput(
+      body,
+      context.var.actor.id,
+      credentialService.modelKey?.keyId,
+    );
     if (!input) {
       return context.json({ error: "Credential input is invalid." }, 400);
     }
@@ -2346,11 +2354,20 @@ export function createApp(
 function credentialInput(
   value: unknown,
   actorUserId: string,
+  /**
+   * The name the built-in Bots read their model key under (`ModelKeyName`). A model key sent
+   * without a name is filed under it: the Vault's form asks only for the provider and the secret.
+   */
+  modelKeyId?: string,
 ): CredentialInput | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const body = value as Record<string, unknown>;
+  const given = value as Record<string, unknown>;
+  const body =
+    modelKeyId && given.kind === "model" && given.keyId === undefined
+      ? { ...given, keyId: modelKeyId }
+      : given;
   /*
    * An allowlist, and deliberately narrower than `CredentialKind`.
    *

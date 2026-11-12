@@ -11,8 +11,10 @@ import { expect, test } from "../harness/test";
  * question to the Personal Assistant, one whole answer from one run, and the conversation named.
  *
  * The AI connection is chosen the way the web app offers it: Settings → Setup says the AI model
- * needs a key and links to the Vault, where the person adds an OpenAI key. (Choosing a provider in a
- * setup window is OpenBot Desktop's, driven in a later slice.) The key is a dummy: aimock answers.
+ * needs a key and links to the Vault's Add key form, where the person pastes an OpenAI key and
+ * nothing else. The form starts on the provider the Personal Assistant runs on and asks for no name,
+ * so the key lands where the Personal Assistant reads it. (Choosing a provider in a setup window is
+ * OpenBot Desktop's, driven in a later slice.) The key is a dummy: aimock answers.
  */
 
 const PERSON = "Sam Rivera";
@@ -84,26 +86,27 @@ test("a new person sets up OpenBot and gets a first answer from the Personal Ass
     );
     await shot("setup-needs-a-key");
 
+    // Straight to the Vault's Add key form, already on the provider the Personal Assistant runs on.
     await aiModel.getByRole("link", { name: "Vault" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Vault", level: 1 }),
-    ).toBeVisible();
-    await expect(page.getByText("No keys yet")).toBeVisible();
-    await page.getByRole("button", { name: "Add key" }).first().click();
-
     await expect(
       page.getByRole("heading", { name: "Add key", level: 1 }),
     ).toBeVisible();
     await expect(page.getByRole("combobox", { name: "Type" })).toContainText(
       "Model",
     );
-    // The provider and key id the Personal Assistant's model reads (examples/personal/model.yaml).
-    await page.getByRole("textbox", { name: "Provider" }).fill("openai");
-    await page.getByRole("textbox", { name: "Key ID" }).fill("openai-api-key");
+    await expect(
+      page.getByRole("combobox", { name: "Provider" }),
+    ).toContainText("OpenAI");
+    await expect(
+      page.getByText("Your Bots run on OpenAI and will use this key."),
+    ).toBeVisible();
+    // Nothing to name, so nothing to get wrong: only the key itself.
+    await expect(page.getByRole("textbox", { name: "Key ID" })).toHaveCount(0);
     await page.getByRole("textbox", { name: "Secret" }).fill(DUMMY_OPENAI_KEY);
     await shot("add-key");
     await page.getByRole("button", { name: "Save credential" }).click();
 
+    // Filed under the name the Personal Assistant reads (examples/personal/model.yaml).
     await expect(
       page.getByRole("heading", { name: "Vault", level: 1 }),
     ).toBeVisible();
