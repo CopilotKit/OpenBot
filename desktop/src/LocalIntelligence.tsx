@@ -217,10 +217,15 @@ export const RELEASE_SAID =
  * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
  * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
  * and tries again.
+ *
+ * `runsWhatItHad` false when the update left the back end not working (paused services): then it
+ * does not run the version it had, and Retry is what tries the update again.
  */
-function updateFailedSaid(step: string | null): string {
+function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
   const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
-  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+  return runsWhatItHad
+    ? `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
+    : `OpenBot couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
 }
 
 export type LocalSequence = State & {
@@ -639,6 +644,10 @@ export function useLocalSequence({
        *
        * Once per wait (`updatedIntelligence`), so an update that keeps failing stops at its row
        * rather than looping; Retry is the next attempt.
+       *
+       * Not on a degraded stack whose disk OpenBot found short, or still recovering from being
+       * short (`shortfall`): the update downloads the new release's images and fails there again,
+       * after up to ten minutes. The row says to free space, and the Retry after that updates.
        */
       if (
         found.updateTo &&
@@ -646,7 +655,8 @@ export function useLocalSequence({
         !updatedIntelligence &&
         (found.readiness === "ready" ||
           (unfinished !== null &&
-            (found.readiness === "stopped" || found.readiness === "degraded")))
+            (found.readiness === "stopped" ||
+              (found.readiness === "degraded" && !found.shortfall))))
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
@@ -659,8 +669,18 @@ export function useLocalSequence({
       }
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
-      if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedStep) });
+      // A stack the failed update left degraded, its checks failing, does not run the version it
+      // had: its services stay paused until an update finishes. Not one it woke, which comes back
+      // up on that version.
+      const leftNotWorking =
+        failedTo !== null &&
+        !woken &&
+        found.readiness === "degraded" &&
+        found.checksPassed !== true;
+      if (failedTo && (failedStep || leftNotWorking)) {
+        update({
+          updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
+        });
       }
       failedTo = null;
       if (isReady(found)) {
