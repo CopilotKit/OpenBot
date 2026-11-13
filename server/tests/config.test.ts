@@ -586,6 +586,55 @@ describe("deployment configuration", () => {
     });
   });
 
+  test("accepts configurable OIDC scopes separated by spaces or commas", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+      OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+      OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+      OKTA_OAUTH_SCOPES: "openid, profile email openid",
+    });
+    expect(config.auth?.okta?.scopes).toEqual(["openid", "profile", "email"]);
+  });
+
+  test("accepts the openid scope alone for minimal OIDC providers", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+      OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+      OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+      OKTA_OAUTH_SCOPES: "openid",
+    });
+    expect(config.auth?.okta?.scopes).toEqual(["openid"]);
+  });
+
+  test("rejects explicitly configured OIDC scopes missing openid", () => {
+    for (const scopes of ["profile email", " ", ""]) {
+      expect(() =>
+        loadConfig({
+          ...withoutSignIn,
+          ...SESSION,
+          OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+          OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+          OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+          OKTA_OAUTH_SCOPES: scopes,
+        }),
+      ).toThrow("OKTA_OAUTH_SCOPES must include openid");
+    }
+  });
+
+  test("refuses OIDC scopes without an OAuth client", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        OKTA_OAUTH_SCOPES: "openid",
+      }),
+    ).toThrow("OKTA_OAUTH_SCOPES");
+  });
+
   test("refuses Okta without an issuer, which names no particular Okta", () => {
     expect(() =>
       loadConfig({
