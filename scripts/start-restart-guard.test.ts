@@ -627,7 +627,10 @@ describe("start.sh and the managed Bot", () => {
     ["the default provider", {}],
     [
       "an Anthropic-only selection",
-      { BOT_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "synthetic-anthropic-key" },
+      {
+        BOT_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
+      },
     ],
   ])("%s starts the harness and no retired Bot", async (_, settings) => {
     const result = await runStart({ settings });

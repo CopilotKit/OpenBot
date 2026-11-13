@@ -270,9 +270,10 @@ describe("what a Bot runs from the spec file", () => {
         BOT_MODEL: "claude-haiku",
       }),
     ).toEqual({ provider: "anthropic", model: "claude-haiku" });
-    expect(
-      botSettings("agent-agno", { BOT_PROVIDER: "  Google " }),
-    ).toEqual({ provider: "google", model: "gemini-2.5-flash" });
+    expect(botSettings("agent-agno", { BOT_PROVIDER: "  Google " })).toEqual({
+      provider: "google",
+      model: "gemini-2.5-flash",
+    });
   });
 
   /**
@@ -312,11 +313,7 @@ describe("what a Bot runs from the spec file", () => {
    */
   test("a pinned Bot ignores the provider environment it never read", () => {
     expect(
-      botSettings(
-        "agent-antigravity",
-        { BOT_PROVIDER: "anthropic" },
-        "google",
-      ),
+      botSettings("agent-antigravity", { BOT_PROVIDER: "anthropic" }, "google"),
     ).toEqual({ provider: "google", model: "gemini-3.6-flash" });
     expect(
       botSettings(
@@ -329,9 +326,10 @@ describe("what a Bot runs from the spec file", () => {
 
   /** A name nobody has heard of is kept, so the Bot's own refusal can put it in the message. */
   test("an unknown provider stays unknown, with a model to be refused with", () => {
-    expect(
-      botSettings("agent-agno", { BOT_PROVIDER: " Mistral " }),
-    ).toEqual({ provider: "mistral", model: "gpt-5.5" });
+    expect(botSettings("agent-agno", { BOT_PROVIDER: " Mistral " })).toEqual({
+      provider: "mistral",
+      model: "gpt-5.5",
+    });
   });
 
   /** A Bot wired to the file without a row in it is a mistake made in this repository. */

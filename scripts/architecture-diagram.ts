@@ -242,7 +242,13 @@ function render(t: Theme): string {
   const botY = 126;
   const botH = 92;
   const bots: [number, number, string, string, boolean][] = [
-    [372, 446, "agent-langgraph-agui :4201", "the managed Bot, on LangGraph", false],
+    [
+      372,
+      446,
+      "agent-langgraph-agui :4201",
+      "the managed Bot, on LangGraph",
+      false,
+    ],
     [840, 250, "your agent", "any AG-UI endpoint, any framework", true],
   ];
   text(372, botY - 14, "BOTS", {
