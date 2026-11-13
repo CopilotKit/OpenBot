@@ -359,6 +359,11 @@ every deployment:
   Gmail", "Reads your apps", "Reads github.com". Migration `0093_check_in_source` adds
   `source_kind` (`apps` on every existing check-in, which reads every app as before) and
   `source_server_id` to `proactive_settings`.
+- **A Bot's page lists its routines.** A Routines section, between For you and Activity, shows each
+  routine, goal and check-in the Bot has on, in the Routines page's own rows: running now first,
+  then any that can't look or failed, then by what starts next, at most five, then **All routines**
+  with how many it has in all. Its header counts them, "1 running · 3 scheduled · 1 on demand".
+  Activity no longer lists the Bot's routines and goals a second time.
 - **Pause all your Bots with one switch.** Routines starts with **All Bots active**. Turned off,
   every one of your Bots behaves as a paused Bot does: nothing runs on its own, running work stops,
   and Bots don't answer your Slack, Teams or text messages, though each still answers you in a

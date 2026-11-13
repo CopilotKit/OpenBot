@@ -54,6 +54,19 @@ first), as the first row of its Bot's group under Needs you (not counted in the 
 badge's dot shows), and on its page above On. No ping is sent for it. Each row also says what it
 reads: "Reads Gmail", "Reads your apps", "Reads github.com".
 
+### On a Bot's page
+
+A Bot's page has a **Routines** section between For you and Activity: each routine, goal and
+check-in of that Bot's that is on, drawn by the Routines page's own rows from the same merged list
+(`BotRoutinesSection` in `app/src/components/routines/bot-routines.tsx`, ordered and counted by
+`app/src/lib/routines/bot-routines.ts`). Running now first (with the pulsing dot), then the ones that
+can't look or failed last time, then by what starts next, then the goals that wait to be asked; at
+most five, then **All routines**, which opens the Bot's Routines page and says how many it has in
+all. The header counts what is on, "1 running · 3 scheduled · 1 on demand", the way the Routines
+row counts it. A Bot with nothing on gets no section. While the Bot is paused, by itself or with
+all, its rows read "Paused". Activity on a Bot's page keeps what is not a routine (hand-offs,
+follow-ups, queued runs, what waits on you), so nothing shows twice. The server is unchanged.
+
 ### Pause all
 
 Routines' every-Bot card starts with **All Bots active**, the person's own switch for all their Bots

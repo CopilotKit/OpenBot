@@ -203,7 +203,7 @@ opens its page under Connections. The Bot is told which button the card shows, s
 (`server/src/plugins/app-access-tool.ts`).
 
 **Bots** lists your Bots and, under **What your Bots learn**, a link to Skills. A Bot's own page
-shows what it is working on and what waits for you, with its Activity beside them, then its settings
+shows what it is working on and what waits for you, the routines it has on, and its Activity, then its settings
 in this order: **Routines** (its routines, goals and check-ins in one list), **Skills**, **Apps**,
 **Computer** (its folders and its browser), **Approvals** and **Setup** (its name, instructions and
 who it hands work to). There is no Memory row, because the personal edition does not offer memory
