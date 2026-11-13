@@ -153,7 +153,7 @@ export type AuthConfig = {
    */
   microsoft?: MicrosoftAuthConfig;
   /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
-  okta?: OAuthClient & { issuer: string };
+  okta?: OAuthClient & { issuer: string; scopes?: string[] };
 };
 
 /**
@@ -1144,13 +1144,22 @@ function allowedEntraClients(environment: Environment): string[] {
  */
 function oktaAuth(
   environment: Environment,
-): (OAuthClient & { issuer: string }) | undefined {
+): (OAuthClient & { issuer: string; scopes?: string[] }) | undefined {
   const client = oauthClient(environment, "OKTA");
   const issuer = url(environment, "OKTA_OAUTH_ISSUER");
+  const configuredScopes = environment["OKTA_OAUTH_SCOPES"];
+  // Unset preserves better-auth's defaults. A configured list must include the OIDC identity scope.
+  const scopes =
+    configuredScopes === undefined
+      ? undefined
+      : [...new Set(configuredScopes.split(/[\s,]+/).filter(Boolean))];
+  if (scopes && !scopes.includes("openid")) {
+    throw new Error("OKTA_OAUTH_SCOPES must include openid");
+  }
   if (!client) {
-    if (issuer) {
+    if (issuer || configuredScopes !== undefined) {
       throw new Error(
-        "OKTA_OAUTH_ISSUER is set but OKTA_OAUTH_CLIENT_ID and OKTA_OAUTH_CLIENT_SECRET are not",
+        "OKTA_OAUTH_ISSUER or OKTA_OAUTH_SCOPES is set but OKTA_OAUTH_CLIENT_ID and OKTA_OAUTH_CLIENT_SECRET are not",
       );
     }
     return undefined;
@@ -1160,7 +1169,7 @@ function oktaAuth(
       "Okta sign-in requires OKTA_OAUTH_ISSUER, such as https://example.okta.com/oauth2/default",
     );
   }
-  return { ...client, issuer };
+  return { ...client, issuer, ...(scopes ? { scopes } : {}) };
 }
 
 /**
