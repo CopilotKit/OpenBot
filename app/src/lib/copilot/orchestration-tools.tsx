@@ -22,7 +22,7 @@ import { queryClient } from "@/query-client";
  * place; `react` draws nothing of its own, since the reaction is drawn under the person's message;
  * `link_to_thread` is the list of threads it found, each a way in.
  *
- * RENDER ONLY. The three run on the server (tasks/orchestration.ts), where the task is opened and
+ * RENDER ONLY. The three run on the server, where the task is opened and
  * the reaction stored, so nothing here registers a tool or decides anything.
  */
 
