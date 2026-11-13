@@ -5304,20 +5304,35 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
     i32::from(!failures.is_empty())
 }
 
-/// The app's identifier, the name of each folder Tauri keeps for it.
+/// The app's identifier as built, the name of each folder Tauri keeps for it. Beside an installed
+/// OpenBot the app goes by another (`side_by_side`).
 const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
+
+/**
+The app's context, under an identifier of its own when it is a second OpenBot beside an installed
+one (`stack::identifier_for`). Set before the app is built, so the single-instance lock and every
+folder Tauri resolves for the app follow it.
+*/
+fn side_by_side<R: tauri::Runtime>(mut context: tauri::Context<R>) -> tauri::Context<R> {
+    let identifier = stack::identifier_for(&context.config().identifier);
+    context.config_mut().identifier = identifier;
+    context
+}
 
 /// Tauri's `app_local_data_dir`, for a process with no app around it: the same folder, found the
 /// way Tauri 2 finds it (`dirs::data_local_dir`, then the identifier).
 fn headless_local_data_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join(APP_IDENTIFIER))
+    dirs::data_local_dir().map(|dir| dir.join(stack::identifier_for(APP_IDENTIFIER)))
 }
 
 /// Tauri's `app_log_dir`, for a process with no app around it: `~/Library/Logs/<identifier>` on a
 /// Mac, `logs` in the local data folder elsewhere, as Tauri 2 finds it.
 fn headless_log_dir() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|home| home.join("Library/Logs").join(APP_IDENTIFIER))
+        dirs::home_dir().map(|home| {
+            home.join("Library/Logs")
+                .join(stack::identifier_for(APP_IDENTIFIER))
+        })
     } else {
         headless_local_data_dir().map(|data| data.join("logs"))
     }
@@ -7020,7 +7035,7 @@ mod app_page_tests {
             .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
-            .build(tauri::generate_context!(test = true))
+            .build(side_by_side(tauri::generate_context!(test = true)))
             .unwrap();
         // As the app's setup does: this context compiles the page's permissions in.
         know_app_page_grants(app.handle());
@@ -7378,6 +7393,144 @@ mod app_page_tests {
             app.path().app_local_data_dir().ok()
         );
         assert_eq!(headless_log_dir(), app.path().app_log_dir().ok());
+    }
+
+    /// Box G: a second OpenBot beside an installed one (`stack::PROJECT_VARIABLE`) went by the
+    /// installed one's identifier. Its launch was handed to the installed app by the single-instance
+    /// lock, and with that app quit it opened the installed one's folder from the installed one's
+    /// `last-launched-root.json`, and its Quit stopped the installed one's back end. It goes by an
+    /// identifier of its own now: every folder Tauri gives it, the record of its installation and the
+    /// lock are its own, and it leaves the browsers' Recorder alone. Run in a process of its own, with
+    /// the variable set and a home of its own.
+    #[test]
+    fn a_second_openbot_keeps_its_own_lock_folders_and_installation() {
+        const CHILD: &str = "OPENBOT_TEST_SIDE_BY_SIDE_CHILD";
+        let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
+            let home =
+                std::env::temp_dir().join(format!("openbot-side-by-side-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "app_page_tests::a_second_openbot_keeps_its_own_lock_folders_and_installation",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, &home)
+                // Unique, so the folders it makes where Windows keeps them are this run's alone.
+                .env(
+                    stack::PROJECT_VARIABLE,
+                    format!("openbot-test-{}", std::process::id()),
+                )
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", home.join(".config"))
+                .env("XDG_DATA_HOME", home.join(".local").join("share"))
+                .env(RECORDER_HOST_TEST_HOME, &home)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&home);
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.status.success(), "{said}");
+            assert!(said.contains("1 passed"), "{said}");
+            return;
+        };
+        let project = stack::side_by_side_project().expect("the child names a project");
+        let identifier = format!("{APP_IDENTIFIER}.{project}");
+        let (app, _) = app();
+        // The single-instance lock is keyed by this on every platform (Windows' mutex, a Mac's
+        // socket, Linux's D-Bus name), so a launch of this app is never handed to the installed one.
+        assert_eq!(app.config().identifier, identifier);
+        let folders = [
+            app.path().app_config_dir().unwrap(),
+            app.path().app_data_dir().unwrap(),
+            app.path().app_local_data_dir().unwrap(),
+            app.path().app_cache_dir().unwrap(),
+        ];
+        for folder in &folders {
+            assert_eq!(
+                folder.file_name().and_then(|name| name.to_str()),
+                Some(identifier.as_str()),
+                "{}",
+                folder.display()
+            );
+        }
+        let logs = app.path().app_log_dir().unwrap();
+        assert!(
+            logs.components()
+                .any(|part| part.as_os_str() == std::ffi::OsStr::new(&identifier)),
+            "{}",
+            logs.display()
+        );
+        assert_eq!(
+            headless_local_data_dir(),
+            app.path().app_local_data_dir().ok()
+        );
+        assert_eq!(headless_log_dir(), Some(logs));
+
+        // The installation it last opened is read from its own folder, never the installed one's.
+        let config = app.path().app_config_dir().unwrap();
+        let installed = config.with_file_name(APP_IDENTIFIER);
+        let first = home.join("OpenBot");
+        let second = home.join("second").join("OpenBot");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        // Where Windows keeps them is not under HOME: the installed app's record there is a real one.
+        if !cfg!(windows) {
+            preparation::save_selected_root(&installed, &first).unwrap();
+            assert_eq!(
+                preparation::selected_root(&installed),
+                Some(std::fs::canonicalize(&first).unwrap())
+            );
+        }
+        assert_eq!(last_launched_root(), None);
+        preparation::save_selected_root(&config, &second).unwrap();
+        assert_eq!(
+            last_launched_root(),
+            Some(openbot_desktop_lib::paths::plain(
+                std::fs::canonicalize(&second).unwrap()
+            ))
+        );
+        if cfg!(windows) {
+            for folder in folders {
+                let _ = std::fs::remove_dir_all(folder);
+            }
+        }
+
+        // The browsers' Recorder stays the installed app's: with a Chrome and an Edge here, nothing
+        // is registered and nothing under this home is written.
+        for browser in [
+            home.join("Library/Application Support/Google/Chrome"),
+            home.join("Library/Application Support/Microsoft Edge"),
+            home.join(".config/google-chrome"),
+            home.join(".config/microsoft-edge"),
+        ] {
+            std::fs::create_dir_all(browser).unwrap();
+        }
+        let files = |home: &Path| {
+            let mut found = Vec::new();
+            let mut pending = vec![home.to_path_buf()];
+            while let Some(folder) = pending.pop() {
+                for entry in std::fs::read_dir(folder).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        pending.push(path.clone());
+                    }
+                    found.push(path);
+                }
+            }
+            found.sort();
+            found
+        };
+        let before = files(&home);
+        assert_eq!(
+            install_recorder_host_for_this_user().unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(files(&home), before);
     }
 
     /// Box I: the uninstaller's stop ran `podman compose` with none of what the app sets up when it
@@ -11130,6 +11283,11 @@ fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
 /// One round at a time: the launch's rounds and a Start's may overlap, and both read and write Desktop's note of what
 /// it registered.
 fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
+    // A second OpenBot beside an installed one leaves the browsers' Recorder to the installed one,
+    // whose host manifests would otherwise be pointed at this app.
+    if stack::side_by_side_project().is_some() {
+        return Ok(Vec::new());
+    }
     static ONE_ROUND: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _round = ONE_ROUND
         .lock()
@@ -11257,7 +11415,7 @@ fn main() {
     let local_offset = time::UtcOffset::current_local_offset().ok();
     // After an in-app update, or from the installer's last page: in front as the window first shows.
     let from_installer = started_by_installer(&args);
-    let context = tauri::generate_context!();
+    let context = side_by_side(tauri::generate_context!());
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
     #[cfg(feature = "shell-updater")]

@@ -3366,8 +3366,45 @@ tested: with its own `HOME` it has its own folder, but on the same engine `DESKT
 installed OpenBot's project, so the second one would take the installed one's containers, ports,
 database and Bots' computers as its own. Unset, empty, or not a name Compose accepts, it is ignored.
 An installation that already recorded its project keeps it (see `project`).
+
+Naming a project other than `DESKTOP_PROJECT` also gives the app an identifier of its own
+(`identifier_for`), so the second app has its own single-instance lock and its own folders for
+everything it keeps (which installation it last opened among them), and never opens, starts or
+stops the installed one's.
 */
 pub const PROJECT_VARIABLE: &str = "OPENBOT_DESKTOP_PROJECT";
+
+/// The project `PROJECT_VARIABLE` names, when it names one other than `DESKTOP_PROJECT`: this app is
+/// then a second OpenBot beside an installed one.
+pub fn side_by_side_project() -> Option<String> {
+    side_by_side_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn side_by_side_named(named: Option<&str>) -> Option<String> {
+    let project = desktop_project_named(named);
+    (project != DESKTOP_PROJECT).then_some(project)
+}
+
+/**
+The identifier this run of the app goes by: `built`, the one in `tauri.conf.json`, or, beside an
+installed OpenBot (`side_by_side_project`), `built` followed by the project.
+
+Everything the app keeps per installation hangs off its identifier: the single-instance lock, which
+otherwise hands a second app's launch to the first and exits, and the folders Tauri gives the app
+(Application Support and Logs on a Mac, `%APPDATA%` and `%LOCALAPPDATA%` on Windows), which hold the
+record of the installation it last opened. With the built identifier, a second app opened the
+first one's folder and its Quit stopped the first one's back end.
+*/
+pub fn identifier_for(built: &str) -> String {
+    identifier_named(built, side_by_side_project().as_deref())
+}
+
+fn identifier_named(built: &str, project: Option<&str>) -> String {
+    match project {
+        Some(project) => format!("{built}.{project}"),
+        None => built.to_owned(),
+    }
+}
 
 /// The project a new installation runs as: `DESKTOP_PROJECT`, or the one `PROJECT_VARIABLE` names.
 pub fn desktop_project() -> String {
@@ -9966,6 +10003,24 @@ fn main() {
         assert_eq!(
             compose_names(&docker, &root),
             (Some(side.to_owned()), Some(side.to_owned()))
+        );
+    }
+
+    #[test]
+    fn only_another_project_gives_the_app_an_identifier_of_its_own() {
+        const BUILT: &str = "ai.copilotkit.openbot.desktop";
+        for unchanged in [None, Some(""), Some("Not A Name"), Some(DESKTOP_PROJECT)] {
+            assert_eq!(side_by_side_named(unchanged), None, "{unchanged:?}");
+            assert_eq!(
+                identifier_named(BUILT, side_by_side_named(unchanged).as_deref()),
+                BUILT
+            );
+        }
+        let side = side_by_side_named(Some("openbot-test2"));
+        assert_eq!(side.as_deref(), Some("openbot-test2"));
+        assert_eq!(
+            identifier_named(BUILT, side.as_deref()),
+            "ai.copilotkit.openbot.desktop.openbot-test2"
         );
     }
 
