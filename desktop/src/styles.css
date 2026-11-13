@@ -739,7 +739,12 @@ button.text-link.change-provider {
 fieldset.picker.hosting {
   max-height: none;
   overflow-y: visible;
-  margin: 8px 0 24px;
+  margin: 4px 0 12px;
+}
+
+/* A shade tighter than the provider list, so the whole first screen fits the window's default size. */
+fieldset.picker.hosting .tile {
+  padding-block: 9px;
 }
 
 fieldset.picker.hosting .tile.chosen {
@@ -763,14 +768,19 @@ fieldset.picker.hosting .tile.unavailable .mark-tile {
 
 /* What Self-hosted asks of this computer: the reason, then the four needs, two to a line. */
 .needs .lede {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+}
+
+/* The setup-time line under the needs, a little closer to Install. */
+.needs + .lede {
+  margin-bottom: 16px;
 }
 
 .needs-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
   gap: 2px 16px;
-  margin: 0 0 20px;
+  margin: 0 0 8px;
   padding-left: 20px;
   color: var(--text-primary);
   font-size: var(--text-sm);

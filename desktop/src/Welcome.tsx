@@ -30,6 +30,7 @@ export const SELF_HOSTED_NEEDS = [
  *
  * In this order: the three ways to run OpenBot, of which only Self-hosted can be chosen here
  * (OpenBot Cloud and OpenBot for Business are shown greyed, Business with the one booking link);
+ * all of it fits the window's default size (1000×800, less a title bar) with no scrollbar;
  * what this computer needs for Self-hosted and why, which is that every part of OpenBot runs on it;
  * then how long setup takes. Usage data is not said here: it is the last screen's choice
  * (`UsageDataChoice`).
@@ -119,7 +120,7 @@ export function Welcome({
           </HostingMark>
           <span className="tile-name">OpenBot for Business</span>
           <span className="tile-summary">
-            For your whole team, on your own servers or OpenBot Cloud.{" "}
+            For your whole team.{" "}
             <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink> for
             early access.
           </span>
@@ -129,8 +130,8 @@ export function Welcome({
         <h2 id="needs-heading">What this computer needs</h2>
         <p className="lede">
           Self-hosted runs every part of OpenBot on this computer: the app, its
-          server and database, your Bots&apos; memory, and a computer of its own
-          for each Bot to work on. Together they need:
+          server and database, your Bots&apos; memory, and a computer for each
+          Bot to work on.
         </p>
         <ul className="needs-list">
           {SELF_HOSTED_NEEDS.map((need) => (
@@ -139,8 +140,7 @@ export function Welcome({
         </ul>
       </section>
       <p className="lede">
-        Depending on your internet speed, setup can take between 1 and 10
-        minutes.
+        Setup takes 1 to 10 minutes, depending on your internet speed.
       </p>
       <div className="row">
         <button type="button" disabled={short || checking} onClick={install}>

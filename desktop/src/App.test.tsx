@@ -622,8 +622,8 @@ test("the first screen offers Self-hosted, shows Cloud and Business greyed, and 
   expect(
     [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
   ).toEqual([
-    "Self-hosted runs every part of OpenBot on this computer: the app, its server and database, your Bots' memory, and a computer of its own for each Bot to work on. Together they need:",
-    "Depending on your internet speed, setup can take between 1 and 10 minutes.",
+    "Self-hosted runs every part of OpenBot on this computer: the app, its server and database, your Bots' memory, and a computer for each Bot to work on.",
+    "Setup takes 1 to 10 minutes, depending on your internet speed.",
   ]);
   expect(
     [...view.container.querySelectorAll(".needs-list li")].map(
