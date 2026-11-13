@@ -98,11 +98,6 @@ import {
 } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
-  NO_SLACK_NAMES,
-  type SlackNames,
-  slackNamesIn,
-} from "@/lib/slack/mentions";
-import {
   RESEARCH_RESULTS_LABELS,
   readResearchSources,
   researchRoleOfCall,
@@ -116,6 +111,11 @@ import {
   unofferedTool,
 } from "@/lib/plugins/tool-result";
 import { useResultVisibility } from "@/lib/product-telemetry";
+import {
+  NO_SLACK_NAMES,
+  type SlackNames,
+  slackNamesIn,
+} from "@/lib/slack/mentions";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
