@@ -12,6 +12,13 @@ import {
 export type WrittenRule = PolicyTranslation & { text: string };
 
 /**
+ * Under the CEL field once the model has drafted the rule into it, on Add rule and on a rule's page:
+ * what the description became, and that this, and not the description, is what is checked.
+ */
+export const DRAFTED_RULE =
+  "Your model drafted this from your description. This is the rule OpenBot checks before every action, exactly as written.";
+
+/**
  * A sentence in, and a button that hands it to the deployment's model: the field a boundary and a
  * team approval rule are both described in.
  *
@@ -110,7 +117,7 @@ export function DescribeRule({
   return (
     <DescribeField
       action="Write rule"
-      description="Say in a sentence what no Bot may do, and your model drafts the rule. OpenBot checks the rule you save, not your words. A second reading that never sees your words says what the rule does."
+      description="Say in a sentence what no Bot may do, and your model drafts the rule in CEL. A second reading that never sees your words says what the rule does."
       id="rule-description-english"
       label="Describe the rule"
       placeholder="Bots may not visit social media sites"

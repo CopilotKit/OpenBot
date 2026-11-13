@@ -369,7 +369,7 @@ test("the list and a rule's page say rules are checked as written, and the descr
   ).toBeTruthy();
   expect(
     rule.getByText(
-      /your model drafts the rule\. OpenBot checks the rule you save, not your words\./,
+      /what no Bot may do, and your model drafts the rule in CEL\./,
     ),
   ).toBeTruthy();
 });

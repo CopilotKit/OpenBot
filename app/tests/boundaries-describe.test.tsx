@@ -426,3 +426,52 @@ test("on a rule's own page, a description rewrites it in place, keeps its name, 
     },
   });
 });
+
+/** The Field around a control: its label, its description and the control itself. */
+const fieldOf = (control: HTMLElement) =>
+  control.closest('[data-slot="field"]') as HTMLElement;
+
+test("on Add rule, the drafted CEL sits right under the description and says it is the rule OpenBot checks, exactly as written", async () => {
+  serving({ mode: "enforce", deny: [], allow: ["true"] });
+  translation = SOCIAL;
+  const { view } = open("/admin/boundaries/new");
+
+  fireEvent.click(await view.findByText("Describe it in words"));
+  await describeRule(view, "Bots may not visit social media sites");
+  await view.findByText(SOCIAL.explanation as string);
+
+  const rule = view.getByLabelText("Rule") as HTMLTextAreaElement;
+  expect(rule.value).toBe(SOCIAL.rule);
+  expect(fieldOf(rule).textContent).toContain(
+    "Your model drafted this from your description. This is the rule OpenBot checks before every action, exactly as written.",
+  );
+  // The plain-language reading is under the rule, inside its field.
+  expect(fieldOf(rule).textContent).toContain(SOCIAL.explanation as string);
+  // The result of the description comes straight after it, before Name and What it stops.
+  const described = view.getByLabelText("Describe the rule");
+  const name = view.getByLabelText("Name");
+  expect(
+    described.compareDocumentPosition(rule) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    rule.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("on a rule's page, a drafted rule says it is the rule OpenBot checks, and a rule not drafted says nothing of the kind", async () => {
+  const old = 'intent == "navigate" && contains(page.host, "facebook.com")';
+  serving({ mode: "enforce", deny: [old], allow: ["true"] });
+  translation = SOCIAL;
+  const { view } = open("/admin/boundaries/0");
+
+  const before = (await view.findByLabelText("Rule")) as HTMLTextAreaElement;
+  expect(fieldOf(before).textContent).not.toContain("Your model drafted this");
+
+  await describeRule(view, "Bots may not visit social media sites");
+  await view.findByText(SOCIAL.explanation as string);
+  const rule = view.getByLabelText("Rule") as HTMLTextAreaElement;
+  expect(rule.value).toBe(SOCIAL.rule);
+  expect(fieldOf(rule).textContent).toContain(
+    "Your model drafted this from your description. This is the rule OpenBot checks before every action, exactly as written.",
+  );
+});
