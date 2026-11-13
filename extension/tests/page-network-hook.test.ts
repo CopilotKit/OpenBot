@@ -205,6 +205,28 @@ test("one fetch produces one masked network event in the collector's field names
   expect(postMessageCalls).toBe(0);
 });
 
+test("a relative address is recorded where the browser sends it, under the page's <base href>", async () => {
+  // A browser resolves fetch("small") against document.baseURI, which <base href> moves. The page's
+  // fetch here does the same, so it reaches /api/small, and the event has to say /api/small too.
+  const base = document.createElement("base");
+  base.href = "/api/";
+  document.head.append(base);
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    nativeFetch(
+      new URL(String(input), document.baseURI),
+      init,
+    )) as typeof fetch;
+  try {
+    configure("extension-id");
+    await (await fetch("small")).text();
+    const event = await nextEvent();
+    expect(event.value.route).toBe("/api/small");
+    expect(event.value.url).toBe(url("/api/small"));
+  } finally {
+    base.remove();
+  }
+});
+
 test("a fetch's JSON request body is masked in the page before it is sent anywhere", async () => {
   configure("extension-id");
   await (

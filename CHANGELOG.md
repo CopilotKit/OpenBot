@@ -437,6 +437,11 @@ every deployment:
 
 ### Smaller changes
 
+- The Recorder records a page's requests at the address the browser sends them to. When Chrome
+  would not let the Recorder use its debugger, it watched requests from inside the page and
+  resolved a relative address against the page's own address, though a browser resolves it against
+  the page's `<base href>`. On a site that sets one, such as many Angular apps, a step's request was
+  recorded at an address that was never called. It is now the address the debugger reports.
 - In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
   off the button's corner, past the icon and almost on the rail's edge. A count is now a smaller
   circle, so the icon still shows under it. The badge on the menu button in a narrow window
