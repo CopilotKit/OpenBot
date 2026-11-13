@@ -2515,6 +2515,10 @@ is deleted unsent after 7 days. Connecting to another OpenBot, or as another per
 first. The Recorder is not yet in the Chrome Web Store or Edge Add-ons; until it is, OpenBot Desktop
 does not add it to your everyday Chrome or Edge.
 
+### A Cloudflare challenge on a long address no longer stops a Bot's computer
+
+When a Bot met a Cloudflare challenge, the computer kept the page's address without the challenge's one-time `__cf_chl_*` tokens. Removing them rewrote the rest of the query, so characters such as `:` and `/` came back as `%3A` and `%2F`, and an address that fit the 2,048-character limit could grow past it. The computer then could not save the request, and from then on refused every action from that Bot with "The handoff state could not be saved". The tokens are now removed from the query as it was written, and an address still too long is not kept.
+
 ### A personal edition for one person on one computer
 
 `OPENBOT_EDITION=personal` runs OpenBot for one person on their own machine, without the screens
