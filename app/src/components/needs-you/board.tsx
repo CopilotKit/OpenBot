@@ -21,10 +21,12 @@ import { useNeedsYou } from "./needs-you";
 const FINDS_SHOWN = 3;
 
 /**
- * Everything waiting on the person, in two halves, each grouped under the Bot it came from.
+ * Everything waiting on the person, in three halves, each grouped under the Bot it came from.
  *
  * WAITING ON YOU is what a Bot is stopped on: a question, an action to allow or deny, a task to
- * review or answer. Each is decided on its row. FROM CHECK-INS is what a Bot found on its own, which
+ * review, answer or try again. Each is decided on its row. WORKING ON IT is a task the person started
+ * that its Bot is still doing: nothing to decide yet, and it moves up when there is. FROM CHECK-INS is
+ * what a Bot found on its own, which
  * the person may act on or not; it is quieter, and the Bots badge does not count it
  * (`waitingOnYou`).
  *
@@ -39,13 +41,24 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const list = useNeedsYou(agentId);
 
   const blocked = new Map(waiting.byBot);
+  /*
+   * A task its Bot is still working on waits on nobody. It sat under Waiting on you as "waiting since
+   * now", counted in "1 waiting"; it has its own half now, and moves up once it is ready for review,
+   * needs input or failed.
+   */
+  const working = new Map<string, { rows: ReactNode[]; times: string[] }>();
   for (const listed of list.tasks) {
-    const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
+    const groups = listed.status === "working" ? working : blocked;
+    const group = groups.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
       <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
     );
-    group.times.push(listed.task.updatedAt);
-    blocked.set(listed.task.agentId, group);
+    group.times.push(
+      listed.status === "working"
+        ? listed.task.createdAt
+        : listed.task.updatedAt,
+    );
+    groups.set(listed.task.agentId, group);
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
@@ -71,16 +84,25 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     failure ? [{ ...source, failure }] : [],
   );
 
-  if (blocked.size === 0 && found.size === 0 && failures.length === 0)
+  if (
+    blocked.size === 0 &&
+    working.size === 0 &&
+    found.size === 0 &&
+    failures.length === 0
+  )
     return null;
 
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
-  const waitingCount = [...blocked.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
+  const count = (groups: Map<string, { rows: unknown[] }>) =>
+    [...groups.values()].reduce((total, group) => total + group.rows.length, 0);
+  const waitingCount = count(blocked);
+  const workingCount = count(working);
+  const earliest = (times: string[]) =>
+    times.reduce((first, at) =>
+      Date.parse(at) < Date.parse(first) ? at : first,
+    );
   const foundCount = list.items.length;
 
   return (
@@ -89,6 +111,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
         <span className="text-muted-foreground text-xs">
           {[
             waitingCount ? `${waitingCount} waiting` : null,
+            workingCount ? `${workingCount} working` : null,
             foundCount ? `${foundCount} found` : null,
           ]
             .filter(Boolean)
@@ -112,11 +135,21 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
-                note={`waiting since ${relativeTime(
-                  group.times.reduce((first, at) =>
-                    Date.parse(at) < Date.parse(first) ? at : first,
-                  ),
-                )}`}
+                note={`waiting since ${relativeTime(earliest(group.times))}`}
+              >
+                {group.rows}
+              </BotGroup>
+            ))}
+          </Half>
+        ) : null}
+        {working.size ? (
+          <Half title="Working on it">
+            {[...working].map(([botId, group]) => (
+              <BotGroup
+                bot={bot(botId)}
+                botId={botId}
+                key={botId}
+                note={`started ${relativeTime(earliest(group.times))}`}
               >
                 {group.rows}
               </BotGroup>

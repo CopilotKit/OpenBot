@@ -454,6 +454,38 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
   );
 });
 
+/*
+ * FOUND IN AN AUDIT: a task its Bot was still doing sat under Waiting on you as "waiting since now",
+ * and was counted in "1 waiting".
+ */
+test("a task still being worked on has its own half, after Waiting on you, and is counted as working", async () => {
+  tasks = [
+    task({ id: "w", title: "Draft the board update", status: "working" }),
+    task({ id: "n", title: "Book the venue", status: "needs_input" }),
+  ];
+  items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
+  serving();
+  const { region } = await drawAll();
+  const bots = region("Bots page");
+  await bots.findByText("Draft the board update");
+  const section = bots
+    .getByRole("heading", { name: "Needs you" })
+    .closest("section") as HTMLElement;
+  const halves = [...section.querySelectorAll("h3")].map(
+    (heading) => heading.textContent,
+  );
+  expect(halves).toEqual(["Waiting on you", "Working on it", "From check-ins"]);
+  expect(
+    within(section).getByText("1 waiting · 1 working · 1 found"),
+  ).toBeTruthy();
+  const workingHalf = [...section.querySelectorAll("h3")].find(
+    (heading) => heading.textContent === "Working on it",
+  )?.parentElement as HTMLElement;
+  expect(within(workingHalf).getByText("Draft the board update")).toBeTruthy();
+  expect(within(workingHalf).queryByText("Book the venue")).toBeNull();
+  expect(within(workingHalf).getByText(/^· started /)).toBeTruthy();
+});
+
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {
   tasks = [task({ id: "r", title: "Reply to the landlord" })];
   busy = ["c-r"];
