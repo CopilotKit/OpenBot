@@ -1,0 +1,2 @@
+ALTER TABLE "proactive_runs" DROP CONSTRAINT "proactive_runs_skip_reason_check";--> statement-breakpoint
+ALTER TABLE "proactive_runs" ADD CONSTRAINT "proactive_runs_skip_reason_check" CHECK (("proactive_runs"."outcome" = 'skipped' AND "proactive_runs"."skip_reason" IS NOT NULL AND "proactive_runs"."skip_reason" IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy', 'paused_all')) OR ("proactive_runs"."outcome" <> 'skipped' AND "proactive_runs"."skip_reason" IS NULL));

@@ -666,6 +666,13 @@
       "when": 1794577230798,
       "tag": "0094_check_in_page",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1794577693129,
+      "tag": "0095_check_in_paused_all",
+      "breakpoints": true
     }
   ]
 }

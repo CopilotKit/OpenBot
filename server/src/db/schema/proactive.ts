@@ -264,7 +264,7 @@ export const proactiveRuns = pgTable(
      */
     check(
       "proactive_runs_skip_reason_check",
-      sql`(${table.outcome} = 'skipped' AND ${table.skipReason} IS NOT NULL AND ${table.skipReason} IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy')) OR (${table.outcome} <> 'skipped' AND ${table.skipReason} IS NULL)`,
+      sql`(${table.outcome} = 'skipped' AND ${table.skipReason} IS NOT NULL AND ${table.skipReason} IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy', 'paused_all')) OR (${table.outcome} <> 'skipped' AND ${table.skipReason} IS NULL)`,
     ),
     // Only a running check-in is unfinished.
     check(
