@@ -88,9 +88,14 @@ import {
 import {
   markdownComponents,
   markdownPlugins,
-  replyRemarkPlugins,
+  replyRemarkPluginsFor,
 } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
+import {
+  NO_SLACK_NAMES,
+  type SlackNames,
+  slackNamesIn,
+} from "@/lib/slack/mentions";
 import {
   RESEARCH_RESULTS_LABELS,
   readResearchSources,
@@ -784,6 +789,7 @@ function ResponsibilityFiring({
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
   role,
+  slackNames = NO_SLACK_NAMES,
   streaming = false,
   settled = true,
   text,
@@ -792,6 +798,8 @@ const TranscriptMessage = memo(function TranscriptMessage({
 }: {
   commandLabels?: string;
   role: "user" | "assistant";
+  /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
+  slackNames?: SlackNames;
   threadId?: string;
   messageId: string;
   /* This is the Bot's reply still being written: the last row of a turn in flight. */
@@ -909,7 +917,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
                     components={markdownComponents}
                     mode={mode}
                     plugins={markdownPlugins}
-                    remarkPlugins={replyRemarkPlugins}
+                    remarkPlugins={replyRemarkPluginsFor(slackNames)}
                   >
                     {revealed}
                   </Streamdown>
@@ -2089,6 +2097,26 @@ export function ChatTranscript({
   const folders = foldersRef.current.names;
 
   /*
+   * The people and channels this conversation's Slack steps named, so a reply that quotes Slack's
+   * `<@U…>` shows "@Alex Clarke". Kept the same map while the names are the same, as the folders are,
+   * so a finished message is not drawn again.
+   */
+  const slackRef = useRef<{ key: string; names: SlackNames }>({
+    key: "",
+    names: NO_SLACK_NAMES,
+  });
+  const slackNamed = slackNamesIn(
+    visible.filter(
+      (item): item is Extract<typeof item, { kind: "tool" }> =>
+        item.kind === "tool",
+    ),
+  );
+  const slackKey = JSON.stringify([...slackNamed]);
+  if (slackKey !== slackRef.current.key)
+    slackRef.current = { key: slackKey, names: slackNamed };
+  const slackNames = slackRef.current.names;
+
+  /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
    * appears, the transcript is already saying the Bot is working — a second indicator under a
    * half-written answer would claim it had stopped and started again.
@@ -2433,6 +2461,7 @@ export function ChatTranscript({
           settled={!busy || index < turnStart}
           commandLabels={commandLabels}
           role={item.role}
+          slackNames={slackNames}
           streaming={
             busy && item.role === "assistant" && index === items.length - 1
           }

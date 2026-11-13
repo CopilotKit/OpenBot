@@ -10,6 +10,11 @@ import {
   defaultRemarkPlugins,
   type StreamdownProps,
 } from "streamdown";
+import {
+  NO_SLACK_NAMES,
+  remarkSlackMentions,
+  type SlackNames,
+} from "@/lib/slack/mentions";
 
 /**
  * Shared markdown rendering for Bot prose and tool results.
@@ -216,8 +221,8 @@ function breakLineEndings(node: MarkdownNode) {
 }
 
 /**
- * The remark plugins for a Bot's reply in a conversation: Streamdown's own, plus a single line ending
- * drawn as a line break.
+ * The remark plugins for a Bot's reply in a conversation: Streamdown's own, a single line ending
+ * drawn as a line break, and Slack's mention markup shown as names (`lib/slack/mentions.ts`).
  *
  * WHY. Markdown reads one line ending as a space and wants a blank line or two trailing spaces for a
  * new line. A Bot asked for something "one per line" writes `Red\nGreen\nBlue` and the reader saw
@@ -227,10 +232,28 @@ function breakLineEndings(node: MarkdownNode) {
  *
  * ONLY FOR REPLIES. A document, a SKILL.md or a tool's answer is markdown written to be read as
  * markdown, where a wrapped line is meant to join the line before it, and keeps Streamdown's
- * defaults. One array for the module, so Streamdown sees the same plugins on every render.
+ * defaults. One array per set of Slack names, so Streamdown sees the same plugins on every render
+ * while the conversation's names are the same.
  */
-export const replyRemarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> =
-  [
-    ...Object.values(defaultRemarkPlugins),
-    () => (tree: MarkdownNode) => breakLineEndings(tree),
-  ];
+const replyPlugins = new WeakMap<
+  SlackNames,
+  NonNullable<StreamdownProps["remarkPlugins"]>
+>();
+
+export function replyRemarkPluginsFor(
+  names: SlackNames,
+): NonNullable<StreamdownProps["remarkPlugins"]> {
+  let plugins = replyPlugins.get(names);
+  if (!plugins) {
+    plugins = [
+      ...Object.values(defaultRemarkPlugins),
+      () => (tree: MarkdownNode) => breakLineEndings(tree),
+      [remarkSlackMentions, { names: [...names] }],
+    ];
+    replyPlugins.set(names, plugins);
+  }
+  return plugins;
+}
+
+/** A reply with no conversation's Slack names to hand: mentions still never show as ids. */
+export const replyRemarkPlugins = replyRemarkPluginsFor(NO_SLACK_NAMES);
