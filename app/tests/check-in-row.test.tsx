@@ -27,7 +27,7 @@ import { settleReactWork } from "./settle-react-work";
  * One Bot's check-ins, against a server answering as `/api/proactive` does: the row says how often
  * and when it runs next whatever the focus and links to the check-in's page, which says what the last
  * check-in did (a skip and why included) and what Run now did. Turn on check-ins is offered only for
- * a Bot that has none, over the person's own conversations with it, never a task's.
+ * a Bot that has none, and asks for no conversation: a check-in belongs to its Bot.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -253,7 +253,7 @@ test("Run now queued says it is on its way, and a check-in that ran says what it
   ).toBeTruthy();
 });
 
-test("Turn on check-ins is offered only for a Bot without them, and lists its own conversations, never a task's", async () => {
+test("Turn on check-ins is offered only for a Bot without them, and asks for no conversation", async () => {
   const on = draw();
   await on.findByRole("link", { name: /Expenses/ });
   expect(on.queryByRole("button", { name: "Turn on check-ins" })).toBeNull();
@@ -267,12 +267,15 @@ test("Turn on check-ins is offered only for a Bot without them, and lists its ow
     name: "Turn on check-ins",
   });
   await user.click(turnOn as HTMLElement);
-  await user.click(await off.findByRole("combobox", { name: "Conversation" }));
-  await waitFor(() =>
-    expect(
-      off.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["Expenses: Expense reports"]),
-  );
+  const dialog = await off.findByRole("dialog", { name: "Turn on check-ins" });
+  expect(
+    within(dialog).queryByRole("combobox", { name: "Conversation" }),
+  ).toBeNull();
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "Turn on check-ins" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
 });
 
 test("Remove asks first, and only then removes the check-in", async () => {

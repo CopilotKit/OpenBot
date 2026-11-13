@@ -2,7 +2,6 @@ import { useRenderTool } from "@copilotkit/react-core/v2";
 import { OFFER_CHECK_IN_TOOL } from "@openbot/shared/check-in-offer";
 import { IconRadar } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -94,7 +93,6 @@ export function CheckInOfferCard({
   toolCallId: string;
 }) {
   const agentId = useDeclaredBotId();
-  const channelId = useParams({ strict: false }).channelId;
   const bot = useQuery({
     ...agentQueryOptions(agentId ?? ""),
     enabled: Boolean(agentId),
@@ -160,11 +158,6 @@ export function CheckInOfferCard({
           {create.error.message}
         </p>
       ) : null}
-      {channelId ? null : (
-        <p className="text-muted-foreground text-sm">
-          Open this in a conversation with {who} to turn it on.
-        </p>
-      )}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Select
           disabled={create.isPending}
@@ -197,12 +190,10 @@ export function CheckInOfferCard({
           Not now
         </Button>
         <Button
-          disabled={create.isPending || !channelId}
+          disabled={create.isPending}
           onClick={() =>
-            channelId &&
             create.mutate({
               agentId,
-              channelId,
               subject,
               focus: focus ?? "",
               ...(link && /^https?:\/\//.test(link)

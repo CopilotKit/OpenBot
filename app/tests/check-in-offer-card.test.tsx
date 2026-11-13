@@ -42,6 +42,8 @@ function drawn(
     settings?: unknown[];
     allowed?: boolean;
     toolCallId?: string;
+    /** Where the card is drawn: a conversation, unless a case says otherwise. */
+    at?: string;
   } = {},
 ) {
   const posted: unknown[] = [];
@@ -81,9 +83,16 @@ function drawn(
     path: "/channel/$channelId",
     component: Card,
   });
+  const elsewhere = createRoute({
+    getParentRoute: () => root,
+    path: "/bots/$agentId",
+    component: Card,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([channel]),
-    history: createMemoryHistory({ initialEntries: ["/channel/ch_1"] }),
+    routeTree: root.addChildren([channel, elsewhere]),
+    history: createMemoryHistory({
+      initialEntries: [options.at ?? "/channel/ch_1"],
+    }),
   });
   const view = render(
     <QueryClientProvider client={client}>
@@ -106,7 +115,6 @@ test("asks about the one thing, and turns on a daily check-in only when pressed"
     expect(posted).toEqual([
       {
         agentId: "assistant",
-        channelId: "ch_1",
         subject: BRIEF.subject,
         focus: "",
         sourceLink: BRIEF.link,
@@ -114,6 +122,15 @@ test("asks about the one thing, and turns on a daily check-in only when pressed"
       },
     ]),
   );
+});
+
+// A check-in belongs to its Bot, so the card turns one on wherever it is drawn.
+test("turns on outside a conversation too, and sends no conversation", async () => {
+  const { view, posted } = drawn({ at: "/bots/assistant" });
+  fireEvent.click(await view.findByRole("button", { name: "Turn on" }));
+  await waitFor(() => expect(posted).toHaveLength(1));
+  expect(posted[0]).not.toHaveProperty("channelId");
+  expect(view.queryByText(/Open this in a conversation/)).toBeNull();
 });
 
 test("Not now leaves nothing running, and stays said after a reload", async () => {

@@ -5,7 +5,7 @@ import {
   IconPlus,
   IconRadar,
 } from "@tabler/icons-react";
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import {
@@ -42,8 +42,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   createProactiveSettingMutationOptions,
   type LastCheckIn,
@@ -269,18 +267,12 @@ export function TurnOnResearchDialog({
       (bot) => !settings.data?.some((setting) => setting.agentId === bot.id),
     ),
   };
-  const channels = useInfiniteQuery(channelListQueryOptions());
   const [pickedBot, setAgentId] = useState("");
   const agentId = fixedBot ?? pickedBot;
-  const [channelId, setChannelId] = useState("");
   const [focus, setFocus] = useState("");
   // Hourly, the most often a Bot checks and the default for a new Bot.
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const id = useId();
-  const eligibleChannels = (channels.data ?? []).filter(
-    (channel) =>
-      channel.active && !channel.task && channel.agentIds.includes(agentId),
-  );
   const add = useMutation(createProactiveSettingMutationOptions(queryClient));
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
@@ -288,8 +280,8 @@ export function TurnOnResearchDialog({
         <DialogHeader>
           <DialogTitle>Turn on check-ins</DialogTitle>
           <DialogDescription>
-            It reads the apps it can use in this conversation and tells you when
-            something needs you.
+            It reads the apps it can use and tells you under Needs you when
+            something there needs you.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -300,7 +292,7 @@ export function TurnOnResearchDialog({
             onSubmit={(event) => {
               event.preventDefault();
               add.mutate(
-                { agentId, channelId, focus, intervalMinutes },
+                { agentId, focus, intervalMinutes },
                 { onSuccess: onClose },
               );
             }}
@@ -314,10 +306,7 @@ export function TurnOnResearchDialog({
                       value: bot.id,
                       label: bot.name,
                     }))}
-                    onValueChange={(value) => {
-                      setAgentId(value ?? "");
-                      setChannelId("");
-                    }}
+                    onValueChange={(value) => setAgentId(value ?? "")}
                     required
                     value={agentId || null}
                   >
@@ -334,29 +323,6 @@ export function TurnOnResearchDialog({
                   </Select>
                 </Field>
               ) : null}
-              <Field>
-                <FieldLabel htmlFor={`${id}-channel`}>Conversation</FieldLabel>
-                <Select
-                  items={eligibleChannels.map((channel) => ({
-                    value: channel.id,
-                    label: conversationLabel(channel),
-                  }))}
-                  onValueChange={(value) => setChannelId(value ?? "")}
-                  required
-                  value={channelId || null}
-                >
-                  <SelectTrigger className="w-full" id={`${id}-channel`}>
-                    <SelectValue placeholder="Choose a conversation" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {eligibleChannels.map((channel) => (
-                      <SelectItem key={channel.id} value={channel.id}>
-                        {conversationLabel(channel)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
               <Field>
                 <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
                 <Select
@@ -406,7 +372,7 @@ export function TurnOnResearchDialog({
             Cancel
           </Button>
           <Button
-            disabled={add.isPending || !agentId || !channelId}
+            disabled={add.isPending || !agentId}
             form={id}
             size="sm"
             type="submit"
