@@ -443,6 +443,9 @@ every deployment:
   sits the same way.
 - The OpenMuse skin is now called OpenFuse. Anyone who picked it keeps it, with nothing to
   choose again.
+- A passphrase passed by name in a Bot's shell command is now redacted in the command kept for
+  Action Recording and in the copy exported to a telemetry collector. `gpg --passphrase secret`,
+  `BORG_PASSPHRASE=secret` and `PASSPHRASE=secret` were kept in clear.
 - New Bot's first screen ends with a **Bring your own agent** card showing the mark of every
   framework a custom agent can run on. It opens the same list the **Connect a custom agent** button
   in the sheet's footer did, and that button is gone.

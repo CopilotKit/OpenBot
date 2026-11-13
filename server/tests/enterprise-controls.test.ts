@@ -489,6 +489,22 @@ describe("scrubbing commands", () => {
       "docker login -u bob \\\n  -p [REDACTED] r.test",
     ],
     ["redis-cli PING\nls -a /tmp", "redis-cli PING\nls -a /tmp"],
+    [
+      "gpg --batch --yes --passphrase hunter2 --decrypt secrets.txt.gpg",
+      "gpg --batch --yes --passphrase [REDACTED] --decrypt secrets.txt.gpg",
+    ],
+    [
+      "BORG_PASSPHRASE=hunter2 borg create /mnt/backup::today ~/docs",
+      "BORG_PASSPHRASE=[REDACTED] borg create /mnt/backup::today ~/docs",
+    ],
+    [
+      `curl -d '{"passphrase":"hunter2"}' https://x.test`,
+      `curl -d '{"passphrase":[REDACTED]}' https://x.test`,
+    ],
+    [
+      "gpg --batch --passphrase-fd 0 --decrypt secrets.txt.gpg",
+      "gpg --batch --passphrase-fd 0 --decrypt secrets.txt.gpg",
+    ],
   ];
   for (const [input, output] of cases) {
     test(input, () => expect(scrubCommand(input)).toBe(output));
