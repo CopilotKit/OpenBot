@@ -15,6 +15,13 @@ import type { ChannelSummary } from "@/lib/channels/queries";
 import type { Project } from "@/lib/projects/queries";
 
 /** The three sections, in the order the sidebar draws them. */
+/**
+ * The mime type a dragged conversation row carries, so a folder accepts only our rows and not
+ * whatever else a browser might drop on it. A private handshake between the two halves of this
+ * feature, not a contract anyone else reads.
+ */
+export const DRAGGED_CHANNEL_MIME = "application/x-openbot-channel";
+
 export const CONVERSATION_SECTION_IDS = [
   "group",
   "direct",

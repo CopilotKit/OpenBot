@@ -10,7 +10,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **The sidebar in sections.** The conversation sidebar now draws its conversations in three
 collapsible sections — Group chats, Direct chats and Projects — and a person can make folders and
-file conversations into them. A folder is one person's filing, so two people can file the same
+file conversations into them, by dragging a conversation onto a folder, from the conversation's
+right-click menu, or from the "Move to project" button beside an open conversation. A folder is
+one person's filing, so two people can file the same
 conversation differently, and filing one takes it out of Group/Direct for that person only. Which
 sections are folded is kept on the account, so it follows a person across devices. Upgrading runs
 `0089`, which only adds: `projects` and `channel_projects` with a unique index, and nothing

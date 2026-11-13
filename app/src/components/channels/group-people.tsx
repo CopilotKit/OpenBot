@@ -26,6 +26,7 @@ import {
   groupQueryOptions,
   removeGroupMemberMutationOptions,
 } from "@/lib/groups";
+import { MoveToProjectButton } from "./move-to-project-button";
 
 /**
  * Who is in a group, from its top bar: how many people, and a dialog listing them where the creator
@@ -140,6 +141,13 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
                 {(add.error ?? remove.error)?.message}
               </p>
             ) : null}
+            {/* Filing, on the surface the group already has for doing things to it: a person
+                looking at the group's people is the person deciding where the group belongs. */}
+            <Separator className="my-1" />
+            <MoveToProjectButton
+              channelId={channelId}
+              label="File in project…"
+            />
           </DialogBody>
         </DialogContent>
       </Dialog>

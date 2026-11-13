@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { DeleteConversationDialog } from "./delete-conversation-dialog";
+import { MoveToProjectButton } from "./move-to-project-button";
 
 /**
  * Pin and Delete for the conversation that is open, in the Bot panel beside it.
@@ -61,6 +62,7 @@ export function ConversationActions({
           {pinned ? <IconPinnedOff /> : <IconPin />}
           {pinned ? "Unpin" : "Pin"}
         </Button>
+        <MoveToProjectButton channelId={channelId} />
         <Button
           aria-label="Delete conversation…"
           className="w-full text-sm!"

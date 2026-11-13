@@ -565,3 +565,81 @@ test("a refused move is said on the row that asked", async () => {
     ],
   ]);
 });
+
+/*
+ * The drag. A row carries its channel; a folder's header takes the drop. Both halves are drawn
+ * here, so what a rendered tree can say is whether the payload left the row and reached the folder
+ * the person was looking at.
+ */
+
+/** The dataTransfer of a drag these tests drive, because jsdom has none of its own. */
+function dragPayload() {
+  const types: string[] = [];
+  const values = new Map<string, string>();
+  return {
+    get types() {
+      return [...types];
+    },
+    setData(type: string, value: string) {
+      if (!types.includes(type)) types.push(type);
+      values.set(type, value);
+    },
+    getData: (type: string) => values.get(type) ?? "",
+    dropEffect: "",
+    effectAllowed: "",
+  };
+}
+
+/** The link of one conversation row, which is what was made draggable. */
+function rowLink(container: HTMLElement, rowName: string) {
+  const link = within(container).getByText(rowName).closest("a");
+  if (!link) throw new Error(`no row for "${rowName}"`);
+  return link;
+}
+
+test("dropping a dragged row on a folder files it in that folder", async () => {
+  const seen = servingMove();
+  const view = await renderSections({
+    channels: [directChat, filedChat],
+    projects: [designFolder, emptyFolder],
+  });
+
+  const row = rowLink(view.container, "My assistant");
+  expect(row.getAttribute("draggable")).toBe("true");
+  const payload = dragPayload();
+  fireEvent.dragStart(row, { dataTransfer: payload });
+  const folder = header(view.container, "Website redesign");
+  fireEvent.dragOver(folder, { dataTransfer: payload });
+  fireEvent.drop(folder, { dataTransfer: payload });
+
+  await waitFor(() => expect(seen).toHaveLength(1));
+  expect(seen[0]?.url).toBe("/api/channels/my-assistant/project");
+  expect(seen[0]?.init?.method).toBe("PATCH");
+  expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
+    projectId: "p-website",
+  });
+});
+
+test("a refused drop is said on the folder it was dropped on", async () => {
+  servingMove(404, { error: "That project is not yours." });
+  const view = await renderSections({
+    channels: [directChat],
+    projects: [designFolder],
+  });
+
+  const payload = dragPayload();
+  fireEvent.dragStart(rowLink(view.container, "My assistant"), {
+    dataTransfer: payload,
+  });
+  const folder = header(view.container, "Website redesign");
+  fireEvent.dragOver(folder, { dataTransfer: payload });
+  fireEvent.drop(folder, { dataTransfer: payload });
+
+  const alert = await waitFor(() => {
+    const found = view.container.querySelector('[role="alert"]');
+    if (!found)
+      throw new Error("the folder said nothing about the refused drop");
+    return found;
+  });
+  expect(alert.textContent).toBe("That project is not yours.");
+});

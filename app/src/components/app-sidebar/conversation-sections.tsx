@@ -1,3 +1,7 @@
+import type {
+  SidebarSectionId,
+  SidebarSections,
+} from "@openbot/shared/user-preferences";
 import {
   IconChevronRight,
   IconPencil,
@@ -14,15 +18,13 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import type {
-  SidebarSectionId,
-  SidebarSections,
-} from "@openbot/shared/user-preferences";
+import { untitledLine } from "@/lib/channels/label";
 import { pinnedFirst } from "@/lib/channels/order";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import {
   collapsedSections,
   conversationSections,
+  DRAGGED_CHANNEL_MIME,
   type ProjectFolder as Folder,
   SECTION_EMPTY,
   SECTION_EMPTY_HINT,
@@ -30,10 +32,10 @@ import {
   sectionVisible,
 } from "@/lib/channels/sections";
 import { isUnread } from "@/lib/channels/unread";
-import { untitledLine } from "@/lib/channels/label";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
   createProjectMutationOptions,
+  moveChannelToProjectMutationOptions,
   renameProjectMutationOptions,
 } from "@/lib/projects/mutations";
 import type { Project } from "@/lib/projects/queries";
@@ -218,6 +220,15 @@ function FolderBlock({
 }) {
   const queryClient = useQueryClient();
   const rename = useMutation(renameProjectMutationOptions(queryClient));
+  /*
+   * The other way in: a row dragged from anywhere in the sidebar and dropped on this folder.
+   * Filed through `mutate` rather than the promise because this component stays on screen — the
+   * folder is not closed by the drop the way the menu is closed by the click, so the observer is
+   * still listening when the server answers.
+   */
+  const move = useMutation(moveChannelToProjectMutationOptions(queryClient));
+  /* Whether a row this folder accepts is over it, for the highlight a drop target owes. */
+  const [droppable, setDroppable] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -252,7 +263,26 @@ function FolderBlock({
               <button
                 aria-controls={bodyId}
                 aria-expanded={!collapsed}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                onDragOver={(event) => {
+                  // Accepting only our rows: a link dragged from elsewhere is navigation, not filing.
+                  if (event.dataTransfer.types.includes(DRAGGED_CHANNEL_MIME)) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDroppable(true);
+                  }
+                }}
+                onDragLeave={() => setDroppable(false)}
+                onDrop={(event) => {
+                  setDroppable(false);
+                  const channelId =
+                    event.dataTransfer.getData(DRAGGED_CHANNEL_MIME);
+                  if (channelId)
+                    move.mutate({ channelId, projectId: folder.project.id });
+                }}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  droppable && "bg-foreground/10",
+                )}
                 onClick={() => setCollapsed((folded) => !folded)}
                 type="button"
               >
@@ -286,6 +316,12 @@ function FolderBlock({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {/* No toast in this app: why a drop did not take is said on the folder it was dropped on. */}
+      {move.error ? (
+        <p className="text-destructive px-1.5 text-xs" role="alert">
+          {move.error.message}
+        </p>
+      ) : null}
       <div hidden={collapsed} id={bodyId}>
         <SectionRows
           animateOrder={animateOrder}
