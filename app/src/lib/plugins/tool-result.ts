@@ -243,6 +243,8 @@ export function toolResultFailed(result: string | undefined): boolean {
   const answer = asText(result).replace(/^Error: /, "");
   return (
     answer.startsWith("The vendor reported an error:") ||
-    answer.startsWith("That tool could not be called")
+    answer.startsWith("That tool could not be called") ||
+    // A folder action on the person's computer that broke there, rather than being declined.
+    answer.startsWith("That host operation could not be completed")
   );
 }
