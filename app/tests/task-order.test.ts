@@ -29,6 +29,7 @@ const task = (
   suggestionId: null,
   sourceApp: null,
   sourceLink: null,
+  originChannelId: null,
   status,
   failure: null,
   failedAt: null,
