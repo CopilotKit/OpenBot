@@ -95,9 +95,9 @@ export function researchRoleOf(ref: string): ResearchRole | null {
 /**
  * The research role a tool plays, from the name a model is offered it under, or null.
  *
- * Granted tools reach a model as `mcp__<server>__<tool>`. A Bot running its own loop (`agent-bot`,
- * `agent-langgraph`) sees only those names, not the refs the server holds, so this is how it learns
- * whether it was offered a search tool on this run.
+ * Granted tools reach a model as `mcp__<server>__<tool>`. A Bot running its own loop sees only those
+ * names, not the refs the server holds, so this is how it learns whether it was offered a search
+ * tool on this run.
  */
 export function researchRoleOfToolName(name: string): ResearchRole | null {
   if (!name.startsWith("mcp__")) return null;

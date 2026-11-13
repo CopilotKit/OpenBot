@@ -317,7 +317,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
-      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
+      # name is a prefix of another (`agent-langgraph` was one of `agent-langgraph-agui`) would otherwise
       # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
       # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
       # from a digest that lived in the other's repository, so the join failed with "not found".

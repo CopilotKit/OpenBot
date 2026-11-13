@@ -197,16 +197,9 @@ jobs:
         with:
           shard: ${{ matrix.shard }}/${{ strategy.job-total }}
       - run: bun install --frozen-lockfile
-      # The Bots are not root workspaces and each keeps its own lockfile. The startup tests spawn
-      # the real entrypoint, so its dependencies have to be installed as well.
-      - run: bun install --frozen-lockfile
-        working-directory: agent-bot
-      # Same for the LangGraph Bot: its history tests import @langchain/core, which lives in that
-      # Bot's own tree and not in the root one.
-      - run: bun install --frozen-lockfile
-        working-directory: agent-langgraph
-      # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
-      # from that Bot's own dependency tree.
+      # The Bots are not root workspaces and each keeps its own lockfile. The Mastra Bot's: root
+      # test discovery imports its receiver tests, which load Mastra from that Bot's own dependency
+      # tree.
       - run: bun install --frozen-lockfile
         working-directory: agent-mastra
       # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is

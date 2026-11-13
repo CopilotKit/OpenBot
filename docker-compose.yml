@@ -120,7 +120,7 @@ services:
       COMPUTER_SUPERVISOR_URL: ${COMPUTER_SUPERVISOR_CONTAINER_URL-http://supervisor:4300}
       # The managed Bot by name, when the deployment has one. `:+` keeps an empty setting empty, which
       # is how a deployment without that Bot says so: the package drops its row while this is blank.
-      MANAGED_AGENT_AG_UI_URL: ${MANAGED_AGENT_AG_UI_URL:+http://agent-langgraph:4201/ag-ui}
+      MANAGED_AGENT_AG_UI_URL: ${MANAGED_AGENT_AG_UI_URL:+http://agent-langgraph-agui:4206/}
       # These three have a container address only the deployment knows, so they take the shape
       # `OPENAI_CONTAINER_BASE_URL` already has on the Bots below: the container's own address when
       # one is given, and otherwise the deployment's, which for anything not on this machine is
@@ -401,38 +401,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # The built-in Bot is an AG-UI endpoint registered the same way as a customer-provided Bot.
-  agent-bot:
-    build:
-      context: .
-      dockerfile: agent-bot/Dockerfile
-    # Built from this checkout. A release publishes it too, and IMAGE_PULL_POLICY=missing pulls that
-    # instead, as OpenBot Desktop does.
-    image: ${BOT_IMAGE:-openbot-agent-bot:latest}
-    pull_policy: ${IMAGE_PULL_POLICY:-build}
-    ports:
-      # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
-      # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
-      # host: the server calls it over localhost, and other containers use the compose network.
-      - "127.0.0.1:${BOT_PORT:-4200}:4200"
-      - "[::1]:${BOT_PORT:-4200}:4200"
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      # Server sends this on every call to the managed Bot. It refuses to start without it.
-      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
-      # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
-      # to it verbatim.
-      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
-      # gpt-5.5, not the deployment default: this Bot writes /v1/chat/completions by hand, and
-      # gpt-5.6-* rejects function tools there unless reasoning is turned off. Its own variable, so
-      # a BOT_MODEL set for the framework Bot cannot silently take its tools away.
-      BOT_MODEL: ${AGENT_BOT_MODEL:-gpt-5.5}
-    healthcheck:
-      test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4200/health')\""]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # The harness somebody picked during setup, whichever one it is.
   #
   # ONE SERVICE RATHER THAN TWELVE, because a picked harness is a choice and not twelve branches in
@@ -456,14 +424,14 @@ services:
     pull_policy: missing
     ports:
       # Loopback, and on the image's own port on both sides. The server is a host process, so it
-      # reaches this the same way it reaches agent-bot: over the published port, not the compose
-      # network.
+      # reaches this the same way it reaches the managed Bot: over the published port, not the
+      # compose network.
       - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
       - "[::1]:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
     environment:
       # Every harness refuses without this; it is what makes the endpoint the server's alone.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
-      # Deployment-owned tools use the same signed callback as agent-langgraph.
+      # Deployment-owned tools use the same signed callback as the managed Bot.
       OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
       AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
       # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
@@ -496,24 +464,30 @@ services:
       # mount has to be the containing directory rather than the file mount point.
       - ./.langchain:/root/.langchain
 
-  # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
-  agent-langgraph:
+  # The managed Bot: the one the deployment runs for itself, registered the way a customer's own Bot
+  # is, as an AG-UI endpoint in the registry (the tenant package names it by MANAGED_AGENT_AG_UI_URL).
+  # It is the LangGraph harness, the same image a person can pick in setup.
+  agent-langgraph-agui:
     build:
       context: .
-      dockerfile: agent-langgraph/Dockerfile
+      dockerfile: agent-langgraph-agui/Dockerfile
     # Built from this checkout. A release publishes it too, and IMAGE_PULL_POLICY=missing pulls that
     # instead, as OpenBot Desktop does.
-    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph:latest}
+    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph-agui:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
-      # Loopback, for the same reason as agent-bot above.
-      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
-      - "[::1]:${LANGGRAPH_PORT:-4201}:4201"
+      # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
+      # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
+      # host: the server calls it over loopback, and other containers use the compose network.
+      #
+      # LANGGRAPH_PORT on the host and the image's own 4206 inside, so a picked harness that is this
+      # same image keeps 4206 on the host to itself.
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4206"
+      - "[::1]:${LANGGRAPH_PORT:-4201}:4206"
     environment:
-      # The selected provider reads its own key. Models requiring the Responses API use
-      # BOT_RESPONSES_API instead of changing the streaming loop here.
+      # The selected provider reads its own key.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
-      # Same server-to-Bot request boundary as agent-bot above.
+      # The server sends this on every call to the managed Bot, which refuses every call without it.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
@@ -521,16 +495,8 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      # Unset, this Bot takes the spec file's row for its model rather than this line
-      # substituting gpt-5.5 whatever BOT_PROVIDER named — a provider other than OpenAI was
-      # handed that substitute and then failed at its own vendor on it. The file's OpenAI row is
-      # the same gpt-5.5 as before, so an OpenAI deployment answers on the model it always did;
-      # BOT_MODEL still wins when it is set, and a 5.6 tier named there switches the Responses
-      # API on by itself below.
+      # Empty when nobody named one: the server sends the model on every run.
       BOT_MODEL: ${BOT_MODEL:-}
-      BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
-      # How hard it thinks, on a model that reasons. Empty leaves the provider's own default.
-      BOT_REASONING_EFFORT: ${BOT_REASONING_EFFORT:-}
       # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
       # `host.docker.internal` because the API server runs on the host, not in this network.
       #
@@ -542,7 +508,7 @@ services:
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     healthcheck:
-      test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4201/health')\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4206/health')"]
       interval: 10s
       timeout: 5s
       retries: 5

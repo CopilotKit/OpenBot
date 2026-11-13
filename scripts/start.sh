@@ -73,9 +73,7 @@ export OPENBOT_BACKEND_TAG
 APP_PORT="$(setting APP_PORT 3010)"
 SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
-BOT_PORT="$(setting BOT_PORT 4200)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
-BOT_PROVIDER="$(setting BOT_PROVIDER openai | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 # Through `setting`, like every other key here, so `.env` counts as the comment above says and as
 # docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
@@ -103,7 +101,8 @@ WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 #
 # Written into .env rather than exported for this run alone, so `docker compose up` by hand later
 # sees the same value the script used.
-# The laptop stack runs agent-langgraph on LANGGRAPH_PORT. The one-container image does not, so
+# The laptop stack runs the managed Bot, the LangGraph harness (agent-langgraph-agui), on
+# LANGGRAPH_PORT. The one-container image does not, so
 # this default stays in the script rather than in .env: a `docker run --env-file .env` must not
 # inherit a URL that points at a process the image does not contain.
 #
@@ -115,7 +114,7 @@ if [ "$EDITION" = "personal" ]; then
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
   COMPUTER_PERSON_ID=personal
 else
-  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+  MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_PORT}/")"
   COMPUTER_PERSON_ID=
 fi
 export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
@@ -324,19 +323,15 @@ fi
 # changed, so naming them all costs a comparison and buys the guarantee that what is running is what
 # this run configured.
 SERVICES+=(agent-computer)
-# The managed coworker uses LangGraph. The separate legacy sample only accepts OpenAI keys,
-# so requiring it would prevent an Anthropic-only deployment from reaching its managed Bot.
+# The managed coworker is the LangGraph harness, on whichever provider BOT_PROVIDER names.
 if [ "$EDITION" = "personal" ]; then
-  info "  agent-bot, agent-langgraph: skipped for the personal edition (its Bot runs in the server)"
-elif [ "$BOT_PROVIDER" = "anthropic" ]; then
-  info "  agent-bot: skipped for Anthropic (OpenAI-only sample)"
-  SERVICES+=(agent-langgraph)
+  info "  agent-langgraph-agui: skipped for the personal edition (its Bot runs in the server)"
 else
-  SERVICES+=(agent-bot agent-langgraph)
+  SERVICES+=(agent-langgraph-agui)
 fi
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
-export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
+export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 # Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
 # terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
@@ -371,10 +366,7 @@ if ! docker compose run --rm migrate >"$LOGS/migrate.log" 2>&1; then
 fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
-  if [ "$BOT_PROVIDER" != "anthropic" ]; then
-    wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
-  fi
-  wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
+  wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
 fi
 
 for table in agent_profiles agent_preferences; do

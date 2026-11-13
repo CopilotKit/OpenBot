@@ -1,8 +1,7 @@
 /**
  * What a Bot in this box knows about its own hands.
  *
- * Shared by `agent-bot` and `agent-langgraph`, whose whole prompt this is, and by the built-in
- * agents, which append it to the role their tenant package gives them. A Bot's instructions about
+ * Read by the built-in agents, which append it to the role their tenant package gives them. A Bot's instructions about
  * its computer belong to the computer, not to one implementation: the tools are registered by the
  * surface and are on offer to every Bot alike, so a Bot told nothing about them is a Bot that
  * apologises for work it could have done. That is what happened to the built-in agents, which knew
@@ -171,8 +170,7 @@ export type ComputerHolding = {
  *
  * A function rather than one constant because the right advice about the browser depends on whether
  * a search tool sits beside it; see `WITH_SEARCH_LINES`. Built-in Bots get it from `copilot.ts`, which
- * knows the tools it is building with; `agent-bot` and `agent-langgraph` work it out from the tools
- * each run offers them.
+ * knows the tools it is building with.
  */
 export function computerGuidance(holding: ComputerHolding): string {
   return asParagraphs([
@@ -699,9 +697,8 @@ function dayIn(
  * it. "Nothing happened" would leave it repeating the request, and a fake success would have it
  * report work it never did.
  *
- * Shared because both Bots in this repo have to say the same thing. The first fix for this landed in
- * `agent-langgraph` alone, and `agent-bot` — the Bot that ships in the box, and the one behind the
- * Browser Bot — went on failing in exactly the same way until somebody drove it.
+ * Shared because every Bot that answers for a step has to say the same thing: a fix that lands in
+ * one Bot alone leaves the others failing in exactly the same way until somebody drives them.
  */
 export const NO_ANSWER_CAME = notRun(
   "no result came back, because the person did not answer this and the run it belonged to has ended.",

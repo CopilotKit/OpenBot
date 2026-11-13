@@ -1,4 +1,4 @@
-"""The current run's tools, with the same ownership contract as agent-langgraph.
+"""The current run's tools, with the ownership contract every OpenBot harness keeps.
 
 Computer/UI tools finish the run for the surface to execute and resume. Only tools
 marked by OpenBot's server execute here, through its signed callback. The request

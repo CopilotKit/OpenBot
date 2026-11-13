@@ -45,7 +45,6 @@ pub struct Ports {
     pub server: u16,
     pub postgres: u16,
     pub computer: u16,
-    pub bot: u16,
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
@@ -58,7 +57,6 @@ impl Default for Ports {
             server: 3001,
             postgres: 5432,
             computer: 4100,
-            bot: 4200,
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
@@ -67,12 +65,11 @@ impl Default for Ports {
 }
 
 /// The `.env` keys a deployment's host ports are kept under.
-const PORT_KEYS: [&str; 8] = [
+const PORT_KEYS: [&str; 7] = [
     "APP_PORT",
     "SERVER_PORT",
     "POSTGRES_PORT",
     "COMPUTER_PORT",
-    "BOT_PORT",
     "LANGGRAPH_PORT",
     "SUPERVISOR_PORT",
     "PICKED_HARNESS_HOST_PORT",
@@ -151,7 +148,6 @@ impl Ports {
             ("SERVER_PORT", &mut ports.server),
             ("POSTGRES_PORT", &mut ports.postgres),
             ("COMPUTER_PORT", &mut ports.computer),
-            ("BOT_PORT", &mut ports.bot),
             ("LANGGRAPH_PORT", &mut ports.langgraph),
             ("SUPERVISOR_PORT", &mut ports.supervisor),
         ] {
@@ -172,7 +168,6 @@ impl Ports {
             ("SERVER_PORT", self.server),
             ("POSTGRES_PORT", self.postgres),
             ("COMPUTER_PORT", self.computer),
-            ("BOT_PORT", self.bot),
             ("LANGGRAPH_PORT", self.langgraph),
             ("SUPERVISOR_PORT", self.supervisor),
         ]
@@ -241,7 +236,6 @@ impl Ports {
             server: choose(self.server)?,
             postgres: choose(self.postgres)?,
             computer: choose(self.computer)?,
-            bot: choose(self.bot)?,
             langgraph: choose(self.langgraph)?,
             supervisor: choose(self.supervisor)?,
             harness: harness
@@ -430,8 +424,7 @@ mod port_tests {
                 server: port,
                 postgres: port,
                 computer: port,
-                bot: port,
-                langgraph: port,
+                    langgraph: port,
                 supervisor: port,
                 harness: None,
             };
@@ -453,7 +446,6 @@ mod port_tests {
             server: port,
             postgres: port,
             computer: port,
-            bot: port,
             langgraph: port,
             supervisor: port,
             harness: Some(port),
@@ -860,7 +852,6 @@ pub fn compose(
             );
             env.insert("BOT_PROVIDER".into(), "openai".into());
             env.insert("BOT_MODEL".into(), model.clone());
-            env.insert("AGENT_BOT_MODEL".into(), model.clone());
         }
         ModelCredential::Compatible {
             base_url,
@@ -891,18 +882,6 @@ pub fn compose(
                 insert_if_given(&mut env, "OPENAI_CONTAINER_BASE_URL", container_base_url);
             }
             insert_if_given(&mut env, "BOT_MODEL", name);
-            /*
-             * The bundled Bot's own model variable, set to the same name.
-             *
-             * It has one because it hand-writes `/v1/chat/completions`, where `gpt-5.6-*` rejects
-             * function tools, so `docker-compose.yml` pins it to `gpt-5.5` rather than letting the
-             * framework Bot's choice take its tools away. That reasoning is about OpenAI's own
-             * models and does not survive a custom endpoint: `gpt-5.5` is not in the catalogue of
-             * an Ollama or a vLLM, so the pin asked somebody's own server for a model it has never
-             * heard of. The person named exactly one model on that screen and meant it for
-             * whichever Bot answers.
-             */
-            insert_if_given(&mut env, "AGENT_BOT_MODEL", name);
         }
     }
 
@@ -1060,8 +1039,8 @@ pub fn compose(
      * The picked harness, if there is one.
      *
      * Addressed on loopback rather than by a compose service name, because the server is a host
-     * process here and not a container: it reaches `agent-bot` and `agent-langgraph` the same way,
-     * over the port those services publish.
+     * process here and not a container: it reaches a Bot's container the same way, over the port
+     * that service publishes.
      *
      * One address and one kind. The package's single row drops itself while the address is blank,
      * so a deployment that picked nothing registers nothing.
@@ -3437,18 +3416,9 @@ mod model_tests {
             compatible.get("BOT_MODEL"),
             Some(&"local-model".to_string())
         );
-        /*
-         * And the bundled Bot's own variable, which is the one that was missed.
-         *
-         * `docker-compose.yml` reads `AGENT_BOT_MODEL` for `agent-bot` rather than `BOT_MODEL`, so
-         * that a model chosen for the framework Bot cannot take its tools away. On a custom
-         * endpoint that pin asked somebody's own server for `gpt-5.5`, which an Ollama or a vLLM
-         * has never heard of.
-         */
-        assert_eq!(
-            compatible.get("AGENT_BOT_MODEL"),
-            Some(&"local-model".to_string())
-        );
+        // AGENT_BOT_MODEL was the retired agent-bot's own model setting: nothing reads it now, so
+        // nothing writes it, and an earlier .env's line is taken out (REMOVED_WHEN_UNSET).
+        assert!(!compatible.contains_key("AGENT_BOT_MODEL"));
 
         let with_a_key = compose(
             &intelligence(),

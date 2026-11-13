@@ -83,7 +83,7 @@ async function runStart({
     "WORKER_SHARED_SECRET=worker-secret",
     "MANAGED_AGENT_TOKEN=managed-token",
     "AGENT_TOOL_TOKEN=agent-tool-token",
-    "MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui",
+    "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/",
     "OPENBOT_ONE_COMPUTER_EACH=true",
     "DATABASE_URL=postgres://openbot:openbot@localhost:5432/openbot",
   ].filter(
@@ -175,7 +175,7 @@ exit 1
 args="$*"
 printf '%s\\n' "$args" >> "$CURL_LOG"
 for port in ${unavailableHealthPorts.join(" ")}; do
-  if [[ "$args" == *"http://localhost:$port/health"* ]]; then exit 7; fi
+  if [[ "$args" == *"http://localhost:$port/health"* || "$args" == *"http://127.0.0.1:$port/health"* ]]; then exit 7; fi
 done
 if [[ "$args" == *"/api/copilotkit/info"* ]]; then
   printf '{"licenseStatus":"valid","mode":"test","agents":{"analyst":{}}}'
@@ -545,7 +545,7 @@ describe("start.sh one computer each", () => {
       stderr: "",
     });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres agent-computer agent-bot agent-langgraph",
+      "compose up -d --build postgres agent-computer agent-langgraph-agui",
     );
     expect(result.dockerLog).not.toContain("supervisor");
   });
@@ -566,7 +566,7 @@ describe("start.sh one computer each", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+        "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
       );
     }
     // Two whole starts, one after the other.
@@ -617,64 +617,51 @@ describe("start.sh Learning container check", () => {
   });
 });
 
-describe("start.sh selected provider services", () => {
-  test.each([".env", "process environment"])(
-    "an Anthropic-only %s selection starts the managed Bot without the OpenAI-only sample",
-    async (source) => {
-      const selected = {
-        BOT_PROVIDER: "anthropic",
-        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
-      };
-      const result = await runStart({
-        settings: source === ".env" ? selected : { BOT_PROVIDER: "openai" },
-        processEnvironment: source === "process environment" ? selected : {},
-        unavailableHealthPorts: [4200],
-      });
-      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
-        exitCode: 0,
-        stderr: "",
-      });
-      expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-langgraph",
-      );
-      expect(result.dockerLog).not.toContain("agent-bot");
-      expect(result.dockerLog).toContain("compose run --rm migrate");
-      expect(result.curlLog).toContain("http://localhost:4100/health");
-      expect(result.curlLog).toContain("http://localhost:4201/health");
-      expect(result.curlLog).not.toContain("http://localhost:4200/health");
-      expect(result.stdout).toContain("agent-bot: skipped for Anthropic");
-      expect(result.stdout).not.toContain("agent-bot ready");
-      expect(result.stdout).toContain("agent-langgraph ready");
-      expect(result.stdout).toContain(
-        "managed coworker endpoint: http://localhost:4201/ag-ui",
-      );
-      expect(result.stdout).toContain("Ready. http://localhost:3010");
-    },
-  );
-
-  test("the default OpenAI startup still starts and checks the legacy sample", async () => {
-    const result = await runStart();
-    expect(result.exitCode).toBe(0);
+describe("start.sh and the managed Bot", () => {
+  /**
+   * The managed Bot is the LangGraph harness (agent-langgraph-agui), on whichever provider
+   * BOT_PROVIDER names. agent-bot, an OpenAI-only proof of concept, and the TypeScript
+   * agent-langgraph were retired, so neither is started or waited for, whichever provider is picked.
+   */
+  test.each([
+    ["the default provider", {}],
+    [
+      "an Anthropic-only selection",
+      { BOT_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "synthetic-anthropic-key" },
+    ],
+  ])("%s starts the harness and no retired Bot", async (_, settings) => {
+    const result = await runStart({ settings });
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
     );
-    expect(result.curlLog).toContain("http://localhost:4200/health");
-    expect(result.stdout).toContain("agent-bot ready");
-    expect(result.stdout).not.toContain("agent-bot: skipped");
+    expect(result.dockerLog).not.toMatch(/agent-bot|agent-langgraph(?!-agui)/);
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.curlLog).not.toContain(":4200/health");
+    expect(result.stdout).toContain("agent-langgraph-agui ready");
+    expect(result.stdout).not.toMatch(/agent-bot/);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+    expect(result.stdout).toContain("Ready. http://localhost:3010");
   });
 
-  test("Anthropic startup still fails if its managed LangGraph Bot is unavailable", async () => {
-    const result = await runStart({
-      settings: {
-        BOT_PROVIDER: "anthropic",
-        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
-      },
-      unavailableHealthPorts: [4200, 4201],
-    });
+  test("names the harness's own address when .env names none", async () => {
+    const result = await runStart({ omitFromEnv: ["MANAGED_AGENT_AG_UI_URL"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+  });
+
+  test("startup fails if the managed Bot is unavailable", async () => {
+    const result = await runStart({ unavailableHealthPorts: [4201] });
     expect(result.exitCode).toBe(1);
-    expect(result.curlLog).not.toContain("http://localhost:4200/health");
-    expect(result.curlLog).toContain("http://localhost:4201/health");
-    expect(result.stdout).toContain("agent-langgraph never became ready");
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.stdout).toContain("agent-langgraph-agui never became ready");
     expect(result.stdout).not.toContain("Ready. http://localhost:3010");
   });
 });
@@ -706,7 +693,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
     );
   });
 

@@ -11,12 +11,9 @@ services:
   agent-computer:
     ports: !override
       - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
-  agent-bot:
+  agent-langgraph-agui:
     ports: !override
-      - "127.0.0.1:${BOT_PORT:-4200}:4200"
-  agent-langgraph:
-    ports: !override
-      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4206"
   agent-harness:
     ports: !override
       - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"

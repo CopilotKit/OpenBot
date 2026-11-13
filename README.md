@@ -477,8 +477,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `app`                    | 3010                       | React/Vite UI.                                                                                   |
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
-| `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
-| `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
+| `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
 | `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |

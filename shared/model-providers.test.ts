@@ -235,11 +235,11 @@ describe("whether a model has to be driven through the Responses API", () => {
 describe("what a Bot runs from the spec file", () => {
   /** The shipped Bots, each at the row the file holds for it. */
   test("a Bot with an environment that names nothing runs its file row", () => {
-    expect(botSettings("agent-bot", {})).toEqual({
+    expect(botSettings("agent-langgraph-agui", {})).toEqual({
       provider: "openai",
-      model: "gpt-5.5",
+      model: "gpt-4o-mini",
     });
-    expect(botSettings("agent-langgraph", {})).toEqual({
+    expect(botSettings("agent-agno", {})).toEqual({
       provider: "openai",
       model: "gpt-5.5",
     });
@@ -271,7 +271,7 @@ describe("what a Bot runs from the spec file", () => {
       }),
     ).toEqual({ provider: "anthropic", model: "claude-haiku" });
     expect(
-      botSettings("agent-langgraph", { BOT_PROVIDER: "  Google " }),
+      botSettings("agent-agno", { BOT_PROVIDER: "  Google " }),
     ).toEqual({ provider: "google", model: "gemini-2.5-flash" });
   });
 
@@ -307,22 +307,30 @@ describe("what a Bot runs from the spec file", () => {
   /**
    * A pinned provider is a Bot answering to one name only.
    *
-   * `agent-bot` speaks chat completions by hand and has never read `BOT_PROVIDER`; pinning keeps
+   * `agent-antigravity` drives Google's API alone and does not read `BOT_PROVIDER`; pinning keeps
    * that true while the model still comes from the file.
    */
   test("a pinned Bot ignores the provider environment it never read", () => {
     expect(
-      botSettings("agent-bot", { BOT_PROVIDER: "anthropic" }, "openai"),
-    ).toEqual({ provider: "openai", model: "gpt-5.5" });
+      botSettings(
+        "agent-antigravity",
+        { BOT_PROVIDER: "anthropic" },
+        "google",
+      ),
+    ).toEqual({ provider: "google", model: "gemini-3.6-flash" });
     expect(
-      botSettings("agent-bot", { BOT_MODEL: " gpt-4.1 " }, "openai"),
-    ).toEqual({ provider: "openai", model: "gpt-4.1" });
+      botSettings(
+        "agent-antigravity",
+        { BOT_MODEL: " gemini-2.5-pro " },
+        "google",
+      ),
+    ).toEqual({ provider: "google", model: "gemini-2.5-pro" });
   });
 
   /** A name nobody has heard of is kept, so the Bot's own refusal can put it in the message. */
   test("an unknown provider stays unknown, with a model to be refused with", () => {
     expect(
-      botSettings("agent-langgraph", { BOT_PROVIDER: " Mistral " }),
+      botSettings("agent-agno", { BOT_PROVIDER: " Mistral " }),
     ).toEqual({ provider: "mistral", model: "gpt-5.5" });
   });
 
