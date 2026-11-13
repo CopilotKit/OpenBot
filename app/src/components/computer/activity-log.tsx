@@ -27,6 +27,7 @@ import {
 } from "@tabler/icons-react";
 import { useSyncExternalStore } from "react";
 import {
+  type AllowedDecision,
   activityFor,
   type BrowserStepName,
   type ComputerActivity,
@@ -60,6 +61,23 @@ const BROWSER_ICONS: Record<BrowserStepName, typeof IconWorld> = {
   computer_key: IconKeyboard,
   computer_scroll: IconArrowsVertical,
 };
+
+/** How the person allowed a step on its card, as the card says it once answered. */
+const ALLOWED: Record<AllowedDecision, string> = {
+  allow_once: "Allowed once.",
+  allow_conversation: "Allowed for this conversation.",
+  allow_always: "Always allowed here.",
+};
+
+/** The line under a step the person allowed on its card, as one they declined has its own. */
+function AllowedLine({ allowed }: { allowed: AllowedDecision | undefined }) {
+  if (!allowed) return null;
+  return (
+    <p className="mt-1 pl-5 text-muted-foreground text-xs">
+      {ALLOWED[allowed]}
+    </p>
+  );
+}
 
 function timeOf(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, {
@@ -107,6 +125,7 @@ function CommandEntry({
         })}
         truncated={entry.truncated === true}
       />
+      <AllowedLine allowed={entry.allowed} />
     </li>
   );
 }
@@ -160,6 +179,7 @@ function BrowserEntry({ entry }: { entry: ComputerActivity }) {
             : "It did not work."}
         </p>
       ) : null}
+      <AllowedLine allowed={entry.allowed} />
     </li>
   );
 }
@@ -221,6 +241,7 @@ function Entry({ entry }: { entry: ComputerActivity }) {
           />
         </div>
       )}
+      <AllowedLine allowed={entry.allowed} />
     </li>
   );
 }

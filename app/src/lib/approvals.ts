@@ -65,6 +65,8 @@ export type ApprovalInboxData = {
     createdAt: string;
     /** When the person (or a rule) decided it; null while it waits. */
     decidedAt?: string | null;
+    /** What the person answered; null while it waits. */
+    decision?: ApprovalDecision | null;
     action: {
       botId: string;
       toolRef: string;

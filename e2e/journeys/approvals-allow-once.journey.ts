@@ -120,6 +120,8 @@ test("Allow once places one order and the next one asks again; Deny buys nothing
     await expect(declined).toHaveCount(1);
     await expect(declined).toContainText("Place order");
     await expect(declined).toContainText("You declined it.");
+    // This page was opened again after the Deny, and every row kept its time, the declined one too.
+    await expectEveryRowTimed(page);
     await shot("denied");
   });
 });

@@ -7,7 +7,13 @@ import {
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
+import {
+  type ApprovalDecision,
+  type ApprovalInboxData,
+  approvalInboxOptions,
+} from "@/lib/approvals";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
 
@@ -74,6 +80,8 @@ export type ComputerActivity = {
   refused?: boolean;
   /** Refused because the person declined it, so the line says declined rather than what it would have done. */
   declined?: boolean;
+  /** The person allowed it on its card, and how: the line says so, as it says a step was declined. */
+  allowed?: AllowedDecision;
   /**
    * It was handed to the person and they did it themselves. Done, so not drawn as refused, and
    * nothing ran on the computer for it, so not drawn as a command that printed nothing either.
@@ -83,6 +91,12 @@ export type ComputerActivity = {
   truncated?: boolean;
   timedOut?: boolean;
 };
+
+/** How a person allowed a step on its card. */
+export type AllowedDecision = Extract<
+  ApprovalDecision,
+  "allow_once" | "allow_conversation" | "allow_always"
+>;
 
 /** What a call did, without the bookkeeping the pane adds to it. */
 export type ActivityDetails = Omit<ComputerActivity, "id" | "at">;
@@ -95,7 +109,48 @@ export type ConversationCall = {
   id: string;
   did: ActivityDetails | null;
   finishedAt?: number;
+  /** When the person answered it on its card, for a step whose answer is a sentence that says no time. */
+  decidedAt?: number;
 };
+
+/** What the person answered on a step's card, and when, by the step's call. */
+export type StepDecision = { decision: ApprovalDecision; at?: number };
+export type StepDecisions = ReadonlyMap<string, StepDecision>;
+const NO_DECISIONS: StepDecisions = new Map();
+
+/**
+ * The person's answers on the cards of this owner's recent steps, by call, from the approvals inbox
+ * the conversation already reads. The card says what was answered while it shows; once answered it
+ * folds away, and the step's own answer is the computer's, or a sentence for the Bot, neither of
+ * which says how the person answered or, for a sentence, when. So "Allow for this conversation" left
+ * no line in Activity, and a step declined there had no time once the conversation was opened again.
+ */
+export function decisionsIn(
+  inbox: ApprovalInboxData | undefined,
+): StepDecisions {
+  const decisions = new Map<string, StepDecision>();
+  for (const request of inbox?.requests ?? []) {
+    const id = request.action.toolCallId;
+    if (!id || !request.decision) continue;
+    const at = request.decidedAt ? Date.parse(request.decidedAt) : Number.NaN;
+    decisions.set(id, {
+      decision: request.decision,
+      ...(Number.isFinite(at) ? { at } : {}),
+    });
+  }
+  return decisions;
+}
+
+function allowedBy(
+  decision: StepDecision | undefined,
+): AllowedDecision | undefined {
+  const answered = decision?.decision;
+  return answered === "allow_once" ||
+    answered === "allow_conversation" ||
+    answered === "allow_always"
+    ? answered
+    : undefined;
+}
 
 /**
  * The most recent entries per computer.
@@ -175,6 +230,7 @@ function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
     entry.exitCode === details.exitCode &&
     entry.refused === details.refused &&
     entry.declined === details.declined &&
+    entry.allowed === details.allowed &&
     entry.doneByPerson === details.doneByPerson &&
     entry.truncated === details.truncated &&
     entry.timedOut === details.timedOut
@@ -319,7 +375,7 @@ export function recordActivity(
     const existing = present.get(call.id);
     if (existing) {
       // The server's answer can arrive after the browser's placeholder, with when it finished.
-      const at = existing.at ?? call.finishedAt;
+      const at = existing.at ?? call.finishedAt ?? call.decidedAt;
       if (!sameDetails(existing, call.did) || at !== existing.at) {
         next ??= [...current];
         const position = next.findIndex((entry) => entry.id === call.id);
@@ -342,7 +398,10 @@ export function recordActivity(
     answeredHere.delete(call.id);
     // When the step says it finished, when the person answered it here, or when this page saw its answer arrive.
     const at =
-      call.finishedAt ?? answeredAt ?? (watched ? Date.now() : undefined);
+      call.finishedAt ??
+      call.decidedAt ??
+      answeredAt ??
+      (watched ? Date.now() : undefined);
     const entry: ComputerActivity = {
       ...call.did,
       id: call.id,
@@ -867,6 +926,7 @@ function declinedCommand(command: string): ActivityDetails {
  */
 export function conversationActivity(
   messages: readonly Message[],
+  decisions: StepDecisions = NO_DECISIONS,
 ): ConversationCall[] {
   const computerCalls = new Set<string>();
   const browserCalls = new Set<string>();
@@ -922,25 +982,24 @@ export function conversationActivity(
         continue;
       }
       const name = call.function.name;
-      if (isBrowserStep(name)) {
-        const answer = answered.get(call.id);
-        if (answer && awaitingFreshLook(answer)) continue;
-        const finishedAt = finishedAtOf(answer);
-        calls.push({
-          id: call.id,
-          did: answer ? browserDidOf(name, call, answer, labels) : null,
-          ...(finishedAt === undefined ? {} : { finishedAt }),
-        });
-        continue;
-      }
+      const browser = isBrowserStep(name);
       const kind = KINDS[name];
-      if (!kind) continue;
+      if (!browser && !kind) continue;
       const answer = answered.get(call.id);
+      if (browser && answer && awaitingFreshLook(answer)) continue;
+      const did = !answer
+        ? null
+        : browser
+          ? browserDidOf(name, call, answer, labels)
+          : didOf(kind as ComputerActivity["kind"], call, answer);
+      const decision = decisions.get(call.id);
+      const allowed = allowedBy(decision);
       const finishedAt = finishedAtOf(answer);
       calls.push({
         id: call.id,
-        did: answer ? didOf(kind, call, answer) : null,
+        did: did && allowed ? { ...did, allowed } : did,
         ...(finishedAt === undefined ? {} : { finishedAt }),
+        ...(decision?.at === undefined ? {} : { decidedAt: decision.at }),
       });
     }
   }
@@ -967,6 +1026,11 @@ export function useConversationActivity(
   messages: readonly Message[],
 ): void {
   const { copilotkit } = useCopilotKit();
+  // The person's answers on the steps' cards: the same inbox the conversation's cards read.
+  const decisions = useQuery({
+    ...approvalInboxOptions(),
+    select: decisionsIn,
+  }).data;
   useEffect(
     () =>
       copilotkit.subscribe({
@@ -983,7 +1047,10 @@ export function useConversationActivity(
     [copilotkit],
   );
   useEffect(() => {
-    recordActivity(computerId, conversationActivity(messages));
+    recordActivity(
+      computerId,
+      conversationActivity(messages, decisions ?? NO_DECISIONS),
+    );
     // And which of the panel's views the Bot is working in: see panel-view.ts.
     followView(computerId, latestView(messages));
   });

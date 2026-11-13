@@ -5,9 +5,11 @@ import {
   HANDLED_BY_PERSON,
 } from "@openbot/shared/approval-outcomes";
 import { withFinishedAt } from "@openbot/shared/computer-control";
+import type { ApprovalInboxData } from "../src/lib/approvals";
 import {
   activityFor,
   conversationActivity,
+  decisionsIn,
   noteAnswered,
   recordActivity,
 } from "../src/lib/computers/activity";
@@ -271,4 +273,93 @@ test("a step's answer is stamped with when it finished, once, and a step waiting
   expect(withFinishedAt(waiting)).toBe(waiting);
   // A sentence (declined, done by the person) is not an object to stamp.
   expect(withFinishedAt(DECLINED_BY_PERSON)).toBe(DECLINED_BY_PERSON);
+});
+
+/** The approvals inbox as the server answers it, with one decided request for this call. */
+function inboxWith(
+  toolCallId: string,
+  decision: "allow_conversation" | "deny",
+  decidedAt: string,
+): ApprovalInboxData {
+  return {
+    enabled: true,
+    rules: [],
+    teamRules: [],
+    questions: [],
+    requests: [
+      {
+        id: `request-${toolCallId}`,
+        status: "completed",
+        createdAt: "2026-11-12T22:05:00.000Z",
+        decidedAt,
+        decision,
+        action: {
+          botId: "fernhill-shopper",
+          toolRef: "computer_click",
+          effect: "write",
+          scope: "host.docker.internal",
+          threadId: "thread-1",
+          toolCallId,
+          args: { ref: "f2e13", snapshotId: 4 },
+          target: {},
+        },
+      },
+    ],
+  };
+}
+
+test("a step allowed for the conversation on its card says so", () => {
+  const decisions = decisionsIn(
+    inboxWith("sunflower", "allow_conversation", "2026-11-12T22:05:31.000Z"),
+  );
+  const did = conversationActivity(
+    [
+      ...checkout,
+      ...step(
+        "sunflower",
+        "computer_click",
+        { ref: "f2e13", snapshotId: 4 },
+        {
+          ok: true,
+          action: "click",
+          element: { role: "button", name: "Place order" },
+          url: "http://host.docker.internal:46600/shop/sunflower",
+          elapsedMs: 40,
+          finishedAt: "2026-11-12T22:05:33.000Z",
+        },
+      ),
+    ],
+    decisions,
+  ).find((call) => call.id === "sunflower")?.did;
+  expect(did).toMatchObject({
+    subject: "Place order",
+    allowed: "allow_conversation",
+  });
+});
+
+test("a step declined on its card keeps the time it was declined when the conversation is opened again", () => {
+  const id = computer();
+  const decidedAt = "2026-11-12T22:05:42.000Z";
+  // Opened again: nothing here watched it, and its answer is a sentence that says no time.
+  recordActivity(
+    id,
+    conversationActivity(
+      [
+        ...checkout,
+        ...step(
+          "basil",
+          "computer_click",
+          { ref: "f2e13", snapshotId: 4 },
+          DECLINED_BY_PERSON,
+        ),
+      ],
+      decisionsIn(inboxWith("basil", "deny", decidedAt)),
+    ),
+  );
+  const declined = activityFor(id).find((entry) => entry.id === "basil");
+  expect(declined).toMatchObject({
+    declined: true,
+    subject: "Place order",
+    at: Date.parse(decidedAt),
+  });
 });
