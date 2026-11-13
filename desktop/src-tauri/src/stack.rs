@@ -97,7 +97,7 @@ pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> 
 }
 
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
-    let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
+    let project = project(engine, root).unwrap_or_else(|_| desktop_project());
     let mut command = engine.command();
     command.current_dir(root).args(["compose"]).envs(secrets);
     command.env("COMPOSE_PROJECT_NAME", &project);
@@ -1030,7 +1030,7 @@ pub fn installation_images_in(
 pub fn standalone_compose_command(compose: &Path, root: &Path, secrets: &Secrets) -> Command {
     let mut command = crate::quiet::command(compose);
     command.current_dir(root).envs(secrets);
-    command.env("COMPOSE_PROJECT_NAME", DESKTOP_PROJECT);
+    command.env("COMPOSE_PROJECT_NAME", desktop_project());
     command
 }
 
@@ -3358,6 +3358,67 @@ pub const PROJECT_FILE: &str = ".openbot-project.json";
 /// tell which containers are the app's.
 pub const DESKTOP_PROJECT: &str = "openbot-desktop";
 
+/**
+Names another Compose project for a new installation in place of `DESKTOP_PROJECT`.
+
+For a second OpenBot Desktop run on one computer beside an installed one, such as a build being
+tested: with its own `HOME` it has its own folder, but on the same engine `DESKTOP_PROJECT` is the
+installed OpenBot's project, so the second one would take the installed one's containers, ports,
+database and Bots' computers as its own. Unset, empty, or not a name Compose accepts, it is ignored.
+An installation that already recorded its project keeps it (see `project`).
+
+Naming a project other than `DESKTOP_PROJECT` also gives the app an identifier of its own
+(`identifier_for`), so the second app has its own single-instance lock and its own folders for
+everything it keeps (which installation it last opened among them), and never opens, starts or
+stops the installed one's.
+*/
+pub const PROJECT_VARIABLE: &str = "OPENBOT_DESKTOP_PROJECT";
+
+/// The project `PROJECT_VARIABLE` names, when it names one other than `DESKTOP_PROJECT`: this app is
+/// then a second OpenBot beside an installed one.
+pub fn side_by_side_project() -> Option<String> {
+    side_by_side_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn side_by_side_named(named: Option<&str>) -> Option<String> {
+    let project = desktop_project_named(named);
+    (project != DESKTOP_PROJECT).then_some(project)
+}
+
+/**
+The identifier this run of the app goes by: `built`, the one in `tauri.conf.json`, or, beside an
+installed OpenBot (`side_by_side_project`), `built` followed by the project.
+
+Everything the app keeps per installation hangs off its identifier: the single-instance lock, which
+otherwise hands a second app's launch to the first and exits, and the folders Tauri gives the app
+(Application Support and Logs on a Mac, `%APPDATA%` and `%LOCALAPPDATA%` on Windows), which hold the
+record of the installation it last opened. With the built identifier, a second app opened the
+first one's folder and its Quit stopped the first one's back end.
+*/
+pub fn identifier_for(built: &str) -> String {
+    identifier_named(built, side_by_side_project().as_deref())
+}
+
+fn identifier_named(built: &str, project: Option<&str>) -> String {
+    match project {
+        Some(project) => format!("{built}.{project}"),
+        None => built.to_owned(),
+    }
+}
+
+/// The project a new installation runs as: `DESKTOP_PROJECT`, or the one `PROJECT_VARIABLE` names.
+pub fn desktop_project() -> String {
+    desktop_project_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn desktop_project_named(named: Option<&str>) -> String {
+    named
+        .map(str::trim)
+        .filter(|name| compose_project_name(name))
+        .unwrap_or(DESKTOP_PROJECT)
+        .to_owned()
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedProject {
     project: String,
@@ -3388,7 +3449,7 @@ Every Compose command for the installation is given it (see `compose_command`), 
 Stop, the cleanup at Quit, status and Start fresh all name the same project, and none of them can
 name one that is not the installation's own.
 
-A new installation runs as `DESKTOP_PROJECT`. One made by an earlier app ran as its folder's name
+A new installation runs as `DESKTOP_PROJECT`, or as the project `PROJECT_VARIABLE` names. One made by an earlier app ran as its folder's name
 (`project_name`), and keeps it ONLY when the engine holds containers of that project that Compose
 ran from this very folder: Compose labels each container with the folder it ran from, which is
 the one thing a folder-named project cannot fake. Any other answer is `DESKTOP_PROJECT`. A tester's
@@ -3416,11 +3477,12 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     if let Some(saved) = saved_project(root) {
         return Ok(saved);
     }
+    let new = desktop_project();
     // No folder, no installation: nothing to decide for, and nowhere to record it.
     if !root.is_dir() {
-        return Ok(DESKTOP_PROJECT.to_owned());
+        return Ok(new);
     }
-    let chosen = if legacy != DESKTOP_PROJECT && compose_project_name(legacy) {
+    let chosen = if legacy != DESKTOP_PROJECT && legacy != new && compose_project_name(legacy) {
         let running = legacy_containers(engine, root, legacy)?;
         if running.here {
             legacy.to_owned()
@@ -3432,10 +3494,10 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
             }
             legacy.to_owned()
         } else {
-            DESKTOP_PROJECT.to_owned()
+            new
         }
     } else {
-        DESKTOP_PROJECT.to_owned()
+        new
     };
     crate::preparation::write_checkpoint(
         root,
@@ -3588,10 +3650,12 @@ fn canonical(folder: &Path) -> PathBuf {
 /// installation has to say: `None` leaves it what earlier apps always ran with.
 ///
 /// `DESKTOP_PROJECT`'s own, so a new installation's `<namespace>-computer-…`, `-profile-…` and
-/// `-workspace-…` cannot be a source checkout's either. A legacy installation keeps the default its
-/// Bots' computers and volumes were made under, or it would lose them.
+/// `-workspace-…` cannot be a source checkout's either, and the project `PROJECT_VARIABLE` names
+/// its own, so a second OpenBot beside an installed one never stops or reuses the installed one's.
+/// A legacy installation keeps the default its Bots' computers and volumes were made under, or it
+/// would lose them.
 pub fn computer_namespace_for(project: &str) -> Option<&str> {
-    (project == DESKTOP_PROJECT).then_some(DESKTOP_PROJECT)
+    (project == DESKTOP_PROJECT || project == desktop_project()).then_some(project)
 }
 
 /**
@@ -9913,6 +9977,77 @@ fn main() {
                 Some(DESKTOP_PROJECT.to_owned())
             )
         );
+    }
+
+    #[test]
+    fn a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot() {
+        const TEST: &str = "stack::tests::a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot";
+        if crate::test_support::isolated_process(TEST) {
+            return;
+        }
+        let side = "openbot-side-by-side";
+        std::env::set_var(PROJECT_VARIABLE, side);
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (installed, _) = project_choice_root(&path, "installed");
+        let (root, _) = project_choice_root(&path, "side");
+        // The installed OpenBot is running, as `DESKTOP_PROJECT`, from its own folder.
+        std::fs::write(
+            root.join(".fixture-containers"),
+            compose_container_row("c-installed", "server", DESKTOP_PROJECT, &installed),
+        )
+        .unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), side);
+        assert_eq!(saved_project(&root).as_deref(), Some(side));
+        // Its Bots' computers are its own too: Quit stops these, and only these.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (Some(side.to_owned()), Some(side.to_owned()))
+        );
+    }
+
+    #[test]
+    fn only_another_project_gives_the_app_an_identifier_of_its_own() {
+        const BUILT: &str = "ai.copilotkit.openbot.desktop";
+        for unchanged in [None, Some(""), Some("Not A Name"), Some(DESKTOP_PROJECT)] {
+            assert_eq!(side_by_side_named(unchanged), None, "{unchanged:?}");
+            assert_eq!(
+                identifier_named(BUILT, side_by_side_named(unchanged).as_deref()),
+                BUILT
+            );
+        }
+        let side = side_by_side_named(Some("openbot-test2"));
+        assert_eq!(side.as_deref(), Some("openbot-test2"));
+        assert_eq!(
+            identifier_named(BUILT, side.as_deref()),
+            "ai.copilotkit.openbot.desktop.openbot-test2"
+        );
+    }
+
+    #[test]
+    fn the_project_variable_is_ignored_unless_compose_accepts_the_name() {
+        assert_eq!(desktop_project_named(None), DESKTOP_PROJECT);
+        for ignored in [
+            "",
+            "  ",
+            "Upper",
+            "-leading",
+            "_leading",
+            "two words",
+            "a/b",
+            "dot.ted",
+        ] {
+            assert_eq!(
+                desktop_project_named(Some(ignored)),
+                DESKTOP_PROJECT,
+                "{ignored:?}"
+            );
+        }
+        assert_eq!(
+            desktop_project_named(Some(" openbot-dev \n")),
+            "openbot-dev"
+        );
+        assert_eq!(desktop_project_named(Some("openbot_2")), "openbot_2");
     }
 
     #[test]
