@@ -88,3 +88,91 @@ test("bounded historical references are forwarded without fabricated success and
     ).status,
   ).toBe(404);
 });
+
+/*
+ * The ask to star OpenBot on GitHub, counted per trigger so the triggers can be compared. A person,
+ * not a click: the same answer twice is one event id, and nothing names a thread or a message.
+ */
+const star = {
+  kind: "star_prompt_clicked",
+  trigger: "prompts",
+  surface: "desktop",
+};
+test("a star prompt event is forwarded under the person's pseudonym, with its trigger and surface", async () => {
+  const f = await fixture();
+  expect((await f.request(star)).status).toBe(204);
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]?.event).toBe("oss.runtime.openbot.star_prompt_clicked");
+  expect(f.sent[0]?.properties).toMatchObject({
+    trigger: "prompts",
+    surface: "desktop",
+    user_id: expect.stringMatching(/^ob_/),
+  });
+  expect(String(f.sent[0]?.properties?.user_id)).not.toContain(
+    "private-user-one",
+  );
+  expect(f.sent[0]?.properties).not.toHaveProperty("thread_id");
+  expect(f.sent[0]?.properties).not.toHaveProperty("message_id");
+});
+test("the same person and answer is one event id, and another trigger is another", async () => {
+  const f = await fixture();
+  await f.request(star);
+  await f.request(star);
+  await f.request({ ...star, trigger: "settings" });
+  for (const kind of ["star_prompt_shown", "star_prompt_dismissed"]) {
+    expect((await f.request({ ...star, kind })).status).toBe(204);
+  }
+  expect(f.sent[0]?.properties?.event_id).toBe(f.sent[1]?.properties?.event_id);
+  expect(f.sent[2]?.properties?.event_id).not.toBe(
+    f.sent[0]?.properties?.event_id,
+  );
+  expect(f.sent.map((sent) => sent.event)).toEqual([
+    "oss.runtime.openbot.star_prompt_clicked",
+    "oss.runtime.openbot.star_prompt_clicked",
+    "oss.runtime.openbot.star_prompt_clicked",
+    "oss.runtime.openbot.star_prompt_shown",
+    "oss.runtime.openbot.star_prompt_dismissed",
+  ]);
+});
+test("a star prompt event refuses an unknown trigger, surface or kind, and any extra field", async () => {
+  const f = await fixture();
+  for (const body of [
+    { ...star, trigger: "onboarding" },
+    { ...star, surface: "mobile" },
+    { ...star, kind: "star_prompt_starred" },
+    { ...star, threadId: "thread-one" },
+    { kind: "star_prompt_clicked", trigger: "prompts" },
+  ]) {
+    expect((await f.request(body)).status).toBe(400);
+  }
+  expect(f.sent).toHaveLength(0);
+});
+test("with product telemetry off, a star prompt event is accepted and nothing is sent", async () => {
+  const sent: LambdaSendOptions[] = [];
+  const telemetry = await createProductTelemetry({
+    privacyKey: "synthetic-key",
+    deploymentId: "deployment",
+    env: {},
+    send: async (event) => {
+      sent.push(event);
+    },
+  });
+  const app = new Hono().route(
+    "/api/telemetry",
+    createProductTelemetryRoutes(async (c, next) => {
+      c.set("actor", {
+        id: "private-user-one",
+        email: "synthetic@example.test",
+        role: "user",
+      });
+      await next();
+    }, telemetry),
+  );
+  const response = await app.request("/api/telemetry/product-events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(star),
+  });
+  expect(response.status).toBe(204);
+  expect(sent).toHaveLength(0);
+});

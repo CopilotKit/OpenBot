@@ -124,3 +124,23 @@ FROM consumption c LEFT JOIN result_messages t
 -- No matching execution is unknown coverage, not evidence of success/failure.
 -- No view/copy is unobserved consumption, not dissatisfaction. Notification
 -- open and usefulness have no event here; do not infer them from delivery.
+
+-- F. The ask to star OpenBot on GitHub: people shown, starring and dismissing, per
+-- trigger. Each event_id is one person, answer and trigger, so counts are people.
+-- Clicked is opening the repository, not a GitHub star; GitHub's own count is the
+-- outcome. 'settings' clicks are the permanent link and have no shown event.
+SELECT properties.trigger AS trigger, properties.surface AS surface,
+       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_shown',
+                         properties.event_id, NULL)) AS people_shown,
+       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_clicked',
+                         properties.event_id, NULL)) AS people_clicked,
+       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_dismissed',
+                         properties.event_id, NULL)) AS people_dismissed
+FROM events
+WHERE event IN ('oss.runtime.openbot.star_prompt_shown',
+                'oss.runtime.openbot.star_prompt_clicked',
+                'oss.runtime.openbot.star_prompt_dismissed')
+  AND properties.app_id='openbot' AND properties.environment='production'
+  AND properties.event_id IS NOT NULL
+  AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
+GROUP BY trigger,surface;
