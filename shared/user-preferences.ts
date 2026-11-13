@@ -49,6 +49,11 @@ export type UserPreferences = {
   /** Whether this person closed the banner offering help self-hosting OpenBot. */
   selfHostBannerDismissed: boolean;
   /**
+   * Set once this person answers the ask to star OpenBot on GitHub, either way, so it is asked once
+   * on every device they sign in from. Absent until then, which reads as not answered.
+   */
+  starPromptAnswered?: boolean;
+  /**
    * Whether this person narrates their recordings in OpenBot's Browser: the page listens to their microphone (hosted
    * OpenBot), or the Recorder in their browser does (OpenBot Desktop), only when it is `on`. Null until they chose, which
    * the Browser page asks before their first recording; the microphone stays closed until then.

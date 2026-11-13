@@ -75,6 +75,45 @@ export function dismissSelfHostBannerMutationOptions(
   });
 }
 
+/**
+ * Answer the ask to star OpenBot on GitHub for this person, on every device they sign in from.
+ * Either answer, Star on GitHub or Not now, is the same answer: do not ask again.
+ *
+ * Patched in onMutate like the self-host banner's, so the card is gone the moment it is pressed,
+ * and put back if the save fails rather than vanishing now and returning on the next load.
+ */
+export function answerStarPromptMutationOptions(
+  queryClient: QueryClient,
+  userId: string | undefined,
+) {
+  const queryKey = userPreferencesQueryOptions(userId).queryKey;
+  return mutationOptions({
+    mutationFn: (): Promise<UserPreferences> => {
+      if (!userId) throw new Error("Sign in to save your preferences.");
+      return client("/api/settings/preferences", "preferences", {
+        method: "PATCH",
+        body: { starPromptAnswered: true },
+        fallback: "Could not save your preferences",
+      });
+    },
+    onMutate: () => {
+      const previous = queryClient.getQueryData(queryKey);
+      if (previous) {
+        queryClient.setQueryData(queryKey, {
+          ...previous,
+          starPromptAnswered: true,
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous)
+        queryClient.setQueryData(queryKey, context.previous);
+    },
+    onSuccess: (preferences) => queryClient.setQueryData(queryKey, preferences),
+  });
+}
+
 export function saveUserPreferencesMutationOptions(
   queryClient: QueryClient,
   userId: string | undefined,

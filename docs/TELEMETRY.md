@@ -18,7 +18,7 @@ Browser runs are `web`, or `desktop` in the desktop distribution; the native app
 
 ## Events and interpretation
 
-The event names are `oss.runtime.openbot.run_accepted`, `.run_terminal`, `.run_stop_requested`, `.capability`, `.result_viewed` and `.result_copied`. Common properties include `schema_version`, `app_id`, `event_id`, `occurred_at`, `deployment_id`, `user_id` and `environment`. Run events carry known thread/run/root/parent IDs, `attempt_id=run_id`, a numeric `attempt` only when available, `trigger`, `surface` and `purpose`. Unknown linkage stays unknown.
+The event names are `oss.runtime.openbot.run_accepted`, `.run_terminal`, `.run_stop_requested`, `.capability`, `.result_viewed`, `.result_copied`, `.star_prompt_shown`, `.star_prompt_clicked` and `.star_prompt_dismissed`. Common properties include `schema_version`, `app_id`, `event_id`, `occurred_at`, `deployment_id`, `user_id` and `environment`. Run events carry known thread/run/root/parent IDs, `attempt_id=run_id`, a numeric `attempt` only when available, `trigger`, `surface` and `purpose`. Unknown linkage stays unknown.
 
 `run_accepted` records entry into agent execution, rather than every HTTP run/connect request. Only runs OpenBot started as work are counted: a person's, a routine's, a subagent's or a hop's. The runtime's own runs on a Bot, naming a new conversation or offering suggestions, carry no OpenBot context and emit no run events. `run_terminal` records the observed `outcome`, bounded `failure_category`, duration, `is_root` and up to 256 `result_message_ids`. An actual protocol finish without an explicit failure is normal completion; source errors, cancellation and timeout remain distinct. The host may emit `run_stop_requested` with a bounded stop reason; this records a request, not a terminal outcome. A run OpenBot knows it stopped ends `cancelled` with `failure_category` `none`: a person's Stop (on a browser run or on a thread a headless turn runs in), a stop that reaches a subagent, a headless cancel or pause, and a paused hop. A headless turn stopped at its deadline ends `timeout`. A lost lock is not a stop. Missing terminal evidence is unknown. A child run never determines its parent's outcome. Human initiation, scheduled routines, followups and subagents remain separate triggers.
 
@@ -41,6 +41,16 @@ Channel chat and direct Bot chat observe a settled, nonempty assistant markdown 
 PostHog joins consumption to terminal execution through scoped user, deployment, thread and membership of `message_id` in `result_message_ids`. The browser need not know the run ID. Unmatched observations remain visible as missing joins; a matching terminal establishes the observed execution outcome, not usefulness.
 
 Tool/activity-only outputs, nested code/table copy controls, native mobile and external-channel consumption remain outside this UI coverage. The notification sheet is an approval/question inbox with no delivered-result open action, so a bell click emits no result-open event. Existing feedback behavior is unchanged and has no new product analytics event.
+
+## The star prompt
+
+The same endpoint accepts the one other body shape, for the ask to star OpenBot on GitHub (`OPENBOT_STAR_PROMPT`, see [configuration.md](configuration.md)):
+
+```json
+{"kind":"star_prompt_clicked","trigger":"prompts","surface":"desktop"}
+```
+
+`kind` is `star_prompt_shown|star_prompt_clicked|star_prompt_dismissed`: the card was drawn, its Star on GitHub link was pressed, or Not now was. `trigger` is the moment that asked: `prompts` (the card after a person's fifth message) or `bot_created` (the card after they create a Bot), and `settings` for the permanent link in Settings → General, which has no shown event. `surface` is `web` or `desktop`. Nothing else is accepted. Beyond the common properties the server forwards them as `prompt_trigger` and `prompt_surface`, named apart from the run events' own `trigger` and `surface`, and adds nothing else. The stable event ID is the person, the kind and the trigger, so a card drawn on every visit, or a link pressed twice, counts once: deduplicated, the counts are people. The browser also reports a card as shown only the first time it draws it for each trigger. Clicked means the repository opened, not that a star was given; GitHub's own star count is the outcome. [Query F](telemetry-queries.sql) counts people shown, clicking and dismissing per trigger.
 
 ## Delivery and reporting limits
 

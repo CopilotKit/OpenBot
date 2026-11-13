@@ -88,6 +88,8 @@ test.each([
   {},
   null,
   { selfHostBannerDismissed: "yes" },
+  { starPromptAnswered: "yes" },
+  { starPromptAnswered: null },
   { messageListEmphasis: "invalid" },
   { narration: "always" },
   { narration: null },
@@ -271,4 +273,19 @@ test("check-ins start on, and a person's off is kept without touching the others
   expect(
     (await (await appFor("alice").request(path)).json()).preferences.proactive,
   ).toBe("on");
+});
+
+// Either answer to the ask to star OpenBot hides it on every device; nothing else moves.
+test("saves the star prompt's answer without touching other preferences", async () => {
+  const { appFor } = fixture();
+  const alice = appFor("alice");
+  await alice.request(path, patch({ messageListEmphasis: "agent" }));
+  const saved = await alice.request(path, patch({ starPromptAnswered: true }));
+  expect(saved.status).toBe(200);
+  expect(
+    (await (await appFor("alice").request(path)).json()).preferences,
+  ).toMatchObject({ messageListEmphasis: "agent", starPromptAnswered: true });
+  expect(
+    (await (await appFor("bob").request(path)).json()).preferences,
+  ).not.toHaveProperty("starPromptAnswered");
 });

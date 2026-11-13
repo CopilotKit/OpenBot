@@ -93,6 +93,7 @@ at `agent-langgraph` on a laptop.
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default; the Helm chart generates one | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
+| `OPENBOT_STAR_PROMPT` | unset (on)               | Set `false` or `0` to stop asking people to star OpenBot on GitHub and to drop the link from Settings → General, for everybody. Each person who answers the ask stops seeing it. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `OPENBOT_PRODUCT_TELEMETRY` | unset (off; on for OpenBot Desktop) | `1` or `true` sends OpenBot's product usage events; `0` turns them off. `DO_NOT_TRACK` or `COPILOTKIT_TELEMETRY_DISABLED` set to `1` or `true` turns them off whatever this says. See [TELEMETRY.md](TELEMETRY.md). |
 | `OPENBOT_ALLOW_LOOPBACK_MCP` | unset                      | `1` lets an MCP server on this machine's loopback address (`http://127.0.0.1:<port>` or `[::1]`) be added by its address, for developing an MCP server against OpenBot and for the end-to-end tests. Leave it unset everywhere people use OpenBot: every other private, local or plain-http address stays refused either way. |
@@ -124,6 +125,15 @@ developer plan, an inactive entitlement, and one that cannot be read all show it
 kept for ten minutes, so a plan bought today hides the bar within ten minutes, and a page waits at
 most a second for the first answer after the server starts. In Helm, set the variable through
 `config.extraEnv`.
+
+**`OPENBOT_STAR_PROMPT`** asks each person once, in a card above the message box, to star OpenBot
+on GitHub, and lists the same link in Settings → General. The card appears after the fifth message
+sent from that browser. Either of its buttons, Not now or Star on GitHub, is saved to that person's
+preferences, so it is never asked again on any device they sign in from. It is on in every
+edition. Set `false` or `0` to turn off both the card and the Settings link for everybody, which
+suits a fork running OpenBot for its own organization. Any other value, or none, leaves it on. With
+product telemetry on, OpenBot counts how many people were shown the card, starred from it, or
+dismissed it; see [TELEMETRY.md](TELEMETRY.md).
 
 The component catalogue has separate per-Bot grants. Its sortable data table (`showTable`),
 interactive form (`askForm`), and other compiled or playground-authored components remain governed

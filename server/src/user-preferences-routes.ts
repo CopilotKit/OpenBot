@@ -14,6 +14,7 @@ const preferencesPatch = z
   .strictObject({
     messageListEmphasis: z.enum(["agent", "thread"]).optional(),
     selfHostBannerDismissed: z.boolean().optional(),
+    starPromptAnswered: z.boolean().optional(),
     narration: z.enum(["on", "off"]).optional(),
     skin: z.string().transform(currentSkinId).pipe(z.enum(SKIN_IDS)).optional(),
     proactive: z.enum(["on", "off"]).optional(),
@@ -48,7 +49,7 @@ export function userPreferencesRoutes(
     if (!parsed.success) {
       return context.json(
         {
-          error: `Choose agent or thread for message list emphasis, true or false for the self-host banner, on or off for narration or check-ins, or one of these skins: ${SKIN_IDS.join(", ")}.`,
+          error: `Choose agent or thread for message list emphasis, true or false for the self-host banner or the star prompt, on or off for narration or check-ins, or one of these skins: ${SKIN_IDS.join(", ")}.`,
         },
         400,
       );

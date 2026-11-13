@@ -473,6 +473,7 @@ Settings worth knowing:
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |
 | `DEPLOYMENT_ID`                      | Names this deployment when two share one Intelligence project.            |
 | `OPENBOT_SELF_HOST_BANNER`           | Set `false` to hide the bar offering CopilotKit's help self-hosting OpenBot. It never shows on a paid Intelligence plan. |
+| `OPENBOT_STAR_PROMPT`                | Set `false` to stop asking people to star OpenBot on GitHub, and drop the link from Settings. |
 
 Full reference: [docs/configuration.md](docs/configuration.md).
 

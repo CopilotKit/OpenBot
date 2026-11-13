@@ -22,8 +22,14 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
-import { NotifyPrompt } from "@/components/notifications/notify-prompt";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { useNotificationPermission } from "@/lib/notifications/permission";
+import { notePromptSent } from "@/lib/star-prompt";
 import { newId } from "../../lib/new-id";
 
 export function ConversationView({
@@ -194,6 +200,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -321,6 +328,14 @@ export function ConversationView({
     setRunning(true);
     try {
       await onSubmit(draft);
+      /*
+       * Once `onSubmit` has resolved, which in a conversation is when the turn it started is over
+       * (a stopped turn included), so the card can appear as the answer lands. A send that throws,
+       * whose words go back in the box, is not counted. A first message that opens a new
+       * conversation resolves once the conversation is made, so it counts even if its run then
+       * fails, which is fine for a nudge counted to five.
+       */
+      notePromptSent();
     } finally {
       setRunning(false);
     }
@@ -506,6 +521,22 @@ export function ConversationView({
         {messages.some((message) => message.role === "user") ? (
           <NotifyPrompt />
         ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, once this browser has earned it, and never beside the
+         * notifications offer: one card above the composer at a time, and the offer that is useful
+         * to this person goes first. Read on each render, which a finished turn always causes.
+         *
+         * It also waits while OpenBot Desktop has not yet said whether notifications are on
+         * (`checking`), or the card could draw, be counted as shown, and vanish when the answer is
+         * "not asked yet". And never in a conversation that cannot take a message: the brief
+         * "Picking a Bot" screen, or one whose Bot was deleted.
+         */}
+        {disabled ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
+          <StarPrompt />
+        )}
         {/*
          * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
          *

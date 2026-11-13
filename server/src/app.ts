@@ -613,6 +613,9 @@ export function createApp(
           : selfHostBanner
             ? await selfHostBanner.shown()
             : config.selfHostBanner,
+      // Whether to ask people to star OpenBot on GitHub. In every edition: anybody using the open
+      // project can help others find it. Only the operator's switch turns it off.
+      starPrompt: config.starPrompt,
       /*
        * Whether this is somebody trying OpenBot on their own machine, not an organization's
        * deployment. Onboarding reads it to explain where OpenBot can run, which only the person

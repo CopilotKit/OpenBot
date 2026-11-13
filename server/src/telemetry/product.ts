@@ -103,6 +103,25 @@ export function parseConsumption(value: unknown): ProductConsumption | null {
   const parsed = consumptionSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
+/*
+ * The ask to star OpenBot on GitHub: shown, answered with the link, or answered with Not now. The
+ * trigger says which moment asked (`settings` is the permanent link there), so the moments can be
+ * compared without an experiment. Nothing about the person or what they were doing goes with it.
+ */
+const starPromptSchema = z.strictObject({
+  kind: z.enum([
+    "star_prompt_shown",
+    "star_prompt_clicked",
+    "star_prompt_dismissed",
+  ]),
+  trigger: z.enum(["prompts", "bot_created", "settings"]),
+  surface: z.enum(["web", "desktop"]),
+});
+export type ProductStarPrompt = z.infer<typeof starPromptSchema>;
+export function parseStarPrompt(value: unknown): ProductStarPrompt | null {
+  const parsed = starPromptSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 export function productExportEnabled(
   env: Record<string, string | undefined>,
 ): boolean {
@@ -643,6 +662,25 @@ export async function createProductTelemetry(options: {
           message_id: event.messageId,
           consumption_surface: event.surface,
           ...(event.runId ? { run_id: event.runId } : {}),
+        },
+      );
+    },
+    /*
+     * Keyed on the person, the answer and the trigger, so a card shown on every visit, or a link
+     * clicked twice, is one event: PostHog counts people who were asked and people who starred.
+     *
+     * `prompt_trigger` and `prompt_surface`, not `trigger` and `surface`: run events already carry
+     * those names with other values (`human`, `routine`), and a breakdown across every OpenBot event
+     * would mix the two, as `consumption_surface` already avoids.
+     */
+    starPrompt: async (actor: string, event: ProductStarPrompt) => {
+      await emit(
+        event.kind,
+        `star:${user(actor)}:${event.kind}:${event.trigger}`,
+        {
+          user_id: user(actor),
+          prompt_trigger: event.trigger,
+          prompt_surface: event.surface,
         },
       );
     },

@@ -29,6 +29,11 @@ export type DeploymentCapabilities = {
    */
   selfHostBanner: boolean;
   /**
+   * Whether to ask people to star OpenBot on GitHub, and list the link in Settings. On unless the
+   * deployment set OPENBOT_STAR_PROMPT=false. Absent, from a server too old to say, reads as off.
+   */
+  starPrompt?: boolean;
+  /**
    * Whether this is somebody trying OpenBot on their own machine rather than an organization's
    * deployment: single-user mode on the server, which only a local, unreachable install can be in.
    */
@@ -76,6 +81,7 @@ export function deploymentCapabilitiesQueryOptions() {
       ).json()) as {
         generativeUi?: boolean;
         selfHostBanner?: boolean;
+        starPrompt?: boolean;
         localEvaluation?: boolean;
         edition?: string;
         transcription?: boolean;
@@ -85,6 +91,7 @@ export function deploymentCapabilitiesQueryOptions() {
       return {
         generativeUi: body.generativeUi === true,
         selfHostBanner: body.selfHostBanner === true,
+        starPrompt: body.starPrompt === true,
         localEvaluation: body.localEvaluation === true,
         edition: body.edition === "personal" ? "personal" : "team",
         transcription: body.transcription === true,

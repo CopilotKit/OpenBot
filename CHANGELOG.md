@@ -366,6 +366,15 @@ every deployment:
 
 ### Conversations
 
+- **OpenBot asks once to be starred on GitHub.** After your fifth message, a card above the message
+  box asks you to star OpenBot on GitHub, with Not now beside the link. Either answer is saved to
+  your account, so it is never asked again on any device, and it waits until you have answered the
+  notifications offer, so the two never show together. Settings → General keeps the link in a new
+  OpenBot section. Set `OPENBOT_STAR_PROMPT=false` to turn both off for everybody, which suits a
+  deployment running OpenBot for its own organization. With product telemetry on, OpenBot counts
+  how many people were shown the card, opened the link or dismissed it, through three new events
+  (`star_prompt_shown`, `star_prompt_clicked`, `star_prompt_dismissed`); see
+  [TELEMETRY.md](docs/TELEMETRY.md).
 - **A Bot no longer does an app change twice after you answer an approval.** When a built-in Bot
   asked for several app changes at once and one of them waited for your Allow, the others that
   needed no approval still went ahead, but the Bot was told they had not run. It then did them
