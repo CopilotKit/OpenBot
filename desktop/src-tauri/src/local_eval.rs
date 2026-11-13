@@ -2585,13 +2585,22 @@ fn bundled_cli() -> Option<Result<PinnedCli, Failure>> {
     ))
 }
 
-/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, beside the program
-/// elsewhere.
+/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, Tauri's resource folder
+/// `../lib/OpenBot/cli-bundle` on Linux (`/usr/lib/OpenBot` for the .deb and .rpm, `usr/lib/OpenBot`
+/// inside the AppImage), beside the program on Windows.
 fn bundled_cli_root() -> Option<PathBuf> {
     let program = std::env::current_exe().ok()?;
     let directory = program.parent()?;
     if cfg!(target_os = "macos") {
         Some(directory.parent()?.join("Resources").join("cli-bundle"))
+    } else if cfg!(target_os = "linux") {
+        Some(
+            directory
+                .parent()?
+                .join("lib")
+                .join("OpenBot")
+                .join("cli-bundle"),
+        )
     } else {
         Some(directory.join("cli-bundle"))
     }

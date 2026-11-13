@@ -117,6 +117,8 @@ const realSums = `a9d7e34eaeeadd4ecbd9f0795f49f9d2c2625e63fc4e2f77709f039497f570
 d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6  node-v26.13.0-darwin-arm64.tar.gz
 6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e  node-v26.13.0-darwin-arm64.tar.xz
 525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e  node-v26.13.0-darwin-x64.tar.gz
+439e9c438acdf6a6ffe47418da709153d66c4bed812e30a473faacb107dd2791  node-v26.13.0-linux-arm64.tar.gz
+5848553868b402d3fabb5b09270649977780a390f832155721025a08b5104455  node-v26.13.0-linux-x64.tar.gz
 4c9baa047c4ae555050179f25a63153f1c962af32e2aad97735fb550750c5e7a  win-arm64/node.exe
 14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5  win-x64/node.exe
 caad0090dc3add94c06abd01e395e8ec0f1586c10071bda1f99480445d695f6f  win-x64/node.lib
@@ -139,11 +141,13 @@ test("intelligence-cli.json pins the hashes nodejs.org lists", () => {
     readFileSync(join(import.meta.dir, "..", "intelligence-cli.json"), "utf8"),
   );
   expect(choice.node.version).toBe("26.13.0");
-  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon and Windows ones, and
-  // the signed Intel Mac one Desktop macOS signing builds.
+  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon, Windows and Linux
+  // ones, the signed Intel Mac one Desktop macOS signing builds, and an arm64 Linux build.
   for (const [platform, arch] of [
     ["darwin", "arm64"],
     ["darwin", "x64"],
+    ["linux", "arm64"],
+    ["linux", "x64"],
     ["win32", "x64"],
   ] as const) {
     const asset = nodeAsset(platform, arch, choice.node.version);
@@ -563,9 +567,9 @@ function runCommandLine(...args: string[]) {
 }
 
 test("the command line exits 1 on an unknown platform", () => {
-  const result = runCommandLine("linux", "x64");
+  const result = runCommandLine("freebsd", "x64");
   expect(result.exitCode).toBe(1);
-  expect(result.stderr.toString()).toContain("linux");
+  expect(result.stderr.toString()).toContain("freebsd");
 });
 
 test("the command line exits 1 on an unknown architecture", () => {
