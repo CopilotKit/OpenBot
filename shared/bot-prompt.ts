@@ -166,7 +166,30 @@ export type ComputerHolding = {
   search: boolean;
   /** The personal edition, which has no administrator to send anybody to. */
   personal?: boolean;
+  /**
+   * What the computer has installed to run code with, as the deployment that built its image says
+   * ("Node.js, Bun, curl and unzip"). Absent says nothing, for a computer nobody here built.
+   */
+  installed?: string;
 };
+
+/**
+ * What the computer can run, said once, so a Bot does not write a script for a program it lacks.
+ *
+ * A Bot asked to build a spreadsheet wrote a Python script, the person approved it on the card, and
+ * it failed with "Python isn't installed": the computer had none, and nothing had said so. Models
+ * reach for Python for anything with rows and columns. So the Bot is told what is there, and to
+ * check before it writes a script, or install what it needs first: a script the person approves
+ * and that cannot run is their time spent on nothing. The list comes from the deployment that
+ * builds the image, so it stays true when the image changes.
+ */
+function installedLines(installed: string): string[] {
+  return [
+    `Your computer runs Ubuntu Linux and has ${installed} installed. Before you write a script,`,
+    "check that what runs it is on that list, or install it first with your shell. Never ask the",
+    "person to approve a script for a program your computer does not have.",
+  ];
+}
 
 /**
  * The computer guidance for one run, chosen by what it holds.
@@ -186,6 +209,7 @@ export function computerGuidance(holding: ComputerHolding): string {
         : WITHOUT_SEARCH_LINES),
     "",
     ...ACTING_LINES,
+    ...(holding.installed ? ["", ...installedLines(holding.installed)] : []),
   ]);
 }
 
@@ -369,8 +393,8 @@ const ASK_TEST_LINES = [
   "Ask the person something yourself only when you cannot go on without them: a wrong guess would be",
   "hard to undo and OpenBot does not ask about it, the possible readings would lead to materially",
   "different work, or only they know the answer. Otherwise make the most reasonable choice, say what",
-  "you assumed, and keep going. Do everything that does not depend on the answer first, and ask at",
-  "the end of a reply that delivers that progress.",
+  "you assumed, and carry on with what was asked. Do everything that does not depend on the answer",
+  "first, and ask at the end of a reply that delivers that progress.",
 ];
 
 const OPENBOT_ASKS =
@@ -427,6 +451,31 @@ export const BROUGHT_BOT_ASKING_GUIDANCE = asParagraphs(
  * read every result, act instead of announcing, retry once, and deliver with the gaps named. The
  * retry sentence matters on its own: Anthropic measured that naming a retry as allowed raised retries
  * from almost none to about half, where a general nudge to act more freely changed nothing.
+ *
+ * ACT ON WHAT WAS ASKED, SAID ONCE. The push to act used to be said three times (here, in the ask
+ * test's "keep going" and again in the starter's role), with nothing about scope, and a Bot asked
+ * "are you able to build a sequence in Smartlead?" read two live campaigns nobody asked about and
+ * wrote a second, longer message. It is said once now, here, bounded by what was asked: the
+ * preparation a task needs is done without asking, and a question gets its answer, not the job it
+ * is about.
+ *
+ * A SEARCH THAT HAS NOT COME BACK. A Bot holding its app tools behind a search started one for a
+ * Slack user lookup and, in the same reply, said it had no way to look anybody up; the search then
+ * returned the tool and it took the sentence back.
+ *
+ * FAILURES BY KIND. "Try once more" fits a timeout. It does not fit a step the person declined, and
+ * it is wrong for a change that may already have happened: a Bot told some Sheets steps had not run,
+ * when they had, ran them again and made duplicate tabs. So a temporary failure gets one retry, a
+ * declined step stays declined, a change whose outcome is unknown is looked for before it is redone,
+ * and a failure that keeps happening becomes a short report rather than a loop. Grok Bot and OpenAI's
+ * own connected-app tools type their retries the same way.
+ *
+ * CLAIMS NEED A RESULT. A Bot said a sheet's formulas were right, then that they were wrong, then
+ * rebuilt them. The claim came before any read. Anthropic's own rule for agents handling records is
+ * "say a check was done only if a tool result in this session showed it", and Claude in Slack keeps
+ * the same gate: move fast on the work, slow down before you assert. The read-back is one specific
+ * read after a change in an app, never a general "double-check your work", which Anthropic found
+ * makes its newest models over-verify; see {@link readsBack}.
  */
 const HOW_TO_WORK_LINES = [
   "Use what you already have first: this conversation and earlier results in this run, then your",
@@ -436,13 +485,129 @@ const HOW_TO_WORK_LINES = [
   "together, a few at a time (about five), and read every result before the next batch. Only batch",
   "tool calls that are independent of each other. Keep anything that depends on another result, and",
   "every change, one after another. Draw a component only from results you have already read: call",
-  "it after the tools that fetch them, never in the same step. When you decide on a step,",
-  "take it in the same reply instead of saying you will. If a call fails, times out or comes back",
-  "empty, try once more or another way; if it still fails, carry on without it and say so. Deliver",
-  "what was asked even when part of it is missing, and end with what you could not confirm, if anything.",
+  "it after the tools that fetch them, never in the same step.",
+  "",
+  "Do what was asked, at the scope it was asked. Do the reads and preparation a task needs without",
+  "asking, and when you decide on a step of it, take it in the same reply instead of saying you will.",
+  "Do not start work nobody asked for: a question gets its answer, not the job it is about. When you",
+  "have started a search for a tool, wait for what it returns before you decide, or say, that",
+  "something cannot be done.",
+  "",
+  "When a call fails, read what it says. If the failure looks temporary (a timeout, a rate limit, a",
+  "server error) or a search came back empty, try once more or another way; if it says your request",
+  "was wrong, fix the request and try again. A step the person declined stays declined: do not try",
+  "it, or anything that does the same, again. Never repeat a change only because you are not sure it",
+  "went through: when a change timed out or its outcome is unknown, look in the app first and redo",
+  "only what is missing. If a call still fails, carry on without it and say so, and when the same",
+  "thing keeps failing, stop and say briefly what failed and what you got done.",
 ];
 
-export const HOW_TO_WORK_GUIDANCE = asParagraphs(HOW_TO_WORK_LINES);
+/** Say a change is done only once a result showed it, with the read-back for a model that needs it. */
+function claimsLines(readBack: boolean): string[] {
+  return [
+    "Say something is done, sent, saved or correct only when a tool result in this conversation",
+    "showed it.",
+    ...(readBack
+      ? [
+          "After you change something in an app, read the result back once before you say it is done:",
+          "the tabs that now exist, the cells and whether their formulas show errors, the message and",
+          "its link.",
+        ]
+      : []),
+    "Report what you did, scoped to what you checked: say 'all' only if you checked every item, and",
+    "call anything you could not check unconfirmed. Deliver what was asked even when part of it is",
+    "missing, and end with what you could not confirm, if anything.",
+  ];
+}
+
+/**
+ * Whether a model is told to read an app change back before it reports it.
+ *
+ * Anthropic's guide for Claude Opus 5 says it "verifies its own work without being told to", and that
+ * explicit verification instructions make it over-verify, so an Opus model of generation 5 or later
+ * is not told, and the claims rule alone stays. Every other model OpenBot runs is told, once and
+ * specifically: GPT-6 tests broadly when left alone, and OpenAI's own fix is a bounded check, which
+ * "once" is; Claude Sonnet, Claude Haiku and Gemini carry no such guidance. An unknown model (a
+ * brought Bot, a plan) is told, because a claim with no read behind it is the failure this guards.
+ */
+export function readsBack(model?: string): boolean {
+  const opus = /claude-opus-(\d+)/i.exec(model ?? "");
+  return !(opus && Number(opus[1]) >= 5);
+}
+
+/** How to work, worded for the model a run answers on. See {@link readsBack}. */
+export function howToWorkGuidance(model?: string): string {
+  return asParagraphs([
+    ...HOW_TO_WORK_LINES,
+    "",
+    ...claimsLines(readsBack(model)),
+  ]);
+}
+
+/** How to work for a model this deployment does not know, which is told to read back. */
+export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
+
+/**
+ * How long a reply is, set by the question rather than a word count.
+ *
+ * Nothing in the prompt asked for brevity except one line about the browser, and Bots answered at
+ * length: a yes-or-no question about Smartlead drew a capability list, a list of limits and a brief,
+ * about 600 words over two messages, and a spreadsheet job ran to 18 messages with two near-identical
+ * summaries. Claude in Slack and Claude Cowork define length by the question's shape (a yes/no gets
+ * yes or no; a finished job gets a sentence or two), and Anthropic warns that hard word limits make
+ * prose choppy, so this names shapes, not numbers.
+ *
+ * A question about whether the Bot can do something gets an answer and an offer. A request worded
+ * as a question is a request: OpenAI's GPT-6 guide treats "can you..." as an instruction, and so does
+ * this, when it asks for something.
+ *
+ * Progress is one line, not a stream: Cowork tells its model not to narrate each step. The last
+ * message still stands on its own, because it may be the only one read.
+ *
+ * It says it is about words. Generative UI is unchanged: a component the answer calls for is drawn.
+ */
+const REPLY_LINES = [
+  "Size each reply to the question, and lead with the answer. A yes-or-no question gets yes or no",
+  "and at most one line more. A question about whether you can do something, such as 'are you able",
+  "to build email sequences in Smartlead?', gets a short answer from what you hold and an offer to do",
+  "it, naming anything you would need from the person: do not do the work, read their data to show",
+  "that you could, or list everything you can do. A request worded as a question, such as 'can you",
+  "send me today's agenda?', is a request: do it. When you finish a job, say what you did in one or",
+  "two sentences, with the result or a link to it.",
+  "",
+  "Do not recap your steps, repeat a summary you already gave, or add sections nobody asked for.",
+  "While you work, do not write a message for each step: one short line before a long job is",
+  "enough. Your last message should still make sense on its own and say what is left, if anything.",
+  "This is about words, not components: a chart, table or card the answer calls for under the rules",
+  "above is still drawn.",
+];
+
+export const REPLY_GUIDANCE = asParagraphs(REPLY_LINES);
+
+/**
+ * What a spreadsheet or a document a Bot builds looks like when nobody said.
+ *
+ * A Bot asked for an MROI template in Google Sheets left the headers plain and the percentages as
+ * bare numbers, and added tabs; the person said another assistant formats by default. Every vendor
+ * ships the same defaults in its spreadsheet skill (Anthropic's xlsx skill, Claude for Excel, OpenAI's
+ * spreadsheets skill): live formulas, inputs in labelled cells, units in headers, real number formats,
+ * the simplest workbook that does the job, the existing formatting kept, and the written cells read
+ * back for errors before delivery. That read is the spreadsheet's own check, the one Claude for Excel
+ * makes, so it is said for every model.
+ */
+const DOCUMENT_LINES = [
+  "When you build or change a spreadsheet, make one a person can keep using. Put each input in its",
+  "own labelled cell, and work everything else out with live formulas that refer to those cells,",
+  "never numbers you calculated yourself and typed in. Put units in the headers, make the header row",
+  "bold and freeze it, and format numbers, percentages, currencies and dates as what they are. Keep a",
+  "small task to one tab, add tabs only when the work needs them, and keep the formatting of a sheet",
+  "you add to. Before you hand it over, read back the tabs and cells you wrote, and fix any formula",
+  "that shows an error such as #REF!, #NAME? or #VALUE!.",
+  "",
+  "A document gets a clear title and headings, the content that was asked for, and no filler sections.",
+];
+
+export const DOCUMENT_GUIDANCE = asParagraphs(DOCUMENT_LINES);
 
 /**
  * What a role is to the messages a Bot receives, said once and the same way everywhere.
@@ -532,7 +697,8 @@ export function promptSection(
 
 /**
  * The working rules every Bot gets, in their fixed order, after its role: how to work, when to ask,
- * where answers come from, how to answer, when to use subagents, and what untrusted content is.
+ * where answers come from, how to answer, how long a reply is, what a spreadsheet or document looks
+ * like, when to use subagents, and what untrusted content is.
  *
  * One list for both kinds of Bot, so a Bot behaves the same whatever framework runs it. A Bot OpenBot
  * runs and one somewhere else differ only in what OpenBot's gate covers (see
@@ -542,15 +708,19 @@ export function promptSection(
 export function workingGuidance(options: {
   brought?: boolean;
   untrusted: string;
+  /** The model the run answers on, when known, for the one rule worded per model. */
+  model?: string;
 }): string[] {
   return [
-    ...promptSection("how_to_work", HOW_TO_WORK_GUIDANCE),
+    ...promptSection("how_to_work", howToWorkGuidance(options.model)),
     ...promptSection(
       "asking",
       options.brought ? BROUGHT_BOT_ASKING_GUIDANCE : ASKING_GUIDANCE,
     ),
     ...promptSection("sources", PROVENANCE_GUIDANCE),
     ...promptSection("answer_format", COMPONENT_GUIDANCE),
+    ...promptSection("replies", REPLY_GUIDANCE),
+    ...promptSection("documents", DOCUMENT_GUIDANCE),
     ...promptSection("subagents", ORCHESTRATION_GUIDANCE),
     ...promptSection("untrusted_content", options.untrusted),
   ];

@@ -4,11 +4,16 @@ import {
   BROUGHT_BOT_ASKING_GUIDANCE,
   COMPONENT_GUIDANCE,
   computerGuidance,
+  DOCUMENT_GUIDANCE,
   HOW_TO_WORK_GUIDANCE,
+  howToWorkGuidance,
   ORCHESTRATION_GUIDANCE,
   PROVENANCE_GUIDANCE,
   promptSection,
+  REPLY_GUIDANCE,
+  readsBack,
   runModeGuidance,
+  workingGuidance,
 } from "./bot-prompt";
 import { RESEARCH_APP_NAMES } from "./research";
 
@@ -137,6 +142,23 @@ describe("computerGuidance", () => {
     expect(shouted).toEqual([]);
   });
 
+  test("says what the computer has to run a script with, when the deployment says", () => {
+    const guidance = flat(
+      computerGuidance({
+        search: true,
+        installed: "Node.js, Bun, curl and unzip",
+      }),
+    );
+    expect(guidance).toContain(
+      "your computer runs ubuntu linux and has node.js, bun, curl and unzip installed",
+    );
+    expect(guidance).toContain(
+      "never ask the person to approve a script for a program your computer does not have",
+    );
+    // A computer nobody here built is not described.
+    expect(flat(WITH_SEARCH)).not.toContain("installed");
+  });
+
   test("a policy refusal leaves that action undone and the rest of the task going", () => {
     // It used to say "and stop", which a Bot read as stopping the whole task.
     const guidance = flat(WITH_SEARCH);
@@ -183,7 +205,11 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       expect(said).toContain("a wrong guess would be hard to undo");
       expect(said).toContain("lead to materially different work");
       expect(said).toContain("only they know the answer");
-      expect(said).toContain("say what you assumed, and keep going");
+      // The else-branch carries on with what was asked, and no further.
+      expect(said).toContain(
+        "say what you assumed, and carry on with what was asked",
+      );
+      expect(said).not.toContain("keep going");
       // The open-ended cues that pulled a routine toward questions instead of an answer.
       expect(said).not.toContain("theirs to make");
       expect(said).not.toContain("prefer this to guessing");
@@ -197,6 +223,127 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       "tools of your own that openbot did not give you are not covered",
     );
     expect(flat(ASKING_GUIDANCE)).not.toContain("tools of your own");
+  });
+
+  test("how to work acts on what was asked, waits for a tool search, and retries by kind", () => {
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain("do what was asked, at the scope it was asked");
+    expect(said).toContain(
+      "a question gets its answer, not the job it is about",
+    );
+    // A tool search that has not come back is not an answer that the tool is missing.
+    expect(said).toContain(
+      "wait for what it returns before you decide, or say, that something cannot be done",
+    );
+    expect(said).toContain("a step the person declined stays declined");
+    expect(said).toContain(
+      "never repeat a change only because you are not sure it went through",
+    );
+    expect(said).toContain(
+      "look in the app first and redo only what is missing",
+    );
+    expect(said).toContain("stop and say briefly what failed");
+  });
+
+  test("a claim needs a tool result, and an app change is read back once before it is called done", () => {
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain(
+      "say something is done, sent, saved or correct only when a tool result in this conversation showed it",
+    );
+    expect(said).toContain(
+      "after you change something in an app, read the result back once before you say it is done",
+    );
+    expect(said).toContain("say 'all' only if you checked every item");
+    // Never the general plea Anthropic says makes its newest models over-verify.
+    expect(said).not.toContain("double-check");
+    expect(said).not.toContain("verify your work");
+  });
+
+  test("the read-back is left out for a model that reads its own work back", () => {
+    for (const model of ["claude-opus-5-5", "claude-opus-5", "claude-opus-6"]) {
+      expect(readsBack(model)).toBe(false);
+      const said = flat(howToWorkGuidance(model));
+      expect(said).not.toContain("read the result back once");
+      // The claims rule stays for every model.
+      expect(said).toContain(
+        "only when a tool result in this conversation showed it",
+      );
+    }
+    for (const model of [
+      undefined,
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-opus-4-8",
+      "gpt-6.1-sol",
+      "gpt-5.6-terra",
+      "gemini-3.8-flash",
+    ]) {
+      expect(readsBack(model)).toBe(true);
+      expect(flat(howToWorkGuidance(model))).toContain(
+        "read the result back once",
+      );
+    }
+    const opus = workingGuidance({ untrusted: "x", model: "claude-opus-5-5" });
+    expect(flat(opus.join(" "))).not.toContain("read the result back once");
+  });
+
+  test("a reply is sized to the question, and still draws what the answer calls for", () => {
+    const said = flat(REPLY_GUIDANCE);
+    expect(said).toContain("lead with the answer");
+    expect(said).toContain("a yes-or-no question gets yes or no");
+    // A question about ability gets an answer and an offer, not the work or a capability list.
+    expect(said).toContain("a question about whether you can do something");
+    expect(said).toContain("an offer to do it");
+    expect(said).toContain("do not do the work");
+    expect(said).toContain("list everything you can do");
+    // A request worded as a question is still a request.
+    expect(said).toContain("a request worded as a question");
+    expect(said).toContain("is a request: do it");
+    expect(said).toContain("in one or two sentences");
+    expect(said).toContain("do not recap your steps, repeat a summary");
+    expect(said).toContain("do not write a message for each step");
+    expect(said).toContain("make sense on its own");
+    // Generative UI is untouched by the length rule.
+    expect(said).toContain(
+      "a chart, table or card the answer calls for under the rules above is still drawn",
+    );
+  });
+
+  test("a spreadsheet gets live formulas, labelled inputs, units, formats, one tab and a read-back", () => {
+    const said = flat(DOCUMENT_GUIDANCE);
+    expect(said).toContain("live formulas");
+    expect(said).toContain("own labelled cell");
+    expect(said).toContain(
+      "never numbers you calculated yourself and typed in",
+    );
+    expect(said).toContain("units in the headers");
+    expect(said).toContain("header row bold and freeze it");
+    expect(said).toContain("percentages, currencies and dates");
+    expect(said).toContain("keep a small task to one tab");
+    expect(said).toContain("read back the tabs and cells you wrote");
+    expect(said).toContain("#ref!");
+    expect(said).toContain("no filler sections");
+  });
+
+  test("the push to act is said once, and every Bot gets the sections in order", () => {
+    for (const brought of [false, true]) {
+      const sections = workingGuidance({ brought, untrusted: "Untrusted." });
+      const all = flat(sections.join(" "));
+      expect(all.split("take it in the same reply").length - 1).toBe(1);
+      expect(all).not.toContain("keep going");
+      expect(sections.map((section) => /^<(\w+)>/.exec(section)?.[1])).toEqual(
+        [
+          "how_to_work",
+          "asking",
+          "sources",
+          "answer_format",
+          "replies",
+          "documents",
+          "subagents",
+          "untrusted_content",
+        ],
+      );
+    }
   });
 
   test("how to work: reuse, batch a few reads, act instead of announcing, retry once, deliver", () => {
@@ -261,9 +408,11 @@ describe("how a Bot asks, and how an unattended run ends", () => {
   });
 
   test("no working rule shouts", () => {
-    // "ID" is an acronym, not emphasis.
+    // "ID" is an acronym, not emphasis, and a spreadsheet's error codes (#REF!) are what it shows.
     for (const guidance of [
       HOW_TO_WORK_GUIDANCE,
+      REPLY_GUIDANCE,
+      DOCUMENT_GUIDANCE,
       ASKING_GUIDANCE,
       BROUGHT_BOT_ASKING_GUIDANCE,
       PROVENANCE_GUIDANCE,
@@ -273,7 +422,9 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       runModeGuidance("check-in"),
     ])
       expect(
-        (guidance.match(/\b[A-Z]{2,}\b/g) ?? []).filter(
+        (
+          guidance.replace(/#[A-Z]+[!?]/g, "").match(/\b[A-Z]{2,}\b/g) ?? []
+        ).filter(
           (word) => word !== "ID",
         ),
       ).toEqual([]);
