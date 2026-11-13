@@ -8,6 +8,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
+import { usePausedAll } from "@/components/bots/paused-all";
 import {
   PageEmpty,
   PageRows,
@@ -146,7 +147,10 @@ export function SuggestionsInbox({
 export function useCheckInsBlocked(): string | null {
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const preferences = useUserPreferences();
+  const pausedAll = usePausedAll();
   if (allowed.data === false) return "Turned off by your admin";
+  // Every Bot is paused, so none checks in until the person turns them back on.
+  if (pausedAll) return "Paused";
   if (preferences.data?.proactive === "off") return "Off for all your Bots";
   return null;
 }

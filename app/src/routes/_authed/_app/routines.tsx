@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { PausedAllBanner } from "@/components/bots/paused-all";
 import { PageShell } from "@/components/layout/page-shell";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
 import { RoutinesList } from "@/components/routines/routines-list";
@@ -23,6 +24,9 @@ function RoutinesPage() {
       description="Your Bots work on their own: on a schedule, toward a goal, or by checking in when something changes. Ask a Bot to set one up, or use New routine."
       title="Routines"
     >
+      <div className="mt-4 empty:hidden">
+        <PausedAllBanner />
+      </div>
       <RoutinesList />
       <CheckInsSection />
     </PageShell>
