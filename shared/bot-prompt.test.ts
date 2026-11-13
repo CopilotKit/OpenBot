@@ -226,6 +226,11 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     expect(said).toContain(
       "after you change something in an app, read the result back once before you say it is done",
     );
+    // Not a second read of what the change's own result already showed: on GPT-6.1 a Bot that
+    // posted a Slack message then searched for it, read the channel twice and fetched its link.
+    expect(said).toContain(
+      "unless the change's own result already shows what changed, such as a sent message with its link",
+    );
     expect(said).toContain("say 'all' only if you checked every item");
     // Never the general plea Anthropic says makes its newest models over-verify.
     expect(said).not.toContain("double-check");
