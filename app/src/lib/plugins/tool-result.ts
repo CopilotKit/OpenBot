@@ -69,6 +69,19 @@ export function withoutUntrustedEnvelope(text: string): string {
 }
 
 /**
+ * The openings of the line the server puts in front of an app's answer, saying what the call did
+ * for the model ("Ran: the app made this change. It answered: sheetId 12, title "Summary"."). The
+ * person sees the step's own state and the app's answer, so the line is left out of what is drawn,
+ * as the untrusted-content notice is. Declared at both ends like {@link REFUSAL_MARKER}.
+ */
+const OUTCOME_LINE = /^(?:Ran|Partly ran|Already done): [^\n]*\n/;
+
+/** An app's answer without the outcome line the server wrote in front of it for the model. */
+export function withoutOutcomeLine(text: string): string {
+  return text.replace(OUTCOME_LINE, "");
+}
+
+/**
  * A tool result, as something worth looking at.
  *
  * MCP says a text part, and vendors fill it with anything from plain markdown to a JSON envelope
@@ -76,7 +89,9 @@ export function withoutUntrustedEnvelope(text: string): string {
  * the markdown it was hiding, and anything else is fenced as JSON. Nothing is discarded.
  */
 export function forDisplay(text: string): string {
-  const trimmed = withoutUntrustedEnvelope(asText(text)).trim();
+  const trimmed = withoutUntrustedEnvelope(
+    withoutOutcomeLine(asText(text)),
+  ).trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
 
   let parsed: unknown;
@@ -220,9 +235,16 @@ export function unofferedTool(result: string | undefined): boolean {
  */
 export function toolResultFailed(result: string | undefined): boolean {
   if (result === undefined) return false;
-  const answer = asText(result);
+  /*
+   * BEHIND THE RUNTIME'S "Error: " TOO. A failed app call is handed to the model as an error rather
+   * than a result, so the model is told it failed (Anthropic's `is_error`), and the runtime then
+   * puts the same words in the conversation with `Error: ` in front of them.
+   */
+  const answer = asText(result).replace(/^Error: /, "");
   return (
     answer.startsWith("The vendor reported an error:") ||
-    answer.startsWith("That tool could not be called")
+    answer.startsWith("That tool could not be called") ||
+    // A folder action on the person's computer that broke there, rather than being declined.
+    answer.startsWith("That host operation could not be completed")
   );
 }

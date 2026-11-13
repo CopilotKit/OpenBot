@@ -12,6 +12,7 @@ import { tryClient } from "@/lib/client";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
+import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
 import {
   runBrowserRead,
   runHelpRequest,
@@ -134,12 +135,15 @@ function ActionLine({
   running,
   refused,
   failed,
+  failedLabel,
   notYet,
   byYou,
 }: {
   label: string;
   /** What was tried, said when the step was refused. See `ToolLine`. */
   attempted?: string;
+  /** What a failed step says instead of "<label>, didn't work". See `ToolLine`. */
+  failedLabel?: string;
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
@@ -157,6 +161,7 @@ function ActionLine({
       byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
+      failedLabel={failedLabel}
       label={label}
       notYet={notYet}
       refused={refused}
@@ -605,21 +610,20 @@ export function ComputerTools() {
       );
       if (!asked.ok) return asked;
 
-      // Completion is `secretWanted` clearing; the value never returns to the model.
+      // Over when this request is, and answered only if the computer says its value was typed
+      // (`secretAnswer`). The value never returns to the model.
+      const id =
+        typeof asked.secretId === "string" ? asked.secretId : undefined;
+      const seen: { last: ControlState | null } = { last: null };
       const outcome = await waitForSecret(
         botId,
-        (state) => state.secretWanted === undefined,
+        (state) => {
+          seen.last = state;
+          return secretRequestOver(id, state);
+        },
         signal,
       );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? `The person has entered ${input.label} into the field. It was typed straight into the page and you were not told what it is.`
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : `Nobody entered ${input.label}. Do not ask for it another way.`,
-      };
+      return secretAnswer(input.label, id, outcome, seen.last);
     },
     // Rendered by ComputerView as a masked prompt.
     render: () => null,
@@ -904,6 +908,12 @@ export function ComputerTools() {
           // The words the approval card and Activity use for the same action.
           label={args?.append === true ? "Added to a file" : "Saved a file"}
           attempted={args?.append === true ? "Add to a file" : "Save a file"}
+          // Not "Saved a file, didn't work": nothing was saved, so the line says so.
+          failedLabel={
+            args?.append === true
+              ? "Didn't add to a file"
+              : "Didn't save a file"
+          }
           // Show the path, never file contents.
           detail={
             outcome.refused === true

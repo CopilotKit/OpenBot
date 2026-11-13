@@ -58,6 +58,15 @@ let settings: Record<string, unknown>;
 let source: ModelSource;
 /** One person (`all`) or a team whose admin allows models (`allowed`). */
 let exposure: "all" | "allowed";
+/** The Usage section's rows, as `/models/usage` summarises them. */
+let usage: {
+  model: string;
+  source: string;
+  runs: number;
+  people: number;
+  refused: number;
+  lastUsedAt: string;
+}[] = [];
 const writes: { path: string; body: unknown }[] = [];
 
 function serving() {
@@ -124,7 +133,7 @@ function serving() {
         ],
       });
     if (path.startsWith("/api/admin/enterprise/models/usage"))
-      return Response.json({ days: 30, summary: [], recent: [] });
+      return Response.json({ days: 30, summary: usage, recent: [] });
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -152,6 +161,7 @@ beforeEach(() => {
   };
   source = "openai";
   exposure = "allowed";
+  usage = [];
   queryClient.clear();
   seedTeamEdition();
   serving();
@@ -220,6 +230,41 @@ test("one person on their own machine is offered every model, and nothing can na
     await view.findByText("Runs on each model in the last 30 days."),
   ).toBeTruthy();
   expect(view.queryByText(/allowlist refused/)).toBeNull();
+});
+
+test("Usage says how each model is known, and why one is missing, never the server's bare words", async () => {
+  // The Mac pass listed the picked harness as "remote:picked-harness · unknown".
+  usage = [
+    {
+      model: "anthropic/claude-sonnet-5-5",
+      source: "configured",
+      runs: 8,
+      people: 1,
+      refused: 0,
+      lastUsedAt: "2026-11-12T00:00:00.000Z",
+    },
+    {
+      model: "remote:sales-agent",
+      source: "unknown",
+      runs: 2,
+      people: 1,
+      refused: 0,
+      lastUsedAt: "2026-11-12T00:00:00.000Z",
+    },
+  ];
+  const view = await draw(ProvidersPage);
+  expect(await view.findByText("anthropic/claude-sonnet-5-5")).toBeTruthy();
+  expect(
+    view.getByText(/8 runs by 1 person\s+· chosen by OpenBot/),
+  ).toBeTruthy();
+  expect(view.getByText("Model not reported")).toBeTruthy();
+  expect(
+    view.getByText(
+      /2 runs by 1 person\s+· sales-agent picks its own model and didn't say which/,
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("remote:sales-agent")).toBeNull();
+  expect(view.queryByText(/· unknown$/)).toBeNull();
 });
 
 test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
