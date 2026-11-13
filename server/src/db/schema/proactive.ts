@@ -10,6 +10,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type {
+  CheckInSourceKind,
   ProactiveRunOutcome,
   ProactiveRunTrigger,
   ProactiveSkipReason,
@@ -62,6 +63,18 @@ export const proactiveSettings = pgTable(
     subject: text("subject").notNull().default(""),
     /** The page or place it watches, where there is one to link to. */
     sourceLink: text("source_link"),
+    /**
+     * What it reads (`CheckInSourceKind`): every app the person connected that the Bot can read
+     * (`apps`, every check-in made before this was kept), one of them (`app`, named in
+     * `source_server_id`), or one public web page (`page`, at `source_link`). Worked out by the
+     * server from the tool the Bot read the thing with, never taken from a label.
+     */
+    sourceKind: text("source_kind")
+      .$type<CheckInSourceKind>()
+      .notNull()
+      .default("apps"),
+    /** The app an `app` check-in reads; null for any other kind. */
+    sourceServerId: text("source_server_id"),
     enabled: boolean("enabled").notNull().default(true),
     intervalMinutes: integer("interval_minutes").notNull().default(60),
     nextRunAt: timestamp("next_run_at", { withTimezone: true })
@@ -94,6 +107,10 @@ export const proactiveSettings = pgTable(
     check(
       "proactive_settings_status_check",
       sql`${table.lastStatus} IN ('idle', 'running', 'succeeded', 'error')`,
+    ),
+    check(
+      "proactive_settings_source_kind_check",
+      sql`${table.sourceKind} IN ('apps', 'app', 'page')`,
     ),
   ],
 );
