@@ -4222,7 +4222,7 @@ Two catalogue entries reach Parallel's public-web search and extraction at
 granted automatically. When a Bot holds both `web_search` and `web_fetch`, the built-in Bot guidance
 describes them for public-web research, and the fintech example's Research Desk ships a
 `research-public-web` skill that declares them. See
-[Public-web research with Parallel](docs/parallel-research.md).
+[Public-web research with Parallel](docs/web-research.md).
 
 ### `lodash-es` is pinned to the patched 4.18.0
 
