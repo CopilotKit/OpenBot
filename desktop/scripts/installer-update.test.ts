@@ -401,9 +401,11 @@ test("the WebView2 Runtime installs under a plain line with the bar moving", () 
   const tauris = download.findIndex((line) =>
     line.startsWith("NSISdl::download "),
   );
-  expect(download.slice(quiet - 3, quiet + 3)).toEqual([
-    'Delete "$TEMP\\MicrosoftEdgeWebview2Setup.exe"',
+  expect(download.slice(quiet - 5, quiet + 3)).toEqual([
     'DetailPrint "$(webview2Downloading)"',
+    "SetDetailsPrint listonly",
+    'Delete "$TEMP\\MicrosoftEdgeWebview2Setup.exe"',
+    "SetDetailsPrint both",
     "!insertmacro OPENBOT_PROGRESS_MOVING 1",
     download[quiet],
     "Pop $0",
@@ -415,6 +417,77 @@ test("the WebView2 Runtime installs under a plain line with the bar moving", () 
   const leave = download.indexOf("Goto install_webview2");
   expect(leave).toBeGreaterThan(quiet);
   expect(leave).toBeLessThan(tauris);
+});
+
+/**
+ * NSIS's own instructions that put a path on the Installing page's status line as they run:
+ * "Output folder:", "Create folder:", "Extract:", "Delete file:", "Remove folder:", "Rename:",
+ * "Created uninstaller:", "Create shortcut:" (Tauri's shortcut functions) and "Execute:".
+ */
+const SAYS_A_PATH =
+  /^(SetOutPath|CreateDirectory|File|Delete|RMDir|Rename|CopyFiles|WriteUninstaller|CreateShortcut|ExecWait|ExecShell|Exec)\b|^Call CreateOrUpdate\w*Shortcut$/;
+
+/**
+ * What `lines` put on the status line, run in order from `SetDetailsPrint both`: the plain lines
+ * said there, the instructions that put a path there, and the details mode left at the end.
+ */
+function statusLine(lines: string[]) {
+  let mode = "both";
+  const said: string[] = [];
+  const paths: string[] = [];
+  for (const line of lines) {
+    const set = /^SetDetailsPrint (\w+)$/.exec(line);
+    if (set) mode = set[1];
+    else if (mode !== "both" && mode !== "textonly") continue;
+    else if (SAYS_A_PATH.test(line)) paths.push(line);
+    else if (line.startsWith("DetailPrint ")) said.push(line);
+  }
+  return { said, paths, mode };
+}
+
+/**
+ * Windows F, a clean install of 1.0.2: the Installing page's status line read "Create folder:
+ * C:\Users\Administrator\AppData\Local\OpenBot\cli-bundle\..." and "Extract: ..." for each of
+ * OpenBot's files, the person's own folders and nothing they could act on. A person reads plain
+ * lines only: "Copying OpenBot's files." while the files go in, and the WebView2 Runtime's own
+ * lines while it comes. NSIS's lines still go to the details list
+ * (https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint).
+ */
+test("the Installing page's status line says plain lines, never a folder or a file", () => {
+  const install = code(between(template(), "Section Install", "SectionEnd"));
+  const copying = statusLine(install);
+  expect(copying.paths).toEqual([]);
+  expect(copying.said).toEqual([`DetailPrint "Copying OpenBot's files."`]);
+  // Up before the first file is copied, and the status line is back for what comes after.
+  expect(install.indexOf(copying.said[0])).toBeLessThan(
+    install.findIndex((line) => line.startsWith("File ")),
+  );
+  expect(copying.mode).toBe("both");
+  // The old version's removal comes first and says its own plain line (OPENBOT_UNINSTALL_OLD_VERSION).
+  expect(install.indexOf("!insertmacro NSIS_HOOK_PREINSTALL")).toBeLessThan(
+    install.indexOf(copying.said[0]),
+  );
+
+  // The WebView2 Runtime, as OpenBot's installer brings it (downloadBootstrapper, Tauri's default).
+  const download = code(
+    between(
+      template(),
+      '!if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"',
+      "Goto install_webview2",
+    ),
+  );
+  const runtime = code(
+    between(template(), "install_webview2:", "webview2_done:"),
+  );
+  for (const part of [download, runtime]) {
+    const shown = statusLine(part);
+    expect(shown.paths).toEqual([]);
+    expect(shown.mode).toBe("both");
+    for (const line of shown.said)
+      expect(line).toMatch(
+        /^DetailPrint "\$\((webview2\w+|installingWebview2)\)"$/,
+      );
+  }
 });
 
 /**
