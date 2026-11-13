@@ -113,8 +113,8 @@ async function withConversation<T>(
  * Carries out what the form's answers made, in one mutation.
  *
  * A routine is one write, a check-in is one write, and a goal is up to three: the goal, the routine
- * that runs it on a schedule, and a first run. The conversation is started once and every write
- * uses it.
+ * that runs it on a schedule, and a first run. For a routine or a goal the conversation is started
+ * once and every write uses it; a check-in has none.
  *
  * A goal whose schedule is refused is deleted again, with the conversation started for it, and the
  * refusal is rethrown: the form stays as it was, saying what the server said, and Create can be
@@ -143,21 +143,15 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
       }
 
       if (plan.kind === "check-in") {
-        const { checkIn } = plan;
-        await withConversation(
-          checkIn.agentId,
-          checkIn.channelId,
-          checkIn.subject.trim() || checkIn.focus.trim(),
-          async (channelId, saved) => {
-            // A new one: the server refuses one the Bot already has, should this screen's list of
-            // them be out of date, as Name does while it is typed.
-            await createProactiveSetting(
-              { ...checkIn, channelId },
-              { refuseExisting: true },
-            );
-            saved();
-          },
-        );
+        /*
+         * No conversation is made for it: a check-in belongs to its Bot, posts nowhere, and what it
+         * finds shows under Needs you. FOUND IN AN AUDIT: Only tell you made an empty conversation
+         * that nothing was ever posted in, and deleting it silently stopped the check-in.
+         *
+         * A new one: the server refuses one the Bot already has, should this screen's list of them
+         * be out of date, as Name does while it is typed.
+         */
+        await createProactiveSetting(plan.checkIn, { refuseExisting: true });
         return;
       }
 

@@ -351,10 +351,25 @@ test("Only tell you offers a schedule only, and no outcome", async () => {
   ]);
   expect(calls[0][2]).toMatchObject({
     agentId: "bot-1",
-    channelId: "c1",
     focus: "Watch for unanswered customer emails",
     intervalMinutes: 1440,
   });
+  // No conversation is made or named for it: a check-in belongs to its Bot.
+  expect(calls[0][2]).not.toHaveProperty("channelId");
+});
+
+test("Only tell you asks for no conversation, and says where what it finds shows", async () => {
+  serving();
+  const view = draw();
+  const user = userEvent.setup({ document });
+  expect(await view.findByLabelText("Posts in")).toBeTruthy();
+  await choose(view, user, "It should", "Only tell you");
+  await waitFor(() => expect(view.queryByLabelText("Posts in")).toBeNull());
+  expect(
+    view.getByText("What it finds shows under Needs you on Bots."),
+  ).toBeTruthy();
+  // Name stays: it is what the Routines page calls it.
+  expect(view.getByLabelText("Name")).toBeTruthy();
 });
 
 test("How often sets the interval", async () => {

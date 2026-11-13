@@ -24,7 +24,8 @@ export type LastCheckIn = {
 export type ProactiveSetting = {
   id: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in was made with, or null: a check-in belongs to its Bot. */
+  channelId: string | null;
   focus: string;
   /** What it watches, in the person's words. Empty on one that watches everything the Bot reads. */
   subject?: string;
@@ -145,7 +146,6 @@ export const proactiveSuggestionsQueryOptions = () =>
 export const createProactiveSetting = (
   input: {
     agentId: string;
-    channelId: string;
     focus: string;
     subject?: string;
     sourceLink?: string;

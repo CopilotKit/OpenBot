@@ -194,7 +194,8 @@ export function routinesOf(agentId: string | undefined) {
 }
 
 /**
- * New routine, on a screen of its own: a Bot, what it does, when, and where it posts.
+ * New routine, on a screen of its own: a Bot, what it does, when, and where it posts. Only tell you
+ * posts nowhere: a check-in belongs to its Bot, and what it finds shows under Needs you.
  *
  * The shape other assistants use for scheduled work. A frequency picker with a time, read back as
  * a sentence, and a way out for anything the picker does not cover: ask the Bot, which writes any
@@ -958,112 +959,135 @@ export function NewRoutinePage({
           }
         </form.Subscribe>
 
-        <PageSection
-          description="Where each run posts, and what the Routines page calls it."
-          title="Where it shows up"
-        >
-          <PageCard className="mt-4">
-            <FieldGroup>
-              <form.Subscribe selector={(state) => state.values.agentId}>
-                {(agentId) => {
-                  const shared = conversationsWith(channels.data, agentId);
-                  // The conversation the clock was pressed in, second and called what it is to the
-                  // person who just left it, even when it is past the roster's first page. The server
-                  // still checks the Bot is in it.
-                  const here =
-                    presetChannelId && agentId === presetAgentId
-                      ? { [presetChannelId]: "This conversation" }
-                      : {};
-                  const items: Record<string, string> = {
-                    [NEW_CONVERSATION]: "A new conversation",
-                    ...here,
-                    ...Object.fromEntries(
-                      shared.map((channel) => [
-                        channel.id,
-                        conversationName(channel),
-                      ]),
-                    ),
-                    ...here,
-                  };
-                  const choices = Object.entries(items);
-                  return (
-                    <form.Field name="channelId">
-                      {(field) => (
-                        <Field>
-                          <FieldLabel htmlFor={field.name}>Posts in</FieldLabel>
-                          <FieldDescription>
-                            {field.state.value === NEW_CONVERSATION
-                              ? "OpenBot starts a conversation for this routine, named after it."
-                              : "Each run posts in this conversation."}
-                          </FieldDescription>
-                          <Select
-                            disabled={saved || !agentId}
-                            items={items}
-                            onValueChange={(value) =>
-                              field.handleChange(String(value))
-                            }
-                            value={
-                              field.state.value in items
-                                ? field.state.value
-                                : NEW_CONVERSATION
-                            }
-                          >
-                            <SelectTrigger className="w-full" id={field.name}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {choices.map(([value, label]) => (
-                                  <SelectItem key={value} value={value}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </Field>
-                      )}
-                    </form.Field>
-                  );
-                }}
-              </form.Subscribe>
+        <form.Subscribe selector={(state) => state.values.does}>
+          {(does) => (
+            <PageSection
+              description={
+                /*
+                 * Only tell you posts nowhere: a check-in belongs to its Bot, and what it finds shows
+                 * under Needs you. FOUND IN AN AUDIT: Posts in made an empty conversation for it that
+                 * nothing was ever posted in, and deleting it silently stopped the check-in.
+                 */
+                does === "tell"
+                  ? "What it finds shows under Needs you on Bots."
+                  : "Where each run posts, and what the Routines page calls it."
+              }
+              title="Where it shows up"
+            >
+              <PageCard className="mt-4">
+                <FieldGroup>
+                  {does === "tell" ? null : (
+                    <form.Subscribe selector={(state) => state.values.agentId}>
+                      {(agentId) => {
+                        const shared = conversationsWith(
+                          channels.data,
+                          agentId,
+                        );
+                        // The conversation the clock was pressed in, second and called what it is to the
+                        // person who just left it, even when it is past the roster's first page. The server
+                        // still checks the Bot is in it.
+                        const here =
+                          presetChannelId && agentId === presetAgentId
+                            ? { [presetChannelId]: "This conversation" }
+                            : {};
+                        const items: Record<string, string> = {
+                          [NEW_CONVERSATION]: "A new conversation",
+                          ...here,
+                          ...Object.fromEntries(
+                            shared.map((channel) => [
+                              channel.id,
+                              conversationName(channel),
+                            ]),
+                          ),
+                          ...here,
+                        };
+                        const choices = Object.entries(items);
+                        return (
+                          <form.Field name="channelId">
+                            {(field) => (
+                              <Field>
+                                <FieldLabel htmlFor={field.name}>
+                                  Posts in
+                                </FieldLabel>
+                                <FieldDescription>
+                                  {field.state.value === NEW_CONVERSATION
+                                    ? "OpenBot starts a conversation for this routine, named after it."
+                                    : "Each run posts in this conversation."}
+                                </FieldDescription>
+                                <Select
+                                  disabled={saved || !agentId}
+                                  items={items}
+                                  onValueChange={(value) =>
+                                    field.handleChange(String(value))
+                                  }
+                                  value={
+                                    field.state.value in items
+                                      ? field.state.value
+                                      : NEW_CONVERSATION
+                                  }
+                                >
+                                  <SelectTrigger
+                                    className="w-full"
+                                    id={field.name}
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {choices.map(([value, label]) => (
+                                        <SelectItem key={value} value={value}>
+                                          {label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              </Field>
+                            )}
+                          </form.Field>
+                        );
+                      }}
+                    </form.Subscribe>
+                  )}
 
-              <form.Field name="title">
-                {(field) => {
-                  const isInvalid = field.name in shown;
-                  return (
-                    <Field data-invalid={isInvalid}>
-                      <FieldLabel htmlFor={field.name}>Name</FieldLabel>
-                      <FieldDescription>
-                        Optional. The Routines page shows it by this name.
-                      </FieldDescription>
-                      <Input
-                        disabled={saved}
-                        aria-invalid={isInvalid}
-                        aria-describedby={
-                          isInvalid ? errorId(field.name) : undefined
-                        }
-                        id={field.name}
-                        name={field.name}
-                        onBlur={field.handleBlur}
-                        onChange={(event) =>
-                          field.handleChange(event.target.value)
-                        }
-                        placeholder="Morning leads"
-                        value={field.state.value}
-                      />
-                      {isInvalid ? (
-                        <FieldError id={errorId(field.name)}>
-                          {shown[field.name]}
-                        </FieldError>
-                      ) : null}
-                    </Field>
-                  );
-                }}
-              </form.Field>
-            </FieldGroup>
-          </PageCard>
-        </PageSection>
+                  <form.Field name="title">
+                    {(field) => {
+                      const isInvalid = field.name in shown;
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Name</FieldLabel>
+                          <FieldDescription>
+                            Optional. The Routines page shows it by this name.
+                          </FieldDescription>
+                          <Input
+                            disabled={saved}
+                            aria-invalid={isInvalid}
+                            aria-describedby={
+                              isInvalid ? errorId(field.name) : undefined
+                            }
+                            id={field.name}
+                            name={field.name}
+                            onBlur={field.handleBlur}
+                            onChange={(event) =>
+                              field.handleChange(event.target.value)
+                            }
+                            placeholder="Morning leads"
+                            value={field.state.value}
+                          />
+                          {isInvalid ? (
+                            <FieldError id={errorId(field.name)}>
+                              {shown[field.name]}
+                            </FieldError>
+                          ) : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+                </FieldGroup>
+              </PageCard>
+            </PageSection>
+          )}
+        </form.Subscribe>
 
         {createFromPlan.error ? (
           <p className="mt-8 text-destructive text-sm" role="alert">

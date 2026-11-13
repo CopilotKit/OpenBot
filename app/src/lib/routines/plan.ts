@@ -35,9 +35,9 @@ export type RoutinePlan =
     }
   | {
       kind: "check-in";
+      /** No conversation: a check-in belongs to its Bot, and what it finds shows under Needs you. */
       checkIn: {
         agentId: string;
-        channelId: string;
         focus: string;
         subject: string;
         intervalMinutes: number;
@@ -84,7 +84,6 @@ export function planRoutine(
       kind: "check-in",
       checkIn: {
         agentId,
-        channelId,
         focus: instruction,
         subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
