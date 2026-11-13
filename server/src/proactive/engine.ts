@@ -11,8 +11,8 @@
  * A CHECK-IN IS USUALLY SILENT. It reads only what is new (`window.ts`) in a thread of its own, and
  * most end with nothing raised: one ledger row, no message, no second turn. Before any of that, the
  * gates that would make it pointless are read without the model: the person turned check-ins off,
- * paused the Bot, an admin turned them off, the Bot used its day's runs, the conversation is gone,
- * or the Bot can read nothing the person connected with their own account (`scope.ts`). Each writes
+ * paused the Bot, an admin turned them off, the Bot used its day's runs, the Bot is no longer theirs
+ * to use, or the Bot can read nothing the person connected with their own account (`scope.ts`). Each writes
  * a `skipped` row saying which.
  *
  * WHAT IT RAISES IS AN ITEM, NOT A MESSAGE. An item needs a source the check-in actually read, and
@@ -95,13 +95,6 @@ const OWN_LISTED = 50;
 /** Check-ins one Bot may run for one person in a day, until an admin says otherwise: hourly. */
 export const DEFAULT_DAILY_RUNS = 24;
 
-export type ProactiveScope = {
-  ownerUserId: string;
-  channelId: string;
-  agentId: string;
-  threadId: string;
-};
-
 export type ProactiveEngineDeps = {
   store: ProactiveStore;
   /**
@@ -112,12 +105,12 @@ export type ProactiveEngineDeps = {
   queue: WorkQueue;
   owner: string;
   runTurn: TurnRunner;
-  /** The person's conversation with this Bot, or null when they can no longer reach either. */
-  resolveScope(
-    ownerUserId: string,
-    channelId: string,
-    agentId: string,
-  ): Promise<ProactiveScope | null>;
+  /**
+   * Whether the person may still use this Bot: not revoked, and the Bot theirs to use. A check-in
+   * belongs to its Bot and has no conversation, so this is its whole reach check, at create, at each
+   * run and at Work on it.
+   */
+  canUseBot(ownerUserId: string, agentId: string): Promise<boolean>;
   /** Delivery of a ping to the person's push devices, Slack and Teams (`delivery/*`). */
   attention: AttentionDelivery;
   /** The admin's switch and daily cap (`admin/*`). Without it, on for everyone and 24 a day. */
@@ -519,13 +512,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       (await dailyRuns(setting.agentId))
     )
       return { skip: "capped" };
-    if (
-      !(await deps.resolveScope(
-        setting.ownerUserId,
-        setting.channelId,
-        setting.agentId,
-      ))
-    )
+    if (!(await deps.canUseBot(setting.ownerUserId, setting.agentId)))
       return { skip: "unreachable" };
     if (!deps.readableApps) return { apps: [] };
     // Nothing the person connected that this Bot can read: there is nothing for a check-in to find.
@@ -544,7 +531,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       await deps.store.recordRun(
         setting.id,
         "error",
-        "This Bot or its conversation is no longer available to you, so it didn't check in.",
+        "This Bot is no longer available to you, so it didn't check in.",
       );
     await deps.store.skipRun({ id: runId, setting, trigger, reason });
   }
@@ -777,19 +764,12 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       input: unknown,
       options: { refuseExisting?: boolean } = {},
     ) {
-      const parsed = input as { agentId?: unknown; channelId?: unknown };
+      const parsed = input as { agentId?: unknown };
       if (
         typeof parsed?.agentId !== "string" ||
-        typeof parsed?.channelId !== "string" ||
-        !(await deps.resolveScope(
-          ownerUserId,
-          parsed.channelId,
-          parsed.agentId,
-        ))
+        !(await deps.canUseBot(ownerUserId, parsed.agentId))
       )
-        throw new ProactiveRefusedError(
-          "Choose one of your Bots and a conversation it's in.",
-        );
+        throw new ProactiveRefusedError("Choose one of your Bots.");
       return deps.store.create(
         ownerUserId,
         input,
@@ -872,16 +852,9 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       if (!deps.tasks)
         throw new ProactiveRefusedError("Starting a task isn't available yet.");
       const suggestion = await deps.store.suggestion(ownerUserId, suggestionId);
-      const setting = await deps.store.get(ownerUserId, suggestion.settingId);
-      if (
-        !(await deps.resolveScope(
-          ownerUserId,
-          setting.channelId,
-          suggestion.agentId,
-        ))
-      )
+      if (!(await deps.canUseBot(ownerUserId, suggestion.agentId)))
         throw new ProactiveRefusedError(
-          "This Bot or its conversation is no longer available to you.",
+          "This Bot is no longer available to you.",
         );
       const started = await deps.store.resolveSuggestion(
         ownerUserId,

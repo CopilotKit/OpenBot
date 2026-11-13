@@ -56,8 +56,9 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
  * from real items, the real delivery router, store, outbox and work queue, the person's real routing
  * and per-Bot preferences, and the real Expo transport. The providers' wires are the only fakes: a
  * Slack, Teams and SMS transport that records what it was asked to send, and Expo's HTTP endpoint.
- * Which conversations the person can still reach is the server's rule (`deliveryScopeFor`), modelled
- * here as a set the tests take conversations out of.
+ * Which conversations the person can still reach is the server's rule (`deliveryScopeFor`), and which
+ * Bots they can still use is its other (`canUseBot`), modelled here as sets the tests take entries
+ * out of.
  */
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -86,6 +87,10 @@ const lifecycle = createBotLifecycleStore(database);
 
 /** The conversations the person can still reach. A test takes one out to revoke it. */
 const reachable = new Set<string>();
+/** The Bots the person can still use. A ping's push is filed under one of these, not a conversation. */
+const usable = new Set<string>();
+const canUseBot = async (ownerUserId: string, agentId: string) =>
+  ownerUserId === owner && usable.has(agentId);
 const scopeFor = async (
   ownerUserId: string,
   channelId: string,
@@ -131,6 +136,7 @@ const router = createDeliveryRouter({
     (await scopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
       ?.threadId === scope.threadId,
   scopeFor,
+  canUseBot,
   runTurn: async (input) => {
     turns.push({
       ownerUserId: input.ownerUserId,
@@ -235,6 +241,7 @@ async function reset() {
   pushSends.length = 0;
   turns.length = 0;
   for (const channelId of CHANNELS) reachable.add(channelId);
+  for (const agentId of BOTS) usable.add(agentId);
   const outbox = await database
     .select({ id: deliveryOutbox.id })
     .from(deliveryOutbox)
@@ -460,13 +467,16 @@ describe("a ping", () => {
       pathname: "/needs-you",
       params: {},
     });
-    // Filed under the newest item's check-in conversation, which says nothing on the phone.
+    // Filed under the newest item's Bot and no conversation: a check-in has none.
     expect(pushSends[0]?.data).not.toHaveProperty("channelId");
     expect(
       (await outboxOf())
         .filter((row) => row.transport === "push")
-        .map((row) => row.channelId),
-    ).toEqual([calendarChannel, calendarChannel]);
+        .map((row) => [row.agentId, row.channelId, row.threadId]),
+    ).toEqual([
+      [calendarBot, null, null],
+      [calendarBot, null, null],
+    ]);
     // Each phone once.
     expect(new Set(pushSends.map((push) => push.to as string)).size).toBe(2);
 
@@ -673,10 +683,10 @@ describe("an account whose Bot the person silenced", () => {
 });
 
 describe("a conversation the person lost", () => {
-  test("is passed over for the next account they used on that platform, and a push is filed under a conversation they still have", async () => {
+  test("is passed over for the next account they used on that platform, and the push still goes", async () => {
     // The Slack account they used last is in a conversation they can no longer reach.
     reachable.delete(researchChannel);
-    // And so is the newest item's Bot's conversation.
+    // And so is the conversation the newest item's check-in once made: a push no longer reads it.
     reachable.delete(calendarChannel);
     await router.notifyAttention(await twoBotPing());
     const rows = await outboxOf();
@@ -689,8 +699,10 @@ describe("a conversation the person lost", () => {
       ].sort(),
     );
     expect(
-      rows.filter((row) => row.transport === "push").map((r) => r.channelId),
-    ).toEqual([inboxChannel, inboxChannel]);
+      rows.filter((row) => row.transport === "push").map((r) => r.agentId),
+    ).toEqual([calendarBot, calendarBot]);
+    await drain();
+    expect(pushSends).toHaveLength(2);
   });
 
   test("lost between the offer and the send is refused, as any send is, and nothing reaches it", async () => {
@@ -712,15 +724,54 @@ describe("a conversation the person lost", () => {
       state: "failed",
       error: "Conversation access has been revoked.",
     });
-    // The pushes were filed under the calendar conversation, now gone too.
-    expect(byTransport.push?.state).toBe("failed");
+    // The pushes name no conversation, so losing one doesn't stop them.
+    expect(byTransport.push?.state).toBe("accepted");
     expect(byTransport.sms?.state).toBe("sent");
     expect(chatSends.map((send) => send.transport)).toEqual(["sms"]);
+    expect(pushSends).toHaveLength(2);
+  });
+});
+
+/*
+ * A check-in belongs to its Bot and has no conversation, so a ping's push is filed under a Bot. It
+ * used to be dropped whenever the person could reach none of the conversations its check-ins had made.
+ */
+describe("a Bot the person can no longer use", () => {
+  test("its push is filed under the next item's Bot they still can", async () => {
+    usable.delete(calendarBot);
+    await router.notifyAttention(await twoBotPing());
+    expect(
+      (await outboxOf())
+        .filter((row) => row.transport === "push")
+        .map((row) => [row.agentId, row.channelId]),
+    ).toEqual([
+      [inboxBot, null],
+      [inboxBot, null],
+    ]);
+  });
+
+  test("lost between the offer and the send, the push is refused and nothing reaches the phone", async () => {
+    await router.notifyAttention(await twoBotPing());
+    usable.delete(calendarBot);
+    await drain();
+    expect(
+      (await outboxOf())
+        .filter((row) => row.transport === "push")
+        .map((row) => row.state),
+    ).toEqual(["failed", "failed"]);
     expect(pushSends).toEqual([]);
   });
 
-  test("none left at all: nothing is offered", async () => {
+  test("with none of its Bots left, no push is offered", async () => {
+    usable.clear();
+    await router.notifyAttention(await twoBotPing());
+    expect(
+      (await outboxOf()).filter((row) => row.transport === "push"),
+    ).toEqual([]);
+  });
+  test("no conversation and no Bot left at all: nothing is offered", async () => {
     reachable.clear();
+    usable.clear();
     await router.notifyAttention(await twoBotPing());
     expect(await outboxOf()).toEqual([]);
     expect(

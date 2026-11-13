@@ -633,10 +633,7 @@ function deployment(pluginStore: ReturnType<typeof pluginStoreFor>) {
     queue,
     owner: `connected-${randomUUID()}`,
     runTurn: turn,
-    resolveScope: async (ownerUserId, channelId, agentId) =>
-      ownerUserId === owner && channelId === channelOf(agentId)
-        ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
-        : null,
+    canUseBot: async (ownerUserId) => ownerUserId === owner,
     attention: { notifyAttention: async () => {} },
     ...checkInToolsFor((ownerUserId) => load(ownerUserId), scope),
     catalogue: pluginStore,

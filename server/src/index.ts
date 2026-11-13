@@ -1758,14 +1758,17 @@ const checkInScope = createCheckInScope({
  * The person's conversation with a Bot, as delivery addresses it, and whether a scope still names one
  * they can reach: the channel's own thread, or that Bot's own thread in a group. See delivery/scope.ts.
  */
-const { scopeFor: deliveryScopeFor, authorise: authoriseDeliveryScope } =
-  createDeliveryScopes({
-    database,
-    people: peopleStore,
-    actorFor,
-    channels: channelStore,
-    bots: agentProfileStore,
-  });
+const {
+  scopeFor: deliveryScopeFor,
+  authorise: authoriseDeliveryScope,
+  canUseBot: canUseBotFor,
+} = createDeliveryScopes({
+  database,
+  people: peopleStore,
+  actorFor,
+  channels: channelStore,
+  bots: agentProfileStore,
+});
 
 /*
  * Memory sources and background research, on by default for each person and Bot, and never switched
@@ -2573,6 +2576,7 @@ const deliveryRouter = createDeliveryRouter({
   providers: deliveryProviders,
   authoriseScope: authoriseDeliveryScope,
   scopeFor: deliveryScopeFor,
+  canUseBot: canUseBotFor,
   notifyEvent: (event) => responsibilityEngine.ingest(event),
   runTurn: async (input) => {
     if (!(await authoriseDeliveryScope(input)))
@@ -2628,8 +2632,9 @@ const deliveryRouter = createDeliveryRouter({
             : event.state === "failed"
               ? "delivery.failed"
               : "delivery.sent",
-      targetType: "channel",
-      targetId: event.channelId,
+      // A ping's push names no conversation, only the Bot it was filed under.
+      targetType: event.channelId ? "channel" : "agent",
+      targetId: event.channelId ?? event.agentId,
       payload: { deliveryId: event.id, kind: event.kind, state: event.state },
     }),
 });
@@ -2696,7 +2701,8 @@ const proactiveEngine = createProactiveEngine({
       copilotRuntime.learning?.containerForThread(input) ??
       Promise.resolve(undefined),
   }),
-  resolveScope: deliveryScopeFor,
+  // A check-in belongs to its Bot: the person may still use it, and no conversation is read.
+  canUseBot: canUseBotFor,
   // The organization's Check-ins switch and per-Bot daily cap, read fresh on every check.
   admin: proactiveAdmin,
   // A ping: push once to each phone, one message per chat platform, the app list at once.

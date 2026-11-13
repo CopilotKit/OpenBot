@@ -74,7 +74,8 @@ export type ProactiveSettingPayload = {
   id: string;
   ownerUserId: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in made, or null: a check-in belongs to its Bot. */
+  channelId: string | null;
   threadId: string;
   focus: string;
   /** What this check-in watches, in the person's words; empty for one that watches everything. */

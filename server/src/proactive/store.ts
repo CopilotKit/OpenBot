@@ -411,8 +411,8 @@ export function createProactiveStore(database: Database) {
      * rather than adding a second that reads the same page twice.
      *
      * `refuseExisting` is for a caller that asked for a new one (the New routine screen): the same
-     * thing is refused with `SAME_CHECK_IN` instead of changed. Changing it in place there would
-     * leave it posting in its own conversation, with the one the person picked left empty.
+     * thing is refused with `SAME_CHECK_IN` instead of changed: the person asked for a second one
+     * and would otherwise find their first one quietly rewritten.
      */
     async create(
       owner: string,
@@ -420,7 +420,11 @@ export function createProactiveStore(database: Database) {
       threadId: string,
       options: { refuseExisting?: boolean } = {},
     ): Promise<ProactiveSetting> {
-      const parsed = parseWith(proactiveSettingInputSchema, input);
+      // A conversation sent by an older client is dropped: a check-in belongs to its Bot.
+      const { channelId: _ignored, ...parsed } = parseWith(
+        proactiveSettingInputSchema,
+        input,
+      );
       const sourceLink = parsed.sourceLink ?? null;
       return database.transaction(async (transaction) => {
         await lockDefaults(transaction, owner, parsed.agentId);

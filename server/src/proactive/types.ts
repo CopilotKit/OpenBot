@@ -89,7 +89,11 @@ const intervalSchema = z
 export const proactiveSettingInputSchema = z
   .object({
     agentId: z.string().trim().min(1).max(128),
-    channelId: z.string().trim().min(1).max(128),
+    /**
+     * Accepted and ignored. A check-in belongs to its Bot and has no conversation; older clients
+     * still send the one they picked or made.
+     */
+    channelId: z.string().trim().max(128).nullish(),
     focus: focusSchema.default(""),
     subject: subjectSchema.default(""),
     sourceLink: sourceLinkSchema.nullish(),
@@ -123,7 +127,7 @@ export const SKIPPED_BECAUSE: Record<ProactiveSkipReason, string> = {
   off_person: "You turned off check-ins for all your Bots.",
   paused: "You paused this Bot.",
   capped: "This Bot used all its check-ins for today.",
-  unreachable: "This Bot or its conversation is no longer available to you.",
+  unreachable: "This Bot is no longer available to you.",
   no_sources:
     "This Bot can't read any app you've connected. Connect one in Connections.",
   busy: "Another check-in was still running.",
@@ -204,7 +208,8 @@ export type ProactiveSetting = {
   id: string;
   ownerUserId: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in made. Null on every one made since; nothing reads it. */
+  channelId: string | null;
   threadId: string;
   focus: string;
   subject: string;

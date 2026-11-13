@@ -107,6 +107,7 @@ const router = createDeliveryRouter({
   store: deliveries,
   queue,
   owner: `delivery-${suite}`,
+  canUseBot: async () => true,
   authoriseScope: async () => true,
   scopeFor: async (ownerUserId, channelId, agentId) => ({
     ownerUserId,
@@ -470,12 +471,8 @@ function replica(
       turns.push(input);
       return turn(input);
     },
-    resolveScope: async (ownerUserId, channelId, agentId) =>
-      options.reachable !== false &&
-      ownerUserId === owner &&
-      [inboxChannel, calendarChannel].includes(channelId)
-        ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
-        : null,
+    canUseBot: async (ownerUserId) =>
+      options.reachable !== false && ownerUserId === owner,
     attention: router,
     ...(options.admin ? { admin: options.admin } : {}),
     ...(options.tasks ? { tasks: options.tasks } : {}),
@@ -741,7 +738,7 @@ describe("a check-in", () => {
     expect(ping?.pushBody).toBe("Inbox Bot: Reply to Dana about Friday");
     expect(ping?.offeredAt).toBeInstanceOf(Date);
     expect(item?.pingId).toBe(ping?.id as string);
-    // Delivered as a ping: the person's one phone, titled for them, filed under the Bot's conversation.
+    // Delivered as a ping: the person's one phone, titled for them, filed under the Bot and no conversation.
     const outbox = await outboxOf();
     expect(
       outbox.map((row) => [row.transport, row.kind, row.dedupeKey, row.text]),
@@ -753,7 +750,11 @@ describe("a check-in", () => {
         "One thing needs you\nInbox Bot: Reply to Dana about Friday",
       ],
     ]);
-    expect(outbox[0]?.channelId).toBe(inboxChannel);
+    expect(outbox[0]).toMatchObject({
+      agentId: inbox.agentId,
+      channelId: null,
+      threadId: null,
+    });
   });
 
   test("a memory is formed only from a read the check-in actually made", async () => {
@@ -1598,7 +1599,9 @@ describe("the ping", () => {
     expect(ping?.text).toContain(
       "• Calendar Bot: Move the standup. The room is double-booked tomorrow. (from Mail)",
     );
-    expect(ping?.text).toEndWith("Open OpenBot to work on them or dismiss them.");
+    expect(ping?.text).toEndWith(
+      "Open OpenBot to work on them or dismiss them.",
+    );
     expect((await itemsOf()).every((item) => item.pingId === ping?.id)).toBe(
       true,
     );

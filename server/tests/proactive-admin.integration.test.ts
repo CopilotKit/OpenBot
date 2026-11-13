@@ -306,12 +306,7 @@ function replica() {
       asked.push(input.ownerUserId);
       return turn(input);
     },
-    resolveScope: async (ownerUserId, channelId, agentId) => ({
-      ownerUserId,
-      channelId,
-      agentId,
-      threadId: `${channelId}-thread`,
-    }),
+    canUseBot: async () => true,
     attention: { notifyAttention: async () => {} },
     admin: proactiveAdmin,
     catalogue: plugins,

@@ -46,6 +46,18 @@ export function createDeliveryScopes(deps: {
       ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
       : null;
   };
+  /**
+   * Whether the person may still use this Bot: not revoked, and the Bot one they can use. What a
+   * check-in, and a ping's push, asks in place of a conversation, since a check-in belongs to its
+   * Bot and has none.
+   */
+  const canUseBot = async (ownerUserId: string, agentId: string) => {
+    const person = await deps.people.find(ownerUserId);
+    if (!person || person.revoked) return false;
+    return (
+      (await deps.bots.get(await deps.actorFor(ownerUserId), agentId)) !== null
+    );
+  };
   const authorise = async (scope: DeliveryScope) => {
     const current = await scopeFor(
       scope.ownerUserId,
@@ -61,5 +73,5 @@ export function createDeliveryScopes(deps: {
     });
     return group?.channelId === scope.channelId;
   };
-  return { scopeFor, authorise };
+  return { scopeFor, authorise, canUseBot };
 }

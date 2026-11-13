@@ -33,10 +33,7 @@ const engine = createProactiveEngine({
   queue: createWorkQueue(database),
   owner: `new-check-in-${suite}`,
   runTurn: async () => ({ replyText: "" }),
-  resolveScope: async (ownerUserId, channelId, agentId) =>
-    ownerUserId === owner && [channelA, channelB].includes(channelId)
-      ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
-      : null,
+  canUseBot: async (ownerUserId) => ownerUserId === owner,
   attention: { deliver: async () => undefined } as never,
   catalogue: { listServers: async () => [] },
   mintThreadId: () => `new-check-in-thread-${randomUUID()}`,
@@ -117,7 +114,8 @@ test("a new check-in on a thing the Bot already watches is refused with 409, and
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({
     id: setting.id,
-    channelId: channelA,
+    // The conversation sent is ignored: a check-in belongs to its Bot.
+    channelId: null,
     intervalMinutes: 60,
     focus: "",
   });

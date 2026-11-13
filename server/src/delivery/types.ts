@@ -50,7 +50,14 @@ export type DeliveryInbox = DeliveryScope & {
  * Bots' check-ins found needs them, every Bot's items folded into it (proactive/ping.ts).
  */
 export type DeliveryKind = "reply" | "question" | "approval" | "attention";
-export type DeliveryOutbox = DeliveryScope & {
+/**
+ * A message waiting to go out. A ping's push may name no conversation (`channelId` and `threadId`
+ * null): a check-in belongs to its Bot and has none, so that row is authorised by whether the person
+ * can still use its Bot. Every other row names the conversation it speaks in.
+ */
+export type DeliveryOutbox = Omit<DeliveryScope, "channelId" | "threadId"> & {
+  channelId: string | null;
+  threadId: string | null;
   id: string;
   bindingId: string | null;
   deviceId: string | null;

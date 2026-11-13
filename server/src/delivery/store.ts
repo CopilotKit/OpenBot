@@ -11,10 +11,7 @@ import {
   deliveryOutbox,
   pushDevices,
 } from "../db/schema/delivery";
-import {
-  proactiveSettings,
-  proactiveSuggestions,
-} from "../db/schema/proactive";
+import { proactiveSuggestions } from "../db/schema/proactive";
 import { workItems } from "../db/schema/work";
 import {
   type BindingTransport,
@@ -112,24 +109,17 @@ export function createDeliveryStore(database: Database) {
         .orderBy(desc(usedAt), asc(deliveryBindings.id));
     },
     /**
-     * Where the items a ping carries were found: each one's check-in conversation with its Bot,
-     * newest item first. A ping's push is filed under the first of these the person can still reach.
+     * The Bots that found the items a ping carries, newest item first. A ping's push is filed under
+     * the first of these the person can still use.
      */
-    async checkInConversations(
+    async checkInBots(
       owner: string,
       suggestionIds: string[],
-    ): Promise<{ agentId: string; channelId: string }[]> {
+    ): Promise<string[]> {
       if (suggestionIds.length === 0) return [];
-      return database
-        .select({
-          agentId: proactiveSuggestions.agentId,
-          channelId: proactiveSettings.channelId,
-        })
+      const rows = await database
+        .select({ agentId: proactiveSuggestions.agentId })
         .from(proactiveSuggestions)
-        .innerJoin(
-          proactiveSettings,
-          eq(proactiveSettings.id, proactiveSuggestions.settingId),
-        )
         .where(
           and(
             eq(proactiveSuggestions.ownerUserId, owner),
@@ -140,6 +130,7 @@ export function createDeliveryStore(database: Database) {
           desc(proactiveSuggestions.createdAt),
           desc(proactiveSuggestions.id),
         );
+      return [...new Set(rows.map((row) => row.agentId))];
     },
     async bind(input: Omit<DeliveryBinding, "id" | "enabled">) {
       return database.transaction(async (tx) => {
@@ -421,7 +412,9 @@ export function createDeliveryStore(database: Database) {
       );
     },
     async offerOutbox(
-      input: DeliveryScope & {
+      input: Omit<DeliveryScope, "channelId" | "threadId"> & {
+        channelId: string | null;
+        threadId: string | null;
         dedupeKey: string;
         bindingId: string | null;
         deviceId: string | null;
