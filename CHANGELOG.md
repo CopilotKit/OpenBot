@@ -347,6 +347,15 @@ every deployment:
 
 ### Check-ins and pausing your Bots
 
+- **A check-in belongs to its Bot, not to a conversation.** New routine's Only tell you no longer
+  asks where it posts and no longer makes an empty conversation for it; it says what it finds shows
+  under Needs you on Bots. A Bot's offer card turns a check-in on wherever it is drawn. A check-in
+  now runs while you can still use its Bot, so deleting a conversation an older check-in was made
+  with no longer stops it. A ping's phone push is filed under a Bot rather than a conversation, so
+  it is no longer dropped when those conversations are gone. A check-in whose Bot you can no longer
+  use says "This Bot is no longer available to you." Migration `0092_check_in_without_conversation`
+  makes `proactive_settings.channel_id`, and `delivery_outbox.channel_id` and `thread_id`, nullable.
+  No row is rewritten, and the API still answers `channelId` (null on new check-ins).
 - **Needs you has a third half, Working on it.** A task its Bot is still doing used to sit under
   Waiting on you as "waiting since now" and count as waiting. It now has its own half after Waiting
   on you, says when it started, and counts as "1 working" in the header. It moves to Waiting on you

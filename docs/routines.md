@@ -26,6 +26,12 @@ row carries it. Rows that are working (on, active, not paused) come first. The e
 holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
 or off for everybody, and limits them, in Admin → Routines.
 
+**A check-in belongs to its Bot.** It posts nowhere and needs no conversation: what it finds is
+raised under Needs you, and a ping's phone push is filed under its Bot. It runs while you can still
+use that Bot; when you can't, its runs are skipped with "This Bot is no longer available to you."
+Check-ins made before this were tied to a conversation (`proactive_settings.channel_id`). Those
+conversations are left as they are, and deleting one no longer affects the check-in.
+
 Old addresses redirect here: `/responsibilities` to Routines, and
 `/bots/<id>/responsibilities` to the Bot's Routines page.
 
@@ -45,7 +51,8 @@ Two ways, and either way a routine or a goal is written by the same store calls.
   - Act when something happens is a goal with that subscription.
   - Now, once is a goal, run at once.
   - Only tell you is a check-in, with **How often** in place of Starts and Done when. It is offered
-    only while an admin allows check-ins.
+    only while an admin allows check-ins. It has no **Posts in** and no conversation is made for
+    it: a check-in belongs to its Bot, and what it finds shows under Needs you on Bots.
 
   A Bot's own Routines page and the clock beside a conversation's message box open the same screen
   with that Bot already chosen, and from the clock that conversation too
