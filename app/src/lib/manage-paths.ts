@@ -6,9 +6,9 @@ export type BrokerDirectory = "composio" | "arcade";
 
 /**
  * Where the pages that set up what Bots can reach live: under Admin in the team edition. In the
- * personal one, where there is no Admin, apps are part of Connections and the rest is under
- * Settings. Both render the same page components, so every link between those pages goes through
- * here rather than naming `/admin`.
+ * personal one, apps are part of Connections and the rest is under Settings, as well as under Admin.
+ * Both render the same page components, so every link between those pages goes through here rather
+ * than naming `/admin`.
  */
 export function managePaths(edition: "team" | "personal") {
   if (edition === "personal") {
@@ -106,30 +106,6 @@ export function personalAppsAddress(rest: string): string {
   if (path === "composio" || path === "arcade")
     return `/connections/browse/${path}`;
   return path ? `/connections/${path}` : "/connections";
-}
-
-/** Each other Admin page the personal edition keeps, and where it is now. */
-const MOVED: readonly (readonly [admin: string, settings: string])[] = [
-  ["/admin/skills", "/skills"],
-  ["/admin/credentials", "/settings/vault"],
-  ["/admin/computers", "/settings/computer"],
-  ["/admin/audit", "/settings/activity"],
-];
-
-/**
- * Where an old Admin address goes in the personal edition: an app's page under Connections, the
- * same page under Settings or Skills with whatever followed it (`/admin/credentials/new` keeps `/new`), or
- * Settings itself for a page the personal edition does not have.
- */
-export function personalAdminRedirect(pathname: string): string {
-  if (pathname === "/admin/plugins" || pathname.startsWith("/admin/plugins/"))
-    return personalAppsAddress(pathname.slice("/admin/plugins".length));
-  for (const [admin, settings] of MOVED) {
-    if (pathname === admin || pathname.startsWith(`${admin}/`)) {
-      return `${settings}${pathname.slice(admin.length)}`.replace(/\/$/, "");
-    }
-  }
-  return "/settings";
 }
 
 /**

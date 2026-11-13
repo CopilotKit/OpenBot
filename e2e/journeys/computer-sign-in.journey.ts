@@ -3,6 +3,7 @@ import { answer, approvalCard, HANDED_OVER } from "./approval-steps";
 import {
   activityRows,
   expect,
+  expectEveryRowTimed,
   expectWholeReply,
   named,
   newConversation,
@@ -103,6 +104,14 @@ test("a password is handed to the person, who signs in and hands the browser bac
     await named(page, channelId);
     // The Bot read the page the person signed in to; it did not sign in again.
     expect(site().signIns.slice(before)).toHaveLength(1);
+    // The step handed over is named for its field, not its ref, and every step has its time, the
+    // ones the Bot took after the hand-over too.
+    await openComputer(page);
+    const handed = activityRows(page).filter({ hasText: "Clicked on page" });
+    await expect(handed).toHaveCount(1);
+    await expect(handed).toContainText("Password");
+    await expect(handed).toContainText("You did it yourself.");
+    await expectEveryRowTimed(page);
     await shot("carried-on");
   });
 });

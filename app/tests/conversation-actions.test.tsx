@@ -24,7 +24,11 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function summary(id: string, pinned: boolean): ChannelSummary {
+function summary(
+  id: string,
+  pinned: boolean,
+  named: string | null = null,
+): ChannelSummary {
   return {
     id,
     name: "Expenses",
@@ -32,7 +36,7 @@ function summary(id: string, pinned: boolean): ChannelSummary {
     threadId: `thread-${id}`,
     active: true,
     lastMessageAt: null,
-    summary: null,
+    summary: named,
     lastMessage: null,
     lastMessageAgentId: null,
     createdAt: "2026-10-01T00:00:00.000Z",
@@ -58,7 +62,7 @@ function draw(leave: () => Promise<unknown> = async () => {}) {
   });
   return render(
     <QueryClientProvider client={client}>
-      <ConversationActions channelId="c1" leave={leave} name="Expenses" />
+      <ConversationActions channelId="c1" leave={leave} />
     </QueryClientProvider>,
   );
 }
@@ -99,4 +103,34 @@ test("Delete is confirmed, and leaves the conversation before deleting it", asyn
 
   await waitFor(() => expect(requests).toContain("DELETE /api/channels/c1"));
   expect(order).toEqual(["leave after 1 requests"]);
+});
+
+test("Delete asks about the conversation by its name, not its Bot's", async () => {
+  // The channel's `name` is its Bot's ("Expenses"); the conversation is called by its summary.
+  serving([summary("c1", false, "Kingfisher Back Colour")]);
+  const view = draw();
+
+  fireEvent.click(
+    await view.findByRole("button", { name: "Delete conversation…" }),
+  );
+
+  expect(
+    await view.findByRole("dialog", {
+      name: "Delete “Kingfisher Back Colour”?",
+    }),
+  ).toBeTruthy();
+  expect(view.queryByRole("dialog", { name: "Delete Expenses?" })).toBeNull();
+});
+
+test("a conversation with no name yet is asked about as this conversation", async () => {
+  serving([summary("c1", false)]);
+  const view = draw();
+
+  fireEvent.click(
+    await view.findByRole("button", { name: "Delete conversation…" }),
+  );
+
+  expect(
+    await view.findByRole("dialog", { name: "Delete this conversation?" }),
+  ).toBeTruthy();
 });

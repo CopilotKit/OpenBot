@@ -20,6 +20,20 @@ docker run -p 3001:3001 --env-file .env \
 their own. What a release publishes is digest-pinned in its `container-images.json`, and deploying
 those digests rather than a moving tag is what [releasing.md](releasing.md) recommends.
 
+## Checking an image's signature
+
+OpenBot's images are signed with OpenBot's own key. The public half is [cosign.pub](cosign.pub), and
+[cosign](https://docs.sigstore.dev/cosign/) checks an image against it before you deploy:
+
+```sh
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot-server:main
+```
+
+The same command checks `ghcr.io/copilotkit/openbot`, `openbot-agent-computer` and
+`openbot-supervisor`, at any tag published from now on; images from v1.0.2 and earlier carry no
+signature. The signatures are not recorded in a public transparency log, which is what
+`--insecure-ignore-tlog=true` tells cosign to expect. The key is what proves the image is OpenBot's.
+
 ## What is in the image, and what is not
 
 **In it:** the built app, the API, and Chromium. One port, 3001. The browser listens on 4100 inside

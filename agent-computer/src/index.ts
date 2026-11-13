@@ -1024,6 +1024,15 @@ serve<StreamData & TerminalSocketData>({
         const attach = async () => {
           const target = await currentPage(ws.data.botId);
           if (target === casting) return;
+          /*
+           * THE WINDOW FITTED TO THE PAGE THE SCREEN IS ABOUT TO SHOW, every time it starts showing one. A tab laid out
+           * again (in front again after a person closed the one before it) takes what its window has then, and a window
+           * fitted for another tab can have less: Chromium's warning bar for `--no-sandbox` sits in a Bot's first tab and
+           * is only made room for when that tab is laid out again, so it came back 56 pixels short and the screen showed
+           * a black band under the page, after Hand back too. Fitted here, from the tab as it is now laid out, it holds
+           * the whole page. A Bot's browser only: a person's is fitted as its tabs open, and local Chrome is theirs.
+           */
+          await profiles.bot(ws.data.botId)?.fitWindow(target);
           const cast = await startScreencast(target, send);
           // The claim stops a cast it refuses, so a launch that lost the screen leaks nothing.
           if (!(await claim.install(cast))) return;
@@ -1307,7 +1316,8 @@ serve<StreamData & TerminalSocketData>({
         return json(state);
       }
 
-      // The Bot asking for one value it must not be told. It has already focused the field.
+      // The Bot asking for one value it must not be told, naming the field by its ref. It does not click it first:
+      // the value is put into that field below, when the person sends it.
       if (url.pathname === "/control/secret" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as {
           label?: unknown;

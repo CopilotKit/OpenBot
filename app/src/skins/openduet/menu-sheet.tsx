@@ -37,7 +37,7 @@ import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -474,9 +474,9 @@ function ConversationRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={isOpen ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );
