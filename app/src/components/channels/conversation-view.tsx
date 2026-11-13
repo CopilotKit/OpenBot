@@ -22,8 +22,14 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
-import { NotifyPrompt } from "@/components/notifications/notify-prompt";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { useNotificationPermission } from "@/lib/notifications/permission";
+import { notePromptSent } from "@/lib/star-prompt";
 import { newId } from "../../lib/new-id";
 
 export function ConversationView({
@@ -194,6 +200,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -321,6 +328,8 @@ export function ConversationView({
     setRunning(true);
     try {
       await onSubmit(draft);
+      // Once the run has started, not when the box was pressed: a send that failed asked for nothing.
+      notePromptSent();
     } finally {
       setRunning(false);
     }
@@ -506,6 +515,15 @@ export function ConversationView({
         {messages.some((message) => message.role === "user") ? (
           <NotifyPrompt />
         ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, once this browser has earned it, and never beside the
+         * notifications offer: one card above the composer at a time, and the offer that is useful
+         * to this person goes first. Read on each render, which a sent message always causes.
+         */}
+        {notificationPermission === "default" &&
+        !notifyPromptAnswered() ? null : (
+          <StarPrompt />
+        )}
         {/*
          * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
          *

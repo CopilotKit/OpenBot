@@ -4,6 +4,7 @@ import type { CreateBotRequest } from "@/lib/api/generated/model";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
+import { noteBotCreated } from "@/lib/star-prompt";
 import { type AgentProfile, agentApiPath, agentKeys } from "./queries";
 
 /**
@@ -34,7 +35,11 @@ export function createAgentMutationOptions(queryClient: QueryClient) {
           fallback: FALLBACK,
         })
       ).bot,
-    onSuccess: () => invalidateAgents(queryClient),
+    onSuccess: () => {
+      // Here rather than in the New Bot sheet, so a Bot made from a conversation counts too.
+      noteBotCreated();
+      return invalidateAgents(queryClient);
+    },
   });
 }
 
