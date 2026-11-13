@@ -54,6 +54,39 @@ first), as the first row of its Bot's group under Needs you (not counted in the 
 badge's dot shows), and on its page above On. No ping is sent for it. Each row also says what it
 reads: "Reads Gmail", "Reads your apps", "Reads github.com".
 
+### Watching a web page
+
+A `page` check-in reads one address and nothing else, and the model is given no tool that takes an
+address. Each run, after the usual gates, the engine reads `source_link` itself through the Bot's
+page-read tool (Parallel's `web_fetch`, Exa's `web_fetch_exa` or Firecrawl's `firecrawl_scrape`), by
+`PluginStore.callTool` as the person and under the run's proactive initiator, so grants, policy and
+the audit trail apply as to any call. The text is normalised, capped at 50,000 characters and
+hashed, and kept on the check-in (`page_text`, `page_hash`):
+
+- the first read is kept as the baseline, and nothing is raised;
+- the same page again ends quiet, with no model call;
+- a changed page runs one turn, given the earlier and the new text as quoted, untrusted data, whose
+  only tools are `suggest_next_step` and `clear_next_step`. What it raises takes the page as its
+  source: its host as the app and its address as the link. The new text becomes the baseline once
+  that turn finishes;
+- a read that fails ends failed, "Couldn't read the page."; three in a row is can't look.
+
+A page run forms no memories and its thread is given no Learning container: text from the open web
+never becomes something a Bot knows about the person. Each run counts toward the Bot's daily limit,
+changed or not. The address is fixed when the check-in is made; changing it means making a new one.
+
+**The door.** A check-in's tool call is refused unless it is a labelled read on the person's own
+account, and a page read is neither, so `callTool` admits one more call: a page-read tool
+(`researchRoleFor(ref) === "fetch"`), from a running check-in whose kind is `page`, asking for exactly
+that check-in's address. Anything else (another address, two addresses, a search tool, a page read
+from a check-in on apps) is refused and audited as `check_in_not_a_read`. This covers the keyed
+entries as well, on the admin's key: the admin gave the Bot the tool, the page is public, and the
+daily limit bounds how often a Bot reads it for one person. The address check when it is made
+(`http` or `https`, not a loopback or private host) is a courtesy: the read happens at the provider.
+
+A check-in on a web page made before check-ins knew pages reads every app, and stays that way until
+the person accepts a new offer on the same link, which makes it a `page` one.
+
 **A check-in belongs to its Bot.** It posts nowhere and needs no conversation: what it finds is
 raised under Needs you, and a ping's phone push is filed under its Bot. It runs while you can still
 use that Bot; when you can't, its runs are skipped with "This Bot is no longer available to you."

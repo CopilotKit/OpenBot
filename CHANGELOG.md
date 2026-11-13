@@ -359,6 +359,12 @@ every deployment:
   Gmail", "Reads your apps", "Reads github.com". Migration `0093_check_in_source` adds
   `source_kind` (`apps` on every existing check-in, which reads every app as before) and
   `source_server_id` to `proactive_settings`.
+- **A check-in can watch a public web page.** It reads that one page each time, and only when the
+  page changed does the Bot look at what changed, with no tool that could fetch any other address.
+  The first look keeps the page as it is and raises nothing. In the personal edition this works on
+  a fresh install, through Parallel Search. In the team edition it is offered for Bots an admin gave
+  a web search app to, the keyed entries included. A page run forms no memories. Migration
+  `0094_check_in_page` adds `page_text` and `page_hash` to `proactive_settings`.
 - **A check-in belongs to its Bot, not to a conversation.** New routine's Only tell you no longer
   asks where it posts and no longer makes an empty conversation for it; it says what it finds shows
   under Needs you on Bots. A Bot's offer card turns a check-in on wherever it is drawn. A check-in

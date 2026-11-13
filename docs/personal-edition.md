@@ -267,6 +267,11 @@ The first time the server starts, it turns on **Parallel Search**, Parallel's fr
 needs no key, so every Bot can search the web and read pages with nothing set up. Every Bot gets its
 `web_search` and `web_fetch` tools, including Bots made later.
 
+It also means a check-in can watch a public web page on a fresh install, with no app connected:
+New routine's Only tell you offers **A web page**, and a Bot that just read one offers to keep an eye
+on it (see [Routines](routines.md#watching-a-web-page)). Each look reads that one address through
+`web_fetch` and counts toward the Bot's daily check-ins.
+
 What a Bot searches for goes to Parallel: the search queries and the addresses of the pages it asks
 to read, and a session identifier for the conversation. Full conversations are not sent. See
 [Public-web research](web-research.md#choice-and-controls).
