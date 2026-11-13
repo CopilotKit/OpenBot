@@ -1,0 +1,41 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "How much flour do I need if I triple a recipe that uses 150 grams?",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "You need **450 grams of flour**."
+      },
+      "recordedTimings": {
+        "ttftMs": 1009,
+        "interChunkDelaysMs": [
+          7,
+          391,
+          2,
+          0,
+          32,
+          9,
+          3,
+          6,
+          0,
+          0,
+          3,
+          0,
+          176,
+          4,
+          0,
+          405
+        ],
+        "totalDurationMs": 2047
+      },
+      "metadata": {
+        "systemHash": "6eda1e70",
+        "toolsHash": "6d7140c9"
+      }
+    }
+  ]
+}

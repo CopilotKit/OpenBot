@@ -3038,6 +3038,11 @@ const app = createApp(
     config.keyEncryptionKey,
     credentialStore,
     createAuditStore(database),
+    // The entry `resolveModelApiKey` reads, so a key added in the Vault is the one the Bots use.
+    {
+      provider: runtimeModel.provider,
+      keyId: tenantPackage.model.credentialSecretRef,
+    },
   ),
   createPackageStatusReader(database),
   // The runtime call: the model, per-actor agent loading, and the two identity

@@ -36,6 +36,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "harbour-pilot",
   name: "Harbour Pilot",
   title: "Harbour Pilot",

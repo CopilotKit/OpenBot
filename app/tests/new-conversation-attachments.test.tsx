@@ -50,6 +50,8 @@ const REFUSED = "blob.bin";
 const REFUSAL = `'${REFUSED}' isn't a file type OpenBot can read.`;
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,

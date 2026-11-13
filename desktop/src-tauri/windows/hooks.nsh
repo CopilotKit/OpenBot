@@ -187,6 +187,67 @@ Var OpenBotFlagAt
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$OpenBotRunArgs"
 !macroend
 
+; Box H: after Finish on a clean computer, nothing was on screen for about ten seconds: this
+; installer had closed, and OpenBot's window wasn't up yet. So from the last page the installer
+; stays, saying OpenBot is opening, until OpenBot's window is on screen (the class and title Tauri
+; gives it), for a minute at most. Nothing on the page can be pressed meanwhile, its close button
+; included. It keeps answering Windows: every tenth of a second it hands on whatever messages are
+; waiting for it, as its own loop would, so the page never shows as not responding.
+!define OPENBOT_WINDOW_CLASS "Tauri Window"
+!define OPENBOT_OPEN_WAIT_TENTHS 600
+!define /ifndef SC_CLOSE 0xF060
+!define /ifndef MF_GRAYED 0x0001
+!define /ifndef PM_REMOVE 0x0001
+Var OpenBotWaitMessage
+Var OpenBotWaitTenths
+Var OpenBotWaitWindow
+Var OpenBotWaitAnswer
+!macro OPENBOT_STAY_UNTIL_OPEN
+  ${IfNot} ${Silent}
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 1
+    EnableWindow $OpenBotWaitWindow 0
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 2
+    EnableWindow $OpenBotWaitWindow 0
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 3
+    EnableWindow $OpenBotWaitWindow 0
+    EnableWindow $mui.FinishPage.Run 0
+    EnableWindow $mui.FinishPage.ShowReadme 0
+    System::Call 'user32::GetSystemMenu(p $HWNDPARENT, i 0) p.s'
+    Pop $OpenBotWaitWindow
+    System::Call 'user32::EnableMenuItem(p $OpenBotWaitWindow, i ${SC_CLOSE}, i ${MF_GRAYED})'
+    SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 "STR:Opening OpenBot. This can take a minute."
+    ; A MSG, with room to spare.
+    System::Alloc 64
+    Pop $OpenBotWaitMessage
+    StrCpy $OpenBotWaitTenths 0
+    ${Do}
+      FindWindow $OpenBotWaitWindow "${OPENBOT_WINDOW_CLASS}" "${PRODUCTNAME}"
+      ${If} $OpenBotWaitWindow <> 0
+        System::Call 'user32::IsWindowVisible(p $OpenBotWaitWindow) i.s'
+        Pop $OpenBotWaitAnswer
+        ${If} $OpenBotWaitAnswer <> 0
+          ${ExitDo}
+        ${EndIf}
+      ${EndIf}
+      ${If} $OpenBotWaitTenths >= ${OPENBOT_OPEN_WAIT_TENTHS}
+        ${ExitDo}
+      ${EndIf}
+      ${Do}
+        System::Call 'user32::PeekMessageW(p $OpenBotWaitMessage, p 0, i 0, i 0, i ${PM_REMOVE}) i.s'
+        Pop $OpenBotWaitAnswer
+        ${If} $OpenBotWaitAnswer = 0
+          ${ExitDo}
+        ${EndIf}
+        System::Call 'user32::TranslateMessage(p $OpenBotWaitMessage)'
+        System::Call 'user32::DispatchMessageW(p $OpenBotWaitMessage)'
+      ${Loop}
+      Sleep 100
+      IntOp $OpenBotWaitTenths $OpenBotWaitTenths + 1
+    ${Loop}
+    System::Free $OpenBotWaitMessage
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   ${If} $OpenBotUninstallFirst = 1
     !insertmacro OPENBOT_UNINSTALL_OLD_VERSION

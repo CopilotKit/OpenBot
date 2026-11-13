@@ -24,7 +24,10 @@ import {
 import { DeleteRow } from "@/components/routines/delete-row";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
 import { routinesOf } from "@/components/routines/new-routine-page";
-import { RoutineDetailMissing } from "@/components/routines/routine-detail-missing";
+import {
+  RoutineDetailMissing,
+  useDeletedHere,
+} from "@/components/routines/routine-detail-missing";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +59,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { markdownComponents } from "@/lib/markdown";
 import {
+  deleteResponsibilityMutationKey,
   deleteResponsibilityMutationOptions,
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
@@ -141,6 +145,10 @@ export function GoalRoutePage({
 }) {
   const goals = useQuery(responsibilitiesQueryOptions());
   const routines = useQuery(routinesQueryOptions());
+  const deleted = useDeletedHere<string>(
+    deleteResponsibilityMutationKey,
+    (id) => id === goalId,
+  );
   const back = routinesOf(agentId);
   const goal = goals.data?.find((row) => row.id === goalId);
 
@@ -163,6 +171,7 @@ export function GoalRoutePage({
   return (
     <RoutineDetailMissing
       back={back}
+      deleted={deleted}
       icon={IconTarget}
       kind="goal"
       read={goals}
@@ -556,7 +565,11 @@ export function GoalPage({
             <Button
               disabled={remove.isPending}
               onClick={() =>
-                remove.mutate(goal.id, { onSuccess: () => navigate(back) })
+                remove.mutate(goal.id, {
+                  // Usually the route has gone back already, on the list without it. This is
+                  // for a list that couldn't be read again.
+                  onSuccess: () => navigate({ ...back, replace: true }),
+                })
               }
               size="sm"
               type="button"

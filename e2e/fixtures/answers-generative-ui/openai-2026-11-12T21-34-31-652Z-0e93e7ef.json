@@ -1,0 +1,80 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Now show the four-month rainfall total as a single metric card, then say one short sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 1,
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "showMetrics",
+            "arguments": "{\"title\":\"Four-month garden rainfall\",\"caption\":\"January–April 2026\",\"metrics\":[{\"label\":\"Total rainfall\",\"value\":\"236 mm\",\"change\":\"\",\"changeTone\":\"neutral\",\"link\":\"\"}]}",
+            "id": "call_nBCkJYaRO8tskkLV34zyH7h9"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 745,
+        "interChunkDelaysMs": [
+          7,
+          553,
+          506,
+          5,
+          5,
+          0,
+          0,
+          0,
+          33,
+          10,
+          4,
+          0,
+          0,
+          2,
+          19,
+          12,
+          11,
+          10,
+          2,
+          7,
+          3,
+          8,
+          3,
+          0,
+          0,
+          3,
+          15,
+          16,
+          8,
+          8,
+          3,
+          5,
+          0,
+          1,
+          0,
+          0,
+          41,
+          7,
+          4,
+          0,
+          32,
+          6,
+          8,
+          3,
+          51,
+          21,
+          75,
+          10,
+          229
+        ],
+        "totalDurationMs": 2491
+      },
+      "metadata": {
+        "systemHash": "e006dae3",
+        "toolsHash": "e175874e"
+      }
+    }
+  ]
+}

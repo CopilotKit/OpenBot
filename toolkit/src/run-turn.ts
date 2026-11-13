@@ -345,7 +345,7 @@ export function turnMessages(input: {
           toolCallId: continuation.snapshot.toolCallId,
           ...continuation.result,
         },
-        ...notRunBeside(continuation),
+        ...notRunBeside(continuation, seeded),
       ])
     : seeded.some((message) => message.id === turn.id)
       ? seeded
@@ -369,9 +369,14 @@ export function turnMessages(input: {
  * goes on, waited for them for ever: the person's decision reached it and it said nothing.
  *
  * A step that was answered before the turn stopped keeps its answer; only a step with none gets this.
+ * And a step the thread holds a result for ran, so it is answered with that result. A built-in Bot's
+ * app calls in one step start together, and one allowed beside the call that waited has reached the
+ * app; the run that stopped kept its result in the thread, after the snapshot was taken. Answered
+ * "Not run", the Bot did it again: a sheet's tabs added twice.
  */
 function notRunBeside(
   continuation: NonNullable<Parameters<TurnRunner>[0]["continuation"]>,
+  thread: readonly Message[],
 ): Message[] {
   const { messages, toolCallId } = continuation.snapshot;
   const asked = messages.find(
@@ -385,15 +390,23 @@ function notRunBeside(
       message.role === "tool" ? [message.toolCallId] : [],
     ),
   );
+  const held = new Map(
+    thread.flatMap((message) =>
+      message.role === "tool" ? [[message.toolCallId, message] as const] : [],
+    ),
+  );
   return (asked.toolCalls ?? [])
     .filter((call) => call.id !== toolCallId && !answered.has(call.id))
-    .map((call) => ({
-      id: `${continuation.messageId}:${call.id}`,
-      role: "tool" as const,
-      toolCallId: call.id,
-      content: NOT_RUN_WHILE_WAITING,
-      error: NOT_RUN_WHILE_WAITING,
-    }));
+    .map(
+      (call) =>
+        held.get(call.id) ?? {
+          id: `${continuation.messageId}:${call.id}`,
+          role: "tool" as const,
+          toolCallId: call.id,
+          content: NOT_RUN_WHILE_WAITING,
+          error: NOT_RUN_WHILE_WAITING,
+        },
+    );
 }
 
 /** The run's input: this run's id, the conversation, the tools it is offered, and any resume. */

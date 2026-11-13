@@ -172,7 +172,10 @@ test("the row leads with how often, that it tells you, and when, whatever the fo
   const view = draw();
   const row = await view.findByRole("link", { name: /Expenses/ });
   const lines = [...row.querySelectorAll("[data-slot=item-description]")];
-  expect(lines[0]?.textContent).toMatch(/^Every hour · Tells you · Next /);
+  // When it looks next in the words a routine's page uses, never a raw date and time.
+  expect(lines[0]?.textContent).toBe(
+    "Every hour · Tells you · Next check in 45 minutes",
+  );
   const focus = lines.find((line) => line.textContent?.includes(FOCUS));
   expect(focus?.textContent).toBe(`Looks for: ${FOCUS}`);
   expect(focus?.className).toContain("line-clamp-1");

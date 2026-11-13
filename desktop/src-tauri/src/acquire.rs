@@ -233,7 +233,7 @@ pub fn connection_of_machine(machine: &str) -> String {
 
 /// A `podman` command, run so that the person's default connection stays as they had it (see
 /// `podman_default`).
-fn podman(args: &[&str]) -> Result<String, String> {
+pub(crate) fn podman(args: &[&str]) -> Result<String, String> {
     crate::podman_default::keeping(&mut crate::podman_default::ThisComputer, args)
 }
 
@@ -1279,10 +1279,18 @@ pub type Containers = Vec<(String, Vec<String>)>;
 /// The containers running in the machine `name` now. Asked over SSH, which still answers when the
 /// machine's API has gone.
 pub fn running_containers(name: &str) -> Containers {
+    running_containers_with(&mut podman, name)
+}
+
+/// `running_containers`, asked through `run`.
+pub(crate) fn running_containers_with(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    name: &str,
+) -> Containers {
     [connection_for(name, false), connection_for(name, true)]
         .into_iter()
         .filter_map(|connection| {
-            let ids = podman(&["--connection", &connection, "ps", "--quiet"]).ok()?;
+            let ids = run(&["--connection", &connection, "ps", "--quiet"]).ok()?;
             let ids: Vec<String> = ids.lines().map(str::to_string).collect();
             (!ids.is_empty()).then_some((connection, ids))
         })
@@ -1390,10 +1398,19 @@ pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), St
             Err(error) => return Err(error),
         }
     }
+    start_containers_with(&mut podman, containers);
+    Ok(())
+}
+
+/// The containers that were running in a machine, started again once it is back, through `run`.
+pub(crate) fn start_containers_with(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    containers: &Containers,
+) {
     for (connection, ids) in containers {
         let mut args = vec!["--connection", connection.as_str(), "start"];
         args.extend(ids.iter().map(String::as_str));
-        match podman(&args) {
+        match run(&args) {
             Ok(_) => log::info!(
                 "[engine] started {} container(s) on {connection} again",
                 ids.len()
@@ -1401,7 +1418,6 @@ pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), St
             Err(error) => log::warn!("[engine] could not start containers again: {error}"),
         }
     }
-    Ok(())
 }
 
 /// The machine `name` is running and its Docker API answers, or why not.

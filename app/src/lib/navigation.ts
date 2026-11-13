@@ -59,9 +59,8 @@ export type NavigationItem =
     }
   | {
       /**
-       * Not a page: the personal edition's list of team features, opened as a dialog where Admin
-       * would be. See `components/edition/team-features-dialog.tsx`, which every frame draws it
-       * through.
+       * Not a page: the personal edition's list of team features, opened as a dialog beside Admin.
+       * See `components/edition/team-features-dialog.tsx`, which every frame draws it through.
        */
       kind: "dialog";
       id: "team-features";
@@ -140,9 +139,10 @@ export const NAVIGATION: readonly NavigationItem[] = [
 ];
 
 /**
- * The destinations this person may open, in order. The personal edition has no Admin: the team
- * features entry takes its place, for everybody, since nobody there administers anybody else. It
- * has no Memory either (see `offersMemory`).
+ * The destinations this person may open, in order. Admin is in every edition, for an admin: in the
+ * personal edition that is the one person, whom single-user mode makes the admin. The personal
+ * edition also lists what the team edition adds, right after Admin, and has no Memory (see
+ * `offersMemory`).
  */
 export function navigationFor(
   role: string | undefined,
@@ -151,15 +151,16 @@ export function navigationFor(
   const offered = NAVIGATION.filter(
     (item) =>
       item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
-  );
-  if (edition === "personal") {
-    return offered.map((item) =>
-      item.id === "admin" ? TEAM_FEATURES_ITEM : item,
-    );
-  }
-  return offered.filter(
+  ).filter(
     (item) => item.kind === "dialog" || !item.adminOnly || role === "admin",
   );
+  if (edition !== "personal") return offered;
+  const settings = offered.findIndex((item) => item.id === "settings");
+  return [
+    ...offered.slice(0, settings),
+    TEAM_FEATURES_ITEM,
+    ...offered.slice(settings),
+  ];
 }
 
 /**

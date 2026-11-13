@@ -518,7 +518,7 @@ test("an update that fails says the step it stopped at and that the data is kept
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
     expect(row(screen, "Updating OpenBot").textContent).toContain(
-      "OpenBot couldn't finish updating, so it runs the version it had. It stopped while pausing OpenBot's services. Your data is kept, and OpenBot tries again the next time it starts.",
+      "OpenBot couldn't finish updating. It stopped while pausing OpenBot's services. Your data is kept. Retry to try the update again.",
     ),
   );
 });
@@ -666,6 +666,276 @@ test("after Quit, the unfinished update starts the stack, and the release it had
     "run_local_eval:status",
     "run_local_eval:update",
     "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+});
+
+/**
+ * Found in a dogfooding report, 0.16.0-rc.10 to rc.11 on a Mac: the update paused the back end's
+ * services (`update-quiesce`) and then failed at `dependencies-install`. The stack was left
+ * running with its checks failing and the update on record. The CLI refuses `start` while the
+ * update is on record, so every Retry asked for status once and stopped, and the update was never
+ * tried again.
+ */
+const leftByUpdate = (() => {
+  const base = report({
+    readiness: "degraded",
+    licence: "valid",
+    checksPassed: false,
+    updateTo: "0.16.0-rc.11",
+  });
+  return {
+    ...base,
+    stack: base.stack && {
+      ...base.stack,
+      installedRelease: "0.16.0-rc.10",
+      step: "update-quiesce",
+      hasFailedStep: true,
+      updateInProgress: true,
+      unfinishedUpdate: {
+        to: "0.16.0-rc.11",
+        prepared: false,
+        stoppedDownloading: false,
+        failedStep: "dependencies-install",
+      },
+      observed: {
+        running: true,
+        services: ["postgres", "redis", "minio"].map((name) => ({
+          name,
+          phase: "Running",
+          ready: true,
+        })),
+      },
+    },
+  };
+})();
+
+const updateStopped = report({
+  outcome: "failed",
+  stack: null,
+  reason: "local-command-failed",
+});
+
+test("a backend an update left not working runs the update again, and opens once it finishes", async () => {
+  const statuses: LocalReport[] = [
+    leftByUpdate,
+    onRelease("0.16.0-rc.11", null),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return onRelease("0.16.0-rc.11", null);
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+  ).toBeNull();
+});
+
+test("an update that stops again is tried once per Start, and Retry tries it once more", async () => {
+  let updates: Array<LocalReport> = [
+    updateStopped,
+    onRelease("0.16.0-rc.11", null),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updates.shift();
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    // Not working until an update finishes.
+    return updates.length === 0
+      ? onRelease("0.16.0-rc.11", null)
+      : leftByUpdate;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  // The failed update's row, and the wait stopped at once: no second update, no start.
+  expect(row(screen, "Updating OpenBot").textContent).toContain(
+    "OpenBot couldn't finish updating. It stopped while updating where OpenBot keeps your data. Your data is kept. Retry to try the update again.",
+  );
+  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+    "runs the version it had",
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "OpenBot is running but not working properly. Retry to start it again.",
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  expect(started).toEqual([]);
+  await userEvent.click(retry);
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  updates = [];
+});
+
+/**
+ * Found on Windows, rc.11 to rc.12: an interrupted update left the services at 0 replicas, its
+ * record `prepared` with no failed step. After the retried update failed, the first answer said
+ * `starting` and the next `degraded`, and the row still said "so it runs the version it had" over a
+ * back end that did not.
+ */
+test("an update that fails again says Retry once the back end settles not working, after a first answer of starting", async () => {
+  const paused = (readiness: "starting" | "degraded") => {
+    const stack = leftByUpdate.stack;
+    return {
+      ...leftByUpdate,
+      readiness,
+      stack: stack && {
+        ...stack,
+        step: "ready",
+        unfinishedUpdate: {
+          to: "0.16.0-rc.12",
+          prepared: true,
+          stoppedDownloading: false,
+        },
+      },
+      updateTo: "0.16.0-rc.12",
+    };
+  };
+  const statuses: LocalReport[] = [
+    paused("degraded"),
+    paused("starting"),
+    paused("degraded"),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updateStopped;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await screen.findByRole("button", { name: "Retry" });
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+  expect(row(screen, "Updating OpenBot").textContent).toContain(
+    "OpenBot couldn't finish updating. Your data is kept. Retry to try the update again.",
+  );
+  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+    "runs the version it had",
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "OpenBot is running but not working properly.",
+  );
+});
+
+/** A back end starting with no update on record and then not working has no update row. */
+test("a back end that starts and then is not working, with no update on record, says nothing about an update", async () => {
+  const statuses: LocalReport[] = [
+    report({ readiness: "starting", licence: "valid" }),
+    report({ readiness: "degraded", licence: "valid" }),
+  ];
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return statuses.length > 1 ? statuses.shift() : statuses[0];
+  };
+  const screen = view({ stack: "local-abc123", connected: true });
+  await screen.findByRole("button", { name: "Retry" });
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:status",
+  ]);
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+  ).toBeNull();
+  expect(screen.queryByText(/couldn't finish updating/)).toBeNull();
+});
+
+/**
+ * The same stack with a disk OpenBot found short: the update downloads the new release's images
+ * and would fail there again, after up to ten minutes. The row says to free space, and nothing is
+ * updated until a Retry finds the disk no longer short.
+ */
+test("a backend an update left not working on a full disk says so, and updates on the Retry after space is freed", async () => {
+  let short = true;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return onRelease("0.16.0-rc.11", null);
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    if (commands().includes("run_local_eval:update"))
+      return onRelease("0.16.0-rc.11", null);
+    return short
+      ? {
+          ...leftByUpdate,
+          shortfall: {
+            podman: false,
+            cpu: false,
+            memory: false,
+            disk: true,
+            diskGb: "2",
+            nearlyFull: true,
+            diskSizeGb: "60",
+          },
+        }
+      : leftByUpdate;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(row(screen, WAIT).textContent).toContain(
+    "Docker Desktop has 2 GB free",
+  );
+  expect(commands()).toEqual(["run_local_eval:status"]);
+  short = false;
+  await userEvent.click(retry);
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:status",
+    "run_local_eval:update",
     "run_local_eval:status",
   ]);
 });
@@ -988,6 +1258,165 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
     "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
+});
+
+/**
+ * A person's own Podman machine with fewer CPUs than the CLI's 4 used to stop at one sentence with
+ * a command crammed into it: "OpenBot has 2 CPUs. It needs 4. Stop your Podman machine, run podman
+ * machine set --cpus 6, start it again, then Retry." The row now says what happened, and OpenBot
+ * offers to make the machine bigger and sets up again after.
+ */
+const cpuShortOnPodman = report({
+  outcome: "failed",
+  stack: null,
+  reason: "resources-short",
+  // As `local_eval.rs` reads the rc.12 CLI's "Docker available resources: 2 CPUs (requires 4),
+  // 5.2 GiB RAM available (requires 4), 51 GiB free storage (requires 40)." on Podman.
+  shortfall: {
+    podman: true,
+    cpu: true,
+    memory: false,
+    disk: false,
+    cpus: "2",
+    memoryGb: "5.2",
+    diskGb: "51",
+  },
+});
+// `machine_size::plan` for that machine on a 10-CPU Mac.
+const resizeToSix = {
+  machine: "podman-machine-default",
+  cpus: 2,
+  memoryMib: 6144,
+  toCpus: 6,
+  toMemoryMib: 6144,
+  forThem: true,
+};
+
+test("a 2-CPU Podman machine says so, and Resize makes it bigger and sets up again", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [cpuShortOnPodman, report()],
+    podman_machine_plan: [resizeToSix],
+    resize_podman_machine: [null],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const offer = await screen.findByRole("region", {
+    name: "OpenBot can fix this for you",
+  });
+  expect(row(screen, SETUP).textContent).toContain(
+    "Your Podman machine has 2 CPUs. OpenBot needs 4.",
+  );
+  // The command is not crammed into the sentence any more.
+  expect(row(screen, SETUP).textContent).not.toContain("podman machine set");
+  expect(offer.textContent).toContain(
+    "Resizing restarts your Podman machine with 6 CPUs.",
+  );
+  // The native side is asked about what the CLI found, the measured number included.
+  expect(
+    invokeCalls.find((call) => call.command === "podman_machine_plan")?.args,
+  ).toEqual({ short: cpuShortOnPodman.shortfall });
+  // Nothing is changed until the person says so.
+  expect(commands()).not.toContain("resize_podman_machine");
+  await userEvent.click(
+    within(offer).getByRole("button", { name: "Resize my Podman" }),
+  );
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(
+    invokeCalls.find((call) => call.command === "resize_podman_machine")?.args,
+  ).toEqual({ cpus: 6, memoryMib: 6144 });
+  expect(commands()).toEqual([
+    "set_up_local_eval",
+    "podman_machine_plan",
+    "resize_podman_machine",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
+test("when OpenBot can't resize the Podman machine, the fix is numbered steps, each command in its own block with Copy", async () => {
+  const withDisk = report({
+    ...cpuShortOnPodman,
+    shortfall: {
+      ...(cpuShortOnPodman.shortfall as NonNullable<LocalReport["shortfall"]>),
+      disk: true,
+      diskGb: "12",
+    },
+  });
+  invokeHandler = answers({
+    set_up_local_eval: [withDisk],
+    podman_machine_plan: [{ ...resizeToSix, forThem: false }],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const screen = view();
+  const steps = await screen.findByRole("region", {
+    name: "Make your Podman machine bigger",
+  });
+  expect(row(screen, SETUP).textContent).toContain(
+    "Your Podman machine doesn't have enough CPUs and free disk space for OpenBot.",
+  );
+  const items = within(steps).getAllByRole("listitem");
+  expect(items.map((item) => item.querySelector("code")?.textContent)).toEqual([
+    "podman machine stop podman-machine-default",
+    "podman machine set --cpus 6 --disk-size 160 podman-machine-default",
+    "podman machine start podman-machine-default",
+    undefined,
+  ]);
+  expect(items[3].textContent).toBe("Come back here and click Retry.");
+  expect(within(steps).getAllByRole("button", { name: "Copy" }).length).toBe(3);
+  expect(
+    within(steps).queryByRole("button", { name: "Resize my Podman" }),
+  ).toBeNull();
+  // Retry is the way on after doing it by hand.
+  expect(screen.getByRole("button", { name: "Retry" }).className).not.toContain(
+    "quiet",
+  );
+});
+
+test("a resize Podman refused says so and gives the steps instead", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [cpuShortOnPodman],
+    podman_machine_plan: [resizeToSix],
+    resize_podman_machine: [
+      "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+    ],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  // The native side rejects with its sentence.
+  const answer = invokeHandler;
+  invokeHandler = async (command, args) => {
+    const answered = await answer(command, args);
+    if (command === "resize_podman_machine") throw answered;
+    return answered;
+  };
+  const screen = view();
+  const offer = await screen.findByRole("region", {
+    name: "OpenBot can fix this for you",
+  });
+  await userEvent.click(
+    within(offer).getByRole("button", { name: "Resize my Podman" }),
+  );
+  const steps = await screen.findByRole("region", {
+    name: "Make your Podman machine bigger",
+  });
+  expect(steps.textContent).toContain(
+    "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+  );
+  expect(steps.textContent).toContain(
+    "podman machine set --cpus 6 podman-machine-default",
+  );
+  expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
 });
 
 /**

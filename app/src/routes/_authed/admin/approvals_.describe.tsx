@@ -7,6 +7,7 @@ import {
 } from "@/components/approvals/describe-rules";
 import { DescribeField } from "@/components/boundaries/describe-rule";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
@@ -20,7 +21,7 @@ import type { ApprovalRuleInput } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/approvals_/describe")({
-  component: DescribeTeamRulesPage,
+  component: DescribeTeamRulesPageInEveryEdition,
 });
 
 const BACK = {
@@ -179,5 +180,19 @@ function DescribeTeamRulesPage() {
         </PageCard>
       </form>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function DescribeTeamRulesPageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
+      backButton={BACK}
+      more={<YourOwnApprovals />}
+      title="Describe team rules"
+    >
+      <DescribeTeamRulesPage />
+    </TeamPage>
   );
 }

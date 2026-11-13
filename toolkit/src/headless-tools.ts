@@ -11,6 +11,7 @@ import {
 } from "@ag-ui/client";
 import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
 import { isDecisionTool } from "@openbot/shared/decision-tools";
+import { HARNESS_OWN_TOOLS } from "@openbot/shared/harness-own-tools";
 import {
   calledTooEarly,
   drawnTooEarlyAnswer,
@@ -196,7 +197,24 @@ export class HeadlessToolsMiddleware extends Middleware {
               (call.function.name.startsWith("computer_") &&
                 !callerOffers.has(call.function.name)),
           );
+          /*
+           * A call the harness runs itself, which it has yet to reach. It is answered in the
+           * harness's next run, once this side's results come back, so it never ends the turn for
+           * the caller, who has nothing to answer it with. See `HARNESS_OWN_TOOLS`.
+           */
+          const forTheCaller = pending.filter(
+            (call) =>
+              !owned.includes(call) &&
+              !HARNESS_OWN_TOOLS.has(call.function.name),
+          );
           if (owned.length === 0) {
+            // Ended on its own call with nothing for anyone else to answer: nobody will.
+            if (
+              pending.length > 0 &&
+              forTheCaller.length === 0 &&
+              terminal.outcome?.type !== "interrupt"
+            )
+              throw new Error(RUN_ENDED_EARLY);
             subscriber.next(terminal);
             return;
           }
@@ -355,7 +373,7 @@ export class HeadlessToolsMiddleware extends Middleware {
           const unresolved = interrupts.filter(
             (interrupt) => !results.has(interrupt.toolCallId ?? interrupt.id),
           );
-          if (owned.length !== pending.length || unresolved.length > 0) {
+          if (forTheCaller.length > 0 || unresolved.length > 0) {
             subscriber.next(
               unresolved.length > 0
                 ? {

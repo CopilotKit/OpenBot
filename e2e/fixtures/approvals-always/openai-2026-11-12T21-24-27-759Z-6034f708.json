@@ -1,0 +1,49 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Order the tomato seeds from http://host.docker.internal:46600/shop/tomato for me, then reply with just the order number.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 3,
+        "hasToolResult": true
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_click",
+            "arguments": "{\"ref\":\"f2e13\",\"snapshotId\":4}",
+            "id": "call_Sgcgzh4IlVTygRu3PpIV2BUx"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 828,
+        "interChunkDelaysMs": [
+          21,
+          417,
+          7,
+          0,
+          4,
+          0,
+          0,
+          18,
+          5,
+          1,
+          3,
+          6,
+          5,
+          5,
+          22,
+          137,
+          5,
+          390
+        ],
+        "totalDurationMs": 1874
+      },
+      "metadata": {
+        "systemHash": "d034e2a7",
+        "toolsHash": "b3e8252a"
+      }
+    }
+  ]
+}

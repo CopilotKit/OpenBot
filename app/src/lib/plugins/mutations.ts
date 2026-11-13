@@ -1,7 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { client, tryClient } from "@/lib/client";
 import { desktopConsentQuery } from "@/lib/desktop/shell";
-import { pluginKeys } from "./queries";
+import { type PluginServer, pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
 
 /**
@@ -266,6 +266,76 @@ export function addCustomServerMutationOptions(queryClient: QueryClient) {
         body: input,
         fallback: FALLBACK,
       });
+    },
+    onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/** What a person types to add an MCP server from Connections. */
+export type AddServerByUrlInput = {
+  title: string;
+  url: string;
+  /** A key the server gave them, for a server that needs one. Only an admin may send it. */
+  token?: string;
+};
+
+/**
+ * What adding a server by its address came to. A refusal is an answer here, not a failure: the
+ * server needed a key, the admin's MCP allowlist doesn't include it, or it is already added. The
+ * screen draws each of them, so they come back as values rather than as a thrown error.
+ */
+export type AddServerByUrlOutcome =
+  | { added: true; server: PluginServer; signIn: boolean }
+  | {
+      added: false;
+      error: string;
+      /** `needs-key` or `not-approved`, when the refusal is one the screen can offer a step for. */
+      code?: "needs-key" | "not-approved";
+      /** Whether the person may approve the address themselves (an admin). */
+      canApprove?: boolean;
+      /** The server already added at this address, when that is why. */
+      serverId?: string;
+    };
+
+/**
+ * Add an MCP server by its address, from Connections. The server is asked how it is reached and
+ * the answer comes back on `signIn`: true means each person signs in to it next.
+ */
+export function addServerByUrlMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (
+      input: AddServerByUrlInput,
+    ): Promise<AddServerByUrlOutcome> => {
+      const response = await tryClient("/api/plugins/servers/by-url", {
+        method: "POST",
+        body: input,
+      });
+      const body = (await response.json().catch(() => null)) as {
+        server?: PluginServer;
+        signIn?: boolean;
+        error?: string;
+        code?: string;
+        canApprove?: boolean;
+        serverId?: string;
+      } | null;
+      if (response.ok && body?.server) {
+        return {
+          added: true,
+          server: body.server,
+          signIn: Boolean(body.signIn),
+        };
+      }
+      return {
+        added: false,
+        error: body?.error ?? "Couldn't add that server. Try again.",
+        ...(body?.code === "needs-key" || body?.code === "not-approved"
+          ? { code: body.code }
+          : {}),
+        ...(body?.canApprove ? { canApprove: true } : {}),
+        ...(typeof body?.serverId === "string"
+          ? { serverId: body.serverId }
+          : {}),
+      };
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

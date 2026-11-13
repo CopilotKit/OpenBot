@@ -1,0 +1,31 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "You choose which capabilities to load for the message below. You are not answering it.\n\nCapabilities available:\n- research-public-web: Research the public web. Search current public sources and write a cited brief.\n- find-a-document: Find a document. Search the connected document sources for a file and read what it says.\n- find-a-notion-page: Find a Notion page. Search Notion for a page and read what it says.\n- skill-creator: Write a skill. Interview me about a skill I want, then write it and save it as a new skill.\n- bot-creator: Make a Bot. Work out what a new Bot should be, then put it in front of you to create.\n\nMessage:\nOrder the tomato seeds from http://host.docker.internal:46600/shop/tomato for me, then reply with just the order number.\n\nReply with only JSON: {\"skills\": [\"<slug>\", ...]}.\nChoose every capability that might be needed, including ones you are only somewhat sure about.\nChoosing one that turns out to be unnecessary costs almost nothing. Failing to choose one that\nwas needed means the work cannot be done at all, because its tools will not be loaded. When in\ndoubt, include it. Use an empty list only when the message plainly needs none of them.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "{\"skills\":[\"research-public-web\"]}",
+        "usage": {
+          "prompt_tokens": 274,
+          "completion_tokens": 77,
+          "total_tokens": 351,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 57,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        }
+      }
+    }
+  ]
+}

@@ -38,6 +38,8 @@ const NativeResponse = globalThis.Response;
 const BOT = "terra-bot";
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,

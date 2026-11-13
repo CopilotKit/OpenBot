@@ -1,0 +1,81 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Great. Please also buy the lavender seeds at http://host.docker.internal:46600/shop/lavender and give me that order number too.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 6,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "I’m opening Fernhill Garden Supply’s lavender checkout to place the additional order and get its number.",
+        "toolCalls": [
+          {
+            "name": "computer_navigate",
+            "arguments": "{\"url\":\"http://host.docker.internal:46600/shop/lavender\"}",
+            "id": "call_3vDW4PRw3wEKMvjUNJ8jNhoG"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 1059,
+        "interChunkDelaysMs": [
+          34,
+          323,
+          151,
+          0,
+          3,
+          3,
+          2,
+          3,
+          3,
+          5,
+          0,
+          0,
+          0,
+          10,
+          3,
+          2,
+          7,
+          3,
+          28,
+          3,
+          3,
+          5,
+          1,
+          0,
+          0,
+          116,
+          4,
+          2,
+          2,
+          2,
+          6,
+          0,
+          2,
+          1,
+          0,
+          0,
+          0,
+          13,
+          0,
+          11,
+          6,
+          3,
+          4,
+          0,
+          0,
+          16,
+          119,
+          2,
+          197
+        ],
+        "totalDurationMs": 2157
+      },
+      "metadata": {
+        "systemHash": "67ebaa8c",
+        "toolsHash": "4a353f4d"
+      }
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import {
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
-import { noteWatched } from "@/lib/computers/activity";
+import { noteAnswered } from "@/lib/computers/activity";
 import { EASE_OUT } from "@/lib/motion";
 
 /**
@@ -80,7 +80,7 @@ export function InlineApproval({
     onSuccess: (_, choice) => {
       setAnswered(choice);
       // Answered here, so the step's entry in Activity says when, even on a page opened after it was asked.
-      if (toolCallId) noteWatched(toolCallId);
+      if (toolCallId) noteAnswered(toolCallId);
       return cache.invalidateQueries({ queryKey: ["approvals"] });
     },
   });

@@ -38,6 +38,9 @@ function agent(
   overrides: Partial<AgentProfile> & { id: string; name: string },
 ): AgentProfile {
   return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
     avatarSeed: overrides.id,
     builtIn: true,
     canManage: true,

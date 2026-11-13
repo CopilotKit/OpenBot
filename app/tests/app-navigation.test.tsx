@@ -270,15 +270,25 @@ test("Admin is in the list for admins only", () => {
   ]);
 });
 
-test("the personal edition has no Admin, and a feature list in Admin's place", () => {
+test("the personal edition has Admin, and the feature list beside it", () => {
   const personal = navigationFor("admin", "personal");
   expect(
     personal.some((item) => item.kind !== "dialog" && item.to === "/admin"),
-  ).toBe(false);
+  ).toBe(true);
   const dialogs = personal.filter((item) => item.kind === "dialog");
   expect(dialogs.map((item) => item.id)).toEqual(["team-features"]);
   // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
+    "bots",
+    "routines",
+    "skills",
+    "connections",
+    "admin",
+    "team-features",
+    "settings",
+  ]);
+  // Admin is still for an admin only, in this edition as in the other.
+  expect(navigationFor("user", "personal").map((item) => item.id)).toEqual([
     "bots",
     "routines",
     "skills",
@@ -291,11 +301,13 @@ test("the personal edition has no Admin, and a feature list in Admin's place", (
   expect(navigationFor("admin").map((item) => item.id)).toContain("admin");
 });
 
-test("in the personal edition the menu opens OpenBot for Business instead of Admin", async () => {
+test("in the personal edition the menu opens Admin, and OpenBot for Business beside it", async () => {
   const { view, user } = renderSidebar("admin", "personal");
   await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
   const menu = await view.findByRole("menu");
-  expect(within(menu).queryByRole("menuitem", { name: "Admin" })).toBeNull();
+  expect(
+    within(menu).getByRole("menuitem", { name: "Admin" }).getAttribute("href"),
+  ).toBe("/admin");
   const entry = within(menu).getByRole("menuitem", {
     name: "OpenBot for Business",
   });

@@ -1,0 +1,39 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Please buy the sunflower seeds at http://host.docker.internal:46600/shop/sunflower and give me the order number in one sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 2,
+        "hasToolResult": true
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_snapshot",
+            "arguments": "{}",
+            "id": "call_ohOxoXAi35J05eE4uYc4VoMP"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 1526,
+        "interChunkDelaysMs": [
+          20,
+          359,
+          289,
+          46,
+          22,
+          101,
+          10,
+          212
+        ],
+        "totalDurationMs": 2585
+      },
+      "metadata": {
+        "systemHash": "67ebaa8c",
+        "toolsHash": "4a353f4d"
+      }
+    }
+  ]
+}

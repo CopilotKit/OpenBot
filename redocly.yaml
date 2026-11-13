@@ -1,0 +1,52 @@
+# Lint for OpenBot's API spec. Run with `bun run api:lint`; CI runs the same command.
+#
+# Redocly's recommended rules, every warning raised to an error so a pull request cannot add one, plus
+# OpenBot's own conventions (api/redocly/rules.mjs), which are CopilotKit Intelligence's v2 conventions
+# so the two read as one API.
+apis:
+  openbot:
+    root: api/openapi.yaml
+
+plugins:
+  - ./api/redocly/rules.mjs
+
+extends:
+  - recommended-strict
+
+rules:
+  # OpenBot's conventions. See api/redocly/rules.mjs for what each one checks and why.
+  openbot/openapi-3-1: error
+  openbot/organization-scoped: error
+  openbot/no-intelligence-collision: error
+  openbot/problem-details-errors: error
+  openbot/idempotency-key-on-writes: error
+  openbot/cursor-paging: error
+
+  # Every operation names who may call it, has a stable camelCase id a generated client is named from,
+  # and says what it does.
+  security-defined: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-summary: error
+  operation-description: error
+  rule/operation-id-camel-case:
+    subject:
+      type: Operation
+      property: operationId
+    assertions:
+      casing: camelCase
+    message: operationId must be camelCase, like listBots.
+    severity: error
+  operation-4xx-response: error
+  operation-2xx-response: error
+  no-unused-components: error
+  no-invalid-media-type-examples: error
+  no-invalid-parameter-examples: error
+  component-name-unique: error
+  paths-kebab-case: error
+  no-ambiguous-paths: error
+  path-not-include-query: error
+  no-http-verbs-in-paths: error
+  tag-description: error
+  info-license: error
+  info-license-strict: error

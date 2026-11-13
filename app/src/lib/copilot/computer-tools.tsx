@@ -1,4 +1,5 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import {
@@ -570,8 +571,8 @@ export function ComputerTools() {
     name: "computer_request_secret",
     description:
       "Ask the person for a single value you must not be told: a password, a one-time code, a card number. " +
-      "Focus the field first with computer_click, then call this with the ref of that field and a " +
-      "short label for what you need. They type it into a masked box that goes straight to the page. " +
+      `${SECRET_FIELD_BY_REF} Add a short label for what you need. ` +
+      "They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
       "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
       "if the form needs submitting, do that yourself afterwards with computer_click.",
@@ -791,6 +792,11 @@ export function ComputerTools() {
       "directory is your workspace, so paths are relative to it and files you write here are the " +
       "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
       "truncated from the start, and a command that runs too long is stopped. " +
+      "Installed: Python 3 (`python3`) with pip, openpyxl, pandas, python-docx, python-pptx, " +
+      "matplotlib, pypdf, pdfplumber and reportlab; Node.js and Bun; curl, unzip and the usual " +
+      "Linux tools. There is no LibreOffice, so nothing here calculates spreadsheet formulas: " +
+      "write them with openpyxl and Excel or Google Sheets calculates them when the file is " +
+      "opened. `pip install <package>` adds a Python package. " +
       "For package installation, check `id -u` first. As root (0), use " +
       "`apt-get update && apt-get install -y <package>` directly; otherwise use " +
       "`sudo openbot-apt update && sudo openbot-apt install <package>`, which takes package " +

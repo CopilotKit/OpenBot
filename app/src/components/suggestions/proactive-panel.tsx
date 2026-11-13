@@ -69,7 +69,7 @@ const SUGGESTIONS_SHOWN = 3;
 
 /**
  * What the person's Bots found in their check-ins, each with why, its source and its Bot, to Start
- * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenMuse's Ideas); OpenBot's
+ * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenFuse's Ideas); OpenBot's
  * own pages list the same rows under Needs you.
  */
 export function SuggestionsInbox({
@@ -422,18 +422,20 @@ export function TurnOnResearchDialog({
 /**
  * Whether it is on, and when it runs next. Stated rather than captured, so it follows the query.
  * While check-ins are off for all the person's Bots, that is the answer, whatever this one says.
+ *
+ * When is said the way a routine's page says it ("in 6 days", "tomorrow"), never as a date and
+ * time. A time already past is one the scheduler hasn't picked up yet, so it is due, not "ago".
  */
 export function checkInStatus(
   setting: ProactiveSetting,
   blocked: string | null,
 ) {
-  return !setting.enabled
-    ? "Off"
-    : blocked
-      ? blocked
-      : setting.lastStatus === "running"
-        ? "Checking now"
-        : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
+  if (!setting.enabled) return "Off";
+  if (blocked) return blocked;
+  if (setting.lastStatus === "running") return "Checking now";
+  return Date.parse(setting.nextRunAt) <= Date.now()
+    ? "Next check due"
+    : `Next check ${relativeTime(setting.nextRunAt)}`;
 }
 
 /** When a check-in happened, as its line says it: "just now" for the moment after a Run now. */

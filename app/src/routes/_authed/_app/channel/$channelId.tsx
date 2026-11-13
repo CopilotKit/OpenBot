@@ -110,7 +110,6 @@ function RouteComponent() {
                 <ConversationActions
                   channelId={channelId}
                   leave={() => navigate({ to: "/" })}
-                  name={channel.data.name}
                 />
               ) : null
             }

@@ -1,92 +1,19 @@
 import { queryOptions } from "@tanstack/react-query";
+import { getBot, listBots } from "@/lib/api/generated/bots/bots";
+import type { Bot, BotVisibility } from "@/lib/api/generated/model";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import { client, tryClient } from "@/lib/client";
 
-export type AgentVisibility = "public" | "private";
+export type AgentVisibility = BotVisibility;
 
 /**
- * A coworker as the browser sees it.
+ * A coworker as the browser sees it: the `Bot` of api/openapi.yaml, generated from the spec.
  *
- * `canManage` and `systemOwned` are server-decided authorization facts; components render from the
- * returned flags rather than recomputing ownership rules.
+ * `canManage`, `mine`, `systemOwned` and the isolation fields are server-decided facts; components
+ * render from the returned flags rather than recomputing ownership rules. What each field means is
+ * written once, in the spec.
  */
-export type AgentProfile = {
-  id: string;
-  name: string;
-  title: string;
-  roleDescription: string;
-  avatarSeed: string;
-  visibility: AgentVisibility;
-  /** Where this coworker runs. Null for the Bot in the box. */
-  endpoint: string | null;
-  /**
-   * Whether it runs on this deployment's own Bot.
-   *
-   * Creating a coworker with no endpoint stores the deployment's managed address, so `endpoint`
-   * alone cannot tell "built-in" from "hosted by a person" — and the difference decides whether the
-   * Connection screen asks for a callback token. A built-in coworker calls tools back with the
-   * deployment's own credential and needs no setup at all.
-   */
-  builtIn: boolean;
-  /**
-   * Whether it runs inside OpenBot on OpenBot's own model. Only such a Bot gets the composer's model
-   * picker; a Bot on its own framework picks its own model. Absent reads as no.
-   */
-  runsOnOpenBotModel?: boolean;
-  /**
-   * Whether OpenBot gives it a key for its tools on every run, because OpenBot runs it: the harness
-   * picked in setup, or the Bot in the box. It needs no key of its own. Absent reads as no.
-   */
-  keyFromOpenBot?: boolean;
-  /** Whether a key is set for it. Never the key itself. */
-  hasAuth: boolean;
-  /**
-   * Whether this coworker holds a credential for calling tools back.
-   *
-   * A boolean, because the token is readable exactly once: in the response that issued it. The
-   * surface needs this only to decide between offering "generate" and "rotate".
-   */
-  hasCallbackToken: boolean;
-  hidden: boolean;
-  /** Whether the signed-in person pinned it to the top of their Bots list. Nobody else's. */
-  pinned: boolean;
-  /** A Team Bot an administrator assigned to this person; their Bots list always pins it. */
-  assignedToMe?: boolean;
-  systemOwned: boolean;
-  canManage: boolean;
-  /**
-   * Whether the signed-in person created this coworker.
-   *
-   * Separate from `canManage`, which is also true for administrators on everybody's coworkers. Split
-   * a roster on `canManage` and an administrator's "mine" fills up with other people's work.
-   */
-  mine: boolean;
-  /**
-   * Whether its owner gave it a computer of its own, rather than letting it share theirs.
-   *
-   * What was asked for. Whether it is happening is `isolationActive`: an administrator can withdraw
-   * "Isolated Bots" from the owner, and the Bot then runs on a shared computer with this still true,
-   * so that giving the switch back restores it.
-   */
-  isolated: boolean;
-  /** Whether its next run gets that computer of its own. Decided by the server from the owner's switch. */
-  isolationActive: boolean;
-  /**
-   * Why an isolated Bot is running on a shared computer instead, or null. `admin`: the owner no
-   * longer holds "Isolated Bots". `deployment`: this OpenBot cannot make a second computer.
-   */
-  isolationOffReason: "admin" | "deployment" | null;
-  /**
-   * What the starter Bot is told, kept apart from `roleDescription`, which says what it does and is
-   * what the conversation header shows. Only the starter has these. Every other Bot's instructions
-   * are its role description, and its profile leaves this out.
-   */
-  instructions?: string | null;
-  /**
-   * What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when
-   * OpenBot doesn't know, such as an agent connected by address with no framework named.
-   */
-  framework?: string;
-};
+export type AgentProfile = Bot;
 
 /**
  * Whether this is an agent shared with you: made public by somebody else, not your own.
@@ -157,17 +84,46 @@ export type HandoffGrants = {
   grantable: boolean;
 };
 
+/**
+ * Every Bot in the list, page by page.
+ *
+ * The API pages every list (`cursor`, `limit`, `nextCursor`), and every screen here wants the whole
+ * roster, so this reads to the end. A server that hands back the cursor it was given is a server
+ * that would never end the list, so a repeated cursor ends it too.
+ */
+async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
+  const bots: AgentProfile[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await listBots(
+      ORGANIZATION_ID,
+      {
+        ...(hidden ? { hidden } : {}),
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      },
+      { fallback: "Couldn't load your Bots." },
+    );
+    bots.push(...page.bots);
+    if (cursor) seen.add(cursor);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor && !seen.has(cursor));
+  return bots;
+}
+
 export function agentListQueryOptions(hidden = false) {
   return queryOptions({
     queryKey: agentKeys.list(hidden),
-    queryFn: (): Promise<AgentProfile[]> =>
-      client(`/api/agents${hidden ? "?hidden=true" : ""}`, "agents", {
-        fallback: "Couldn't load your Bots.",
-      }),
+    queryFn: (): Promise<AgentProfile[]> => everyBot(hidden),
   });
 }
 
-/** Package-defined IDs remain one path segment without changing their stored or cache identity. */
+/**
+ * The address of one Bot's routes the API spec does not cover yet (handoff, duplicate, hide, pin,
+ * callback token). Package-defined IDs remain one path segment without changing their stored or
+ * cache identity.
+ */
 export function agentApiPath(agentId: string): string {
   return `/api/agents/${encodeURIComponent(agentId)}`;
 }
@@ -175,10 +131,12 @@ export function agentApiPath(agentId: string): string {
 export function agentQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.detail(agentId),
-    queryFn: (): Promise<AgentProfile> =>
-      client(agentApiPath(agentId), "agent", {
-        fallback: "Couldn't load this Bot.",
-      }),
+    queryFn: async (): Promise<AgentProfile> =>
+      (
+        await getBot(ORGANIZATION_ID, agentId, {
+          fallback: "Couldn't load this Bot.",
+        })
+      ).bot,
   });
 }
 

@@ -8,7 +8,10 @@ import {
 } from "@ag-ui/client";
 import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
 import { NOT_DRAWN } from "@openbot/shared/tool-steps";
-import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
+import {
+  HeadlessToolsMiddleware,
+  RUN_ENDED_EARLY,
+} from "@openbot/toolkit/headless-tools";
 import { createTurnRunner, type RunnerLike } from "@openbot/toolkit/run-turn";
 import { Observable } from "rxjs";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
@@ -372,6 +375,34 @@ function computerHarness(deny: string[] = []) {
   return { gateway, audit, received };
 }
 
+/**
+ * A step the server takes says when it finished, in the answer the conversation keeps.
+ *
+ * After a person allows a step, the server takes it and carries the turn on with steps of its own,
+ * none of which pass through the browser. Activity beside the Bot's screen read the time of each step
+ * from the browser watching it, so every one of those rows had no time (found by the approvals
+ * journeys). The answer now carries it, read by `conversationActivity` in the app.
+ */
+test("a computer step the server runs answers with the time it finished", async () => {
+  const { gateway } = computerHarness();
+  const tools = headless.createHeadlessComputerTools({
+    gateway,
+    seat: botSeat("bot"),
+    actor: { id: "owner", userId: "owner" },
+  });
+  const click = tools.find((tool) => tool.definition.name === "computer_click");
+  const before = Date.now();
+  const answer = (await click?.execute(
+    { ref: "e1", snapshotId: 7 },
+    { toolCallId: "place-order", signal: new AbortController().signal },
+  )) as { ok?: boolean; finishedAt?: unknown };
+  expect(answer.ok).toBe(true);
+  expect(typeof answer.finishedAt).toBe("string");
+  const at = Date.parse(String(answer.finishedAt));
+  expect(at).toBeGreaterThanOrEqual(before);
+  expect(at).toBeLessThanOrEqual(Date.now());
+});
+
 test("scheduled computer actions carry the owner and routine into both policy and audit", async () => {
   const { gateway, received, audit } = computerHarness([
     'initiator.kind == "routine" && intent == "run_command"',
@@ -701,6 +732,168 @@ test("a Bot whose stream stops after it starts is told in words, not as a missin
   expect(events.at(-1)).toMatchObject({
     type: EventType.RUN_ERROR,
     message: "The Bot stopped before it finished answering. Try again.",
+  });
+});
+
+/*
+ * FOUND IN A DOGFOODING REPORT. A Bot on the Claude Agent SDK harness made two calls in one step:
+ * an app tool this side runs, and `ToolSearch`, Claude Code's own search, which the harness runs
+ * itself. Claude Code ran the app tool first and the harness ended its run for its result, with
+ * `ToolSearch` still to run. This side ran the app tool, then took the search for a call the browser
+ * would answer and ended the turn: no answer, no error, and the harness left waiting.
+ */
+function oneStep(
+  calls: { id: string; name: string; args?: string }[],
+): BaseEvent[] {
+  return calls.flatMap(({ id, name, args = "{}" }) => [
+    {
+      type: EventType.TOOL_CALL_START,
+      toolCallId: id,
+      toolCallName: name,
+      parentMessageId: "step-1",
+    },
+    { type: EventType.TOOL_CALL_ARGS, toolCallId: id, delta: args },
+    { type: EventType.TOOL_CALL_END, toolCallId: id },
+  ]);
+}
+
+const slackFetch = {
+  definition: {
+    name: "SLACK_FETCH_MESSAGE_THREAD",
+    description: "Fetch a message thread from a conversation",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+function runThrough(
+  middleware: HeadlessToolsMiddleware,
+  agent: AbstractAgent,
+  tools: RunAgentInput["tools"] = [],
+) {
+  const events: BaseEvent[] = [];
+  return new Promise<BaseEvent[]>((resolve, reject) =>
+    middleware
+      .run(
+        {
+          threadId: "thread",
+          runId: "run",
+          messages: [
+            { id: "ask", role: "user", content: "Save that thread to Drive." },
+          ],
+          state: {},
+          context: [],
+          forwardedProps: {},
+          tools,
+        },
+        agent,
+      )
+      .subscribe({
+        next: (event) => events.push(event),
+        error: reject,
+        complete: () => resolve(events),
+      }),
+  );
+}
+
+test("a step that also searches the harness's own tools goes back to the harness with this side's results", async () => {
+  const remote = remoteTurn((input, index) =>
+    lifecycle(
+      input,
+      index === 0
+        ? oneStep([
+            { id: "fetch", name: slackFetch.definition.name },
+            { id: "search", name: "ToolSearch", args: '{"query":"drive"}' },
+          ])
+        : [
+            {
+              type: EventType.TOOL_CALL_RESULT,
+              toolCallId: "search",
+              messageId: "search-result",
+              role: "tool",
+              content: "GOOGLEDRIVE_UPLOAD_FILE",
+            },
+            ...reply("Saved the thread to Drive."),
+          ],
+    ),
+  );
+  let executions = 0;
+  const events = await runThrough(
+    new HeadlessToolsMiddleware([
+      {
+        ...slackFetch,
+        execute: async () => {
+          executions += 1;
+          return "The thread.";
+        },
+      },
+    ]),
+    remote.agent,
+  );
+  expect(executions).toBe(1);
+  expect(remote.requests).toHaveLength(2);
+  expect(remote.requests[1]?.messages).toContainEqual(
+    expect.objectContaining({
+      role: "tool",
+      toolCallId: "fetch",
+      content: "The thread.",
+    }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      delta: "Saved the thread to Drive.",
+    }),
+  );
+  expect(events.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+});
+
+test("a step's call the caller offers still ends the run for the caller, beside a harness search", async () => {
+  const remote = remoteTurn((input) =>
+    lifecycle(
+      input,
+      oneStep([
+        { id: "fetch", name: slackFetch.definition.name },
+        { id: "navigate", name: "computer_navigate" },
+        { id: "search", name: "ToolSearch" },
+      ]),
+    ),
+  );
+  const events = await runThrough(
+    new HeadlessToolsMiddleware([
+      { ...slackFetch, execute: async () => "The thread." },
+    ]),
+    remote.agent,
+    [
+      {
+        name: "computer_navigate",
+        description: "Open a page in the Bot's browser",
+        parameters: { type: "object", properties: {} },
+      },
+    ],
+  );
+  expect(remote.requests).toHaveLength(1);
+  expect(
+    events
+      .filter((event) => event.type === EventType.TOOL_CALL_RESULT)
+      .map((event) => (event as { toolCallId?: string }).toolCallId),
+  ).toEqual(["fetch"]);
+  expect(events.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+});
+
+test("a run that ends on a harness's own call, with nothing left for anyone to answer, says so", async () => {
+  const remote = remoteTurn((input) =>
+    lifecycle(input, oneStep([{ id: "search", name: "ToolSearch" }])),
+  );
+  const events = await runThrough(
+    new HeadlessToolsMiddleware([
+      { ...slackFetch, execute: async () => "The thread." },
+    ]),
+    remote.agent,
+  );
+  expect(remote.requests).toHaveLength(1);
+  expect(events.at(-1)).toMatchObject({
+    type: EventType.RUN_ERROR,
+    message: RUN_ENDED_EARLY,
   });
 });
 

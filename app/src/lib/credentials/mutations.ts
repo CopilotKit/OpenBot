@@ -5,7 +5,8 @@ import { credentialKeys } from "./queries";
 export type CredentialInput = {
   kind: "model" | "connector";
   provider: string;
-  keyId: string;
+  /** Left out of a model key, which the server files under the name the Bots read. */
+  keyId?: string;
   metadata: Record<string, unknown>;
   plaintext: string;
 };

@@ -292,12 +292,15 @@ test("the Browse apps tile and the directory it opens speak to you in personal, 
     expect(personal).not.toMatch(TEAM_WORDS);
     expect(personal).not.toMatch(/composio|arcade|nobody here/i);
   }
-  expect(moreAppsRow("composio", true, "personal").description).toBe(
-    "A few hundred more apps you can connect.",
-  );
-  expect(moreAppsRow("composio", true).description).toBe(
-    "A few hundred apps. Each person connects their own account.",
-  );
+  // No count: the directory is the vendor's and grows, so a number here goes stale.
+  for (const provider of ["composio", "arcade"] as const) {
+    expect(moreAppsRow(provider, true, "personal").description).toBe(
+      "More apps you can connect.",
+    );
+    expect(moreAppsRow(provider, true).description).toBe(
+      "Apps nobody here has reviewed. Each person connects their own account.",
+    );
+  }
   expect(directoryDescriptions()).toEqual({
     page: "Add an app to make its tools available to Bots. Each person still connects their own account before a Bot reads anything.",
     search: "Search by name. Nobody here has reviewed these apps.",

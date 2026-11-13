@@ -1,0 +1,82 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Open http://host.docker.internal:46600/members, fill in my username robin.okafor, then hand me the browser so I can type my password myself. After I hand it back, tell me my seed allowance in one plain sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 0,
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "I’m opening the Fernhill Garden Supply members’ area and will enter your username before handing over for your password.",
+        "toolCalls": [
+          {
+            "name": "computer_navigate",
+            "arguments": "{\"url\":\"http://host.docker.internal:46600/members\"}",
+            "id": "call_A5SZ23mruV2sf4bNfkL7brHH"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 772,
+        "interChunkDelaysMs": [
+          19,
+          1335,
+          177,
+          3,
+          0,
+          0,
+          0,
+          17,
+          2,
+          38,
+          0,
+          0,
+          28,
+          5,
+          0,
+          29,
+          15,
+          6,
+          2,
+          1,
+          3,
+          0,
+          6,
+          40,
+          3,
+          1,
+          4,
+          0,
+          132,
+          5,
+          2,
+          4,
+          5,
+          0,
+          0,
+          0,
+          0,
+          8,
+          13,
+          4,
+          4,
+          3,
+          5,
+          2,
+          0,
+          4,
+          8,
+          114,
+          0,
+          183
+        ],
+        "totalDurationMs": 3002
+      },
+      "metadata": {
+        "systemHash": "1499f2d6",
+        "toolsHash": "6d7140c9"
+      }
+    }
+  ]
+}

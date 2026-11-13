@@ -24,7 +24,8 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
  * "set" because the environment or the vault has one, and nothing here reads, masks, measures or
  * echoes what it is. The two outbound reads, Intelligence's entitlement and one `GET /v1/models/<id>`
  * at the provider, are the ones the server already makes at boot; "Check again" repeats them, at
- * most once every {@link RECHECK_INTERVAL_MS}. A plain read repeats them too, under the same limit,
+ * most once every {@link RECHECK_INTERVAL_MS} for the same key, unless the last round couldn't get
+ * an answer. A plain read repeats them too, under the same limit,
  * once an answer could not be had or is older than {@link ANSWER_KEPT_MS}, for the read after it. A
  * definite refusal is not asked again by a read: asking would hear the same refusal, and every
  * signed-in person's read would start a round at Intelligence, the provider and the computers.
@@ -43,7 +44,10 @@ import type { RuntimeEntitlementResponse } from "../self-host-banner";
 const DOCS = "https://github.com/CopilotKit/openbot/blob/main/docs";
 const QUICK_START = "https://github.com/CopilotKit/openbot#quick-start";
 
-/** How long a "Check again" is answered from the last one, so a held button is not a flood. */
+/**
+ * How long a "Check again" about the same key is answered from the last one, so a held button is
+ * not a flood. A key added since, or a last round that couldn't get an answer, is asked at once.
+ */
 export const RECHECK_INTERVAL_MS = 10_000;
 
 /** How long a working answer from another service is served before a read asks again. */
@@ -366,13 +370,15 @@ function modelRow(
   personal: boolean,
 ) {
   const provider = PROVIDER_NAME[model.provider];
+  // The Vault's Add key form itself, which starts on the provider the Bots run on and files the
+  // key under the name they read. The Vault's list only offered a form to fill in by hand.
   const fix: SetupFix = {
     kind: "env",
     names: [KEY_NAME[model.provider]],
     docsUrl: QUICK_START,
     page: personal
-      ? { label: "Vault", path: "/settings/vault" }
-      : { label: "Vault", path: "/admin/credentials" },
+      ? { label: "Vault", path: "/settings/vault/new" }
+      : { label: "Vault", path: "/admin/credentials/new" },
   };
   const readyDetail = `Lets ${product} answer you.`;
   if (model.source === null)
@@ -531,7 +537,11 @@ export type SetupSources = {
    * background, when one of those answers failed or is older than {@link ANSWER_KEPT_MS}.
    */
   facts: () => Promise<SetupFacts>;
-  /** Ask Intelligence, the model provider and the computers again. Resolves when all have answered. */
+  /**
+   * Ask Intelligence, the model provider and the computers again: Check again. Resolves when all
+   * have answered. Inside {@link RECHECK_INTERVAL_MS} it shares the last ask, unless that one asked
+   * about another key or couldn't get an answer.
+   */
   recheck: () => Promise<void>;
 };
 
@@ -628,36 +638,71 @@ export function createSetupSources(input: {
     ),
     computerStatus: askComputer(),
   };
-  let lastRecheck: { at: number; done: Promise<void> } | null = null;
+  /*
+   * The last round asked for: when, the key it asked the provider about, and whether everything it
+   * asked came back with an answer (null while it is still being asked).
+   */
+  let lastRecheck: {
+    at: number;
+    stamp: string | null;
+    done: Promise<void>;
+    answered: boolean | null;
+  } | null = null;
 
-  const recheck = () => {
+  /*
+   * A round shared with the last one inside RECHECK_INTERVAL_MS, so a held button and every
+   * signed-in person's reads are one ask. Never shared when it asked about another key: a key added
+   * a moment ago is a new question, and "Check again to ask OpenAI" has to ask about it. And a press
+   * is never answered from a round that couldn't get an answer, because the row it left tells the
+   * person to press it. A read still waits out the interval then, or every read would start a round.
+   */
+  const ask = async (by: "read" | "press") => {
     const now = Date.now();
-    if (lastRecheck && now - lastRecheck.at < RECHECK_INTERVAL_MS)
-      return lastRecheck.done;
+    const key = await modelKeyOf(keyFacts);
+    const last = lastRecheck;
+    if (
+      last &&
+      now - last.at < RECHECK_INTERVAL_MS &&
+      last.stamp === key.stamp &&
+      (by === "read" || last.answered !== false)
+    )
+      return last.done;
     const check = input.model.check;
     const round: Round = {
       at: now,
       intelligence: askIntelligence(),
       computerStatus: askComputer(),
       modelCheck: check
-        ? (async () => {
-            const { stamp } = await modelKeyOf(keyFacts);
-            return stamp === null
+        ? (async () =>
+            key.stamp === null
               ? undefined
-              : { outcome: await check(), stamp };
-          })().catch(() => undefined)
+              : { outcome: await check(), stamp: key.stamp })().catch(
+            () => undefined,
+          )
         : kept.modelCheck,
     };
-    const done = Promise.all([
-      round.intelligence,
-      round.modelCheck,
-      round.computerStatus,
-    ]).then(() => {
-      // A slow round can finish after a later one: the later answer stays.
-      if (round.at >= kept.at) kept = round;
+    const asked: NonNullable<typeof lastRecheck> = {
+      at: now,
+      stamp: key.stamp,
+      answered: null,
+      done: Promise.all([
+        round.intelligence,
+        round.modelCheck,
+        round.computerStatus,
+      ]).then(([intelligence, modelCheck]) => {
+        // A slow round can finish after a later one: the later answer stays.
+        if (round.at >= kept.at) kept = round;
+        asked.answered = !unanswered(intelligence, {
+          source: key.source,
+          verdict: modelVerdict(modelCheck, key.stamp),
+        });
+      }),
+    };
+    asked.done.catch(() => {
+      asked.answered = false;
     });
-    lastRecheck = { at: now, done };
-    return done;
+    lastRecheck = asked;
+    return asked.done;
   };
 
   return {
@@ -685,14 +730,17 @@ export function createSetupSources(input: {
         apps: input.apps,
         chat: input.chat,
       };
-      if (Date.now() - round.at >= ANSWER_KEPT_MS || unanswered(facts)) {
+      if (
+        Date.now() - round.at >= ANSWER_KEPT_MS ||
+        unanswered(facts.intelligence, facts.model)
+      ) {
         // For the next read, so this one never waits on it. A round that throws keeps the answers
         // it would have replaced, and Check again reports it.
-        recheck().catch(() => {});
+        ask("read").catch(() => {});
       }
       return facts;
     },
-    recheck,
+    recheck: () => ask("press"),
   };
 }
 
@@ -703,12 +751,14 @@ export function createSetupSources(input: {
  * the provider refusing the key or the model, and a computer refusing its policy are not changed by
  * asking again, and asking would start a round on every signed-in person's read.
  */
-function unanswered(facts: SetupFacts): boolean {
-  const { model } = facts;
+function unanswered(
+  intelligence: IntelligenceFact,
+  model: Pick<SetupFacts["model"], "source" | "verdict">,
+): boolean {
   const keyInHand =
     model.source === "credential" || model.source === "environment";
   return (
-    facts.intelligence.state === "unreachable" ||
+    intelligence.state === "unreachable" ||
     (keyInHand && model.verdict === "not_checked")
   );
 }

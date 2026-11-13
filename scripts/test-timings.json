@@ -442,7 +442,7 @@
     "app/tests/skins-openduet-model.test.tsx": 9,
     "app/tests/skins-openduet-motion.test.ts": 1,
     "app/tests/skins-openduet-orb.test.tsx": 1929,
-    "app/tests/skins-openmuse.test.tsx": 1275,
+    "app/tests/skins-openfuse.test.tsx": 1275,
     "app/tests/skins.test.ts": 3,
     "app/tests/skipped-tools-notice.test.tsx": 6,
     "app/tests/skipped-tools-pages.test.tsx": 38,

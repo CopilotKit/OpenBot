@@ -6,13 +6,13 @@ import {
   cancelLocalEval,
   chatGate,
   connectLocalEval,
+  heldForRoom,
   type LocalConnection,
   LocalEvalError,
   type LocalFailure,
   type LocalReason,
   type LocalReport,
   type LocalTerms,
-  heldForRoom,
   localEvalDownload,
   localEvalRoom,
   localEvalSteps,
@@ -20,6 +20,7 @@ import {
   localEvalUpdateStep,
   onInstalledRelease,
   runLocalEval,
+  type Shortfall,
   setUpLocalEval,
   signInToCopilotKit,
   updateStepSaid,
@@ -29,7 +30,9 @@ import {
   engineTooSmallSaid,
   localReadiness,
   onInstalledReleaseSaid,
+  podmanTooSmallSaid,
 } from "./localReadiness";
+import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
   asProblem,
   Failure,
@@ -140,7 +143,15 @@ type State = {
   running: boolean;
   /** When the current row began, so its elapsed time survives a change of screen. */
   since: number | null;
-  blocked: { said: string; reason: LocalReason | null } | null;
+  /**
+   * Why the sequence stopped. `shortfall` with `resources-short`: what the CLI found short, so the
+   * window can offer to make a Podman machine bigger (`PodmanTooSmall`).
+   */
+  blocked: {
+    said: string;
+    reason: LocalReason | null;
+    shortfall?: Shortfall;
+  } | null;
   problem: Problem | null;
   /**
    * The agreement version setup was given and still answered "acceptance required" to. The CLI
@@ -217,10 +228,15 @@ export const RELEASE_SAID =
  * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
  * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
  * and tries again.
+ *
+ * `runsWhatItHad` false when the update left the back end not working (paused services): then it
+ * does not run the version it had, and Retry is what tries the update again.
  */
-function updateFailedSaid(step: string | null): string {
+function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
   const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
-  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+  return runsWhatItHad
+    ? `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
+    : `OpenBot couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
 }
 
 export type LocalSequence = State & {
@@ -599,6 +615,8 @@ export function useLocalSequence({
     let updatedIntelligence = false;
     // The update ran on a stack found stopped. It starts the cluster itself, so the release the
     // stack had comes back up after a failed one, and is waited on like a stack that is starting.
+    // Not one found degraded: its cluster was already up, and nothing on it comes back by itself
+    // after the update fails again, so waiting would only run out the clock.
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
@@ -627,16 +645,29 @@ export function useLocalSequence({
        * usual, and the update runs on the next answer, when it reports ready.
        *
        * AN UPDATE THAT DID NOT FINISH is tried again the same way, on a stack ready on the release
-       * it had. On a stopped one too: there the CLI refuses `start` while the update is on record,
-       * and `local update` is the only call that starts the stack.
+       * it had. On a stopped or degraded one too: the CLI refuses `start` while the update is on
+       * record, so `local update` is the only call that gets the stack going again. On a stopped
+       * stack it starts the cluster itself. A degraded one is what an update leaves when it fails
+       * after pausing the services (`update-quiesce`): running, its checks failing, and nothing but
+       * the update will bring them back. Found in a dogfooding report, rc.10 to rc.11 stopped at
+       * `dependencies-install`, where every Retry asked for status once and gave up. A stack still
+       * on the release it had (`kept`) is one of these degraded ones.
+       *
+       * Once per wait (`updatedIntelligence`), so an update that keeps failing stops at its row
+       * rather than looping; Retry is the next attempt.
+       *
+       * Not on a degraded stack whose disk OpenBot found short, or still recovering from being
+       * short (`shortfall`): the update downloads the new release's images and fails there again,
+       * after up to ten minutes. The row says to free space, and the Retry after that updates.
        */
       if (
         found.updateTo &&
         found.stack &&
         !updatedIntelligence &&
         (found.readiness === "ready" ||
-          kept !== null ||
-          (found.readiness === "stopped" && unfinished !== null))
+          (unfinished !== null &&
+            (found.readiness === "stopped" ||
+              (found.readiness === "degraded" && !found.shortfall))))
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
@@ -649,10 +680,28 @@ export function useLocalSequence({
       }
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
-      if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedStep) });
+      // A stack the failed update left degraded, its checks failing, does not run the version it
+      // had: its services stay paused until an update finishes. Not one it woke, which comes back
+      // up on that version.
+      const leftNotWorking =
+        failedTo !== null &&
+        !woken &&
+        found.readiness === "degraded" &&
+        found.checksPassed !== true;
+      if (failedTo && (failedStep || leftNotWorking)) {
+        update({
+          updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
+        });
       }
-      failedTo = null;
+      /*
+       * Kept while the back end still says `starting`, and with the update on record: whether it
+       * runs the version it had is known only once it settles. Found on Windows: an update stopped
+       * after pausing the services, the first answer after it said `starting` and the next
+       * `degraded`, and the row kept "so it runs the version it had" over a back end that did not.
+       */
+      if (!(found.readiness === "starting" && unfinished !== null)) {
+        failedTo = null;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
@@ -715,12 +764,22 @@ export function useLocalSequence({
     });
     const { root } = latest.current;
     let id = latest.current.stack;
-    const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
+    const stop = (reason?: {
+      said: string;
+      reason?: LocalReason | null;
+      shortfall?: Shortfall;
+    }) => {
       if (generation.current !== token) return;
       update({
         running: false,
         ...(reason
-          ? { blocked: { said: reason.said, reason: reason.reason ?? null } }
+          ? {
+              blocked: {
+                said: reason.said,
+                reason: reason.reason ?? null,
+                ...(reason.shortfall ? { shortfall: reason.shortfall } : {}),
+              },
+            }
           : {}),
       });
     };
@@ -795,7 +854,14 @@ export function useLocalSequence({
             report.reason === "eula-acceptance-required" ? carried : null,
         });
         if (report.outcome !== "completed") {
-          return stop({ said: said(report), reason: report.reason });
+          return stop({
+            said: said(report),
+            reason: report.reason,
+            shortfall:
+              report.reason === "resources-short"
+                ? report.shortfall
+                : undefined,
+          });
         }
         if (!report.stack) return stop({ said: said("missing-stack") });
         accepted.current = null;
@@ -1007,6 +1073,8 @@ export function LocalIntelligence({
   open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
+  const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   // While it runs, one journey says what is happening and how far along the whole Start is. The
   // rows then say which part is done and which is left, and nothing twice.
   // Paused for room: its row says so, with Try again, and no time left counts down.
@@ -1027,7 +1095,14 @@ export function LocalIntelligence({
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : sequence.steps;
+      : plan && tooSmall
+        ? // What happened on the row; what to do in the card under it.
+          sequence.steps.map((row) =>
+            row.ok
+              ? row
+              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+          )
+        : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -1043,33 +1118,45 @@ export function LocalIntelligence({
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && <Failure problem={problem} />}
-      <div className="row">
-        {running && at !== "start" && (
-          <button type="button" className="quiet" onClick={sequence.cancel}>
-            Cancel
-          </button>
-        )}
-        {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
+      {plan && tooSmall && !waitingOn && (
+        <PodmanTooSmall
+          key={plan.machine}
+          plan={plan}
+          shortfall={tooSmall}
+          onRetry={sequence.retry}
+        />
+      )}
+      {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
+      {!(plan && tooSmall) && (
+        <div className="row">
+          {running && at !== "start" && (
+            <button type="button" className="quiet" onClick={sequence.cancel}>
+              Cancel
+            </button>
+          )}
+          {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
             starting, which can't be stopped partway. Said where Cancel was, in its height: on
             Windows G Cancel went at step 4 and the card shrank under the rows. */}
-        {running && at === "start" && (
-          <p className="cannot-cancel">
-            {releasing || releaseDue
-              ? "You can't cancel this last step. Stopping it partway could leave the update half done."
-              : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
-          </p>
-        )}
-        {stopped && !waitingOn && !backendLost(sequence) && (
-          <button type="button" onClick={sequence.retry}>
-            Retry
-          </button>
-        )}
-        {offerStart && !running && at === null && (
-          <button type="button" onClick={sequence.start}>
-            Start OpenBot
-          </button>
-        )}
-      </div>
+          {running && at === "start" && (
+            <p className="cannot-cancel">
+              {releasing || releaseDue
+                ? "You can't cancel this last step. Stopping it partway could leave the update half done."
+                : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
+            </p>
+          )}
+          {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
+          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
+            <button type="button" onClick={sequence.retry}>
+              Retry
+            </button>
+          )}
+          {offerStart && !running && at === null && (
+            <button type="button" onClick={sequence.start}>
+              Start OpenBot
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1089,6 +1176,8 @@ export function LocalStatus({
   /** Its download's row too. Off where the background install's row says it already. */
   download?: boolean;
 }) {
+  const tooSmall = sequence.stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   if (!sequence.stopped) {
     // The rest of OpenBot downloads behind the screen in front: say how far, so the wait is visible.
     if (!download || !sequence.running || !sequence.download) return null;
@@ -1134,13 +1223,25 @@ export function LocalStatus({
           <p>
             {openBot
               ? "Everything else is ready. Retry starts OpenBot again."
-              : (sequence.blocked?.said ?? sequence.problem?.said)}
+              : plan && tooSmall
+                ? podmanTooSmallSaid(tooSmall, plan)
+                : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
-          <div className="row">
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          </div>
+          {plan && tooSmall && (
+            <PodmanTooSmall
+              key={plan.machine}
+              plan={plan}
+              shortfall={tooSmall}
+              onRetry={sequence.retry}
+            />
+          )}
+          {!plan && (
+            <div className="row">
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            </div>
+          )}
           <TroubleshootingLogs
             problem={
               sequence.problem ??

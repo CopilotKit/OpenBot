@@ -37,7 +37,7 @@ import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -137,9 +137,12 @@ export function MenuSheet({
         {/*
          * In OpenBot Desktop on macOS the window's buttons sit over the drawer's top-left corner,
          * about 21–37px down (`data-desktop-titlebar`, macOS only), so the header then starts 48px
-         * down, below them, as onboarding's does.
+         * down, below them, as onboarding's does, and it moves the window (`data-desktop-drag`).
          */}
-        <SheetHeader className="px-5 pt-5 pb-3 in-data-[desktop-titlebar=overlay]:pt-12">
+        <SheetHeader
+          className="px-5 pt-5 pb-3 in-data-[desktop-titlebar=overlay]:pt-12"
+          data-desktop-drag="deep"
+        >
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
             <BrandName>{appConfig.brand.productName}</BrandName>
           </SheetTitle>
@@ -471,9 +474,9 @@ function ConversationRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={isOpen ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );

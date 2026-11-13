@@ -69,6 +69,29 @@ function isOwnBrowser(computer: ComputerProfile): boolean {
 }
 
 /**
+ * What a confirmation is about, kept while its dialog closes.
+ *
+ * The dialog fades out after Cancel or Reset it, and its words are drawn on every frame of that.
+ * Cleared on close, the row went with it, and the title fell back to its words for no row: "Reset the
+ * computer?" flashed up as the dialog left after "Reset Fernhill Guide's browser?" was answered. So
+ * closing only closes, and what the dialog names is replaced the next time it asks.
+ */
+function useConfirmation() {
+  const [asking, setAsking] = useState<{
+    about: ComputerProfile;
+    open: boolean;
+  } | null>(null);
+  return {
+    /** The row asked about, still named while the dialog closes. */
+    about: asking?.about ?? null,
+    open: asking?.open === true,
+    ask: (about: ComputerProfile) => setAsking({ about, open: true }),
+    close: () =>
+      setAsking((current) => (current ? { ...current, open: false } : null)),
+  };
+}
+
+/**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
  * controls for these). The personal edition's Settings renders this page with none.
  *
@@ -97,10 +120,11 @@ export function ComputersPage({
   /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profiles, so it requires confirmation. */
-  const [confirming, setConfirming] = useState<ComputerProfile | null>(null);
+  const reset = useConfirmation();
+  const confirming = reset.about;
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
-  const [confirmingUpdate, setConfirmingUpdate] =
-    useState<ComputerProfile | null>(null);
+  const update = useConfirmation();
+  const confirmingUpdate = update.about;
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
   /*
@@ -156,8 +180,8 @@ export function ComputersPage({
     action: "stop" | "reset" | "update",
   ) => {
     setBusy(rowId(computer));
-    setConfirming(null);
-    setConfirmingUpdate(null);
+    reset.close();
+    update.close();
     setState.mutate(
       {
         action,
@@ -347,7 +371,7 @@ export function ComputersPage({
                       {computer.updateAvailable ? (
                         <Button
                           disabled={busy === rowId(computer)}
-                          onClick={() => setConfirmingUpdate(computer)}
+                          onClick={() => update.ask(computer)}
                           size="sm"
                           variant="outline"
                         >
@@ -377,7 +401,7 @@ export function ComputersPage({
                       ) : (
                         <Button
                           disabled={busy === rowId(computer)}
-                          onClick={() => setConfirming(computer)}
+                          onClick={() => reset.ask(computer)}
                           size="sm"
                           variant="outline"
                         >
@@ -402,9 +426,9 @@ export function ComputersPage({
        */}
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirming(null);
+          if (!open) reset.close();
         }}
-        open={confirming !== null}
+        open={reset.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -425,22 +449,20 @@ export function ComputersPage({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirming(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={reset.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
-              disabled={confirming !== null && busy === rowId(confirming)}
+              disabled={
+                reset.open && confirming !== null && busy === rowId(confirming)
+              }
               onClick={() => {
                 if (confirming) void run(confirming, "reset");
               }}
               size="sm"
               variant="destructive"
             >
-              {confirming !== null && busy === rowId(confirming)
+              {reset.open && confirming !== null && busy === rowId(confirming)
                 ? "Resetting…"
                 : "Reset it"}
             </Button>
@@ -456,9 +478,9 @@ export function ComputersPage({
 
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirmingUpdate(null);
+          if (!open) update.close();
         }}
-        open={confirmingUpdate !== null}
+        open={update.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -472,23 +494,23 @@ export function ComputersPage({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirmingUpdate(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={update.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
               disabled={
-                confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+                update.open &&
+                confirmingUpdate !== null &&
+                busy === rowId(confirmingUpdate)
               }
               onClick={() => {
                 if (confirmingUpdate) void run(confirmingUpdate, "update");
               }}
               size="sm"
             >
-              {confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+              {update.open &&
+              confirmingUpdate !== null &&
+              busy === rowId(confirmingUpdate)
                 ? "Updating…"
                 : "Update it"}
             </Button>

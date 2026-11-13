@@ -618,6 +618,15 @@ export function ChannelChat({
    */
   const [restoring, setRestoring] = useState(seed === null);
   /**
+   * The join is replaying the thread's history, and has not found a turn still going in it.
+   *
+   * `connectAgent` holds `agent.isRunning` true for the whole replay whether or not anything is
+   * running, so a Stop drawn from it showed for as long as a conversation took to load, with no run
+   * for it to reach. Cleared when the join turns out to carry the Bot's answer (`onAnswering`), which
+   * is a run Stop does reach, and when the join is over.
+   */
+  const [replaying, setReplaying] = useState(false);
+  /**
    * How many stored turns this app could not read.
    *
    * Held rather than derived, because the transcript is the running agent's once history is handed
@@ -650,6 +659,7 @@ export function ChannelChat({
     const version = ++historyReadVersion.current;
     // Before the connect: it is handed the subscribers the agent has when it starts.
     const lastRun = followLastRun(agent);
+    setReplaying(true);
 
     void (async () => {
       let joined: "connected" | "deadline" = "deadline";
@@ -672,7 +682,10 @@ export function ChannelChat({
            */
           answering: () => lastRun.running() || rosterSaysWorking(channel.id),
           onAnswering: () => {
-            if (current) setRestoring(false);
+            if (current) {
+              setRestoring(false);
+              setReplaying(false);
+            }
           },
         });
       } catch {
@@ -683,6 +696,7 @@ export function ChannelChat({
          */
       } finally {
         lastRun.stop();
+        if (current) setReplaying(false);
         openJoined.current();
       }
       /*
@@ -1851,8 +1865,10 @@ export function ChannelChat({
             /*
              * Not while the server carries the conversation on after an approval: this tab has no
              * run of its own for Stop to reach then, and a Stop that does nothing is worse than none.
+             * Nor while the join replays history (`replaying`): the agent reports itself running then
+             * with nothing running.
              */
-            stoppable={agent.isRunning || runsInFlight > 0}
+            stoppable={(agent.isRunning && !replaying) || runsInFlight > 0}
             /*
              * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
              * be. A turn that ends without an answer leaves a gap exactly where the reply was going to

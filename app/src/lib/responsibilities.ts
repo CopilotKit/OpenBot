@@ -339,8 +339,15 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
  * The goal's own runs and triggers stop existing, so they are removed rather than refetched: a
  * refetch would ask for a goal that is gone and answer 404.
  */
+/** Every goal delete, so the goal's page can tell it was deleted from there. */
+export const deleteResponsibilityMutationKey = [
+  ...responsibilityKeys.all,
+  "delete",
+] as const;
+
 export function deleteResponsibilityMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
+    mutationKey: deleteResponsibilityMutationKey,
     mutationFn: (id: string) => deleteResponsibility(id),
     onSuccess: (_result, id) => {
       queryClient.removeQueries({ queryKey: responsibilityKeys.runs(id) });

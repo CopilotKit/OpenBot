@@ -44,6 +44,9 @@ const INSTRUCTION =
   "Reply as a tally card. The first line must be exactly TALLY CARD KITTIWAKE-9.";
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,
