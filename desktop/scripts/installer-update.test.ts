@@ -384,6 +384,37 @@ test("the WebView2 Runtime installs under a plain line with the bar moving", () 
     "!insertmacro OPENBOT_PROGRESS_MOVING 0",
   ]);
   expect(update[0]).toBe('DetailPrint "$(installingWebview2)"');
+
+  // Box H: NSISdl's own box said "Downloading MicrosoftEdgeWebview2Setup.exe" and "Connecting ..."
+  // over the page. The bootstrapper comes quietly, from the address Tauri's own line uses, under
+  // the plain line with the bar moving, and Tauri's own lines after it are not reached.
+  const download = code(
+    between(
+      template(),
+      '!if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"',
+      "!endif",
+    ),
+  );
+  const quiet = download.findIndex((line) =>
+    line.startsWith("NSISdl::download_quiet "),
+  );
+  const tauris = download.findIndex((line) =>
+    line.startsWith("NSISdl::download "),
+  );
+  expect(download.slice(quiet - 3, quiet + 3)).toEqual([
+    'Delete "$TEMP\\MicrosoftEdgeWebview2Setup.exe"',
+    'DetailPrint "$(webview2Downloading)"',
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    download[quiet],
+    "Pop $0",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  expect(download[quiet].replace("download_quiet", "download")).toBe(
+    download[tauris],
+  );
+  const leave = download.indexOf("Goto install_webview2");
+  expect(leave).toBeGreaterThan(quiet);
+  expect(leave).toBeLessThan(tauris);
 });
 
 /**

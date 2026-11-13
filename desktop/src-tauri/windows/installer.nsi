@@ -627,6 +627,26 @@ Section WebView2
     ; Skip if updating
     ${If} $UpdateMode <> 1
       !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
+        ; >>> OpenBot
+        ; Box H: NSISdl's own download box covered the page with "Downloading
+        ; MicrosoftEdgeWebview2Setup.exe" and "Connecting ...". The same download from the same
+        ; address, quietly (download_quiet), under the plain line, with the bar moving; Tauri's own
+        ; lines after this block are not reached.
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        DetailPrint "$(webview2Downloading)"
+        !insertmacro OPENBOT_PROGRESS_MOVING 1
+        NSISdl::download_quiet "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Pop $0
+        !insertmacro OPENBOT_PROGRESS_MOVING 0
+        ${If} $0 == "success"
+          DetailPrint "$(webview2DownloadSuccess)"
+        ${Else}
+          DetailPrint "$(webview2DownloadError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+        ; <<< OpenBot
         Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
         DetailPrint "$(webview2Downloading)"
         NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"

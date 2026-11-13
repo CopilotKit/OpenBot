@@ -33,28 +33,76 @@ pub const HEADING: &str = "Getting OpenBot ready";
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const LINE: &str = "This can take a minute.";
 
-/// The setup screens' colours, as RGB: the ground (`--surface-main`, which is `--sidebar`), the
-/// heading's ink (`--foreground`) and the line's (`--muted-foreground`), from `desktop/src/styles.css`.
+/// The setup screens' colours, as RGB, from `desktop/src/styles.css`: the ground (`--surface-main`,
+/// which is `--sidebar`), the card (`--card`) and its edge (`--border`), the heading's ink
+/// (`--foreground`) and the line's (`--muted-foreground`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub ground: (u8, u8, u8),
+    pub card: (u8, u8, u8),
+    pub border: (u8, u8, u8),
     pub ink: (u8, u8, u8),
     pub soft: (u8, u8, u8),
 }
 
-/// Light: `oklch(0.948 0.011 286.2)`, `oklch(0.108 0.015 220.9)`, `oklch(0.506 0.013 285.9)`.
+/// Light: `oklch(0.948 0.011 286.2)`, `oklch(1 0 0)`, `oklch(0.894 0.014 286.1)`,
+/// `oklch(0.108 0.015 220.9)`, `oklch(0.506 0.013 285.9)`.
 pub const LIGHT: Palette = Palette {
     ground: (0xed, 0xed, 0xf5),
+    card: (0xff, 0xff, 0xff),
+    border: (0xdb, 0xdb, 0xe5),
     ink: (0x01, 0x05, 0x07),
     soft: (0x64, 0x64, 0x6c),
 };
 
-/// Dark: `oklch(0.156 0.017 295.8)`, `oklch(0.956 0.005 286.3)`, `oklch(0.69 0.017 285.9)`.
+/// Dark: `oklch(0.156 0.017 295.8)`, `oklch(0.212 0.028 297.1)`, `oklch(0.28 0.035 298.6)`,
+/// `oklch(0.956 0.005 286.3)`, `oklch(0.69 0.017 285.9)`.
 pub const DARK: Palette = Palette {
     ground: (0x0d, 0x0b, 0x13),
+    card: (0x1a, 0x16, 0x24),
+    border: (0x2b, 0x25, 0x38),
     ink: (0xf0, 0xf0, 0xf4),
     soft: (0x9a, 0x9a, 0xa6),
 };
+
+/**
+Where the setup page puts its card and the card's first two lines, in a client area `width` by
+`height` physical pixels at `scale`, so the cover's heading sits where the page's will: `main`'s
+padding (`clamp(16px, 3vh, 32px) 24px`), the `.sheet`'s width (`max-width: 36rem`), padding (32px)
+and corners (`--r-sheet`, 14px), the h1's line (22.5px at 1.3) and the gap after it (8px), and the
+lede's line (22px) and the margin after it (20px). Rectangles are left, top, right, bottom.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sheet {
+    pub card: [i32; 4],
+    pub radius: i32,
+    pub heading: [i32; 4],
+    pub heading_px: i32,
+    pub line: [i32; 4],
+    pub line_px: i32,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn sheet(width: i32, height: i32, scale: f64) -> Sheet {
+    let px = |css: f64| (css * scale).round() as i32;
+    let top = px((f64::from(height) / scale * 0.03).clamp(16.0, 32.0));
+    let card_width = (width - 2 * px(24.0)).clamp(0, px(576.0));
+    let left = (width - card_width) / 2;
+    let right = left + card_width;
+    let pad = px(32.0);
+    let heading_top = top + pad;
+    let heading_bottom = heading_top + px(22.5 * 1.3);
+    let line_top = heading_bottom + px(8.0);
+    let line_bottom = line_top + px(22.0);
+    Sheet {
+        card: [left, top, right, line_bottom + px(20.0) + pad],
+        radius: px(14.0),
+        heading: [left + pad, heading_top, right - pad, heading_bottom],
+        heading_px: px(22.5),
+        line: [left + pad, line_top, right - pad, line_bottom],
+        line_px: px(15.0),
+    }
+}
 
 pub fn palette(dark: bool) -> Palette {
     if dark {
@@ -120,10 +168,10 @@ mod native {
         COLORREF, FILETIME, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM,
     };
     use windows::Win32::Graphics::Gdi::{
-        BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
-        SelectObject, SetBkMode, SetTextColor, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-        DEFAULT_CHARSET, DT_CALCRECT, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, HFONT,
-        OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
+        BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
+        FillRect, RoundRect, SelectObject, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
+        CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE,
+        DT_VCENTER, HFONT, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
@@ -333,13 +381,12 @@ mod native {
         COLORREF(u32::from(red) | (u32::from(green) << 8) | (u32::from(blue) << 16))
     }
 
-    /// Segoe UI at `size` CSS pixels and `weight`, at the window's DPI.
-    unsafe fn font(window: HWND, size: i32, weight: i32) -> HFONT {
-        // SAFETY: plain calls.
+    /// Segoe UI, `px` physical pixels high, at `weight`.
+    unsafe fn font(px: i32, weight: i32) -> HFONT {
+        // SAFETY: a plain call.
         unsafe {
-            let dpi = GetDpiForWindow(window).max(96) as i32;
             CreateFontW(
-                -(size * dpi / 96),
+                -px,
                 0,
                 0,
                 0,
@@ -377,52 +424,50 @@ mod native {
                     let ground = CreateSolidBrush(colorref(palette.ground));
                     FillRect(canvas, &area, ground);
                     let _ = DeleteObject(ground.into());
+                    // The setup page's card, where the page puts it, with its heading and a line.
+                    let scale = f64::from(GetDpiForWindow(window).max(96)) / 96.0;
+                    let at = super::sheet(area.right - area.left, area.bottom - area.top, scale);
+                    let card = CreateSolidBrush(colorref(palette.card));
+                    let edge = CreatePen(PS_SOLID, 1, colorref(palette.border));
+                    let old_brush = SelectObject(canvas, card.into());
+                    let old_pen = SelectObject(canvas, edge.into());
+                    let [left, top, right, bottom] = at.card;
+                    let _ = RoundRect(
+                        canvas,
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        2 * at.radius,
+                        2 * at.radius,
+                    );
+                    SelectObject(canvas, old_pen);
+                    SelectObject(canvas, old_brush);
+                    let _ = DeleteObject(card.into());
+                    let _ = DeleteObject(edge.into());
                     SetBkMode(canvas, TRANSPARENT);
-                    // The setup page's h1 (22.5px, 600) and lede (15px), in the system's face.
-                    let lines = [
-                        (HEADING, 22, 600, palette.ink),
-                        (LINE, 15, 400, palette.soft),
-                    ];
-                    let dpi = GetDpiForWindow(window).max(96) as i32;
-                    let gap = 8 * dpi / 96;
-                    let mut sized = Vec::new();
-                    let mut total = 0;
-                    for (text, size, weight, ink) in lines {
-                        let face = font(window, size, weight);
-                        let old = SelectObject(canvas, face.into());
-                        let mut words: Vec<u16> = text.encode_utf16().collect();
-                        let mut measure = area;
-                        DrawTextW(
-                            canvas,
-                            &mut words,
-                            &mut measure,
-                            DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX,
-                        );
-                        SelectObject(canvas, old);
-                        let height = measure.bottom - measure.top;
-                        total += height;
-                        sized.push((words, face, height, ink));
-                    }
-                    total += gap * (sized.len() as i32 - 1);
-                    let mut top = area.top + (area.bottom - area.top - total) / 2;
-                    for (mut words, face, height, ink) in sized {
+                    for (text, [left, top, right, bottom], px, weight, ink) in [
+                        (HEADING, at.heading, at.heading_px, 600, palette.ink),
+                        (LINE, at.line, at.line_px, 400, palette.soft),
+                    ] {
+                        let face = font(px, weight);
                         let old = SelectObject(canvas, face.into());
                         SetTextColor(canvas, colorref(ink));
+                        let mut words: Vec<u16> = text.encode_utf16().collect();
                         let mut line = RECT {
-                            left: area.left,
+                            left,
                             top,
-                            right: area.right,
-                            bottom: top + height,
+                            right,
+                            bottom,
                         };
                         DrawTextW(
                             canvas,
                             &mut words,
                             &mut line,
-                            DT_CENTER | DT_SINGLELINE | DT_NOPREFIX,
+                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
                         );
                         SelectObject(canvas, old);
                         let _ = DeleteObject(face.into());
-                        top += height + gap;
                     }
                     let _ = EndPaint(window, &sheet);
                     LRESULT(0)
@@ -712,25 +757,52 @@ mod native {
 mod tests {
     use super::*;
 
-    /// The cover is drawn in the setup screens' own colours, as `desktop/src/styles.css` has them.
+    /// The cover is drawn as the setup page draws its first card: its colours, its words, and its
+    /// card where the page puts it, as `desktop/src/styles.css` has them.
     #[test]
-    fn the_cover_uses_the_setup_screens_colours_and_words() {
+    fn the_cover_is_the_setup_pages_own_card_in_its_own_colours_and_words() {
         let styles = include_str!("../../src/styles.css");
-        assert!(styles.contains("--sidebar: oklch(0.948 0.011 286.2);"));
-        assert!(styles.contains("--foreground: oklch(0.108 0.015 220.9);"));
-        assert!(styles.contains("--muted-foreground: oklch(0.506 0.013 285.9);"));
-        assert!(styles.contains("--sidebar: oklch(0.156 0.017 295.8);"));
-        assert!(styles.contains("--foreground: oklch(0.956 0.005 286.3);"));
-        assert!(styles.contains("--muted-foreground: oklch(0.69 0.017 285.9);"));
-        assert!(styles.contains("--surface-main: var(--sidebar);"));
+        for token in [
+            // Light, then dark.
+            "--sidebar: oklch(0.948 0.011 286.2);",
+            "--card: oklch(1 0 0);",
+            "--border: oklch(0.894 0.014 286.1);",
+            "--foreground: oklch(0.108 0.015 220.9);",
+            "--muted-foreground: oklch(0.506 0.013 285.9);",
+            "--sidebar: oklch(0.156 0.017 295.8);",
+            "--card: oklch(0.212 0.028 297.1);",
+            "--border: oklch(0.28 0.035 298.6);",
+            "--foreground: oklch(0.956 0.005 286.3);",
+            "--muted-foreground: oklch(0.69 0.017 285.9);",
+            "--surface-main: var(--sidebar);",
+            // The card and its lines.
+            "padding: clamp(16px, 3vh, 32px) 24px 24px;",
+            "max-width: 36rem;",
+            "padding: 32px;",
+            "--radius: 0.625rem;",
+            "--radius-xl: calc(var(--radius) * 1.4);",
+            "--r-sheet: var(--radius-xl);",
+            "--text-2xl: 1.40625rem; /* 22.5px */",
+            "--text-base: 0.9375rem; /* 15px */",
+        ] {
+            assert!(styles.contains(token), "styles.css no longer has {token}");
+        }
         // The ground the window is built on is the one the title bar already takes.
         assert_eq!(palette(false).ground, (0xed, 0xed, 0xf5));
         assert_eq!(palette(true).ground, (0x0d, 0x0b, 0x13));
         let main = include_str!("main.rs");
         assert!(main.contains("Color(0xed, 0xed, 0xf5, 0xff)"));
         assert!(main.contains("Color(0x0d, 0x0b, 0x13, 0xff)"));
-        // The words the setup page uses while OpenBot gets ready, in plain words.
+        // The words the setup page uses while OpenBot gets ready.
         assert!(include_str!("../../src/App.tsx").contains(&format!("<h1>{HEADING}</h1>")));
         assert_eq!(LINE, "This can take a minute.");
+        // Box H's window, 1000 by 838 at 100%: the card 576 wide in the middle, 25 down (3vh).
+        let at = sheet(1000, 838, 1.0);
+        assert_eq!(at.card[..3], [212, 25, 788]);
+        assert_eq!(at.heading[..2], [244, 57]);
+        assert_eq!((at.heading_px, at.line_px, at.radius), (23, 15, 14));
+        // At 150% the same card in physical pixels; a narrow window keeps 24px each side.
+        assert_eq!(sheet(1500, 1257, 1.5).card[..3], [318, 38, 1182]);
+        assert_eq!(sheet(600, 600, 1.0).card[0], 24);
     }
 }
