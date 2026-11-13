@@ -531,7 +531,11 @@ MICROSOFT_OAUTH_TENANT_ID=common             # your directory GUID for staff onl
 OKTA_OAUTH_CLIENT_ID=
 OKTA_OAUTH_CLIENT_SECRET=
 OKTA_OAUTH_ISSUER=https://example.okta.com/oauth2/default
+# Optional for OIDC providers that only support the mandatory openid scope:
+# OKTA_OAUTH_SCOPES=openid
 ```
+
+`OKTA_OAUTH_SCOPES` accepts spaces or commas and must include `openid`. Leave it unset to keep the default `openid profile email` scopes.
 
 Restart. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
 
