@@ -3,6 +3,101 @@ import type { Message, ToolCall } from "@ag-ui/core";
 import { toVisibleChatItems } from "../src/components/channels/chat-messages";
 
 /**
+ * A Bot that holds `delegate` and `react`, as a LangGraph Bot on Anthropic answered on a live run:
+ * it reacted and wrote the emoji as its reply too, and it called `delegate` before writing its line.
+ */
+describe("a Bot's turn that reacts or hands work on", () => {
+  const thanks: Message = {
+    id: "user-thanks",
+    role: "user",
+    content: "thanks!",
+  };
+  const call = (id: string, name: string, args: string): ToolCall => ({
+    id,
+    type: "function",
+    function: { name, arguments: args },
+  });
+
+  test("a reaction is the whole answer: the emoji written as a reply too is not drawn again", () => {
+    const items = toVisibleChatItems([
+      thanks,
+      {
+        id: "assistant-react",
+        role: "assistant",
+        toolCalls: [call("call-react", "react", '{"emoji":"👍"}')],
+      },
+      {
+        id: "tool-react",
+        role: "tool",
+        toolCallId: "call-react",
+        content: "Reacted 👍 to the person's message.",
+      },
+      { id: "assistant-thumb", role: "assistant", content: "👍" },
+    ]);
+    expect(items.map((item) => item.id)).toEqual(["user-thanks", "call-react"]);
+  });
+
+  test("words beside a reaction, and an emoji with no reaction, are still drawn", () => {
+    const reactedAndSaid = toVisibleChatItems([
+      thanks,
+      {
+        id: "assistant-react",
+        role: "assistant",
+        content: "👍 Glad it helped.",
+        toolCalls: [call("call-react", "react", '{"emoji":"👍"}')],
+      },
+    ]);
+    expect(reactedAndSaid.map((item) => item.id)).toEqual([
+      "user-thanks",
+      "assistant-react",
+      "call-react",
+    ]);
+    const noReaction = toVisibleChatItems([
+      thanks,
+      { id: "assistant-thumb", role: "assistant", content: "👍" },
+    ]);
+    expect(noReaction.map((item) => item.id)).toEqual([
+      "user-thanks",
+      "assistant-thumb",
+    ]);
+  });
+
+  test("the Bot's line comes before the task card, whichever it wrote first", () => {
+    const ask: Message = {
+      id: "user-chart",
+      role: "user",
+      content: "Chart my revenue and summarise it.",
+    };
+    const delegated = toVisibleChatItems([
+      ask,
+      {
+        id: "assistant-delegate",
+        role: "assistant",
+        toolCalls: [
+          call("call-delegate", "delegate", '{"title":"Revenue chart"}'),
+        ],
+      },
+      {
+        id: "tool-delegate",
+        role: "tool",
+        toolCallId: "call-delegate",
+        content: '{"taskId":"t1","channelId":"c1","title":"Revenue chart"}',
+      },
+      { id: "assistant-line", role: "assistant", content: "On it." },
+      { id: "user-next", role: "user", content: "and the costs?" },
+      { id: "assistant-next", role: "assistant", content: "Costs were flat." },
+    ]);
+    expect(delegated.map((item) => item.id)).toEqual([
+      "user-chart",
+      "assistant-line",
+      "call-delegate",
+      "user-next",
+      "assistant-next",
+    ]);
+  });
+});
+
+/**
  * What a channel transcript shows, out of the messages a run produced.
  *
  * The projection used to name the roles it understood and drop everything else, which was correct

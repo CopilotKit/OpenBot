@@ -31,13 +31,19 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * structure, as the answer-format rules say; the work in a task thread draws its own, and they are
  * carried back into the conversation with its result. So the Bot is told both, rather than learning
  * that delegating means a plain line and a link.
+ *
+ * THE WORK IS NAMED, NOT LEFT TO "OTHERWISE". This said to answer "a short ask" and delegate the
+ * rest, and a LangGraph Bot on Claude charted and summed up six months of revenue itself, and filled
+ * in a web shop's order form itself, until the person told it to hand the work off. So the kinds of
+ * work that go to a task are listed, the ask the person makes is never needed, and the line comes
+ * before the call, which is the order the person reads them in.
  */
 export const DELEGATING_GUIDANCE = [
   `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and real work runs in task threads of your own, so this conversation stays short. Each turn, do one of three things:`,
-  "- Answer directly when the ask is short: a question you can answer from what you know or from this conversation, or with one quick read. Draw a component when the answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them.",
-  `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer.`,
-  `- Otherwise, write one short line saying what you will do ("On it, I'll check the venue's listing.") and call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits.`,
-  `When the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link.`,
+  "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, with no tools or one quick read. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
+  `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer, so write nothing at all, not even the emoji.`,
+  `- Hand everything else to a task with ${DELEGATE_TOOL}, without waiting to be asked to: making something (a chart with a summary, a report, a plan, a document), working through figures, research, reading or browsing, a comparison, anything in an app or on a website, and every action such as an order, a purchase, a booking or a message. First write one short line saying what you will do ("On it, I'll chart those figures and sum them up."), then call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own: every figure, name, link and constraint from this conversation the work needs. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits.`,
+  `When the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link as a Markdown link, exactly as it comes back.`,
 ].join("\n\n");
 
 /** What `delegate` answers when the task started, and what its card is drawn from. */
@@ -159,32 +165,40 @@ export function readTaskReport(
  */
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
-  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
+  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.",
   "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.",
   "The task:",
 ];
 
-/** The frame and the blank line under it, which is what `readBrief` strips. */
-const BRIEF_PREFIX = [...BRIEF_FRAME, "", ""].join("\n");
-
-/** The frame a task opened before its answer was posted back whole, still read in its thread. */
-const EARLIER_BRIEF_PREFIX = [
-  BRIEF_FRAME[0],
-  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
-  "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
-  ...BRIEF_FRAME.slice(3),
-  "",
-  "",
-].join("\n");
+/**
+ * Every frame a task's thread has opened with, newest first, so a thread opened under an earlier one
+ * still reads as the Bot's brief. The second line is the one that changed: first the answer's opening
+ * sentences were all that came back; then the answer came back whole; then a component's rows were
+ * no longer to be written out again beside it.
+ */
+const BRIEF_PREFIXES = [
+  BRIEF_FRAME,
+  [
+    BRIEF_FRAME[0],
+    "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
+    ...BRIEF_FRAME.slice(2),
+  ],
+  [
+    BRIEF_FRAME[0],
+    "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
+    "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
+    ...BRIEF_FRAME.slice(3),
+  ],
+].map((frame) => [...frame, "", ""].join("\n"));
 
 /** The brief, wrapped in the words that tell the turn it is a delegated task. */
 export function frameBrief(brief: string): string {
-  return `${BRIEF_PREFIX}${brief}`;
+  return `${BRIEF_PREFIXES[0]}${brief}`;
 }
 
 /** The brief back out of a framed message, or null if this was not one. See `readFiring`. */
 export function readBrief(text: string): string | null {
-  for (const prefix of [BRIEF_PREFIX, EARLIER_BRIEF_PREFIX])
+  for (const prefix of BRIEF_PREFIXES)
     if (text.startsWith(prefix)) return text.slice(prefix.length);
   return null;
 }

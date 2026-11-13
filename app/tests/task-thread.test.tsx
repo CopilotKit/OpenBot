@@ -18,6 +18,7 @@ import {
   MessageReactions,
   TaskCard,
   TaskReport,
+  ThreadLinks,
 } from "@/components/tasks/task-thread";
 import { todayRoutes } from "@/lib/api/served-today";
 import { inAppPath, markdownComponents } from "@/lib/markdown";
@@ -251,6 +252,28 @@ test("a Bot's link to a task thread opens in the app, not in a new tab", async (
   expect(link.getAttribute("href")).toBe("/channel/channel_task");
   link.click();
   await view.findByText("the thread");
+});
+
+test("a link list reads each task as it is now, not as it was when the Bot looked", async () => {
+  // The Bot looked while the task waited on the person; it has finished since.
+  task = { ...task, status: "ready_for_review", next: null };
+  const view = draw(
+    <ThreadLinks
+      threads={[
+        {
+          taskId: "task-1",
+          channelId: "channel_task",
+          title: "Order heirloom tomato seeds",
+          status: "needs_input",
+          link: "/channel/channel_task",
+        },
+      ]}
+    />,
+  );
+  await view.findByText("Done");
+  expect(view.queryByText("Needs you")).toBeNull();
+  const row = view.getByRole("link", { name: /Order heirloom tomato seeds/ });
+  expect(row.getAttribute("href")).toBe("/channel/channel_task");
 });
 
 test("a Bot's reaction is read through the generated client and drawn under its message", async () => {

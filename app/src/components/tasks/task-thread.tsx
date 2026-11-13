@@ -342,37 +342,48 @@ const ANSWERED: Record<CardState, string> = {
   failed: "You answered this in its thread, but it couldn't finish.",
 };
 
-/** The task threads the Bot found when the person asked for a link, each with the way in. */
+/**
+ * The task threads the Bot found when the person asked for a link, each with the way in.
+ *
+ * Each row reads its task as it is now, as the card does. The list is drawn from what the Bot was
+ * told when it looked, and a task that needed the person then and has finished since read "Needs
+ * you" under a card that said Done.
+ */
 export function ThreadLinks({ threads }: { threads: LinkedThread[] }) {
   return (
     <ul
       aria-label="Task threads"
       className="my-2 w-full max-w-md divide-y divide-border overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
     >
-      {threads.map((thread) => {
-        const state = cardState(thread.status as TaskStatus);
-        return (
-          <li key={thread.taskId}>
-            <Link
-              className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted"
-              params={{ channelId: thread.channelId }}
-              to="/channel/$channelId"
-            >
-              <StateIcon state={state} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-sm">
-                  {thread.title}
-                </span>
-                <span className={cn("block text-xs", STATE[state].text)}>
-                  {STATE[state].label}
-                </span>
-              </span>
-              <IconArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-            </Link>
-          </li>
-        );
-      })}
+      {threads.map((thread) => (
+        <ThreadLink key={thread.taskId} thread={thread} />
+      ))}
     </ul>
+  );
+}
+
+function ThreadLink({ thread }: { thread: LinkedThread }) {
+  const task = useQuery(taskQueryOptions(thread.taskId));
+  const state = cardState(task.data?.status ?? (thread.status as TaskStatus));
+  return (
+    <li data-state={state}>
+      <Link
+        className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted"
+        params={{ channelId: thread.channelId }}
+        to="/channel/$channelId"
+      >
+        <StateIcon state={state} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-sm">
+            {thread.title}
+          </span>
+          <span className={cn("block text-xs", STATE[state].text)}>
+            {STATE[state].label}
+          </span>
+        </span>
+        <IconArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+      </Link>
+    </li>
   );
 }
 

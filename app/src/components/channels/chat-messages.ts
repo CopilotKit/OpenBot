@@ -1,4 +1,9 @@
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
+import {
+  DELEGATE_TOOL,
+  REACT_TOOL,
+  REACTIONS,
+} from "@openbot/shared/orchestration";
 import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
 import { classifyAttachment } from "@/lib/channels/attachments";
 
@@ -379,7 +384,7 @@ export function toVisibleChatItems(
     if (isToolResult(message)) results.set(message.toolCallId, message.content);
   }
 
-  return messages.flatMap((message): VisibleChatItem[] => {
+  const visible = messages.flatMap((message): VisibleChatItem[] => {
     if (!isReadableMessage(message)) return [];
     // Every row built below is keyed on `message.id`, including the one that keys on it by string
     // interpolation. See `isDrawableMessage` for why an unkeyable row is dropped rather than given
@@ -588,4 +593,68 @@ export function toVisibleChatItems(
 
     return items;
   });
+
+  return asTheBotMeantIt(visible);
+}
+
+/** A run of nothing but the reactions a Bot may leave, as a reply's whole text. */
+const REACTION_ONLY = new RegExp(
+  `^(?:\\s|${REACTIONS.map((emoji) => emoji.replace(/️/g, "")).join("|")}|\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])+$`,
+  "u",
+);
+
+/**
+ * One turn of a Bot that holds `delegate` and `react`, drawn the way it was meant to read.
+ *
+ * A REACTION IS THE WHOLE ANSWER. A Bot that reacts sometimes also writes the emoji as its reply, and
+ * the person saw 👍 under their message and 👍 again as a line of its own. In a turn that reacted, a
+ * line that is nothing but reactions is that reaction again, and is not drawn.
+ *
+ * THE LINE BEFORE THE CARD. A Bot says in a line what it will do and hands the work on, and a model
+ * that calls `delegate` first and writes its line after the result put the task card above "On it.".
+ * A turn whose first words come after its first `delegate` call has them drawn above it. What the
+ * Bot said is unchanged; only where the card sits.
+ */
+function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
+  const out: VisibleChatItem[] = [];
+  let turnStart = 0;
+  const closeTurn = () => {
+    const turn = out.splice(turnStart);
+    const named = (item: VisibleChatItem, name: string) =>
+      item.kind === "tool" && item.toolCall.function.name === name;
+    const reacted = turn.some((item) => named(item, REACT_TOOL));
+    const kept = reacted
+      ? turn.filter(
+          (item) =>
+            !(
+              item.kind === "text" &&
+              item.role === "assistant" &&
+              REACTION_ONLY.test(item.text)
+            ),
+        )
+      : turn;
+    const card = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const said = kept.findIndex(
+      (item) => item.kind === "text" && item.role === "assistant",
+    );
+    if (card >= 0 && said > card) {
+      const [line] = kept.splice(said, 1);
+      if (line) kept.splice(card, 0, line);
+    }
+    out.push(...kept);
+  };
+  for (const item of items) {
+    const fromPerson =
+      item.kind === "attachments" ||
+      (item.kind === "text" && item.role === "user");
+    if (fromPerson) {
+      closeTurn();
+      out.push(item);
+      turnStart = out.length;
+      continue;
+    }
+    out.push(item);
+  }
+  closeTurn();
+  return out;
 }

@@ -11,6 +11,7 @@
  */
 import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import { DELEGATE_TOOL, DELEGATING_GUIDANCE } from "./orchestration";
 import { RESEARCH_APP_NAMES } from "./research";
 import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
 
@@ -552,6 +553,28 @@ export function workingGuidance(options: {
     ...promptSection("subagents", ORCHESTRATION_GUIDANCE),
     ...promptSection("untrusted_content", options.untrusted),
   ];
+}
+
+/**
+ * How a Bot hands real work into task threads of its own, for a run that is offered `delegate`, in
+ * its own section ("delegating") after the working rules.
+ *
+ * EVERY BOT THAT HOLDS THE TOOL, WHATEVER RUNS IT. A Bot OpenBot runs and one on a harness are
+ * offered the same `delegate`, and a harness Bot (the LangGraph Personal Assistant, the Desktop's
+ * default) that was told about it only by the tool's description did the work itself every time,
+ * until the person said to hand it off. Keyed on the run's tools rather than said always, because a
+ * harness Bot's standing message is one text for all of its runs and a routine, a check-in and a
+ * task's own thread are offered no such tool.
+ */
+export function delegatingGuidance(
+  tools: readonly { name: string }[],
+): string[] {
+  return promptSection(
+    "delegating",
+    tools.some((tool) => tool.name === DELEGATE_TOOL)
+      ? DELEGATING_GUIDANCE
+      : null,
+  );
 }
 
 /**
