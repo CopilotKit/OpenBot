@@ -289,6 +289,9 @@ export function carriesValues(
       JSON.stringify(value).slice(1, -1),
       encodeURIComponent(value),
       encodeURIComponent(value).replace(/%20/g, "+"),
+      // How a form body spells it (URLSearchParams, or the browser posting a form): `'`, `!`, `(`, `)` and `~` are
+      // percent-encoded too, which encodeURIComponent leaves as they are.
+      new URLSearchParams([["", value]]).toString().slice(1),
     ];
     return forms.some((form) => text.includes(form));
   });

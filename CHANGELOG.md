@@ -437,6 +437,10 @@ every deployment:
 
 ### Smaller changes
 
+- The Recorder ties a step to the save that carries what you typed when the text has an
+  apostrophe. A form post spells `Let's` as `Let%27s`, and the Recorder only looked for spellings
+  that leave the apostrophe as it is, so a comment like "Let's meet at noon" posted from a form was
+  not recognised as carrying it, and the step could be recorded without its save request.
 - In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
   off the button's corner, past the icon and almost on the rail's edge. A count is now a smaller
   circle, so the icon still shows under it. The badge on the menu button in a narrow window
