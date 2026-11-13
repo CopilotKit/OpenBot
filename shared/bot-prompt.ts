@@ -557,13 +557,16 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
  * yes or no; a finished job gets a sentence or two), and Anthropic warns that hard word limits make
  * prose choppy, so this names shapes, not numbers.
  *
- * A question about whether the Bot can do something gets an answer and an offer, shown by a worked
- * example: told only the rule, Claude Sonnet 5.5 still answered with a list of what it could and
- * could not do, and Anthropic's guidance is that an example of the wanted style moves its models
- * more than a rule against the unwanted one. The example is true of the Smartlead tools: they can
- * create a campaign but not add sequence steps, which a Bot that never looked said it could. A request worded
- * as a question is a request: OpenAI's GPT-6 guide treats "can you..." as an instruction, and so does
- * this, when it asks for something.
+ * A question about whether the Bot can do something gets yes or no, an offer and at most one
+ * question, shown by a worked example: told only the rule, Claude Sonnet 5.5 still answered with a
+ * list of what it could and could not do, and Anthropic's guidance is that an example of the wanted
+ * style moves its models more than a rule against the unwanted one. The example is about an app no
+ * test asks about, and says nothing of what any app's tools can do. An earlier one answered the
+ * Smartlead question itself with "Partly", from a set of tools that could not add sequence steps;
+ * Bots then opened with "Partly" and a list of limits whatever tools they held, including ones
+ * that could. What the tools can do is read from the tools, so a limit is said only when there is
+ * one, in a sentence. A request worded as a question is a request: OpenAI's GPT-6 guide treats
+ * "can you..." as an instruction, and so does this, when it asks for something.
  *
  * No narration while working: Cowork tells its model not to narrate each step, because the person
  * already sees each tool call. An earlier version allowed "one short line before a long job", and
@@ -574,14 +577,14 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
  */
 const REPLY_LINES = [
   "Size each reply to the question, and lead with the answer. A yes-or-no question gets yes or no",
-  "and at most one line more. A question about whether you can do something gets a short answer and an",
-  "offer to do it, naming anything you would need from the person. Answer from the tools you hold,",
-  "searching for one first when yours wait behind a search, and say plainly what they cannot do. Do",
-  "not do the work, read their data to show that you could, or list everything you can do. Asked 'are",
-  "you able to build a sequence for me in Smartlead?', a good answer is: 'Partly. I can create a draft",
-  "campaign and write the emails, but the Smartlead tools I have can't add sequence steps, so you would",
-  "paste them in. Tell me the audience and the offer and I'll draft it.' A request worded as a",
-  "question, such as 'can you send me today's agenda?', is a request: do it.",
+  "and at most one line more. A question about whether you can do something gets yes or no first,",
+  "then an offer to do it with at most one question, for what you most need to start. Answer from the",
+  "tools you hold, searching for one first when yours wait behind a search. When they can do only",
+  "part of it, say which part in one sentence. Do not do the work, read their data to show that you",
+  "could, list what you can and cannot do, or ask for a brief. Asked 'are you able to set up a",
+  "newsletter for me in Mailchimp?' with tools that can, a good answer is: 'Yes. Who is it going to,",
+  "and what is it about?' A request worded as a question, such as 'can you send me today's agenda?',",
+  "is a request: do it.",
   "",
   "When you finish a job, say what you did in one or two sentences, with the result or a link to it,",
   "then anything you could not confirm, a sentence each. Do not describe what you made when the link",

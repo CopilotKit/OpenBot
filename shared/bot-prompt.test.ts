@@ -296,24 +296,33 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     const said = flat(REPLY_GUIDANCE);
     expect(said).toContain("lead with the answer");
     expect(said).toContain("a yes-or-no question gets yes or no");
-    // A question about ability gets an answer and an offer, not the work or a capability list.
-    expect(said).toContain("a question about whether you can do something");
-    expect(said).toContain("an offer to do it");
-    // Answered from the tools it holds, not from memory: the Smartlead tools cannot write a
-    // sequence, and a Bot that never looked said yes.
+    // A question about ability gets yes or no, an offer and at most one question, not the work, a
+    // capability list or a brief to fill in.
+    expect(said).toContain(
+      "a question about whether you can do something gets yes or no first",
+    );
+    expect(said).toContain("an offer to do it with at most one question");
+    // Answered from the tools it holds, not from memory, and a limit is one sentence, not a list.
     expect(said).toContain(
       "answer from the tools you hold, searching for one first",
     );
-    expect(said).toContain("say plainly what they cannot do");
+    expect(said).toContain("say which part in one sentence");
     expect(said).toContain("do not do the work");
-    expect(said).toContain("list everything you can do");
+    expect(said).toContain(
+      "list what you can and cannot do, or ask for a brief",
+    );
     // A request worded as a question is still a request.
     expect(said).toContain("a request worded as a question");
     expect(said).toContain("is a request: do it");
     expect(said).toContain("in one or two sentences");
     // Claude Sonnet 5.5 met the rule with a list of what it could and could not do; a worked
     // example of the shape wanted is what Anthropic says moves its models.
-    expect(said).toContain("a good answer is: 'partly.");
+    expect(said).toContain("a good answer is: 'yes. who is it going to");
+    // The example is not about an app a test asks about, and never says what an app's tools cannot
+    // do: one that answered the Smartlead question with "Partly" was repeated to people whose
+    // tools could do all of it.
+    expect(said).not.toContain("smartlead");
+    expect(said).not.toContain("partly");
     // A finished job: the result and its gaps, not a tour of what was built or an offer of more.
     expect(said).toContain(
       "then anything you could not confirm, a sentence each",
