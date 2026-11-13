@@ -1,0 +1,47 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Open http://host.docker.internal:46600/members and fill in my username robin.okafor. Ask me for my password with the masked box, so it goes straight into the page and you never see it. Then sign in and tell me my seed allowance in one plain sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 5,
+        "hasToolResult": true
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "computer_click",
+            "arguments": "{\"ref\":\"e15\",\"snapshotId\":2}",
+            "id": "call_10LxxrI7Etke2PfJcfAvpNo6"
+          }
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 1259,
+        "interChunkDelaysMs": [
+          9,
+          395,
+          0,
+          13,
+          4,
+          3,
+          3,
+          4,
+          2,
+          1,
+          0,
+          25,
+          7,
+          85,
+          1,
+          178
+        ],
+        "totalDurationMs": 1989
+      },
+      "metadata": {
+        "systemHash": "d1bff223",
+        "toolsHash": "5dcc471c"
+      }
+    }
+  ]
+}

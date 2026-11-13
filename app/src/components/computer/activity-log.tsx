@@ -9,8 +9,7 @@
  *
  * Read from the conversation, so it is the same whichever way a call ran: in the browser, at the
  * server's gate, or after a person allowed it. A conversation opened again, after a reload too,
- * shows what was already done in it. What this page watched happen says when; what was done before
- * the page opened it does not, because when it ran is not something the conversation says. The
+ * shows what was already done in it, and when: each step's answer says when it finished. The
  * record is still the audit trail on the server; this is the window beside the screen.
  */
 import { ownToolLabel } from "@openbot/shared/tool-name";

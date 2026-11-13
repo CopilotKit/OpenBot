@@ -458,6 +458,8 @@ export function createBotBrowserHost(options: BotBrowserHostOptions) {
             ? await bar.navigate(browser, navigate.value)
             : ({ ok: true } as const);
         if (!done.ok) return json({ error: done.error }, done.status);
+        // The tab now in front, fitted at once, so the screen never shows it short (see the live screen's `attach`).
+        if (tabs?.ok) await view.fitWindow(view.active());
         const after = profiles.bot(botId);
         return json(after ? await stateOf(botId, after) : closedState);
       }

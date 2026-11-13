@@ -1,4 +1,5 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import {
@@ -570,8 +571,8 @@ export function ComputerTools() {
     name: "computer_request_secret",
     description:
       "Ask the person for a single value you must not be told: a password, a one-time code, a card number. " +
-      "Focus the field first with computer_click, then call this with the ref of that field and a " +
-      "short label for what you need. They type it into a masked box that goes straight to the page. " +
+      `${SECRET_FIELD_BY_REF} Add a short label for what you need. ` +
+      "They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
       "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
       "if the form needs submitting, do that yourself afterwards with computer_click.",

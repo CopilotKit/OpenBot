@@ -15,7 +15,7 @@ import {
   isRedirect,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
@@ -377,6 +377,28 @@ describe("the Computer page", () => {
       "The person is signed out of every site they signed in to in it.",
     );
     expect(dialog.textContent).not.toContain("The Bot is signed out");
+  });
+
+  // FOUND BY THE END-TO-END SUITE: answered with Reset it, the dialog fades out, and as it did its title fell back to
+  // "Reset the computer?", the words for no row at all. It names the Bot's browser until it has gone.
+  test("the Reset dialog keeps naming the Bot's browser while it closes", async () => {
+    const view = await renderPage("personal");
+    within(browserRow(view, "Personal Assistant"))
+      .getByRole("button", { name: "Reset" })
+      .click();
+    const dialog = await view.findByRole("dialog");
+    const title = () =>
+      dialog.querySelector('[data-slot="dialog-title"]')?.textContent;
+    expect(title()).toBe("Reset Personal Assistant's browser?");
+    const titles = new Set([title()]);
+    new MutationObserver(() => titles.add(title())).observe(dialog, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    within(dialog).getByRole("button", { name: "Reset it" }).click();
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+    expect([...titles]).toEqual(["Reset Personal Assistant's browser?"]);
   });
 
   /** The section the desktop's folder picker is reached from. */

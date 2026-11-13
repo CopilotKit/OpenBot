@@ -1,0 +1,42 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Open http://host.docker.internal:46600/members and fill in my username robin.okafor. Ask me for my password with the masked box, so it goes straight into the page and you never see it. Then sign in and tell me my seed allowance in one plain sentence.",
+        "model": "gpt-5.6-terra",
+        "turnIndex": 7,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Your seed allowance is 12 packets this season."
+      },
+      "recordedTimings": {
+        "ttftMs": 1005,
+        "interChunkDelaysMs": [
+          13,
+          350,
+          4,
+          1,
+          5,
+          0,
+          0,
+          4,
+          0,
+          20,
+          6,
+          5,
+          5,
+          108,
+          5,
+          0,
+          159
+        ],
+        "totalDurationMs": 1690
+      },
+      "metadata": {
+        "systemHash": "d1bff223",
+        "toolsHash": "5dcc471c"
+      }
+    }
+  ]
+}

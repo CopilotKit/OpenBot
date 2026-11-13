@@ -261,6 +261,64 @@ export function serveSite(): () => Site {
 export const CLOCK = /\d{1,2}:\d{2}:\d{2}/;
 
 /**
+ * Every row of Activity has the time its step finished: the steps the Bot took itself, the one a
+ * person answered, and the ones the server took after an approval, which once had none. And the
+ * times run newest first, as the rows do: the step a person answered once read as later than the
+ * steps the server took after it, timed by when its answer reached the page.
+ */
+export async function expectEveryRowTimed(page: Page) {
+  const rows = activityRows(page);
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(0);
+  const times: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const time = rows.nth(index).locator("time");
+    await expect(time).toHaveText(CLOCK);
+    times.push(Date.parse((await time.getAttribute("datetime")) ?? ""));
+  }
+  expect(times, "Activity's times run newest first").toEqual(
+    [...times].sort((a, b) => b - a),
+  );
+}
+
+/**
+ * The Bot's screen fills the frame kept for it: the page is drawn as tall as the frame, with none of
+ * the black behind it showing as a band underneath. Read as a person sees it, from where the screen
+ * and its frame are laid out, once a frame of the page has been drawn (a canvas starts 300 wide).
+ *
+ * HELD, NOT SEEN ONCE. A tab left in front after another closed came back short about a second
+ * later, so a screen that fills its frame at the first look has to go on filling it: it passes once
+ * it has read as filled every time for two seconds.
+ */
+export async function expectScreenFillsFrame(screen: Locator) {
+  const HELD_MS = 2_000;
+  let filledSince: number | null = null;
+  await expect
+    .poll(
+      async () => {
+        const gap = await screen.evaluate((canvas: HTMLCanvasElement) => {
+          const frame = canvas.parentElement?.getBoundingClientRect();
+          const drawn = canvas.getBoundingClientRect();
+          if (!frame || canvas.width === 300) return "no frame drawn yet";
+          return Math.round(frame.bottom - drawn.bottom);
+        });
+        if (gap !== 0) {
+          filledSince = null;
+          return gap;
+        }
+        filledSince ??= Date.now();
+        return Date.now() - filledSince >= HELD_MS ? 0 : "filled, not yet held";
+      },
+      {
+        message: "the Bot's screen fills its frame, with no band under it",
+        intervals: [250],
+        timeout: 15_000,
+      },
+    )
+    .toBe(0);
+}
+
+/**
  * The conversation has its generated name. OpenBot names a conversation on a loop after its first
  * answer; waited for here so the naming call is made inside the journey that caused it, and a
  * recording files its fixture with that journey rather than the next one.
