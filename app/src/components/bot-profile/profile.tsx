@@ -54,6 +54,33 @@ const NOTIFY_LABEL: Record<BotNotify, string> = {
   none: "Nothing (badges only)",
 };
 
+/** The top of a Bot's page: its orb, what it is for and what it does. */
+export function BotProfileHeader({
+  agent,
+}: {
+  agent: Pick<
+    AgentProfile,
+    "name" | "title" | "roleDescription" | "avatarSeed"
+  >;
+}) {
+  return (
+    <div className="mt-6 flex items-center gap-3">
+      <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+      <div className="min-w-0">
+        {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
+        {agent.title && (
+          <p className="line-clamp-3 text-pretty font-medium">
+            {shownSubtitle(agent.title)}
+          </p>
+        )}
+        <p className="line-clamp-2 text-muted-foreground text-sm">
+          {agent.roleDescription}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /**
  * A Bot's own page: what it needs from you, its state for you, what it is doing, the tasks you marked
  * done this week, its settings, and what can be done to it.
@@ -78,20 +105,7 @@ export function BotProfile({
 
   return (
     <>
-      <div className="mt-6 flex items-center gap-3">
-        <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
-        <div className="min-w-0">
-          {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
-          {agent.title && (
-            <p className="line-clamp-3 text-pretty font-medium">
-              {shownSubtitle(agent.title)}
-            </p>
-          )}
-          <p className="line-clamp-2 text-muted-foreground text-sm">
-            {agent.roleDescription}
-          </p>
-        </div>
-      </div>
+      <BotProfileHeader agent={agent} />
       <div className="mt-4">
         <BotPausedBanner agentId={agent.id} />
       </div>

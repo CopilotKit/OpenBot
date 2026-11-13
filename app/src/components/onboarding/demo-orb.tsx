@@ -7,7 +7,8 @@ import { orbPalette } from "@/lib/orb-palette";
  * it, or OpenBot's own mark with no seed.
  *
  * Always the live `AgentOrb`, because a picture shows a Bot listening, working and done, where
- * `BotOrb` only draws idle, working and waiting. Decorative: the picture around it is labelled, so
+ * `BotOrb` only draws idle, working and waiting. A Bot's keeps its palette in every state, as
+ * `BotOrb`'s does (`trueColors`). Decorative: the picture around it is labelled, so
  * the orb has no name of its own. `still` holds it while its picture is off screen.
  */
 export function DemoOrb({
@@ -34,6 +35,7 @@ export function DemoOrb({
         size={`${size}px`}
         state={state}
         still={still}
+        trueColors={Boolean(seed)}
       />
     </span>
   );
