@@ -227,6 +227,11 @@ every deployment:
 - **The Helm chart is the one published with each release**, installed from its URL; there is no
   chart in the checkout to build from.
 
+### OpenBot runs on CopilotKit 1.88.0
+
+`@copilotkit/react-core` and the server's `@copilotkit/runtime` move from 1.85.0. AG-UI stays
+1.0.2, the version CopilotKit 1.88.0 itself pins.
+
 ### Smaller changes
 
 - In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
