@@ -1,4 +1,6 @@
 import {
+  IconAlertTriangle,
+  IconCircleCheck,
   IconCircleMinus,
   IconCirclePlus,
   IconHistory,
@@ -43,6 +45,7 @@ import {
 } from "@/lib/app-grants/queries";
 import {
   type AppGrantTranslation,
+  type GrantActionProblem,
   translateAppGrants,
 } from "@/lib/app-grants/translate";
 import type { SharedUseApproval } from "@/lib/plugins/shared-use";
@@ -181,13 +184,83 @@ function ActionRows<T extends ChangedAction>({
   );
 }
 
+/**
+ * The exact actions the model chose, as it named them: what the description became, and what OpenBot
+ * checks every call against once it is saved. Above the reading, which says the same in words. An
+ * action the app doesn't offer says why under its name.
+ */
+function ChosenActions({
+  actions,
+  problems,
+  botName,
+  appTitle,
+}: {
+  actions: string[];
+  problems: GrantActionProblem[];
+  botName: string;
+  appTitle: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? actions : actions.slice(0, SHOWN);
+  return (
+    <Field aria-labelledby="app-grants-chosen">
+      <FieldLabel id="app-grants-chosen">Actions {botName} may use</FieldLabel>
+      <FieldDescription>
+        {actions.length === 0
+          ? `Your model chose no actions from your description. Once you save, ${botName} may use no ${appTitle} action.`
+          : `Your model chose these from your description. Once you save, ${botName} may use exactly these ${appTitle} actions and no others. OpenBot checks every call against this list.`}
+      </FieldDescription>
+      {actions.length > 0 ? (
+        <PageRows className="mt-0">
+          {shown.map((action, index) => {
+            const problem = problems.find((entry) => entry.action === action);
+            return (
+              <React.Fragment key={action}>
+                <Item size="sm">
+                  <ItemMedia aria-hidden variant="icon">
+                    {problem ? <IconAlertTriangle /> : <IconCircleCheck />}
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="font-mono text-xs">
+                      {action}
+                    </ItemTitle>
+                    {problem ? (
+                      <ItemDescription className="text-destructive">
+                        {problem.message}
+                      </ItemDescription>
+                    ) : null}
+                  </ItemContent>
+                </Item>
+                {index !== shown.length - 1 && <Separator />}
+              </React.Fragment>
+            );
+          })}
+        </PageRows>
+      ) : null}
+      {actions.length > SHOWN ? (
+        <div>
+          <Button
+            onClick={() => setOpen(!open)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {open ? "Show fewer" : `Show all ${actions.length}`}
+          </Button>
+        </div>
+      ) : null}
+    </Field>
+  );
+}
+
 const TURNS_OFF = "text-amber-600 dark:text-amber-500";
 const TURNS_ON = "text-foreground";
 
 /**
  * "Describe what this Bot can do", on one Bot's page for one app.
  *
- * A sentence in, and the deployment's model picks the app's actions that match it. Beside the set:
+ * A sentence in, and the deployment's model picks the app's actions that match it. The set itself is
+ * listed first, as what OpenBot checks. Under it:
  * whether every action is one the app offers, a reading of the set by a call that never saw the
  * sentence, what saving would turn on and off, and what that would have meant for the Bot's own
  * recent calls. Nothing changes until Save, which goes through the same checks as the switches below
@@ -298,7 +371,7 @@ export function DescribeGrants({
       <FieldGroup>
         <DescribeField
           action="Choose actions"
-          description={`Say in a sentence what ${botName} may do in ${appTitle}, and your model picks the actions. OpenBot checks the actions you save, not your words. A second reading that never sees your words says what they allow.`}
+          description={`Say in a sentence what ${botName} may do in ${appTitle}, and your model picks the actions. A second reading that never sees your words says what they allow.`}
           id="app-grants-english"
           label={`Describe what ${botName} can do`}
           placeholder="Reads everything and writes drafts, but never sends or deletes"
@@ -318,6 +391,14 @@ export function DescribeGrants({
           <p className="text-sm" role="status">
             {saved}
           </p>
+        ) : null}
+        {written ? (
+          <ChosenActions
+            actions={written.actions}
+            appTitle={appTitle}
+            botName={botName}
+            problems={written.check.ok ? [] : written.check.problems}
+          />
         ) : null}
         {written ? (
           <ReadingStatus
