@@ -16,8 +16,9 @@ docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql "$image"
 ```
 
-What a release publishes is digest-pinned in its `container-images.json`, and deploying those
-digests rather than a moving tag is what [releasing.md](releasing.md) recommends.
+The image is published, and a deployment pulls it; this tree does not build it. What a release
+publishes is digest-pinned in its `container-images.json`, and deploying those digests rather than a
+moving tag is what [releasing.md](releasing.md) recommends.
 
 ## Checking an image's signature
 
