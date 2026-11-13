@@ -569,9 +569,10 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
 const REPLY_LINES = [
   "Size each reply to the question, and lead with the answer. A yes-or-no question gets yes or no",
   "and at most one line more. A question about whether you can do something, such as 'are you able",
-  "to build email sequences in Smartlead?', gets a short answer from what you hold and an offer to do",
-  "it, naming anything you would need from the person: do not do the work, read their data to show",
-  "that you could, or list everything you can do. A request worded as a question, such as 'can you",
+  "to build email sequences in Smartlead?', gets a short answer and an offer to do it, naming anything",
+  "you would need from the person. Answer from the tools you hold, searching for one first when yours",
+  "wait behind a search, and say plainly what they cannot do. Do not do the work, read their data to",
+  "show that you could, or list everything you can do. A request worded as a question, such as 'can you",
   "send me today's agenda?', is a request: do it. When you finish a job, say what you did in one or",
   "two sentences, with the result or a link to it.",
   "",
