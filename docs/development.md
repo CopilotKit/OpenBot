@@ -135,7 +135,7 @@ bun run test
 bun run build
 ```
 
-`bun run test:e2e` runs the product end to end, as CI does: a fresh, isolated stack from the
+`bun run test:e2e` runs the product end to end on this machine: a fresh, isolated stack from the
 published images, this checkout's app in a real browser, and every model call answered from
 recorded fixtures. See [e2e/README.md](../e2e/README.md).
 
