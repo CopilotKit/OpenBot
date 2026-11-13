@@ -66,7 +66,10 @@ export function RoutineItem({
   agentId,
   running = false,
   paused = false,
+  from,
 }: {
+  /** The conversation the rows are shown in, which a routine's page goes back to. */
+  from?: string;
   routine: RoutineRecord;
   /** Absent on one Bot's own list. */
   botName?: string;
@@ -96,7 +99,10 @@ export function RoutineItem({
       render={
         <Link
           params={{ routineId: routine.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/schedules/$routineId"
         />
       }
@@ -153,7 +159,10 @@ export function GoalItem({
   agentId,
   running = false,
   paused = false,
+  from,
 }: {
+  /** The conversation the rows are shown in, which a goal's page goes back to. */
+  from?: string;
   /** Running now: the pulsing dot Activity rows use. */
   running?: boolean;
   /** Its Bot is paused, by itself or with all: the row says so in place of when it starts. */
@@ -212,7 +221,10 @@ export function GoalItem({
       render={
         <Link
           params={{ goalId: goal.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/goals/$goalId"
         />
       }
@@ -263,11 +275,17 @@ const EMPTY_BODY =
 export function RoutinesList({
   agentId,
   embedded = false,
+  inDialog = false,
+  from,
 }: {
   /** Show only this Bot's. Absent shows all of the person's, each with its Bot. */
   agentId?: string;
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
+  /** Drawn in a dialog: the rows show on the muted fill, since a card-coloured row is invisible there. */
+  inDialog?: boolean;
+  /** The conversation this list is shown in, which each row's page goes back to. */
+  from?: string;
 } = {}) {
   const routines = useQuery(routinesQueryOptions());
   const goals = useQuery(responsibilitiesQueryOptions());
@@ -347,12 +365,13 @@ export function RoutinesList({
           </PageEmpty>
         )
       ) : (
-        <PageRows>
+        <PageRows className={inDialog ? "bg-muted" : undefined}>
           {rows.map((row, index) => (
             <Fragment key={`${row.kind}:${row.id}`}>
               {index > 0 ? <Separator /> : null}
               {row.kind === "routine" ? (
                 <RoutineItem
+                  from={from}
                   botName={
                     showBot
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
@@ -363,6 +382,7 @@ export function RoutinesList({
                 />
               ) : row.kind === "goal" ? (
                 <GoalItem
+                  from={from}
                   botName={
                     showBot
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
@@ -375,6 +395,7 @@ export function RoutinesList({
               ) : (
                 <SettingRow
                   agentId={agentId}
+                  from={from}
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
                   label="Check-in"

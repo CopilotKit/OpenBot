@@ -1,6 +1,11 @@
 import { useForm, useSelector } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
-import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  type LinkProps,
+  linkOptions,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
@@ -214,11 +219,27 @@ const EVENT_SOURCE_LABEL: Record<RoutineEventSource, string> = {
   connector: "Connected app",
 };
 
-/** The Routines list a page came from: one Bot's, or every Bot's. */
-export function routinesOf(agentId: string | undefined) {
+/**
+ * Where a routine's page goes back to: the conversation it was opened from, by the clock in that
+ * conversation's header, else the Routines list it came from, one Bot's or every Bot's.
+ */
+export function routinesOf(
+  agentId: string | undefined,
+  fromChannelId?: string,
+): LinkProps {
+  if (fromChannelId)
+    return linkOptions({
+      to: "/channel/$channelId",
+      params: { channelId: fromChannelId },
+    });
   return agentId
     ? linkOptions({ to: "/bots/$agentId/routines", params: { agentId } })
     : linkOptions({ to: "/routines" });
+}
+
+/** What the back button says, for where `routinesOf` sends it. */
+export function backLabelFor(back: LinkProps): string {
+  return back.to === "/channel/$channelId" ? "Conversation" : "Routines";
 }
 
 /**

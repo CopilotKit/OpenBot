@@ -12,7 +12,10 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  backLabelFor,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import { DeleteRow } from "@/components/routines/delete-row";
 import {
   RoutineDetailMissing,
@@ -74,9 +77,12 @@ import {
 export function CheckInRoutePage({
   checkInId,
   agentId,
+  from,
 }: {
   checkInId: string;
   agentId?: string;
+  /** The conversation it was opened from, by its header's clock: the back button returns there. */
+  from?: string;
 }) {
   const settings = useQuery(proactiveSettingsQueryOptions());
   const bots = useQuery(agentListQueryOptions());
@@ -90,7 +96,7 @@ export function CheckInRoutePage({
     ({ setting, change }) =>
       change.kind === "remove" && setting.id === checkInId,
   );
-  const back = routinesOf(agentId);
+  const back = routinesOf(agentId, from);
   const setting = settings.data?.find((row) => row.id === checkInId);
   if (!setting)
     return (
@@ -157,7 +163,7 @@ export function CheckInPage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: backLabelFor(back), linkProps: back }}
       description={[setting.subject ? botName : null, setting.focus]
         .filter(Boolean)
         .join(" · ")}

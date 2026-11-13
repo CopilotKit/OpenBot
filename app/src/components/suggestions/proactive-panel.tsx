@@ -461,7 +461,10 @@ export function SettingRow({
   label,
   agentId,
   running = false,
+  from,
 }: {
+  /** The conversation the row is shown in, which the check-in's page goes back to. */
+  from?: string;
   /** Looking now: the pulsing dot Activity rows use. */
   running?: boolean;
   setting: ProactiveSetting;
@@ -492,7 +495,10 @@ export function SettingRow({
       render={
         <Link
           params={{ checkInId: setting.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/check-ins/$checkInId"
         />
       }

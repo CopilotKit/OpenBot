@@ -4,6 +4,7 @@ import { type LinkProps, Navigate } from "@tanstack/react-router";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { backLabelFor } from "./new-routine-page";
 
 const WORDS = {
   goal: { title: "Goal", noun: "goal" },
@@ -71,7 +72,7 @@ export function RoutineDetailMissing({
   if (deleted) return <Navigate {...back} replace />;
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: backLabelFor(back), linkProps: back }}
       title={words.title}
     >
       {read.isPending ? (
