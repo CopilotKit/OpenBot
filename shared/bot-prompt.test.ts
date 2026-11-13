@@ -311,7 +311,18 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     expect(said).toContain("a request worded as a question");
     expect(said).toContain("is a request: do it");
     expect(said).toContain("in one or two sentences");
-    expect(said).toContain("do not recap your steps, repeat a summary");
+    // Claude Sonnet 5.5 met the rule with a list of what it could and could not do; a worked
+    // example of the shape wanted is what Anthropic says moves its models.
+    expect(said).toContain("a good answer is: 'partly.");
+    // A finished job: the result and its gaps, not a tour of what was built or an offer of more.
+    expect(said).toContain(
+      "then anything you could not confirm, a sentence each",
+    );
+    expect(said).toContain(
+      "do not describe what you made when the link shows it",
+    );
+    expect(said).toContain("or offer more work");
+    expect(said).toContain("recap your steps, repeat a summary");
     expect(said).toContain("do not announce or narrate your steps");
     // No preamble either: on GPT-6.1 a "one short line before a long job" became a message of its own.
     expect(said).not.toContain("one short line");
