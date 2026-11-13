@@ -10,6 +10,7 @@ import {
   unreachedApps,
 } from "./store";
 import {
+  PAGE_UNREAD,
   ProactiveConflictError,
   ProactiveNotFoundError,
   ProactiveRefusedError,
@@ -37,6 +38,8 @@ function listed(apps: readonly string[]) {
  * that is what the person can do something about; the next check-in reads what it missed.
  */
 function failedBecause(error: string | null) {
+  if (error === PAGE_UNREAD)
+    return `${PAGE_UNREAD} The next check-in will try again.`;
   const apps = unreachedApps(error);
   if (apps)
     return `Couldn't reach ${listed(apps)}. The next check-in will try again.`;

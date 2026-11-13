@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableColumns,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  sql,
+} from "drizzle-orm";
 import type { Database } from "../db/client";
 import { auditEvents, users } from "../db/schema/core";
 import { botLifecycle } from "../db/schema/lifecycle";
@@ -308,12 +319,22 @@ async function priorItemsOf(
   };
 }
 
+/**
+ * A setting's columns as everything but a page check-in's run reads them: without the page's kept
+ * text, which is up to 50,000 characters and the run's business alone.
+ */
+const {
+  pageText: _pageText,
+  pageHash: _pageHash,
+  ...settingColumns
+} = getTableColumns(proactiveSettings);
+
 export function createProactiveStore(database: Database) {
   const owned = (owner: string, id: string) =>
     and(eq(proactiveSettings.ownerUserId, owner), eq(proactiveSettings.id, id));
   async function get(owner: string, id: string): Promise<ProactiveSetting> {
     const [row] = await database
-      .select()
+      .select(settingColumns)
       .from(proactiveSettings)
       .where(owned(owner, id))
       .limit(1);
@@ -345,7 +366,7 @@ export function createProactiveStore(database: Database) {
         updatedAt: new Date(),
       })
       .where(owned(owner, id))
-      .returning();
+      .returning(settingColumns);
     if (!row) throw new ProactiveNotFoundError();
     return row;
   }
@@ -377,7 +398,7 @@ export function createProactiveStore(database: Database) {
       agentId: string,
     ): Promise<ProactiveSetting | null> {
       const [row] = await database
-        .select()
+        .select(settingColumns)
         .from(proactiveSettings)
         .where(
           and(
@@ -390,7 +411,7 @@ export function createProactiveStore(database: Database) {
     },
     async byId(id: string): Promise<ProactiveSetting | null> {
       const [row] = await database
-        .select()
+        .select(settingColumns)
         .from(proactiveSettings)
         .where(eq(proactiveSettings.id, id))
         .limit(1);
@@ -398,7 +419,7 @@ export function createProactiveStore(database: Database) {
     },
     async list(owner: string): Promise<ProactiveSetting[]> {
       return database
-        .select()
+        .select(settingColumns)
         .from(proactiveSettings)
         .where(eq(proactiveSettings.ownerUserId, owner))
         .orderBy(desc(proactiveSettings.createdAt));
@@ -442,7 +463,7 @@ export function createProactiveStore(database: Database) {
         await lockDefaults(transaction, owner, parsed.agentId);
         const same = (
           await transaction
-            .select()
+            .select(settingColumns)
             .from(proactiveSettings)
             .where(
               and(
@@ -482,7 +503,7 @@ export function createProactiveStore(database: Database) {
               updatedAt: new Date(),
             })
             .where(eq(proactiveSettings.id, same.id))
-            .returning();
+            .returning(settingColumns);
           return row ?? updated;
         }
         const [row] = await transaction
@@ -497,7 +518,7 @@ export function createProactiveStore(database: Database) {
             sourceServerId: source.serverId,
             nextRunAt: new Date(),
           })
-          .returning();
+          .returning(settingColumns);
         if (!row)
           throw new ProactiveRefusedError("Couldn't set up that check-in.");
         return row;
@@ -557,7 +578,7 @@ export function createProactiveStore(database: Database) {
               lte(proactiveSettings.nextRunAt, at),
             ),
           )
-          .returning();
+          .returning(settingColumns);
         if (row) claimed.push(row);
       }
       return claimed;
@@ -915,6 +936,29 @@ export function createProactiveStore(database: Database) {
           run,
         ]);
       return bySetting;
+    },
+    /** A page check-in's kept read of its page, or null before its first. */
+    async keptPage(
+      settingId: string,
+    ): Promise<{ text: string; hash: string } | null> {
+      const [row] = await database
+        .select({
+          text: proactiveSettings.pageText,
+          hash: proactiveSettings.pageHash,
+        })
+        .from(proactiveSettings)
+        .where(eq(proactiveSettings.id, settingId))
+        .limit(1);
+      return row?.text != null && row.hash != null
+        ? { text: row.text, hash: row.hash }
+        : null;
+    },
+    /** Keep a page check-in's newest read of its page, the baseline the next one compares with. */
+    async keepPage(settingId: string, text: string, hash: string) {
+      await database
+        .update(proactiveSettings)
+        .set({ pageText: text, pageHash: hash })
+        .where(eq(proactiveSettings.id, settingId));
     },
     /** Whether a check-in for this setting is on the queue and has not been run yet. */
     async runQueued(settingId: string): Promise<boolean> {

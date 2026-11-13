@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isLoopbackHost } from "@openbot/shared/this-machine";
 
 /**
@@ -63,4 +64,54 @@ export function pageHost(link: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * How much of a page a `page` check-in keeps and compares. A longer page is compared on what fits:
+ * a change past this point is not seen, which is the price of keeping one page's text per check-in.
+ */
+export const PAGE_KEPT_CHARS = 50_000;
+
+/**
+ * A page's text as it is kept and compared: whitespace runs collapsed, trimmed and capped. Spacing a
+ * provider reflows between two reads is not a change to the person.
+ */
+export function normalisedPage(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, PAGE_KEPT_CHARS);
+}
+
+/** The hash a page's kept text is compared by. */
+export function pageHashOf(normalised: string): string {
+  return createHash("sha256").update(normalised).digest("hex");
+}
+
+/**
+ * The arguments a page-read tool takes for one address. Firecrawl's scrape takes `url`; Parallel's
+ * and Exa's fetch take a list, `urls`, given just this one.
+ */
+export function pageReadArgs(
+  ref: string,
+  link: string,
+): Record<string, unknown> {
+  return ref.split("/")[0]?.startsWith("firecrawl")
+    ? { url: link }
+    : { urls: [link] };
+}
+
+/**
+ * The one address a page-read call asks for, or null when it asks for none or for more than one:
+ * `url`, or `urls` holding exactly one. What the door compares with a check-in's own address.
+ */
+export function addressOfPageRead(
+  args: Record<string, unknown>,
+): string | null {
+  if (typeof args.url === "string")
+    return Array.isArray(args.urls) ? null : args.url;
+  if (
+    Array.isArray(args.urls) &&
+    args.urls.length === 1 &&
+    typeof args.urls[0] === "string"
+  )
+    return args.urls[0];
+  return null;
 }

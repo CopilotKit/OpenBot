@@ -56,7 +56,12 @@ import {
   type CheckInSource,
   serverOfRef,
 } from "./scope";
-import { pageHost, publicPageAddress } from "./source";
+import {
+  normalisedPage,
+  pageHashOf,
+  pageHost,
+  publicPageAddress,
+} from "./source";
 import {
   PROACTIVE_RUN_KIND,
   type PriorItems,
@@ -69,6 +74,8 @@ import {
 } from "./store";
 import {
   clearInputSchema,
+  PAGE_UNREAD,
+  pageSuggestionInputSchema,
   MAX_MEMORIES_PER_RUN,
   MAX_SUGGESTIONS_PER_RUN,
   ProactiveRefusedError,
@@ -81,6 +88,7 @@ import {
 import {
   type CheckInContext,
   checkInWindow,
+  pageInstruction,
   researchInstruction,
 } from "./window";
 
@@ -159,6 +167,18 @@ export type ProactiveEngineDeps = {
   ): Promise<CheckInSource>;
   /** The Bot's name as the person knows it, for the sentences `health` says. */
   botName?(ownerUserId: string, agentId: string): Promise<string | null>;
+  /**
+   * Read one page through the Bot's page-read tool, as the person and under the run's proactive
+   * initiator, so grants, policy and the audit trail apply as to any call (`PluginStore.callTool`),
+   * and the door admits it only for this check-in's own address. Its text, or a throw.
+   */
+  readPage?(input: {
+    ownerUserId: string;
+    agentId: string;
+    ref: string;
+    link: string;
+    initiator: AuditInitiator;
+  }): Promise<string>;
   mintThreadId(): string;
   now?: () => Date;
 };
@@ -316,8 +336,20 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
    */
   const running = new Map<
     string,
-    { setting: ProactiveSetting; reached: boolean; catalogue: Catalogue }
+    {
+      setting: ProactiveSetting;
+      reached: boolean;
+      catalogue: Catalogue;
+      /** A page check-in's run: the tool its page was read with, which its items name as source. */
+      pageRef?: string;
+    }
   >();
+  /**
+   * The threads of page check-ins' turns while they run. Text from the open web never becomes
+   * something a Bot learns about the person, so the turn runner answers no Learning container for
+   * these (`learningContainerFor`).
+   */
+  const pageThreads = new Set<string>();
 
   /**
    * The deployment's apps, listed once for one check-in however many it names: each item raised,
@@ -382,6 +414,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     setting: ProactiveSetting,
     runId: string,
     catalogue: Catalogue,
+    pageRef?: string,
   ): HeadlessTool[] {
     const tool = <T>(
       name: string,
@@ -411,6 +444,67 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     });
     let memories = 0;
     const memory = deps.memory;
+    const clear = tool(
+      "clear_next_step",
+      "Clear one of your earlier next steps, listed as still open, that no longer needs the person: it was answered, done or cancelled.",
+      clearInputSchema,
+      async (input) => {
+        const cleared = await deps.store.clearSuggestion(
+          setting.id,
+          input.suggestionId,
+        );
+        if (!cleared)
+          throw new ProactiveRefusedError(
+            "That is not one of your next steps still open. Clear only an id listed as still open.",
+          );
+        return { cleared: cleared.id };
+      },
+    );
+    /*
+     * A page check-in's turn raises and clears, and nothing else: no memory (text from the open web
+     * never becomes something a Bot knows about the person) and no tool that takes an address. What
+     * it raises takes the page as its source; the model names no tool.
+     */
+    if (setting.sourceKind === "page" && pageRef && setting.sourceLink) {
+      const link = setting.sourceLink;
+      return [
+        tool(
+          "suggest_next_step",
+          "Raise one next step for the person, from what changed on the page. They can start it as a task or hide it.",
+          pageSuggestionInputSchema,
+          async (input) => {
+            if (
+              (await deps.store.countSuggestions(runId)) >=
+              MAX_SUGGESTIONS_PER_RUN
+            )
+              throw new ProactiveRefusedError(
+                `This check-in already raised ${MAX_SUGGESTIONS_PER_RUN} next steps.`,
+              );
+            const row = await deps.store.raise(
+              {
+                ownerUserId: setting.ownerUserId,
+                agentId: setting.agentId,
+                settingId: setting.id,
+                runId,
+                title: input.title,
+                detail: input.detail,
+                sourceApp: pageHost(link),
+                sourceRef: pageRef,
+                sourceLink: link,
+              },
+              (prior) =>
+                repeatOf(prior, {
+                  ...input,
+                  sourceLink: link,
+                  agentId: setting.agentId,
+                }),
+            );
+            return { suggested: row.id };
+          },
+        ),
+        clear,
+      ];
+    }
     return [
       tool(
         "suggest_next_step",
@@ -452,22 +546,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
           return { suggested: row.id };
         },
       ),
-      tool(
-        "clear_next_step",
-        "Clear one of your earlier next steps, listed as still open, that no longer needs the person: it was answered, done or cancelled.",
-        clearInputSchema,
-        async (input) => {
-          const cleared = await deps.store.clearSuggestion(
-            setting.id,
-            input.suggestionId,
-          );
-          if (!cleared)
-            throw new ProactiveRefusedError(
-              "That is not one of your next steps still open. Clear only an id listed as still open.",
-            );
-          return { cleared: cleared.id };
-        },
-      ),
+      clear,
       ...(memory
         ? [
             tool(
@@ -825,6 +904,27 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     let lastError: string | null = STOPPED_BEFORE_FINISHING;
     try {
       await deps.store.recordRun(setting.id, "running");
+      if (setting.sourceKind === "page") {
+        const result = await pageRun(
+          setting,
+          runId,
+          trigger,
+          threadId,
+          gate.pageReader,
+          signal,
+        );
+        await deps.store.finishRun(runId, result);
+        closed = true;
+        status = result.outcome === "failed" ? "error" : "succeeded";
+        lastError = result.error;
+        await deps.store.recordRun(setting.id, status, lastError);
+        recorded = true;
+        if (result.itemsRaised > 0)
+          await tryPing(setting.ownerUserId).catch(
+            logged("proactive-ping-error"),
+          );
+        return;
+      }
       const prior = await deps.store.priorItems(
         setting.ownerUserId,
         setting.agentId,
@@ -920,6 +1020,124 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     }
   }
 
+  /**
+   * One page check-in, after its gates: the engine reads the one address itself, and the model is
+   * given the text, never a tool that takes an address.
+   *
+   * - The read failed: failed, "Couldn't read the page." Three in a row is can't look.
+   * - First read: kept as the baseline, quiet. Nothing is raised about a page nobody saw change.
+   * - Same as last time: quiet, and no model call.
+   * - Changed: one turn with the earlier and the new text, whose only tools raise and clear. The new
+   *   text becomes the baseline once that turn finished, so a turn that broke off is compared again.
+   */
+  async function pageRun(
+    setting: ProactiveSetting,
+    runId: string,
+    trigger: ProactiveRunTrigger,
+    threadId: string,
+    reader: { ref: string; name: string } | undefined,
+    signal: AbortSignal,
+  ): Promise<{
+    outcome: "quiet" | "raised" | "failed";
+    itemsRaised: number;
+    reads: number;
+    error: string | null;
+  }> {
+    const link = setting.sourceLink;
+    let text = "";
+    try {
+      if (!reader || !link || !deps.readPage) throw new Error(PAGE_UNREAD);
+      text = normalisedPage(
+        await deps.readPage({
+          ownerUserId: setting.ownerUserId,
+          agentId: setting.agentId,
+          ref: reader.ref,
+          link,
+          initiator: proactiveInitiator(runId),
+        }),
+      );
+    } catch {
+      text = "";
+    }
+    if (!text || !reader)
+      return {
+        outcome: "failed",
+        itemsRaised: 0,
+        reads: 0,
+        error: PAGE_UNREAD,
+      };
+    const hash = pageHashOf(text);
+    const kept = await deps.store.keptPage(setting.id);
+    if (!kept || kept.hash === hash) {
+      await deps.store.keepPage(setting.id, text, hash);
+      return { outcome: "quiet", itemsRaised: 0, reads: 1, error: null };
+    }
+    const prior = await deps.store.priorItems(
+      setting.ownerUserId,
+      setting.agentId,
+    );
+    const turn = {
+      setting,
+      reached: false,
+      catalogue: catalogueOnce(),
+      pageRef: reader.ref,
+    };
+    running.set(runId, turn);
+    pageThreads.add(threadId);
+    const instruction = pageInstruction(
+      setting,
+      { earlier: kept.text, now: text },
+      contextOf(prior, setting.agentId),
+      trigger,
+    );
+    let thrown: unknown = null;
+    try {
+      await deps.runTurn({
+        ownerUserId: setting.ownerUserId,
+        routineId: `proactive:${setting.id}`,
+        agentId: setting.agentId,
+        threadId,
+        instruction,
+        userMessage: {
+          id: `check-in:${runId}`,
+          role: "user",
+          content: instruction,
+        },
+        initiator: proactiveInitiator(runId),
+        runId,
+        signal,
+      });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      running.delete(runId);
+      pageThreads.delete(threadId);
+    }
+    if (turn.reached)
+      await recordHeadlessUsage({
+        ownerUserId: setting.ownerUserId,
+        agentId: setting.agentId,
+        threadId,
+        runId,
+      });
+    const raised = await deps.store.countSuggestions(runId);
+    if (thrown && !(thrown instanceof EmptyTurnError))
+      return {
+        outcome: "failed",
+        itemsRaised: raised,
+        reads: 1,
+        error:
+          thrown instanceof Error ? thrown.message : "The check-in failed.",
+      };
+    await deps.store.keepPage(setting.id, text, hash);
+    return {
+      outcome: raised > 0 ? "raised" : "quiet",
+      itemsRaised: raised,
+      reads: 1,
+      error: null,
+    };
+  }
+
   async function drain(
     kind: string,
     work: (
@@ -981,6 +1199,15 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
     researchInstruction,
     /** Whether an admin left check-ins on for this person. */
     allowed,
+    /** Whether this initiator is a page check-in's run, whose turn holds no granted tool. */
+    isPageRun(initiator: AuditInitiator | null | undefined) {
+      const runId = proactiveRunIdOf(initiator ?? undefined);
+      return runId ? running.get(runId)?.pageRef !== undefined : false;
+    },
+    /** Whether a thread is a page check-in's turn, which no Learning container is given. */
+    isPageThread(threadId: string) {
+      return pageThreads.has(threadId);
+    },
     /** The headless tools for one proactive turn; empty for any other initiator. */
     async toolsForTurn(input: {
       ownerUserId: string;
@@ -1000,7 +1227,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
         return [];
       // The runner asks for a turn's tools once it admitted the turn, just before the model.
       turn.reached = true;
-      const own = toolsForRun(setting, runId, turn.catalogue);
+      const own = toolsForRun(setting, runId, turn.catalogue, turn.pageRef);
       const ownNames = new Set(own.map((tool) => tool.definition.name));
       // A check-in on one app or one page is refused every other app's reads too.
       const others =

@@ -284,6 +284,8 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { pageReadArgs } from "./proactive/source";
 import { createProactiveEngine } from "./proactive/engine";
 import { checkInOfferTools } from "./proactive/offer-tool";
 import {
@@ -2213,6 +2215,17 @@ const subagents = createSubagents({
  * invisible: it runs, and quietly holds different tools or a different role from the one the person
  * is talking to.
  */
+/**
+ * A page check-in's turn holds no granted tool at all: its only tools are its own two, to raise and
+ * to clear (`proactive/engine.ts`). Every other turn's loader is as it was.
+ */
+const withoutToolsInPageRun =
+  (
+    initiator: AuditInitiator | undefined,
+    load: (botId: string) => Promise<GrantedTool[]>,
+  ) =>
+  async (botId: string) =>
+    proactiveEngine.isPageRun(initiator) ? [] : load(botId);
 const actorAgentResolver = createActorAgentResolver({
   productTelemetry,
   loadAgents: loadAgentsForActor,
@@ -2224,21 +2237,24 @@ const actorAgentResolver = createActorAgentResolver({
     }),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
-    restrictToolsForRun(
+    withoutToolsInPageRun(
       initiator,
-      actorId,
-      // A turn the person did not send reads the goals that repeat as it begins.
-      withRepeatingGoalsPinned(
+      restrictToolsForRun(
         initiator,
         actorId,
-        // A goal's run holds the goal's own tools; the Routines copies would be a second set.
-        withoutGoalCopiesInGoalRun(
+        // A turn the person did not send reads the goals that repeat as it begins.
+        withRepeatingGoalsPinned(
           initiator,
-          loadToolsForActor(actorId, initiator),
+          actorId,
+          // A goal's run holds the goal's own tools; the Routines copies would be a second set.
+          withoutGoalCopiesInGoalRun(
+            initiator,
+            loadToolsForActor(actorId, initiator),
+          ),
         ),
+        // A check-in on one app, or on one page, is offered that app's reads alone, or none.
+        proactiveEngine.scopeForRun(initiator, checkInScope),
       ),
-      // A check-in on one app, or on one page, is offered that app's reads alone, or none.
-      proactiveEngine.scopeForRun(initiator, checkInScope),
     ),
   /*
    * Which apps each Bot can use for this person, by name and connection state, so a Bot holding
@@ -2711,9 +2727,12 @@ const proactiveEngine = createProactiveEngine({
     // Only the run's own tools and refusals: no computer, no components.
     toolsForTurn: (input) => proactiveEngine.toolsForTurn(input),
     turnTimeoutMs: 3 * 60_000,
+    // A page check-in's turn reads text from the open web, which never becomes something learned.
     learningContainerForThread: (input) =>
-      copilotRuntime.learning?.containerForThread(input) ??
-      Promise.resolve(undefined),
+      proactiveEngine.isPageThread(input.threadId)
+        ? Promise.resolve(undefined)
+        : (copilotRuntime.learning?.containerForThread(input) ??
+          Promise.resolve(undefined)),
   }),
   // A check-in belongs to its Bot: the person may still use it, and no conversation is read.
   canUseBot: canUseBotFor,
@@ -2728,6 +2747,21 @@ const proactiveEngine = createProactiveEngine({
    * tool the Bot holds is answered with a refusal if the model calls it anyway.
    */
   ...checkInTools,
+  /*
+   * A page check-in's one read, made by the engine through the Bot's page-read tool, as the person
+   * and under the run's initiator: the door admits it for that check-in's own address alone.
+   */
+  readPage: async ({ ownerUserId, agentId, ref, link, initiator }) => {
+    const result = await pluginStore.callTool({
+      ref,
+      args: pageReadArgs(ref, link),
+      botId: agentId,
+      actorId: ownerUserId,
+      initiator,
+    });
+    if (result.isError) throw new Error(result.text);
+    return result.text;
+  },
   botName: async (ownerUserId, agentId) =>
     (await agentProfileStore.get(await actorFor(ownerUserId), agentId))?.name ??
     null,

@@ -168,6 +168,16 @@ export const suggestionInputSchema = z
       .optional(),
   })
   .strict();
+/**
+ * `suggest_next_step` in a page check-in's turn: no `sourceTool` and no link, since the source is
+ * the page the engine read, whatever the model says.
+ */
+export const pageSuggestionInputSchema = suggestionInputSchema.pick({
+  title: true,
+  detail: true,
+});
+/** A page check-in whose read failed, as its run's `error` says it and the person reads it. */
+export const PAGE_UNREAD = "Couldn't read the page.";
 /** `clear_next_step`: an item this Bot raised earlier that no longer needs the person. */
 export const clearInputSchema = z
   .object({
