@@ -323,7 +323,36 @@ test("the section says connections are checked against the policy as written, an
   ).toBeTruthy();
   expect(
     within(dialog).getByText(
-      /your model drafts the list\. OpenBot checks the list you save, not your words\./,
+      /where Bots may connect, and your model drafts the list\./,
     ),
   ).toBeTruthy();
+});
+
+test("a drafted list says it and its mode are what OpenBot checks every connection against, with the reading under it", async () => {
+  const { view } = await openOrganization();
+  const allowlist = () =>
+    (view.getByLabelText("Allowlist") as HTMLTextAreaElement).closest(
+      '[data-slot="field"]',
+    ) as HTMLElement;
+  // A list typed by hand is not called a draft.
+  expect(allowlist().textContent).not.toContain("Your model drafted");
+
+  await userEvent.type(
+    await view.findByLabelText("Describe the allowlist"),
+    recorded.writtenFirstTime.text,
+  );
+  fireEvent.click(view.getByRole("button", { name: "Write list" }));
+  await view.findByText("What becomes reachable");
+
+  const field = allowlist();
+  expect(field.textContent).toContain(
+    "Your model drafted this list and the mode above from your description. OpenBot checks every connection against them, exactly as written.",
+  );
+  // The exact entries are in it, and the plain-language reading is under them.
+  expect(
+    (view.getByLabelText("Allowlist") as HTMLTextAreaElement).value.split("\n"),
+  ).toEqual(TRANSLATION.rules.map((rule) => rule.value));
+  expect(field.textContent).toContain("What becomes reachable");
+  for (const line of reading.reachable)
+    expect(field.textContent).toContain(line);
 });

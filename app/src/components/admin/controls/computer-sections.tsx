@@ -60,6 +60,7 @@ import {
   AllowlistPreview,
   AllowlistReading,
   DescribeAllowlist,
+  DRAFTED_ALLOWLIST,
   type WrittenAllowlist,
 } from "./network-describe";
 
@@ -425,6 +426,7 @@ function NetworkDialog({
               <Field>
                 <FieldLabel htmlFor="network-rules">Allowlist</FieldLabel>
                 <FieldDescription>
+                  {written ? `${DRAFTED_ALLOWLIST} ` : null}
                   One per line. A domain covers its subdomains. *.name covers
                   only subdomains. Either can list ports. Defaults are{" "}
                   {data.defaultDestinations.slice(0, 4).join(", ")} and{" "}

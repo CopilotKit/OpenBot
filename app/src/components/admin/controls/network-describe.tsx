@@ -30,6 +30,13 @@ import {
 export type WrittenAllowlist = NetworkAllowlistTranslation & { text: string };
 
 /**
+ * Over the Allowlist field once the model has drafted the list and the mode into the dialog: what the
+ * description became, and that this, and not the description, is what is checked.
+ */
+export const DRAFTED_ALLOWLIST =
+  "Your model drafted this list and the mode above from your description. OpenBot checks every connection against them, exactly as written.";
+
+/**
  * "Describe the allowlist": a sentence in, allowlist entries out, written by the deployment's own
  * model. `onWritten` hands them to the dialog, which puts them in the Allowlist field where the admin
  * reads them, edits them if they want, and saves them themselves.
@@ -42,7 +49,7 @@ export function DescribeAllowlist({
   return (
     <DescribeField
       action="Write list"
-      description="Say in a sentence where Bots may connect, and your model drafts the list. OpenBot checks the list you save, not your words. A second reading that never sees your words says what becomes reachable."
+      description="Say in a sentence where Bots may connect, and your model drafts the list. A second reading that never sees your words says what becomes reachable."
       id="network-description-english"
       label="Describe the allowlist"
       placeholder="Only Salesforce and Google Workspace"
