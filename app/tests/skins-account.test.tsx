@@ -212,7 +212,7 @@ test("a skin the account could not save is put back, and the picker says so", as
   const picker = view.getByRole("combobox", { name: "Skin" });
   await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
   await user.click(picker);
-  await user.click(await view.findByRole("option", { name: /^OpenMuse/ }));
+  await user.click(await view.findByRole("option", { name: /^OpenFuse/ }));
   await waitFor(() => expect(getSkinId()).toBe("openmuse"));
 
   await act(async () => {
