@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **A Windows machine that has only WSL 1 is now told how to convert it.** When the WSL
+  `DefaultVersion` registry value was absent, setup reported WSL 2 and then tried
+  `wsl.exe --version`, which the older inbox binary does not understand, so it ended on "could not
+  check the WSL version" with no next step. An absent value now means WSL 1, and setup shows the
+  `wsl --set-default-version 2` instructions.
 - **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
   menu, it could seem to do nothing for a few seconds and then close the app, after saving the
   file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
