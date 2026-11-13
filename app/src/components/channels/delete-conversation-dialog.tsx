@@ -10,9 +10,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
+import { openingOf } from "@/lib/voice/cut";
+
+/** How much of a conversation's name the question quotes before it is cut. */
+const TITLE_LIMIT = 60;
+
+/**
+ * The question, naming the conversation by what the sidebar calls it (`conversationTitle`). A
+ * conversation nobody has used yet has no name to quote.
+ */
+export function deleteConversationQuestion(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) return "Delete this conversation?";
+  const shown =
+    trimmed.length > TITLE_LIMIT
+      ? `${openingOf(trimmed, TITLE_LIMIT).trimEnd()}…`
+      : trimmed;
+  return `Delete “${shown}”?`;
+}
 
 /**
  * Confirms deleting a conversation, naming it, and deletes it.
+ *
+ * `title` is the conversation's own name, never its channel `name`: that is the Bot's for every
+ * one-Bot conversation, and "Delete Personal Assistant?" asked about the wrong thing.
  *
  * Shared by the sidebar row's menu and the Bot panel beside an open conversation, so both ask the
  * same question and fail the same way. `leave` runs before the delete when the conversation is the
@@ -24,16 +45,17 @@ import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
 export function DeleteConversationDialog({
   channelId,
   leave,
-  name,
   onOpenChange,
   open,
+  title,
 }: {
   channelId: string;
   /** Navigates away from the conversation. Only passed where it is the one on screen. */
   leave?: () => Promise<unknown>;
-  name: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  /** What the conversation is called (`conversationTitle`), or empty when it has no name yet. */
+  title: string;
 }) {
   const queryClient = useQueryClient();
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
@@ -59,7 +81,7 @@ export function DeleteConversationDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {name}?</DialogTitle>
+          <DialogTitle>{deleteConversationQuestion(title)}</DialogTitle>
           <DialogDescription>
             It disappears for everyone in the conversation.
           </DialogDescription>

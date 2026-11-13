@@ -29,6 +29,8 @@ import { queryClient } from "@/query-client";
  */
 export function CredentialsPage() {
   const paths = useManagePaths();
+  // A key, as the personal edition's Vault and its Add key page call it, wherever this page shows.
+  const noun = paths.edition === "personal" ? "key" : "credential";
   return (
     <PageShell
       action={
@@ -39,13 +41,13 @@ export function CredentialsPage() {
           variant="ghost"
         >
           <IconPlus />
-          Add credential
+          Add {noun}
         </Button>
       }
       description="Manage this deployment’s keys and tokens. Saved secrets cannot be viewed again."
       title={paths.credentialsLabel}
     >
-      <PageSection title="Saved credentials">
+      <PageSection title={`Saved ${noun}s`}>
         <CredentialsList />
       </PageSection>
     </PageShell>

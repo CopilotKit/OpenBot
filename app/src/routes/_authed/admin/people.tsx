@@ -8,6 +8,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { TeamPage } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -37,7 +38,7 @@ import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/people")({
-  component: PeoplePage,
+  component: PeoplePageInEveryEdition,
 });
 
 /** What each provider is called, since the id it registers under is not a name. */
@@ -231,5 +232,18 @@ function PeoplePage() {
         ) : null}
       </PageSection>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function PeoplePageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Manage access for people who have signed in. Only admins can access the Admin pages."
+      more="Here, you're the only person, and the admin."
+      title="People"
+    >
+      <PeoplePage />
+    </TeamPage>
   );
 }

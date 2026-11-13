@@ -3,6 +3,7 @@ import {
   answerOf,
   conversationRow,
   expectSettled,
+  expectSitsNaturally,
   generatedName,
   send,
   transcript,
@@ -226,6 +227,12 @@ test("a person creates a Bot and talks to it", async ({ page, shot }) => {
         .locator('[data-slot="conversation-header"]')
         .getByText(BOT, { exact: true }),
     ).toBeVisible();
+    // Its introduction stays whole above the first exchange, which fits: nothing scrolled up
+    // under the header with empty room left below.
+    await expect(
+      transcript(page).getByRole("heading", { name: BOT, level: 1 }),
+    ).toBeInViewport({ ratio: 1 });
+    await expectSitsNaturally(page);
     await shot("answer-from-it");
 
     // OpenBot names it, and the sidebar shows the name under the Bot's.
@@ -233,6 +240,7 @@ test("a person creates a Bot and talks to it", async ({ page, shot }) => {
     const row = conversationRow(page, named);
     await expect(row).toHaveAttribute("href", `/channel/${channelId}`);
     await expect(row).toContainText(BOT);
+    await expectSitsNaturally(page);
     await shot("conversation-named");
   });
 });

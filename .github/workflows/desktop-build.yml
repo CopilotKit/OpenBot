@@ -296,6 +296,12 @@ jobs:
         if: matrix.platform == 'linux'
         run: cargo test --locked --lib netavark_rules::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
+      # The folder sandbox on the runner's Docker: what a Bot is told when its command fails, runs
+      # too long or out of memory, or cannot start, for each way that happens.
+      - name: Folder sandbox answer regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib host_access::live -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
       # shared/recorder-extension.json, which the Rust reads at compile time.

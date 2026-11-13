@@ -5,6 +5,7 @@ import {
   serverLogMark,
 } from "../harness/runs";
 import { expect, test } from "../harness/test";
+import { expectSitsNaturally } from "./chat";
 
 /**
  * THE CORE LOOP, as a new person meets it on a fresh stack: first-run setup, an AI key, a first
@@ -195,6 +196,11 @@ test("a new person sets up OpenBot and gets a first answer from the Personal Ass
       .getByRole("log");
     await expect(transcript.getByText(answer, { exact: true })).toHaveCount(1);
     await expect(transcript.getByText(answer, { exact: true })).toBeVisible();
+    // The Personal Assistant's introduction and the first exchange fit, and are shown whole.
+    await expect(
+      transcript.getByRole("heading", { name: "Personal Assistant", level: 1 }),
+    ).toBeInViewport({ ratio: 1 });
+    await expectSitsNaturally(page);
     await shot("answer");
 
     // One message, one run: in the conversation's events and in the server's log.
@@ -232,6 +238,7 @@ test("a new person sets up OpenBot and gets a first answer from the Personal Ass
     });
     await expect(conversation).toBeVisible();
     await expect(conversation).toHaveAttribute("href", `/channel/${channelId}`);
+    await expectSitsNaturally(page);
     await shot("named");
   });
 });

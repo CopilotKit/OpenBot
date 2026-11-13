@@ -84,6 +84,32 @@ test("a person pauses, pins, hides, duplicates, resets and deletes a Bot", async
     ]) {
       await expect(page.getByRole("option", { name: option })).toBeVisible();
     }
+    // The list fits: every label whole, inside the card, lined up with the control's right edge.
+    const list = page.getByRole("listbox");
+    await expectSettled(list);
+    await expectStill(list);
+    const card = notifications.locator(
+      "xpath=ancestor::*[@data-slot='item'][1]/..",
+    );
+    const [listBox, cardBox, controlBox] = await Promise.all([
+      list.boundingBox(),
+      card.boundingBox(),
+      notifications.boundingBox(),
+    ]);
+    if (!listBox || !cardBox || !controlBox) throw new Error("not laid out");
+    expect(listBox.x).toBeGreaterThanOrEqual(cardBox.x);
+    expect(listBox.x + listBox.width).toBeLessThanOrEqual(
+      cardBox.x + cardBox.width,
+    );
+    expect(
+      Math.abs(listBox.x + listBox.width - (controlBox.x + controlBox.width)),
+    ).toBeLessThanOrEqual(1);
+    const clipped = await list.evaluate((element) =>
+      [element, ...element.querySelectorAll('[role="option"]')]
+        .filter((node) => node.scrollWidth > node.clientWidth)
+        .map((node) => node.textContent),
+    );
+    expect(clipped, "labels cut off").toEqual([]);
     await shot("notifications-options");
     await page.getByRole("option", { name: "Only when it needs me" }).click();
     await expect(notifications).toContainText("Only when it needs me");

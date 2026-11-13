@@ -246,3 +246,78 @@ export async function expectStill(locator: Locator): Promise<void> {
     )
     .toBe(true);
 }
+
+/**
+ * Watch for the Stop button from now on, and answer with a check of whether it was drawn since.
+ *
+ * A mutation observer rather than a locator: the false Stop shown while a conversation's history
+ * loaded lasted about 300 ms, between two polls. It watches this document, so the page has to stay
+ * it: navigate by clicking, not with `page.goto`.
+ */
+export async function watchForStop(
+  page: Page,
+): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    const watched = window as unknown as {
+      stopSeen?: boolean;
+      stopWatch?: MutationObserver;
+    };
+    const drawn = () =>
+      document.querySelector('[aria-label="Stop the Bot"]') !== null;
+    watched.stopWatch?.disconnect();
+    watched.stopSeen = drawn();
+    watched.stopWatch = new MutationObserver(() => {
+      if (drawn()) watched.stopSeen = true;
+    });
+    watched.stopWatch.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["aria-label"],
+      childList: true,
+      subtree: true,
+    });
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { stopSeen?: boolean }).stopSeen === true,
+    );
+}
+
+/**
+ * The open conversation, at rest, sits naturally: nothing is scrolled up out of view while room is
+ * left empty under its last row. A conversation that fits is shown whole from the top, its Bot's
+ * introduction included; a longer one ends at its last row.
+ *
+ * Read once the view has stopped moving, since a send glides it for a moment.
+ */
+export async function expectSitsNaturally(page: Page): Promise<void> {
+  const view = page.getByRole("region", { name: "Messages" });
+  let last = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const top = await view.evaluate((element) => element.scrollTop);
+        const still = top === last;
+        last = top;
+        return still;
+      },
+      { message: "the view stops moving", intervals: [200, 200, 300, 300] },
+    )
+    .toBe(true);
+  const { hidden, empty } = await view.evaluate((element) => {
+    const content = element.querySelector('[role="log"]');
+    const rows = element.querySelectorAll(
+      '[data-slot="message-scroller-item"]',
+    );
+    const lastRow = rows[rows.length - 1];
+    if (!content || !lastRow) return { hidden: element.scrollTop, empty: 0 };
+    const below =
+      element.getBoundingClientRect().bottom -
+      lastRow.getBoundingClientRect().bottom -
+      Number.parseFloat(getComputedStyle(content).paddingBottom);
+    return { hidden: element.scrollTop, empty: Math.round(below) };
+  });
+  expect(
+    hidden === 0 || empty <= 1,
+    `${hidden}px scrolled out of view above ${empty}px of empty room`,
+  ).toBe(true);
+}
