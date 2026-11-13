@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -91,14 +92,14 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === "/api/plugins/for/waiting-bot")
         return NativeResponse.json({ skills: [], tools: [] });
       // What the Bot's runs are offered is read from these, as the server answers them.
-      if (url.pathname === "/api/agents/waiting-bot")
+      if (url.pathname === botPath("waiting-bot"))
         return NativeResponse.json({
-          agent: { id: "waiting-bot", visibility: "public", canManage: true },
+          bot: { id: "waiting-bot", visibility: "public", canManage: true },
         });
       if (url.pathname === "/api/components/for-agent/waiting-bot")
         return NativeResponse.json({ components: [] });

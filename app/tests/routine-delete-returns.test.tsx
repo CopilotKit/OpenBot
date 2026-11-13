@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -74,12 +75,13 @@ function serving() {
         routines: deleted ? [] : [ROUTINE],
         sweep: { lastSweptAt: new Date().toISOString(), working: true },
       });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: path.includes("hidden=true")
-          ? []
-          : [{ id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" }],
-      });
+    const bots = answerBotsList(path, init, {
+      visible: [
+        { id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" },
+      ],
+      hidden: [],
+    });
+    if (bots) return bots;
     return Response.json({});
   }) as unknown as typeof fetch;
 }

@@ -28,6 +28,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -110,12 +111,6 @@ function api(role: "admin" | "user") {
       nextCursor: null,
     },
     "/api/bots/attention": { bots: [], lastPingId: null },
-    "/api/agents": {
-      agents: [
-        { id: "b-1", name: "Inbox Bot" },
-        { id: "b-2", name: "Ops Bot" },
-      ],
-    },
     "/api/approvals": {
       enabled: true,
       rules: [],
@@ -262,6 +257,13 @@ function api(role: "admin" | "user") {
       });
       return Response.json({ ok: true });
     }
+    const bots = answerBotsList(input, init, {
+      visible: [
+        { id: "b-1", name: "Inbox Bot" },
+        { id: "b-2", name: "Ops Bot" },
+      ],
+    });
+    if (bots) return bots;
     if (path in bodies) return Response.json(bodies[path]);
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;

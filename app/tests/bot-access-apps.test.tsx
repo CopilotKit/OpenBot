@@ -14,6 +14,7 @@ import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { appAccess } from "./app-access-fixture";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -74,7 +75,7 @@ function serving(options: {
   tools?: ReturnType<typeof tool>[];
 }) {
   const { role = "user", apps = [], tools = [] } = options;
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/plugins/for/expenses/apps"))
       return apps === "fail"
@@ -91,7 +92,8 @@ function serving(options: {
           grantable: false,
         },
       });
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
     return Response.json({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });

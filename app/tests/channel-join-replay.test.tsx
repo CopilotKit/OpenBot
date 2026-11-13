@@ -13,7 +13,6 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { ChannelChat } from "@/components/channels/channel-chat";
-import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -22,6 +21,7 @@ import {
 } from "@/lib/channels/queries";
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { queryClient } from "@/query-client";
+import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import {
   ASKED_SO_FAR,
   ASKED_TEXT,
@@ -30,6 +30,7 @@ import {
   askPersonReplayStart,
   askPersonStored,
 } from "./ask-person-replay.fixture";
+import { answerBotsList, botPath } from "./bots-api";
 import {
   ANSWER_TEXT,
   ANSWERED_EARLY,
@@ -140,7 +141,7 @@ beforeAll(() => {
   globalThis.WebSocket = NativeWebSocket;
   originalFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = new URL(
         typeof input === "string"
           ? input
@@ -149,13 +150,13 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === "/api/plugins/for/join-bot")
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/agents/join-bot")
+      if (url.pathname === botPath("join-bot"))
         return NativeResponse.json({
-          agent: { id: "join-bot", visibility: "public", canManage: true },
+          bot: { id: "join-bot", visibility: "public", canManage: true },
         });
       if (url.pathname === "/api/components/for-agent/join-bot")
         return NativeResponse.json({ components: [] });

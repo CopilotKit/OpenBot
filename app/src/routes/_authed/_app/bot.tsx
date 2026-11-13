@@ -16,7 +16,9 @@ import {
   agentKeys,
   agentListQueryOptions,
 } from "@/lib/agents/queries";
-import { tryClient } from "@/lib/client";
+import { getBot } from "@/lib/api/generated/bots/bots";
+import { ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
@@ -55,27 +57,18 @@ type BotDetailLookup =
   | { bot: AgentProfile; status: "found" }
   | { status: "missing" };
 
-function isAgentEnvelope(body: unknown): body is { agent: AgentProfile } {
-  if (body === null || typeof body !== "object") return false;
-  const agent = (body as { agent?: unknown }).agent;
-  return (
-    agent !== null &&
-    typeof agent === "object" &&
-    typeof (agent as { id?: unknown }).id === "string" &&
-    typeof (agent as { name?: unknown }).name === "string"
-  );
-}
-
+/** One Bot, read through the API (`getBot`): found, or not here at all (404). */
 async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
-  const response = await tryClient(
-    `/api/agents/${encodeURIComponent(agentId)}`,
-  );
-  if (response.status === 404) return { status: "missing" };
-  if (!response.ok) throw new Error("Couldn't load this Bot.");
-
-  const body: unknown = await response.json().catch(() => null);
-  if (!isAgentEnvelope(body)) throw new Error("Couldn't load this Bot.");
-  return { bot: body.agent, status: "found" };
+  try {
+    const { bot } = await getBot(ORGANIZATION_ID, agentId, {
+      fallback: "Couldn't load this Bot.",
+    });
+    return { bot, status: "found" };
+  } catch (error) {
+    if (error instanceof ClientError && error.status === 404)
+      return { status: "missing" };
+    throw error;
+  }
 }
 
 function RouteComponent() {

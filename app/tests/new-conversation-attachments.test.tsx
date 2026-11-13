@@ -1,3 +1,4 @@
+import { answerBotsList, botPath } from "./bots-api";
 import "./home-fallback-routing.fixture";
 
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
@@ -148,10 +149,10 @@ beforeAll(() => {
           fallback: false,
           viaMention: false,
         });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ tools: [], skills: [] });
       if (url.pathname === `/api/components/for-agent/${BOT}`)

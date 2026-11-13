@@ -37,6 +37,7 @@ import {
   setSkin,
   useSkinId,
 } from "@/skins/store";
+import { BOTS_PATH } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -387,7 +388,7 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
     userPreferencesQueryOptions("alice").queryKey,
     preferences("openduet"),
   );
-  serve("GET /api/agents", { agents: [] });
+  serve(`GET ${BOTS_PATH}`, { bots: [], nextCursor: null });
   serve("GET /api/channels", { channels: [], nextCursor: null });
   serve("GET /api/bots/attention", { bots: [], lastPingId: null });
   const { view, router } = renderApp(`/s/${key}`);

@@ -82,9 +82,11 @@ const server = setupServer(
           : [],
     }),
   ),
-  http.get("*/api/agents", () =>
+  // The Bots list, at the API's address and in its shape, as the server answers it.
+  http.get("*/api/v2/organizations/:organizationId/bots", () =>
     HttpResponse.json({
-      agents: [{ id: "general-assistant", name: "General Assistant" }],
+      bots: [{ id: "general-assistant", name: "General Assistant" }],
+      nextCursor: null,
     }),
   ),
   http.all("*", () => new HttpResponse(null, { status: 404 })),

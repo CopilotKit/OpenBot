@@ -21,6 +21,7 @@ import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as AdminToolRoute } from "@/routes/_authed/admin/plugins/$key_.tools.$tool";
+import { answerBotsList } from "./bots-api";
 
 /**
  * A connector's own pages, when `GET /api/plugins` fails.
@@ -50,14 +51,15 @@ const originalFetch = global.fetch;
 
 beforeEach(() => {
   global.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0];
       const json = (body: unknown) =>
         new Response(JSON.stringify(body), {
           headers: { "content-type": "application/json" },
         });
       if (path === "/api/plugins/connections") return json({ connections: [] });
-      if (path === "/api/agents") return json({ agents: [] });
+      const bots = answerBotsList(path, init, { visible: [] });
+      if (bots) return bots;
       // The one read under test: a 500 with no body, the shape a broken server sends.
       return new Response(null, { status: 500 });
     },
