@@ -53,7 +53,8 @@ const send = (
   (globalThis as { chrome: { runtime: typeof chrome.runtime } }).chrome.runtime,
 ) as ((id: string, message: unknown) => unknown) | undefined;
 
-const absolute = (url: string) => new URL(url, location.href).href;
+// Against the document's base, as fetch() and XMLHttpRequest.open() resolve it: a <base href> moves it off the page's address.
+const absolute = (url: string) => new URL(url, document.baseURI).href;
 const isAbort = (error: unknown) =>
   typeof error === "object" &&
   error !== null &&
