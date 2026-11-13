@@ -579,8 +579,10 @@ export function ComputerTools() {
       `${SECRET_FIELD_BY_REF} Add a short label for what you need. ` +
       "They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
-      "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
-      "if the form needs submitting, do that yourself afterwards with computer_click.",
+      "full takeover when you only need one field filled in, unless the person asked to type it " +
+      "themselves or to take over the browser: then call computer_request_help instead. The value is " +
+      "only TYPED into the field: if the form needs submitting, do that yourself afterwards with " +
+      "computer_click.",
     parameters: z.object({
       label: z
         .string()
@@ -676,7 +678,9 @@ export function ComputerTools() {
       "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. " +
       "This call is the only thing that reaches them: until you make it they are not looking at the " +
       "page and have no way to help, so saying you need them to sign in, or asking whether they would " +
-      "like to proceed, hands over nothing and leaves the page where it is.",
+      "like to proceed, hands over nothing and leaves the page where it is. " +
+      "Also call this whenever the person asks to take over the browser, or to type a password or " +
+      "anything else into it themselves: they are asking for the browser, not for computer_request_secret.",
     parameters: z.object({
       reason: z
         .string()

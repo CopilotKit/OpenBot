@@ -147,6 +147,33 @@ describe("computerGuidance", () => {
   });
 });
 
+describe("a person who asks to type it themselves gets the browser", () => {
+  /*
+   * The computer-sign-in journey: "hand me the browser so I can type my password myself". In 2 of
+   * 2 fresh live recordings the Bot called computer_request_secret (the masked box) instead, because
+   * the guidance said a single value never hands over the whole browser and said nothing about a
+   * person who asked to. The explicit request comes first, and the masked box is the otherwise.
+   */
+  test.each([
+    ["with a search tool", WITH_SEARCH],
+    ["without one", WITHOUT_SEARCH],
+  ])(
+    "an explicit request to take over comes before the masked box, %s",
+    (_, guidance) => {
+      const text = flat(guidance);
+      const handOver = text.indexOf(
+        "when the person says they will type it themselves, or asks you to hand them the browser or let them take over, call computer_request_help",
+      );
+      const maskedBox = text.indexOf(
+        "otherwise, when you need a single value, a password, a code, a card number, do not hand over the whole browser. call computer_request_secret",
+      );
+      expect(handOver).toBeGreaterThan(-1);
+      expect(maskedBox).toBeGreaterThan(handOver);
+      expect(text).toContain("even for a single password");
+    },
+  );
+});
+
 describe("how a Bot asks, and how an unattended run ends", () => {
   test("asking is a closed test, not a preference", () => {
     for (const guidance of [ASKING_GUIDANCE, BROUGHT_BOT_ASKING_GUIDANCE]) {
