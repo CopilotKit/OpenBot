@@ -135,12 +135,15 @@ function ActionLine({
   running,
   refused,
   failed,
+  failedLabel,
   notYet,
   byYou,
 }: {
   label: string;
   /** What was tried, said when the step was refused. See `ToolLine`. */
   attempted?: string;
+  /** What a failed step says instead of "<label>, didn't work". See `ToolLine`. */
+  failedLabel?: string;
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
@@ -158,6 +161,7 @@ function ActionLine({
       byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
+      failedLabel={failedLabel}
       label={label}
       notYet={notYet}
       refused={refused}
@@ -904,6 +908,12 @@ export function ComputerTools() {
           // The words the approval card and Activity use for the same action.
           label={args?.append === true ? "Added to a file" : "Saved a file"}
           attempted={args?.append === true ? "Add to a file" : "Save a file"}
+          // Not "Saved a file, didn't work": nothing was saved, so the line says so.
+          failedLabel={
+            args?.append === true
+              ? "Didn't add to a file"
+              : "Didn't save a file"
+          }
           // Show the path, never file contents.
           detail={
             outcome.refused === true
