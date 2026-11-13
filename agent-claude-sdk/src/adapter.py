@@ -109,6 +109,7 @@ def loaded_upfront(input_data):
       its routines, its questions to the person, its computer and the components it draws. Few, and
       used on most turns.
     - Every tool this conversation has already called: what a follow-up is most likely to need.
+    - Every tool OpenBot's own search found in this conversation (`found`).
 
     An app's other actions, the hundreds, stay behind the search.
     """
@@ -119,7 +120,42 @@ def loaded_upfront(input_data):
         if getattr(message, "role", None) == "assistant"
         for call in getattr(message, "tool_calls", None) or []
     }
-    return {name for name in names if not name.startswith("mcp__") or name in called}
+    return {
+        name
+        for name in names
+        if not name.startswith("mcp__") or name in called or name in found(input_data)
+    }
+
+
+# The first line of every answer OpenBot's `search_tools` gives, naming the tools it found.
+TOOLS_FOUND_LINE = "Tools found:"
+
+
+def found(input_data):
+    """The tools OpenBot's own search found in this conversation, read from its answers' first line.
+
+    The model was told it can call them from its next step; held behind Claude Code's ToolSearch, it
+    had to search for each a second time first.
+    """
+    names = set()
+    for message in input_data.messages or []:
+        if getattr(message, "role", None) != "tool":
+            continue
+        content = getattr(message, "content", None)
+        if not isinstance(content, str):
+            continue
+        # A replayed answer may arrive JSON-encoded once more.
+        if content.startswith('"'):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                continue
+        first = content.split("\n", 1)[0]
+        if first.startswith(TOOLS_FOUND_LINE):
+            names.update(
+                name.strip() for name in first[len(TOOLS_FOUND_LINE) :].split(",") if name.strip()
+            )
+    return names
 
 
 def _loaded_upfront_in(server_config, names):
@@ -1115,10 +1151,20 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 and bool(input_data.messages)
                 and input_data.messages[-1].role == "user"
             )
+            # A full Bot's query is replaced the same way when it is sent a tool it does not hold:
+            # what OpenBot's own search found for it. FOUND ON WINDOWS: a Bot on this harness,
+            # registered as an ordinary endpoint, searched with `search_tools`, was told it could
+            # call SLACK_SEND_MESSAGE from its next step, and was sent it; the resumed query did not
+            # hold it, so Claude Code's ToolSearch found "No matching deferred tools" and the call
+            # was "No such tool available". The Bot posted with another tool, or not at all.
+            incoming = {tool.name for tool in input_data.tools}
             replaced = answer_only or person_spoke or (
-                self._model_only
-                and turn is not None
-                and {tool.name for tool in input_data.tools} != turn.tool_names
+                turn is not None
+                and (
+                    incoming != turn.tool_names
+                    if self._model_only
+                    else bool(incoming - turn.tool_names)
+                )
             )
             if replaced:
                 await self.interrupt(thread_id)
