@@ -18,6 +18,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModelSource } from "@/lib/models/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
@@ -128,6 +129,16 @@ function serving() {
   }) as unknown as typeof fetch;
 }
 
+/** The team edition, as a server from before the edition switch reads. */
+function seedTeamEdition() {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: false,
+    edition: "team",
+  });
+}
+
 beforeEach(() => {
   settings = {
     ssoRequired: false,
@@ -142,6 +153,7 @@ beforeEach(() => {
   source = "openai";
   exposure = "allowed";
   queryClient.clear();
+  seedTeamEdition();
   serving();
 });
 
@@ -223,6 +235,7 @@ test("Providers names what actually serves the models, with a vendor's mark only
   for (const [served, name, mark] of cases) {
     source = served;
     queryClient.clear();
+    seedTeamEdition();
     const view = await draw(ProvidersPage);
     const title = await view.findByText(name);
     const row = title.closest("[data-slot=item]") as HTMLElement;

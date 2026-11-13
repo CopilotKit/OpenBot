@@ -7,6 +7,7 @@ import {
 } from "@/components/admin/controls/describe-capabilities";
 import { DescribeField } from "@/components/boundaries/describe-rule";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
+import { TeamPage } from "@/components/edition/for-a-team";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
@@ -21,7 +22,7 @@ import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/permissions_/describe")({
-  component: DescribePermissionsPage,
+  component: DescribePermissionsPageInEveryEdition,
 });
 
 const BACK = {
@@ -173,5 +174,18 @@ function DescribePermissionsPage() {
         </PageCard>
       </form>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function DescribePermissionsPageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      backButton={BACK}
+      title="Describe who can do what"
+    >
+      <DescribePermissionsPage />
+    </TeamPage>
   );
 }

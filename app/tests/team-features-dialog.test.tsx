@@ -26,7 +26,6 @@ import {
 import { BOOKING_CALENDAR_TIMEOUT_MS } from "@/components/onboarding/booking-calendar";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
-import { personalAdminRedirect } from "@/lib/manage-paths";
 import { Route as AdminRoute } from "@/routes/_authed/admin/route";
 import { settleReactWork } from "./settle-react-work";
 
@@ -229,69 +228,74 @@ describe("the team features dialog", () => {
   });
 });
 
-describe("an old Admin address in the personal edition", () => {
-  test.each([
-    ["/admin/plugins", "/connections"],
-    ["/admin/plugins/notion", "/connections/notion"],
-    ["/admin/plugins/notion/tools/search", "/connections/notion/tools/search"],
-    ["/admin/plugins/notion/bots/bot-1", "/connections/notion/bots/bot-1"],
-    ["/admin/plugins/composio", "/connections/browse/composio"],
-    ["/admin/skills", "/skills"],
-    ["/admin/credentials", "/settings/vault"],
-    ["/admin/credentials/new", "/settings/vault/new"],
-    ["/admin/computers", "/settings/computer"],
-    ["/admin/audit", "/settings/activity"],
-    ["/admin/people", "/settings"],
-    ["/admin/enterprise", "/settings"],
-    ["/admin", "/settings"],
-    ["/admin/", "/settings"],
-  ])("%s opens %s", (from, to) => {
-    expect(personalAdminRedirect(from)).toBe(to);
-  });
-
+describe("Admin's guard, in both editions", () => {
   type BeforeLoad = (input: {
     context: { queryClient: QueryClient };
     location: { pathname: string };
   }) => Promise<unknown>;
   const beforeLoad = AdminRoute.options.beforeLoad as unknown as BeforeLoad;
 
-  function clientFor(edition: "team" | "personal") {
+  function clientFor(edition: "team" | "personal", role: "admin" | "user") {
     const client = new QueryClient();
     client.setQueryData(authKeys.currentUser(), {
       id: "u1",
       email: "me@example.test",
       name: "Me",
-      role: "admin",
+      role,
     });
     client.setQueryData(deploymentKeys.capabilities(), {
       generativeUi: true,
       selfHostBanner: false,
-      localEvaluation: true,
+      localEvaluation: edition === "personal",
       edition,
     });
     return client;
   }
 
-  async function outcome(edition: "team" | "personal", pathname: string) {
+  async function outcome(
+    edition: "team" | "personal",
+    role: "admin" | "user",
+    pathname: string,
+  ) {
     try {
       await beforeLoad({
-        context: { queryClient: clientFor(edition) },
+        context: { queryClient: clientFor(edition, role) },
         location: { pathname },
       });
       return "open";
     } catch (thrown) {
-      return isRedirect(thrown) ? thrown.options.href : thrown;
+      if (!isRedirect(thrown)) throw thrown;
+      return thrown.options.href ?? thrown.options.to;
     }
   }
 
-  test("is sent to its Settings address", async () => {
-    expect(
-      await outcome("personal", "/admin/plugins/notion/tools/search"),
-    ).toBe("/connections/notion/tools/search");
-    expect(await outcome("personal", "/admin/people")).toBe("/settings");
+  const ADMIN_PAGES = [
+    "/admin",
+    "/admin/plugins",
+    "/admin/plugins/notion/tools/search",
+    "/admin/skills",
+    "/admin/credentials/new",
+    "/admin/computers",
+    "/admin/audit",
+    "/admin/people",
+    "/admin/permissions",
+    "/admin/identity-providers",
+  ];
+
+  test.each(ADMIN_PAGES)(
+    "the personal edition's one person opens %s where it is",
+    async (pathname) => {
+      expect(await outcome("personal", "admin", pathname)).toBe("open");
+    },
+  );
+
+  test("the team edition's admin opens Admin", async () => {
+    expect(await outcome("team", "admin", "/admin/people")).toBe("open");
   });
 
-  test("still opens in the team edition", async () => {
-    expect(await outcome("team", "/admin/people")).toBe("open");
+  test("anybody who isn't an admin is sent home, in either edition", async () => {
+    expect(await outcome("team", "user", "/admin/people")).toBe("/");
+    expect(await outcome("team", "user", "/admin")).toBe("/");
+    expect(await outcome("personal", "user", "/admin")).toBe("/");
   });
 });
