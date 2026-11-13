@@ -359,6 +359,15 @@ every deployment:
   Gmail", "Reads your apps", "Reads github.com". Migration `0093_check_in_source` adds
   `source_kind` (`apps` on every existing check-in, which reads every app as before) and
   `source_server_id` to `proactive_settings`.
+- **Pause all your Bots with one switch.** Routines starts with **All Bots active**. Turned off,
+  every one of your Bots behaves as a paused Bot does: nothing runs on its own, running work stops,
+  and Bots don't answer your Slack, Teams or text messages, though each still answers you in a
+  conversation in the app. Turned back on, each Bot is as it was, so a Bot you paused by itself
+  stays paused. While it is off, Bots, Routines and each Bot's page say so with **Resume all**. Work
+  on it is refused while its Bot is paused, by itself or with all, instead of making a task that
+  never starts. In the OpenDots skin the top bar's pause control now pauses every Bot. Migration
+  `0095_check_in_paused_all` adds `paused_all` to the reasons a check-in is skipped. Admin ›
+  Routines counts it, and its "Conversation gone" skip now reads "Bot no longer available".
 - **A check-in can watch a public web page.** It reads that one page each time, and only when the
   page changed does the Bot look at what changed, with no tool that could fetch any other address.
   The first look keeps the page as it is and raises nothing. In the personal edition this works on

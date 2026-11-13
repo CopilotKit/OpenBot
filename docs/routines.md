@@ -54,6 +54,27 @@ first), as the first row of its Bot's group under Needs you (not counted in the 
 badge's dot shows), and on its page above On. No ping is sent for it. Each row also says what it
 reads: "Reads Gmail", "Reads your apps", "Reads github.com".
 
+### Pause all
+
+Routines' every-Bot card starts with **All Bots active**, the person's own switch for all their Bots
+(both editions; an admin has no team-wide one). Off, every one of their Bots behaves exactly as a
+paused Bot does: no routine, goal, check-in, hand-off or follow-up starts, headless turns already
+running are stopped, and a Bot doesn't answer their Slack, Teams or text messages, take its turn in
+a group conversation or carry on after an approval. It still answers in a one-to-one conversation in
+the app. Work on it is refused up front, with no task made, while its Bot is paused by itself or
+with all.
+
+It is kept on the person (`users.preferences.pausedAllAt`), and `readPause` in
+`server/src/agents/lifecycle.ts` answers paused when the Bot is paused or the person paused all, so
+every caller of `isBotPaused` and `guardBotTurn` honours it, a Bot made meanwhile is paused too, and
+an unreadable answer is paused. Each Bot's own pause is untouched: turning it back on returns every
+Bot to the state it had. Routines and goals record "The Bot is paused, so it did not run." The
+check-in sweep claims none of the person's check-ins, and Run now answers `paused_all`, "You paused
+all your Bots." `PUT /api/bots/pause-all` with `{ paused }` writes it; `GET /api/bots/attention`
+answers `pausedAll`. While it is off, Bots, Routines and each Bot's page show "All your Bots are
+paused." with **Resume all**, and check-in rows read "Paused". In the OpenDots skin it is the top
+bar's pause control.
+
 ### Watching a web page
 
 A `page` check-in reads one address and nothing else, and the model is given no tool that takes an
