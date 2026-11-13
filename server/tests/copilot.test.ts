@@ -64,6 +64,8 @@ const WORKING_SECTIONS = [
   "asking",
   "sources",
   "answer_format",
+  "replies",
+  "documents",
   "subagents",
   "untrusted_content",
 ];
@@ -2184,7 +2186,7 @@ describe("a Claude Agent SDK Bot on a routine", () => {
 describe("when a Bot gives work to subagents", () => {
   const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
 
-  test("a built-in Bot carries it after the component rule", () => {
+  test("a built-in Bot carries it after the reply and document rules", () => {
     const configuration = builtInAgentConfiguration(
       {
         id: "general-assistant",
@@ -2200,7 +2202,7 @@ describe("when a Bot gives work to subagents", () => {
     );
     const sections = sectionsOf(prompt);
     expect(sections.indexOf("subagents")).toBe(
-      sections.indexOf("answer_format") + 1,
+      sections.indexOf("documents") + 1,
     );
     expect(sectionOf(prompt, "subagents")).toBe(ORCHESTRATION_GUIDANCE);
   });

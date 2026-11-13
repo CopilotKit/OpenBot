@@ -256,7 +256,7 @@ describe("a run that ends on a promise", () => {
     expect(
       JSON.stringify(lastMessage(asked[1] as ChatCompletionRequest)),
     ).toContain(
-      'You said \\"I\'ll fetch the rest now.\\" but made no tool call. Do it now, or finish with the result and what is missing.',
+      'You said \\"I\'ll fetch the rest now.\\" but made no tool call. If that is part of what you were asked to do, do it now. If it is only an offer, leave it for the person and end your answer.',
     );
     expect(lookups).toEqual(["ENG-2"]);
     // The nudge was for the model only: the conversation holds what the Bot said and did.
