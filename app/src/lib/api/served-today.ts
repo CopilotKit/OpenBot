@@ -35,8 +35,30 @@ type Envelope = { agents?: unknown; agent?: unknown; sharedApps?: unknown };
  */
 export const todayRoutes = { on: true };
 
+const REACTIONS = /^\/api\/v2\/organizations\/[^/?]+\/reactions\/?(?:\?(.*))?$/;
+
+/**
+ * A conversation's reactions, which today's server answers at `/api/tasks/reactions/{threadId}`,
+ * every one on the first page.
+ */
+function reactionsToday(url: string, method: string): Route | undefined {
+  const match = REACTIONS.exec(url);
+  if (!match || method.toUpperCase() !== "GET") return undefined;
+  const threadId = new URLSearchParams(match[1]).get("threadId");
+  if (!threadId) return undefined;
+  return {
+    path: `/api/tasks/reactions/${encodeURIComponent(threadId)}`,
+    answer: (body) => ({
+      reactions: (body as { reactions?: unknown }).reactions ?? [],
+      nextCursor: null,
+    }),
+  };
+}
+
 export function servedToday(url: string, method = "GET"): Route | undefined {
   if (!todayRoutes.on) return undefined;
+  const reactions = reactionsToday(url, method);
+  if (reactions) return reactions;
   const match = BOTS.exec(url);
   if (!match) return undefined;
   const [, botId, query] = match;
