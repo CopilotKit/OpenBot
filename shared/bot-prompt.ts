@@ -509,9 +509,9 @@ function claimsLines(readBack: boolean): string[] {
     "showed it.",
     ...(readBack
       ? [
-          "After you change something in an app, read the result back once before you say it is done:",
-          "the tabs that now exist, the cells and whether their formulas show errors, the message and",
-          "its link.",
+          "After you change something in an app, read the result back once before you say it is done,",
+          "unless the change's own result already shows what changed, such as a sent message with its",
+          "link: the tabs that now exist, the cells and whether their formulas show errors.",
         ]
       : []),
     "Report what you did, scoped to what you checked: say 'all' only if you checked every item, and",
