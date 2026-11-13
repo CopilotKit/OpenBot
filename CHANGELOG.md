@@ -345,6 +345,22 @@ every deployment:
   - When your browser's time zone isn't one OpenBot knows, New routine says to ask your Bot to set
     the routine up. It asked you to choose a time zone the screen doesn't offer.
 
+### Check-ins and pausing your Bots
+
+- **Needs you has a third half, Working on it.** A task its Bot is still doing used to sit under
+  Waiting on you as "waiting since now" and count as waiting. It now has its own half after Waiting
+  on you, says when it started, and counts as "1 working" in the header. It moves to Waiting on you
+  once it is ready for review, needs your input or failed.
+- The ping a check-in sends by Slack, Teams or text now ends "Open OpenBot to work on it or dismiss
+  it.", matching the buttons. Admin › Routines says acceptance is how many items people worked on,
+  out of the ones they worked on or dismissed.
+- In the personal edition, Settings › Notifications names only push and text messages, since Slack
+  and Microsoft Teams are off there.
+- A Bot's Activity row counts its check-ins as scheduled and its open tasks as in progress. A Bot
+  with a check-in and a task no longer reads "No tasks, routines or goals yet".
+- A check-in skipped because its Bot can read nothing now says "This Bot can't read any app you've
+  connected. Connect one in Connections."
+
 ### Finding things
 
 - **Cmd/Ctrl+K opens a command palette** anywhere signed in. It finds pages, Bots and
