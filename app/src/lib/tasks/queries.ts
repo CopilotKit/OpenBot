@@ -1,4 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
+import type { Reaction } from "@/lib/api/generated/model";
+import { listReactions } from "@/lib/api/generated/reactions/reactions";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
 
 /*
@@ -31,10 +34,13 @@ export type BotTask = {
   threadId: string | null;
   title: string;
   why: string | null;
-  origin: "check_in";
+  /** A check-in's item the person started, or work a Bot handed out of a conversation. */
+  origin: "check_in" | "delegated";
   suggestionId: string | null;
   sourceApp: string | null;
   sourceLink: string | null;
+  /** The conversation a delegated task was asked for in, where its result is said. */
+  originChannelId: string | null;
   status: TaskStatus;
   /** Why its turn couldn't finish, in plain words, while `failed`. Null otherwise. */
   failure: string | null;
@@ -49,7 +55,12 @@ export type BotTask = {
 export const taskKeys = {
   all: ["tasks"] as const,
   list: ["tasks", "list"] as const,
+  one: (id: string) => ["tasks", "one", id] as const,
+  reactions: (threadId: string) => ["tasks", "reactions", threadId] as const,
 };
+
+/** A Bot's reaction to one of the person's messages, in place of a line of its own. */
+export type { Reaction };
 
 /** Something is moving: read again soon. Otherwise only now and then, for a change made elsewhere. */
 const LIVE_MS = 3_000;
@@ -70,6 +81,48 @@ export const taskListQueryOptions = () =>
       query.state.data?.some((task) => moving(task.status))
         ? LIVE_MS
         : QUIET_MS,
+  });
+
+/**
+ * One task, as its card in the conversation that asked for it reads it: kept live while it works or
+ * waits on the person, and left alone once it is done or couldn't finish.
+ */
+export const taskQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: taskKeys.one(id),
+    queryFn: (): Promise<BotTask> =>
+      client(`/api/tasks/${encodeURIComponent(id)}`, "task", {
+        fallback: "Couldn't load this task",
+      }),
+    refetchInterval: (query) =>
+      query.state.data && moving(query.state.data.status) ? LIVE_MS : false,
+  });
+
+/**
+ * The reactions a Bot left in one of the person's conversations, by its thread. Read again when a
+ * turn there ends, which is when a new one can appear.
+ */
+export const reactionsQueryOptions = (threadId: string) =>
+  queryOptions({
+    queryKey: taskKeys.reactions(threadId),
+    queryFn: async (): Promise<Reaction[]> => {
+      const reactions: Reaction[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      // Read to the end; a cursor handed back twice ends the list too.
+      do {
+        const page = await listReactions(
+          ORGANIZATION_ID,
+          { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load reactions." },
+        );
+        reactions.push(...page.reactions);
+        if (cursor) seen.add(cursor);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && !seen.has(cursor));
+      return reactions;
+    },
+    staleTime: 10_000,
   });
 
 /**

@@ -11,6 +11,7 @@ import {
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
+import { readBrief, readTaskReport } from "@openbot/shared/orchestration";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   answersTheModel,
@@ -46,6 +47,11 @@ import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
+import {
+  MessageReactions,
+  SentFromBot,
+  TaskReport,
+} from "@/components/tasks/task-thread";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   Dialog,
@@ -825,6 +831,22 @@ const TranscriptMessage = memo(function TranscriptMessage({
     !isUser && settled && revealed.trim().length > 0,
   );
   const firing = isUser ? readFiring(text) : null;
+  /*
+   * A task thread's first message is the Bot's brief, not something the person typed: drawn as sent
+   * from the Bot, without the words that frame it for the model. See `frameBrief`.
+   */
+  const brief = isUser ? readBrief(text) : null;
+  if (brief !== null) {
+    return (
+      <MessageRow align="end">
+        <MessageContent>
+          <Arriving>
+            <SentFromBot brief={brief} threadId={threadId} />
+          </Arriving>
+        </MessageContent>
+      </MessageRow>
+    );
+  }
   if (firing !== null) {
     return (
       <MessageRow align="start">
@@ -847,6 +869,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
    * Bot saying something new. The id is what says whose it is; see `answerMessageId`.
    */
   const answerer = isUser ? null : answeredBy(messageId);
+  const report = isUser ? null : readTaskReport(messageId);
 
   return (
     <MessageRow
@@ -913,18 +936,38 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closes them for the duration.
                  */
                 <div ref={resultRef}>
-                  <Streamdown
-                    components={markdownComponents}
-                    mode={mode}
-                    plugins={markdownPlugins}
-                    remarkPlugins={replyRemarkPluginsFor(slackNames)}
-                  >
-                    {revealed}
-                  </Streamdown>
+                  {report ? (
+                    /*
+                     * A task the Bot handed out, saying how it went: its words, framed with the
+                     * task they are about and the way into its thread. See `taskReportMessageId`.
+                     */
+                    <TaskReport kind={report.kind} taskId={report.taskId}>
+                      <Streamdown
+                        components={markdownComponents}
+                        mode={mode}
+                        plugins={markdownPlugins}
+                        remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                      >
+                        {revealed}
+                      </Streamdown>
+                    </TaskReport>
+                  ) : (
+                    <Streamdown
+                      components={markdownComponents}
+                      mode={mode}
+                      plugins={markdownPlugins}
+                      remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                    >
+                      {revealed}
+                    </Streamdown>
+                  )}
                 </div>
               )}
             </BubbleContent>
           </Bubble>
+          {isUser && threadId ? (
+            <MessageReactions messageId={messageId} threadId={threadId} />
+          ) : null}
         </Arriving>
       </MessageContent>
     </MessageRow>
