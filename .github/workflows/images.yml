@@ -7,7 +7,8 @@ name: Images
 #
 # Built here: the Bots and harnesses in .github/published-images.json. The server, computer and
 # supervisor images, and the all-in-one `openbot` image, are the published OpenBot images at the tag
-# in backend-images.env at this commit; the manifest pins them by the digest that tag names.
+# in backend-images.env at this commit, or at the tag the caller names; the manifest pins them by the
+# digest that tag names.
 on:
   workflow_call:
     inputs:
@@ -30,6 +31,11 @@ on:
       manifest_version:
         type: string
         required: true
+      # The OpenBot images' tag to pin in place of the one backend-images.env names: `main`, a
+      # version such as `v1.0.3`, or a `test-<date>-<run>` tag. Empty keeps the file's.
+      backend_tag:
+        type: string
+        default: ""
     outputs:
       manifest-artifact:
         description: The name of the artifact that holds container-images.json.
@@ -115,16 +121,25 @@ jobs:
       - id: components
         run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
       # The tag the server, computer and supervisor run at, from the commit being published, so the
-      # manifest pins what this commit was tested with.
+      # manifest pins what this commit was tested with, unless the caller names another.
       - id: backend
         name: Read the OpenBot images' tag
+        env:
+          REQUESTED: ${{ inputs.backend_tag }}
         run: |
           set -euo pipefail
-          tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+          if [ -n "$REQUESTED" ]; then
+            tag="$REQUESTED"
+            source="the backend_tag input"
+          else
+            tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+            source="backend-images.env"
+          fi
           if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
-            echo "::error::backend-images.env names no valid OPENBOT_BACKEND_TAG ('$tag')."
+            echo "::error::$source names no valid OpenBot image tag ('$tag')."
             exit 1
           fi
+          echo "OpenBot images at '$tag', from $source."
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       # This repository's own namespace. A fork publishes under its own name and never into
       # another publisher's registry.
