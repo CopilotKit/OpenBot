@@ -107,6 +107,15 @@ export const deliveryOutbox = pgTable(
   {
     id: text("id").primaryKey(),
     ...scope(),
+    /*
+     * A ping's push may be filed under no conversation: a check-in belongs to its Bot, and has none.
+     * Such a row is authorised by whether the person can still use its Bot. Every other row names
+     * the conversation it speaks in, as before.
+     */
+    channelId: text("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
+    threadId: text("thread_id"),
     dedupeKey: text("dedupe_key").notNull().unique(),
     bindingId: text("binding_id"),
     deviceId: text("device_id"),

@@ -46,7 +46,12 @@ export const proactiveSettings = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
-    channelId: text("channel_id").notNull(),
+    /**
+     * The conversation a check-in made before it belonged to its Bot alone. Null on every check-in
+     * made since: nothing was ever posted in it, and deleting it silently stopped the check-in. Kept
+     * on older rows, and read by nothing that decides whether a check-in runs.
+     */
+    channelId: text("channel_id"),
     threadId: text("thread_id").notNull(),
     focus: text("focus").notNull().default(""),
     /**
