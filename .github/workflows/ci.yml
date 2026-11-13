@@ -147,13 +147,14 @@ jobs:
       # Bot's text, one frame around an interface drawn in a Card, the page under the update banner
       # holding still as an update gets ready, Home's message box holding still while the
       # microphone's notice shows, a reply staying where it was written once its turn is over,
-      # every skin's top-left corner clear of the Mac window's buttons, and OpenDots' Bots badge on
-      # its icon's corner inside the rail, which only a browser's layout and cascade resolve. The
+      # every skin's top-left corner clear of the Mac window's buttons, OpenDots' Bots badge on its
+      # icon's corner inside the rail, and the version in the account row read whole, which only a
+      # browser's layout and cascade resolve. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # The desktop setup window's, for the same reason: the AI step's form holding still while the

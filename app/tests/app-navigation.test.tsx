@@ -233,12 +233,13 @@ test("the running OpenBot version sits to the right of the person's name, in one
   const version = await view.findByText("v0.3.1");
   const account = view.getByRole("button", { name: /Maya Chen/ });
   expect(account.contains(version)).toBe(true);
-  // The name, then the version, side by side in one row that splits its width 80/20.
+  // The name, then the version, side by side in one row: the version as wide as its words, the
+  // name in the rest (account-version-layout.test.tsx measures it in a browser).
   const name = within(account).getByText("Maya Chen");
   expect(name.nextElementSibling).toBe(version);
   const row = name.parentElement;
   expect(row).toBe(version.parentElement);
-  expect(row?.className).toContain("grid-cols-[4fr_1fr]");
+  expect(row?.className).toContain("grid-cols-[minmax(0,1fr)_auto]");
   expect(version.className).toContain("text-right");
 });
 
