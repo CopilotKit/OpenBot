@@ -11,6 +11,7 @@ import { notificationsAllowed } from "@/lib/notifications/permission";
 import { conversationTag, inSight, showNotice } from "@/lib/notifications/show";
 import {
   type ProactiveSuggestion,
+  proactiveSettingsQueryOptions,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { cn } from "@/lib/utils";
@@ -246,6 +247,10 @@ function usePingNotifications(
 export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
   const attention = useQuery(botAttentionQueryOptions());
   const lastPing = useQuery(lastPingQueryOptions());
+  // A check-in that can't look shows as the same dot, never in the number: a setup problem, not news.
+  const cantLook = (useQuery(proactiveSettingsQueryOptions()).data ?? []).some(
+    (setting) => setting.enabled && Boolean(setting.health),
+  );
   useAttentionNotifications(attention.data);
   usePingNotifications(lastPing.data, attention.data);
   const bots = attention.data ?? [];
@@ -266,13 +271,15 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
       </span>
     );
   }
-  if (bots.some((bot) => bot.unread > 0 || bot.items > 0)) {
+  if (cantLook || bots.some((bot) => bot.unread > 0 || bot.items > 0)) {
     return (
       <span
         aria-label={
           bots.some((bot) => bot.unread > 0)
             ? "Unread messages"
-            : "Your check-ins found something"
+            : bots.some((bot) => bot.items > 0)
+              ? "Your check-ins found something"
+              : "A check-in can't look"
         }
         className={cn("size-2 rounded-full bg-primary", !onIcon && "ml-auto")}
         role="img"

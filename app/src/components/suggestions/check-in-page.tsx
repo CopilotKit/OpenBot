@@ -55,6 +55,7 @@ import {
 } from "@/lib/proactive";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { CheckInHealthFix } from "./check-in-health";
 import {
   checkInStatus,
   intervalItems,
@@ -171,7 +172,12 @@ export function CheckInPage({
             </ItemMedia>
             <ItemContent>
               <ItemTitle>{checkInStatus(setting, blocked)}</ItemTitle>
-              {onItsWay ? (
+              {/* Can't look comes first: it is what to fix, and the last run only says it again. */}
+              {setting.enabled && setting.health ? (
+                <ItemDescription className="line-clamp-none text-destructive">
+                  {setting.health.why}
+                </ItemDescription>
+              ) : onItsWay ? (
                 <ItemDescription>
                   Queued. It checks in within a minute.
                 </ItemDescription>
@@ -186,6 +192,18 @@ export function CheckInPage({
                 </ItemDescription>
               ) : null}
             </ItemContent>
+            {setting.enabled && setting.health ? (
+              <ItemActions>
+                <CheckInHealthFix
+                  onPage
+                  onRemove={() => {
+                    change.reset();
+                    setConfirming(true);
+                  }}
+                  setting={setting}
+                />
+              </ItemActions>
+            ) : null}
           </Item>
           <Separator />
           <Item size="sm">

@@ -404,6 +404,16 @@ export function checkInStatus(
     : `Next check ${relativeTime(setting.nextRunAt)}`;
 }
 
+/**
+ * What a check-in reads, as its row says it: "Reads Gmail", "Reads your apps", "Reads github.com".
+ * Null from a server that doesn't say.
+ */
+export function readsLine(setting: ProactiveSetting): string | null {
+  if (setting.sourceKind === undefined) return null;
+  if (setting.sourceKind === "apps") return "Reads your apps";
+  return setting.reads ? `Reads ${setting.reads}` : null;
+}
+
 /** When a check-in happened, as its line says it: "just now" for the moment after a Run now. */
 const sinceThen = (iso: string) =>
   Date.now() - Date.parse(iso) < 60_000 ? "just now" : relativeTime(iso);
@@ -456,10 +466,19 @@ export function SettingRow({
   /** The Bot whose own list this is, so the page's back link returns to it. */
   agentId?: string;
 }) {
-  // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
-  const summary = `${intervalLabel(setting.intervalMinutes)} · Tells you · ${checkInStatus(setting, blocked)}`;
+  // When it starts, what it does, what it reads and where it stands: the Routines list's sentence.
+  const summary = [
+    intervalLabel(setting.intervalMinutes),
+    "Tells you",
+    readsLine(setting),
+    checkInStatus(setting, blocked),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const last = lastCheckInLine(setting.lastRun);
   const outcome = setting.lastRun?.outcome;
+  // Can't look says so in place of the last run, in the tone a failed one uses: it is what to fix.
+  const health = setting.enabled ? setting.health : null;
   return (
     <Item
       render={
@@ -487,7 +506,11 @@ export function SettingRow({
         <ItemDescription>
           {setting.subject && showBot ? `${botName} · ${summary}` : summary}
         </ItemDescription>
-        {last && (outcome === "skipped" || outcome === "failed") ? (
+        {health ? (
+          <ItemDescription className="text-destructive">
+            {health.why}
+          </ItemDescription>
+        ) : last && (outcome === "skipped" || outcome === "failed") ? (
           <ItemDescription
             className={outcome === "failed" ? "text-destructive" : undefined}
           >

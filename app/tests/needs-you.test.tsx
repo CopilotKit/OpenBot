@@ -183,6 +183,8 @@ function serving() {
       );
       return Response.json({ task: tasks.find((entry) => entry.id === id) });
     }
+    if (path === "/api/proactive/settings")
+      return Response.json({ settings: checkInSettings, allowed: true });
     if (path === "/api/proactive/suggestions")
       return Response.json({ suggestions: items });
     if (path === "/api/tasks") return Response.json({ tasks });
@@ -232,7 +234,11 @@ function serving() {
   }) as unknown as typeof fetch;
 }
 
+/** The person's check-ins, as `GET /api/proactive/settings` lists them. */
+let checkInSettings: Record<string, unknown>[] = [];
+
 beforeEach(() => {
+  checkInSettings = [];
   items = [];
   tasks = [];
   questions = [];
@@ -659,4 +665,61 @@ test("a refetch that fails after a good read keeps the rows and adds the notice"
     { timeout: 3000 },
   );
   expect(page.getByText("Reply to Dana")).toBeDefined();
+});
+
+/*
+ * A check-in that can't look says so where the person already looks, with the step that fixes it,
+ * first in its Bot's From check-ins, and is not counted as something found.
+ */
+test("a check-in that can't look heads its Bot's From check-ins, with the step that fixes it", async () => {
+  checkInSettings = [
+    {
+      id: "p1",
+      agentId: "inbox",
+      channelId: null,
+      focus: "",
+      subject: "Your Gmail inbox",
+      sourceLink: null,
+      sourceKind: "app",
+      sourceServerId: "gmail",
+      reads: "Gmail",
+      enabled: true,
+      intervalMinutes: 1440,
+      nextRunAt: now,
+      lastRunAt: null,
+      lastStatus: "idle",
+      lastError: null,
+      lastRun: null,
+      health: {
+        why: "Gmail isn't connected, so Inbox Bot can't check Your Gmail inbox.",
+        fix: "connect",
+        app: { serverId: "gmail", title: "Gmail" },
+      },
+    },
+  ];
+  items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
+  serving();
+  const { region } = await drawAll();
+  const bots = region("Bots page");
+  const row = (
+    await bots.findByText("Inbox Bot can't check Your Gmail inbox")
+  ).closest("[data-slot=item]") as HTMLElement;
+  expect(
+    within(row).getByText(
+      "Gmail isn't connected, so Inbox Bot can't check Your Gmail inbox.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(row)
+      .getByRole("button", { name: "Connect Gmail" })
+      .getAttribute("href"),
+  ).toBe("/connections/gmail");
+  // First in its Bot's group, before what the Bot found.
+  const group = row.closest("[data-needs-you-bot]") as HTMLElement;
+  const titles = [...group.querySelectorAll("[data-slot=item-title]")].map(
+    (title) => title.textContent,
+  );
+  expect(titles[0]).toBe("Inbox Bot can't check Your Gmail inbox");
+  // Not news: the header counts only what was found.
+  expect(bots.getByText("1 found")).toBeTruthy();
 });

@@ -293,3 +293,38 @@ test("Remove asks first, and only then removes the check-in", async () => {
     expect(writes).toEqual(["DELETE /api/proactive/settings/p1"]),
   );
 });
+
+// FOUND IN AN AUDIT: a row said it checked a page it could never read, and nothing said otherwise.
+test("the row says what it reads, and a check-in that can't look says so in place of its last run", async () => {
+  settings = [
+    setting({
+      subject: "OpenBot releases",
+      sourceKind: "page",
+      reads: "github.com",
+      lastRun: {
+        outcome: "quiet",
+        trigger: "schedule",
+        skipReason: null,
+        why: null,
+        itemsRaised: 0,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      },
+      health: {
+        why: "Expenses couldn't read this page the last 3 times.",
+        fix: "open",
+        app: null,
+      },
+    }),
+  ];
+  const view = draw();
+  const row = (await view.findByText("OpenBot releases")).closest(
+    "[data-slot=item]",
+  ) as HTMLElement;
+  expect(within(row).getByText(/Reads github\.com/)).toBeTruthy();
+  const why = within(row).getByText(
+    "Expenses couldn't read this page the last 3 times.",
+  );
+  expect(why.className).toContain("text-destructive");
+  expect(within(row).queryByText(/Nothing needed you/)).toBeNull();
+});
