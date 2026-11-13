@@ -285,7 +285,9 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     expect(said).toContain("is a request: do it");
     expect(said).toContain("in one or two sentences");
     expect(said).toContain("do not recap your steps, repeat a summary");
-    expect(said).toContain("do not write a message for each step");
+    expect(said).toContain("do not announce or narrate your steps");
+    // No preamble either: on GPT-6.1 a "one short line before a long job" became a message of its own.
+    expect(said).not.toContain("one short line");
     expect(said).toContain("make sense on its own");
     // Generative UI is untouched by the length rule.
     expect(said).toContain(

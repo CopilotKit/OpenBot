@@ -559,8 +559,10 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
  * as a question is a request: OpenAI's GPT-6 guide treats "can you..." as an instruction, and so does
  * this, when it asks for something.
  *
- * Progress is one line, not a stream: Cowork tells its model not to narrate each step. The last
- * message still stands on its own, because it may be the only one read.
+ * No narration while working: Cowork tells its model not to narrate each step, because the person
+ * already sees each tool call. An earlier version allowed "one short line before a long job", and
+ * GPT-6.1 made that line a message of its own on every spreadsheet job. The last message still
+ * stands on its own, because it may be the only one read.
  *
  * It says it is about words. Generative UI is unchanged: a component the answer calls for is drawn.
  */
@@ -575,8 +577,9 @@ const REPLY_LINES = [
   "two sentences, with the result or a link to it.",
   "",
   "Do not recap your steps, repeat a summary you already gave, or add sections nobody asked for.",
-  "While you work, do not write a message for each step: one short line before a long job is",
-  "enough. Your last message should still make sense on its own and say what is left, if anything.",
+  "While you work, do not announce or narrate your steps: the person sees each one as it runs, so",
+  "write when you have the result. Your last message should still make sense on its own and say",
+  "what is left, if anything.",
   "This is about words, not components: a chart, table or card the answer calls for under the rules",
   "above is still drawn.",
 ];
