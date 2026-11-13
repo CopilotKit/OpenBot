@@ -196,6 +196,16 @@ args="$*"
 if [[ "$args" == *"compose pull"* ]]; then args="$args policy=\${IMAGE_PULL_POLICY:-}"; fi
 printf '%s tool=%s network=%s tag=%s\\n' "$args" "$OPENBOT_TOOL_URL" "$COMPUTER_NETWORK" "$OPENBOT_BACKEND_TAG" >> "$DOCKER_LOG"
 if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then echo "registry unreachable" >&2; exit 1; fi
+# The server's container refused: for any reason, every time; or the way Docker Desktop refuses a
+# strict bind of a folder whose view is stale, until a plain -v bind of that folder resolves it.
+if [[ "$args" == run*" -v $PWD/.openbot:"* ]]; then touch "$DOCKER_LOG.seen"; fi
+if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
+  if [ -n "\${TEST_SERVER_FAILS:-}" ]; then echo "Error response from daemon: no space left on device" >&2; exit 1; fi
+  if [ -n "\${TEST_MOUNT_NOT_SEEN:-}" ] && [ ! -f "$DOCKER_LOG.seen" ]; then
+    echo "Error response from daemon: invalid mount config for type bind: bind source path does not exist: /host_mnt$PWD/.openbot" >&2
+    exit 1
+  fi
+fi
 # The settings the server's container would be created with, kept for the test to read.
 if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
@@ -717,6 +727,36 @@ describe("start.sh and the OpenBot images", () => {
     expect(pull).toBeLessThan(
       result.dockerLog.indexOf("compose up -d --build"),
     );
+  });
+
+  /**
+   * On a fresh clone, Docker Desktop refused the server's container with "bind source path does
+   * not exist" for `.openbot`, which was there, and kept refusing until a plain `-v` bind of the
+   * folder made it look again. The start makes that bind and starts the server again.
+   */
+  test("shows Docker the server's .openbot folder when it refuses it, then starts the server", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_MOUNT_NOT_SEEN: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("/.openbot; showing it the folder");
+    expect(result.stdout).toContain("server ready");
+    expect(result.dockerLog).toMatch(
+      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot-server:sha-pinned-for-the-test /,
+    );
+    expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(2);
+  });
+
+  test("any other refusal of the server stops the start at once", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_SERVER_FAILS: "1" },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("The server did not start");
+    expect(result.stderr).toContain("no space left on device");
+    expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(1);
   });
 
   test("offline, it starts from the copies already on this machine", async () => {
