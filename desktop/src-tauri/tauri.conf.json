@@ -35,9 +35,11 @@
       "nsis": {
         "template": "./windows/installer.nsi",
         "installerHooks": "./windows/hooks.nsh",
-        "languages": ["English"],
+        "languages": ["English", "Arabic"],
+        "displayLanguageSelector": true,
         "customLanguageFiles": {
-          "English": "./windows/installer-english.nsh"
+          "English": "./windows/installer-english.nsh",
+          "Arabic": "./windows/installer-arabic.nsh"
         },
         "installerIcon": "./icons/icon.ico",
         "uninstallerIcon": "./icons/icon.ico",

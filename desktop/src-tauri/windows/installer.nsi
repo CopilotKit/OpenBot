@@ -193,6 +193,12 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
+; >>> OpenBot
+!define MUI_LANGDLL_ALLLANGUAGES
+!define MUI_LANGDLL_ALWAYSSHOW
+!define MUI_LANGDLL_WINDOWTITLE "OpenBot"
+!define MUI_LANGDLL_INFO "Choose a language / اختر اللغة"
+; <<< OpenBot
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
@@ -437,7 +443,15 @@ Function PageLeaveReinstall
       ${EndIf}
 
       ; Other erros? show generic error message and return to select un/reinstall page
+      ; >>> OpenBot
+      ${If} $(^RTL) = 1
+        MessageBox MB_ICONEXCLAMATION|MB_RIGHT|MB_RTLREADING "$(unableToUninstall)"
+      ${Else}
+      ; <<< OpenBot
       MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
+      ; >>> OpenBot
+      ${EndIf}
+      ; <<< OpenBot
       Abort
     ${EndIf}
   reinst_done:
@@ -558,7 +572,21 @@ Function .onInit
   ${EndIf}
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
+    ; >>> OpenBot
+    ${If} $PassiveMode = 1
+    ${OrIf} ${Silent}
+      ; Signed updates and unattended installs reuse the saved language without a prompt.
+      ReadRegStr $0 HKCU "${MANUPRODUCTKEY}" "${MUI_LANGDLL_REGISTRY_VALUENAME}"
+      ${If} $0 == ${LANG_ENGLISH}
+      ${OrIf} $0 == ${LANG_ARABIC}
+        StrCpy $LANGUAGE $0
+      ${EndIf}
+    ${Else}
+    ; <<< OpenBot
     !insertmacro MUI_LANGDLL_DISPLAY
+    ; >>> OpenBot
+    ${EndIf}
+    ; <<< OpenBot
   !endif
 
   !insertmacro SetContext
@@ -848,6 +876,11 @@ Section Install
 SectionEnd
 
 Function .onInstSuccess
+  ; >>> OpenBot
+  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
+    WriteRegStr HKCU "${MANUPRODUCTKEY}" "${MUI_LANGDLL_REGISTRY_VALUENAME}" $LANGUAGE
+  !endif
+  ; <<< OpenBot
   ; Check for `/R` flag only in silent and passive installers because
   ; GUI installer has a toggle for the user to (re)start the app
   ${If} $PassiveMode = 1

@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 
@@ -34,7 +35,7 @@ export function TryPasswordAgain() {
           );
         }}
       >
-        Try again
+        {setupText("Try again")}
       </button>
     </div>
   );
@@ -133,7 +134,7 @@ export function PausePodman({
             );
           }}
         >
-          Pause my Podman
+          {setupText("Pause my Podman")}
         </button>
       </div>
     </section>

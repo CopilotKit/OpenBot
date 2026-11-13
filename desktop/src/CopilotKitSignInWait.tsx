@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import {
@@ -73,22 +74,25 @@ export function CopilotKitSignInWait({
       {page && (
         <>
           <p className="footnote">
-            Check that the page shows this code:{" "}
+            {setupText("Check that the page shows this code:")}{" "}
             <strong className="sign-in-code">{page.userCode}</strong>
           </p>
           <p className="fallback">
-            Didn't open?{" "}
-            <ExternalLink href={page.url}>Open the sign-in page</ExternalLink>
+            {setupText("Didn't open?")}{" "}
+            <ExternalLink href={page.url}>
+              {setupText("Open the sign-in page")}
+            </ExternalLink>
           </p>
           <p className="footnote">
-            If your browser shows a dashboard after you choose an organization,
-            open the sign-in page again.
+            {setupText(
+              "If your browser shows a dashboard after you choose an organization, open the sign-in page again.",
+            )}
           </p>
         </>
       )}
       <div className="row">
         <button type="button" className="quiet" onClick={onCancel}>
-          Cancel
+          {setupText("Cancel")}
         </button>
       </div>
     </>

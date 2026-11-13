@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import {
@@ -139,7 +140,7 @@ export function CheckForUpdates() {
   if (updatesItself === false) {
     return (
       <details>
-        <summary>Updates</summary>
+        <summary>{setupText("Updates")}</summary>
         <p>{DOESNT_UPDATE_ITSELF}</p>
       </details>
     );
@@ -147,12 +148,12 @@ export function CheckForUpdates() {
 
   return (
     <details>
-      <summary>Updates</summary>
+      <summary>{setupText("Updates")}</summary>
       {updatesItself === true && (
         <p>
-          OpenBot updates itself with signed updates from its publisher. The
-          next Start after an update brings this installation to the same
-          version and keeps your data.
+          {setupText(
+            "OpenBot updates itself with signed updates from its publisher. The next Start after an update brings this installation to the same version and keeps your data.",
+          )}
         </p>
       )}
       <button
@@ -161,34 +162,38 @@ export function CheckForUpdates() {
         disabled={checking || installing}
         onClick={() => void check()}
       >
-        {checking ? "Checking…" : "Check for updates"}
+        {checking ? setupText("Checking…") : setupText("Check for updates")}
       </button>
       {checked?.found === "available" && (
         <>
           <p role="status">
-            {updateOffered(checked.version, ready ?? checked.ready)} You are
-            running {checked.current}.
+            {updateOffered(checked.version, ready ?? checked.ready)}{" "}
+            {setupText("You are running")} {checked.current}.
           </p>
           <button
             type="button"
             disabled={installing}
             onClick={() => void install()}
           >
-            {installing ? describe(progress) : "Update and restart"}
+            {installing ? describe(progress) : setupText("Update and restart")}
           </button>
           {installFailure && (
             <p className="caution" role="alert">
-              OpenBot could not install the update: {installFailure}
+              {setupText("OpenBot could not install the update:")}{" "}
+              {installFailure}
             </p>
           )}
         </>
       )}
       {checked?.found === "upToDate" && (
-        <p role="status">OpenBot {checked.current} is up to date.</p>
+        <p role="status">
+          OpenBot {checked.current} {setupText("is up to date.")}
+        </p>
       )}
       {checked?.found === "installing" && (
         <p role="status">
-          OpenBot is downloading {checked.version} and restarts when it's done.
+          {setupText("OpenBot is downloading")} {checked.version}{" "}
+          {setupText("and restarts when it's done.")}
         </p>
       )}
       {checked?.found === "notOffered" && (

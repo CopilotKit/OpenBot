@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
@@ -168,20 +169,20 @@ function QuitJourney({
   clock.current = ticked.clock;
   const elapsed = Math.floor((now - ticked.clock.began) / 1000);
   return (
-    <section className="journey" aria-label="How far along">
+    <section className="journey" aria-label={setupText("How far along")}>
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
-        <span className="journey-said">{ticked.said}</span>
+        <span className="journey-said">{setupText(ticked.said)}</span>
         <span className="journey-time">
           {leftSaid(ticked.left)}
           <span aria-hidden="true">
             {" · "}
-            {formatElapsed(elapsed)} so far
+            {formatElapsed(elapsed)} {setupText("so far")}
           </span>
         </span>
       </div>
       <progress
-        aria-label="How far along"
+        aria-label={setupText("How far along")}
         aria-valuetext={`${Math.round(ticked.fraction * 100)}%, ${leftSaid(ticked.left)}`}
         value={ticked.fraction}
         max={1}
@@ -209,11 +210,15 @@ export function ShuttingDown({ status }: { status: QuitStatus | null }) {
   return (
     <main>
       <div className="sheet connection-sheet">
-        <h1>Shutting down OpenBot</h1>
+        <h1>{setupText("Shutting down OpenBot")}</h1>
         <p className="lede" role="status">
           {failed
-            ? "Part of it could not be stopped. OpenBot says what happened the next time it opens."
-            : "OpenBot is stopping what it started on this computer, then it closes."}
+            ? setupText(
+                "Part of it could not be stopped. OpenBot says what happened the next time it opens.",
+              )
+            : setupText(
+                "OpenBot is stopping what it started on this computer, then it closes.",
+              )}
         </p>
         {running && <QuitJourney steps={steps} clock={clock} />}
         <SetupProgress

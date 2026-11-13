@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -637,14 +638,19 @@ export function ProviderPicker({
   return (
     <div className="sheet">
       {!returning && <Sections at="AI" />}
-      <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
+      <h1>
+        {returning
+          ? setupText("Refresh your AI connection")
+          : setupText("Connect your AI")}
+      </h1>
       <p className="lede">
-        Choose the AI your Bots use. Sign in with a plan you already have, or
-        use an API key.
+        {setupText(
+          "Choose the AI your Bots use. Sign in with a plan you already have, or use an API key.",
+        )}
       </p>
 
       <fieldset className="picker providers">
-        <legend className="sr-only">Model provider</legend>
+        <legend className="sr-only">{setupText("Model provider")}</legend>
         {/* Once one is chosen it stands alone, with Change to see them all again. */}
         {(row ? [row] : rows).map((r) => (
           <label
@@ -707,18 +713,18 @@ export function ProviderPicker({
             ) : (
               <Mark id={r.mark} name={r.name} />
             )}
-            <span className="tile-name">{r.name}</span>
-            <span className="tile-summary">{r.summary}</span>
+            <span className="tile-name">{setupText(r.name)}</span>
+            <span className="tile-summary">{setupText(r.summary)}</span>
           </label>
         ))}
         {row && (
           <button
             type="button"
             className="text-link change-provider"
-            aria-label="Choose a different provider"
+            aria-label={setupText("Choose a different provider")}
             onClick={chooseAnother}
           >
-            Change
+            {setupText("Change")}
           </button>
         )}
       </fieldset>
@@ -743,10 +749,10 @@ export function ProviderPicker({
                   }}
                 >
                   {option === "plan"
-                    ? "Sign in with my plan"
+                    ? setupText("Sign in with my plan")
                     : option === "oauth"
-                      ? "Sign in"
-                      : "Use an API key"}
+                      ? setupText("Sign in")
+                      : setupText("Use an API key")}
                 </button>
               ))}
             </div>
@@ -788,15 +794,16 @@ export function ProviderPicker({
                   <ButtonMark id={row.mark} />
                   {/* Google's guidelines allow only "Sign in with Google" beside its G. The
                       row above already says Gemini. */}
-                  Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
+                  {setupText("Sign in")}{" "}
+                  {oauthSignedIn === row.id ? "again " : ""}with{" "}
                   {row.id === "google" ? "Google" : row.name}
                 </button>
               )}
               {busy && !signInUrl && (
-                <StatusLine>Preparing sign-in…</StatusLine>
+                <StatusLine>{setupText("Preparing sign-in…")}</StatusLine>
               )}
               <div className="field">
-                <label htmlFor="oauth-model">Model name</label>
+                <label htmlFor="oauth-model">{setupText("Model name")}</label>
                 <input
                   id="oauth-model"
                   value={model}
@@ -815,7 +822,7 @@ export function ProviderPicker({
                   {token
                     ? `Signed in to ${row.name}.`
                     : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
-                  Your plan will be used.
+                  {setupText("Your plan will be used.")}
                 </p>
                 {!token && (
                   <button
@@ -825,7 +832,7 @@ export function ProviderPicker({
                     onClick={beginSignIn}
                   >
                     <ButtonMark id={row.mark} />
-                    Sign in again with {row.name}
+                    {setupText("Sign in again with")} {row.name}
                   </button>
                 )}
                 {/*
@@ -837,25 +844,27 @@ export function ProviderPicker({
                  * `harness::speaking_for` for the failure that came of not saying it at all.
                  */}
                 <p className="footnote">
-                  Your Bot will use{" "}
-                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}.
-                  It’s the one that can use this plan.
+                  {setupText("Your Bot will use")}{" "}
+                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangChain"}
+                  {setupText(". It's the one that can use this plan.")}
                 </p>
               </>
             ) : signInUrl ? (
               <>
                 <p className="lede">
                   {row.id === "anthropic"
-                    ? "Approve the request in your browser, then paste the code it shows you."
+                    ? setupText(
+                        "Approve the request in your browser, then paste the code it shows you.",
+                      )
                     : `Approve the request in your browser. ${row.name} will finish this on its own.`}
                 </p>
                 {/* Shown as well as opened. On a machine with no registered
                     browser the open does nothing and says nothing, and a code
                     box with no link is then a dead end. */}
                 <p className="fallback">
-                  Didn't open?{" "}
+                  {setupText("Didn't open?")}{" "}
                   <a href={signInUrl} target="_blank" rel="noreferrer">
-                    Open the sign-in page
+                    {setupText("Open the sign-in page")}
                   </a>
                 </p>
                 {row.id === "anthropic" ? (
@@ -900,7 +909,7 @@ export function ProviderPicker({
                     onClick={beginSignIn}
                   >
                     <ButtonMark id={row.mark} />
-                    {busy ? "Starting…" : `Sign in with ${row.name}`}
+                    {busy ? setupText("Starting…") : `Sign in with ${row.name}`}
                   </button>
                   {!busy &&
                     (row.id === "openai" || row.id === "anthropic") &&
@@ -912,8 +921,9 @@ export function ProviderPicker({
                           setReuse({ provider: row.id, login: "plan" })
                         }
                       >
-                        Use a saved{" "}
-                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                        {setupText("Use a saved")}{" "}
+                        {row.id === "anthropic" ? "Claude" : "ChatGPT"}{" "}
+                        {setupText("sign-in")}
                       </button>
                     )}
                 </div>
@@ -939,11 +949,13 @@ export function ProviderPicker({
                       setReuse({ provider: row.id, login: "api-key" });
                     }}
                   >
-                    Use a saved {row.name} API key
+                    {setupText("Use a saved")} {row.name} {setupText("API key")}
                   </button>
                 )}
               <div className="field">
-                <label htmlFor="key">{row.name} API key</label>
+                <label htmlFor="key">
+                  {row.name} {setupText("API key")}
+                </label>
                 <input
                   id="key"
                   type="password"
@@ -960,14 +972,14 @@ export function ProviderPicker({
             <>
               {savedEndpointKey && !apiKey && (
                 <p className="lede">
-                  A saved API key for this endpoint will be used.{" "}
+                  {setupText("A saved API key for this endpoint will be used.")}{" "}
                   {!preset && (
                     <button
                       type="button"
                       className="quiet"
                       onClick={() => setReuseEndpointKey(false)}
                     >
-                      Continue without the saved key
+                      {setupText("Continue without the saved key")}
                     </button>
                   )}
                 </p>
@@ -975,7 +987,7 @@ export function ProviderPicker({
               {!preset && (
                 <>
                   <div className="field">
-                    <label htmlFor="base">Base URL</label>
+                    <label htmlFor="base">{setupText("Base URL")}</label>
                     <input
                       id="base"
                       value={baseUrl}
@@ -996,9 +1008,11 @@ export function ProviderPicker({
                     />
                   </div>
                   <details className="field">
-                    <summary>Advanced compatible endpoint options</summary>
+                    <summary>
+                      {setupText("Advanced compatible endpoint options")}
+                    </summary>
                     <label htmlFor="container-base">
-                      Container Base URL, if different
+                      {setupText("Container Base URL, if different")}
                     </label>
                     <input
                       id="container-base"
@@ -1008,20 +1022,20 @@ export function ProviderPicker({
                       spellCheck={false}
                     />
                     <p className="footnote">
-                      Leave this empty unless containers need a different
-                      address for a locally hosted model. Remote endpoints
-                      usually use the same Base URL.
+                      {setupText(
+                        "Leave this empty unless containers need a different address for a locally hosted model. Remote endpoints usually use the same Base URL.",
+                      )}
                     </p>
                   </details>
                 </>
               )}
               <div className="field">
-                <label htmlFor="model">Model name</label>
+                <label htmlFor="model">{setupText("Model name")}</label>
                 <input
                   id="model"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="the name the endpoint knows it by"
+                  placeholder={setupText("the name the endpoint knows it by")}
                   spellCheck={false}
                 />
               </div>
@@ -1029,7 +1043,7 @@ export function ProviderPicker({
                 <label htmlFor="ekey">
                   {preset
                     ? `${row.name} API key`
-                    : "API key, if the endpoint needs one"}
+                    : setupText("API key, if the endpoint needs one")}
                 </label>
                 <input
                   id="ekey"
@@ -1063,7 +1077,7 @@ export function ProviderPicker({
                 target="_blank"
                 rel="noreferrer"
               >
-                What this means
+                {setupText("What this means")}
               </a>
             </p>
           )}
@@ -1083,7 +1097,7 @@ export function ProviderPicker({
               onClick={onBack}
               disabled={starting}
             >
-              Back
+              {setupText("Back")}
             </button>
           )}
           <button
@@ -1091,7 +1105,7 @@ export function ProviderPicker({
             disabled={starting || !row || !login || !ready}
             onClick={continueWithChoice}
           >
-            Continue
+            {setupText("Continue")}
           </button>
         </div>
         {/* Under the form, never above it: what runs behind this step comes and goes while the

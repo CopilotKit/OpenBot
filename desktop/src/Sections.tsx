@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 /** One part of setup, named for what it is about rather than counted. */
 export type Section = "Account" | "Install" | "AI" | "Start";
 
@@ -23,7 +24,9 @@ export function Lockup({ byCopilotKit = false }: { byCopilotKit?: boolean }) {
           ™
         </sup>
       </span>
-      {byCopilotKit && <span className="lockup-by">by CopilotKit</span>}
+      {byCopilotKit && (
+        <span className="lockup-by">{setupText("by CopilotKit")}</span>
+      )}
     </div>
   );
 }
@@ -47,7 +50,7 @@ export function Sections({
   return (
     <div className="setup-header">
       <Lockup byCopilotKit={byCopilotKit} />
-      <ol className="steps-of sections" aria-label="Setup">
+      <ol className="steps-of sections" aria-label={setupText("Setup")}>
         {names.map((name, index) => (
           <li
             key={name}
@@ -60,7 +63,7 @@ export function Sections({
                   : undefined
             }
           >
-            {name}
+            {setupText(name)}
           </li>
         ))}
       </ol>

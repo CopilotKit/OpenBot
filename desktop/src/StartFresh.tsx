@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 /**
  * What each piece of leftover data holds, in the person's words, by the name native setup gives
  * it: a project's `postgres-data` is the database, `agent-profiles` and a Bot's
@@ -58,11 +59,13 @@ export function StartFresh({
     // the alert a failure gets.
     <section className="local-alert needs" aria-labelledby="start-fresh-title">
       <h2 id="start-fresh-title">
-        A previous OpenBot installation left data here
+        {setupText("A previous OpenBot installation left data here")}
       </h2>
       <p>
-        It includes {left}. A new installation does not reuse it. Start fresh
-        permanently deletes that data, then starts OpenBot.
+        {setupText("It includes")} {setupText(left)}
+        {setupText(
+          ". A new installation does not reuse it. Start fresh permanently deletes that data, then starts OpenBot.",
+        )}
       </p>
       <div className="row">
         <button
@@ -70,27 +73,29 @@ export function StartFresh({
           disabled={busy}
           onClick={() => onStartFresh(volumes, containers)}
         >
-          {busy ? "Starting fresh…" : "Start fresh"}
+          {busy ? setupText("Starting fresh…") : setupText("Start fresh")}
         </button>
       </div>
       <p className="footnote">
-        To keep that data instead, do not start. Restore the previous
-        installation’s folder
-        {database ? ", with its original encryption key," : ""} and choose it
-        under Installation options.
+        {setupText(
+          "To keep that data instead, do not start. Restore the previous installation’s folder",
+        )}{" "}
+        {database ? setupText(", with its original encryption key,") : ""}{" "}
+        {setupText("and choose it under Installation options.")}
       </p>
       <details>
-        <summary>What Start fresh deletes</summary>
-        <p>All of this, permanently:</p>
+        <summary>{setupText("What Start fresh deletes")}</summary>
+        <p>{setupText("All of this, permanently:")}</p>
         <ul>
           {heldIn(volumes).map((said) => (
-            <li key={said}>{said}</li>
+            <li key={said}>{setupText(said)}</li>
           ))}
         </ul>
         {containers.length > 0 && (
           <p>
-            It first removes the stopped parts of the previous installation that
-            still use that data.
+            {setupText(
+              "It first removes the stopped parts of the previous installation that still use that data.",
+            )}
           </p>
         )}
       </details>

@@ -119,7 +119,7 @@ Var OpenBotRunning
   ReadRegStr $OpenBotOldFolder SHCTX "${MANUPRODUCTKEY}" ""
   ReadRegStr $OpenBotOldUninstaller SHCTX "${UNINSTKEY}" "UninstallString"
   ${If} $OpenBotOldUninstaller != ""
-    DetailPrint "Removing the previous version of OpenBot. Your Bots and data stay."
+    DetailPrint "$(removingPreviousVersion)"
     !insertmacro OPENBOT_PROGRESS_MOVING 1
     ClearErrors
     ; ExecWait says "Execute: <the command>" on the page's status line, over the plain line, for as
@@ -130,7 +130,7 @@ Var OpenBotRunning
     ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|}
     !insertmacro OPENBOT_PROGRESS_MOVING 0
     ${If} $0 <> 0
-      DetailPrint "Couldn't remove the previous version of OpenBot. Installing over it."
+      DetailPrint "$(couldNotRemovePreviousVersion)"
     ${ElseIf} $OpenBotOldFolder != $INSTDIR
       ; Run in place, the old uninstaller cannot delete itself or its folder.
       Delete "$OpenBotOldFolder\uninstall.exe"

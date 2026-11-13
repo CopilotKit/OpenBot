@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import type { UpdateReadiness } from "../../shared/desktop-updates";
@@ -113,7 +114,7 @@ export function UpdateOffer() {
           : `OpenBot ${version} is available`}
       </h2>
       <p>
-        You are running {offer.current}. {readiness(ready)}
+        {setupText("You are running")} {offer.current}. {readiness(ready)}
       </p>
       <div className="row">
         <button
@@ -123,7 +124,7 @@ export function UpdateOffer() {
         >
           {installing || progress !== null
             ? describe(progress)
-            : "Update and restart"}
+            : setupText("Update and restart")}
         </button>
         <button
           type="button"
@@ -131,12 +132,12 @@ export function UpdateOffer() {
           disabled={installing || progress !== null}
           onClick={() => void decline(version)}
         >
-          Not now
+          {setupText("Not now")}
         </button>
       </div>
       {failure && (
         <p className="caution" role="alert">
-          OpenBot could not install the update: {failure}
+          {setupText("OpenBot could not install the update:")} {failure}
         </p>
       )}
     </section>

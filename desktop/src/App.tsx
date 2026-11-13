@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -875,7 +876,7 @@ function Setup() {
     return (
       <main>
         <div className="sheet">
-          <h1>OpenBot could not check Windows setup</h1>
+          <h1>{setupText("OpenBot could not check Windows setup")}</h1>
           <Failure problem={blockerFailure} />
         </div>
       </main>
@@ -898,9 +899,9 @@ function Setup() {
     return (
       <main>
         <div className="sheet connection-sheet">
-          <h1>Getting OpenBot ready</h1>
+          <h1>{setupText("Getting OpenBot ready")}</h1>
           <p className="lede" role="status">
-            Checking your saved setup…
+            {setupText("Checking your saved setup…")}
           </p>
           <SetupProgress steps={steps} />
         </div>
@@ -935,12 +936,16 @@ function Setup() {
         <div className="sheet">
           <Sections at="Install" />
           <h1>
-            {installationReady ? "Installation complete" : "Installing OpenBot"}
+            {installationReady
+              ? setupText("Installation complete")
+              : setupText("Installing OpenBot")}
           </h1>
           <p className="lede">
             {installationReady
-              ? "OpenBot’s local software is ready. Next, connect your AI."
-              : INSTALL_BLURB}
+              ? setupText(
+                  "OpenBot’s local software is ready. Next, connect your AI.",
+                )
+              : setupText(INSTALL_BLURB)}
           </p>
           {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
@@ -968,7 +973,7 @@ function Setup() {
                 className="quiet"
                 onClick={() => setStep("welcome")}
               >
-                Back
+                {setupText("Back")}
               </button>
               {installationReady ? (
                 <button
@@ -1168,16 +1173,18 @@ function Setup() {
         <div className="sheet connection-sheet">
           <h1>
             {localStarting || installingAfresh
-              ? "Starting OpenBot"
-              : "OpenBot is stopped"}
+              ? setupText("Starting OpenBot")
+              : setupText("OpenBot is stopped")}
           </h1>
           <p className="lede">
             {localStarting || installingAfresh
               ? // No time of its own: the card under it says how long is left, from how long each
                 // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
                 // on Windows G, and the start took four.
-                "OpenBot is getting ready and opens by itself."
-              : "Your installation and saved connections are ready to reopen."}
+                setupText("OpenBot is getting ready and opens by itself.")
+              : setupText(
+                  "Your installation and saved connections are ready to reopen.",
+                )}
           </p>
           {freshInstall || (
             <LocalIntelligence
@@ -1202,7 +1209,7 @@ function Setup() {
                   disabled={busy}
                   onClick={() => setStep("model")}
                 >
-                  Change AI connection
+                  {setupText("Change AI connection")}
                 </button>
                 {displayedFailure && (
                   <button
@@ -1211,13 +1218,13 @@ function Setup() {
                     disabled={busy}
                     onClick={() => install()}
                   >
-                    Repair installation
+                    {setupText("Repair installation")}
                   </button>
                 )}
               </div>
               {appUpdates}
               <details>
-                <summary>Installation options</summary>
+                <summary>{setupText("Installation options")}</summary>
                 <button
                   type="button"
                   className="quiet"
@@ -1228,7 +1235,7 @@ function Setup() {
                     setStep("install");
                   }}
                 >
-                  Change installation
+                  {setupText("Change installation")}
                 </button>
               </details>
             </>
@@ -1249,11 +1256,15 @@ function Setup() {
         <div className="sheet connection-sheet">
           {!returningToInstallation && <Sections at="Start" />}
           {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
-          <h1>Finishing setup</h1>
+          <h1>{setupText("Finishing setup")}</h1>
           <p className="lede">
             {leftoverVolumes.length > 0
-              ? "OpenBot starts once you choose what happens to the data a previous installation left."
-              : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
+              ? setupText(
+                  "OpenBot starts once you choose what happens to the data a previous installation left.",
+                )
+              : setupText(
+                  "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes.",
+                )}
           </p>
           {freshInstall || (
             <LocalIntelligence
@@ -1300,7 +1311,7 @@ function Setup() {
                     : setStep("model")
                 }
               >
-                Back
+                {setupText("Back")}
               </button>
             </div>
           )}
@@ -1317,18 +1328,24 @@ function Setup() {
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-        <h1>{displayedFailure ? "OpenBot stopped" : "OpenBot is running"}</h1>
+        <h1>
+          {displayedFailure
+            ? setupText("OpenBot stopped")
+            : setupText("OpenBot is running")}
+        </h1>
         {/* The back end runs the release it had: information, said where the lede goes. Nothing
           failed, so it is not drawn as a failure and offers no help. */}
         {!displayedFailure && backEndNotice && (
           <p className="lede" role="status">
-            {backEndNotice}
+            {setupText(backEndNotice)}
           </p>
         )}
         {!displayedFailure && !releaseNotice && !backEndNotice && (
           <p className="lede">
-            OpenBot is open in this window. You can also show it or stop it from
-            its icon in {trayPlace()}.
+            {setupText(
+              "OpenBot is open in this window. You can also show it or stop it from its icon in",
+            )}{" "}
+            {trayPlace()}.
           </p>
         )}
         {/* Start went back to the version this installation had. Said before handing over. */}
@@ -1340,8 +1357,8 @@ function Setup() {
           words ("settings written, credentials stored"). */}
         {displayedFailure && <SetupProgress steps={steps} />}
         {displayedFailure && <Failure problem={displayedFailure} />}
-        {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
-        {showing && <StatusLine>Loading OpenBot…</StatusLine>}
+        {stopping && <StatusLine>{setupText("Stopping OpenBot…")}</StatusLine>}
+        {showing && <StatusLine>{setupText("Loading OpenBot…")}</StatusLine>}
         <div className="row">
           <button
             type="button"
@@ -1357,7 +1374,7 @@ function Setup() {
             onClick={showOpenBot}
             disabled={busy || showing}
           >
-            Show OpenBot
+            {setupText("Show OpenBot")}
           </button>
           <button
             type="button"
@@ -1365,7 +1382,7 @@ function Setup() {
             onClick={stop}
             disabled={busy || showing}
           >
-            Stop OpenBot
+            {setupText("Stop OpenBot")}
           </button>
         </div>
         {/* Under the buttons, as on the stopped screen. A disclosure draws a rule above itself, and

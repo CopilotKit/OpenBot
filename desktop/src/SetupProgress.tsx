@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import {
   type ReactNode,
   useEffect,
@@ -203,7 +204,9 @@ export function StatusLine({
   return (
     <p className="status-line" role="status">
       {working && <span className="step-spinner" aria-hidden="true" />}
-      <span>{children}</span>
+      <span>
+        {typeof children === "string" ? setupText(children) : children}
+      </span>
     </p>
   );
 }
@@ -354,7 +357,7 @@ function SetupProgressRow({
           ? "Complete"
           : "Failed";
   return (
-    <li className="step" aria-label={label(step.step)}>
+    <li className="step" aria-label={setupText(label(step.step))}>
       <span
         className={`mark ${waiting || paused ? "waiting" : running ? "active" : step.ok ? "good" : "bad"}`}
         aria-hidden="true"
@@ -369,23 +372,23 @@ function SetupProgressRow({
           "✗"
         )}
       </span>
-      <span className="step-label">{label(step.step)}</span>
+      <span className="step-label">{setupText(label(step.step))}</span>
       <span
         className={`step-status${running || waiting || paused ? "" : step.ok ? " good" : " bad"}`}
       >
-        {status}
+        {setupText(status)}
         {running && showElapsed && (
           <span className="step-elapsed" aria-hidden="true" aria-live="off">
             {" · "}
-            {formatElapsed(elapsed)} elapsed
+            {formatElapsed(elapsed)} {setupText("elapsed")}
           </span>
         )}
       </span>
       <span className="detail">
-        {where ? downloadSaid(step, where) : step.detail}
+        {setupText(where ? downloadSaid(step, where) : step.detail)}
         {step.downloadBytes != null &&
           downloads == null &&
-          ` ${formatDownloadBytes(step.downloadBytes)} downloaded.`}
+          ` ${setupText(`${formatDownloadBytes(step.downloadBytes)} downloaded.`)}`}
       </span>
       {downloads && where && (
         <DownloadProgress downloads={downloads} where={where} />
@@ -396,7 +399,7 @@ function SetupProgressRow({
           className="text-link step-action"
           onClick={step.onTryAgain}
         >
-          Try again
+          {setupText("Try again")}
         </button>
       )}
     </li>
@@ -491,7 +494,7 @@ export function DownloadProgress({
       ) : (
         <progress aria-label="Download progress" aria-valuetext={summary} />
       )}
-      <span aria-hidden="true">{summary}</span>
+      <span aria-hidden="true">{setupText(summary)}</span>
     </div>
   );
 }

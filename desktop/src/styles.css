@@ -498,7 +498,7 @@ button.text-link:hover:not(:disabled) {
 
 .local-alert details ul {
   margin: 4px 0 0;
-  padding-left: 20px;
+  padding-inline-start: 20px;
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: 20px;
@@ -587,14 +587,14 @@ fieldset.picker.providers {
 
 /* The chosen row's own text stops short of Change rather than running under it. */
 .tile.beside-change {
-  padding-right: 84px;
+  padding-inline-end: 84px;
 }
 
 /* Sits on the one chosen row, so going back is where the eye already is. */
 button.text-link.change-provider {
   position: absolute;
   top: 50%;
-  right: 16px;
+  inset-inline-end: 16px;
   transform: translateY(-50%);
   margin: 0;
 }
@@ -611,7 +611,7 @@ button.text-link.change-provider {
   letter-spacing: 0;
   text-transform: none;
   white-space: normal;
-  text-align: left;
+  text-align: start;
   line-height: 1.5;
   min-height: 0;
   display: grid;
@@ -818,7 +818,7 @@ details > summary:hover {
  */
 button.sign-in-with {
   gap: 10px;
-  padding-left: 12px;
+  padding-inline-start: 12px;
 }
 
 .chosen-provider > button.sign-in-with {
@@ -956,7 +956,7 @@ a:hover {
 
 .blocker-steps {
   margin: 0;
-  padding-left: 20px;
+  padding-inline-start: 20px;
   display: grid;
   gap: 12px;
   font-size: 15px;
@@ -1012,6 +1012,8 @@ a:hover {
 }
 
 .command pre {
+  direction: ltr;
+  text-align: left;
   margin: 0;
   padding: 14px 96px 14px 16px;
   font-family: var(--mono);
@@ -1033,7 +1035,7 @@ a:hover {
 .command button {
   position: absolute;
   top: 8px;
-  right: 8px;
+  inset-inline-end: 8px;
   min-height: 32px;
   padding: 0 12px;
   font-size: 12px;
@@ -1553,7 +1555,7 @@ a:hover {
 .lockup .trademark {
   vertical-align: 0.4em;
   letter-spacing: 0;
-  margin-left: 0.1em;
+  margin-inline-start: 0.1em;
   font-size: max(0.45em, 8px);
   font-weight: 500;
   line-height: 0;
@@ -1595,7 +1597,7 @@ a:hover {
 .local-needs .lockup span.lockup-by {
   font-weight: 400;
   color: var(--text-secondary);
-  margin-left: -2px;
+  margin-inline-start: -2px;
 }
 
 /* On the sign-in card, under its heading: the same space above it as below. */
@@ -1615,6 +1617,8 @@ a:hover {
 }
 
 .detail-of pre {
+  direction: ltr;
+  text-align: left;
   margin: 8px 0 0;
   padding: 10px 12px;
   background: color-mix(in srgb, var(--muted) 70%, var(--card));
@@ -1880,7 +1884,7 @@ main > .sheet {
  */
 main > .sheet:has(> .step-footer) {
   scrollbar-gutter: stable;
-  padding-right: calc(32px - var(--gutter, 0px));
+  padding-inline-end: calc(32px - var(--gutter, 0px));
 }
 
 main > .sheet > * {
@@ -1942,7 +1946,7 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 
 @media (max-width: 580px) {
   main > .sheet:has(> .step-footer) {
-    padding-right: calc(24px - var(--gutter, 0px));
+    padding-inline-end: calc(24px - var(--gutter, 0px));
   }
 
   main > .sheet > .step-footer {
