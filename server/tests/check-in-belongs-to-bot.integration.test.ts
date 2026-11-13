@@ -54,7 +54,9 @@ const engine = createProactiveEngine({
     return { replyText: "" };
   },
   canUseBot: scopes.canUseBot,
-  readableApps: async () => [{ title: "Gmail", refs: ["gmail/list"] }],
+  readableApps: async () => [
+    { title: "Gmail", serverId: "gmail", refs: ["gmail/list"], names: [] },
+  ],
   attention: { notifyAttention: async () => {} },
   catalogue: { listServers: async () => [] },
   mintThreadId: () => `${prefix}-thread-${randomUUID()}`,

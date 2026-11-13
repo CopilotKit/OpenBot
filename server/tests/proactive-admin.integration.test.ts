@@ -482,6 +482,11 @@ describe("the ping pass", () => {
           `ci-thread-${randomUUID()}`,
         );
         theirSettings.push(setting.id);
+        // Not due: a new check-in is due at once, and this case is about pings, not runs.
+        await database
+          .update(proactiveSettings)
+          .set({ nextRunAt: FAR })
+          .where(eq(proactiveSettings.id, setting.id));
         await database.insert(proactiveSuggestions).values({
           id: randomUUID(),
           ownerUserId: person.id,

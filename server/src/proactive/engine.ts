@@ -37,6 +37,8 @@ import type { WorkQueue } from "../work/queue";
 import type {
   AttentionDelivery,
   AttentionPing,
+  CheckInHealth,
+  CheckInSourceKind,
   ProactiveAdmin,
   ProactiveRunTrigger,
   ProactiveSkipReason,
@@ -48,13 +50,21 @@ import {
   proactiveRunIdOf,
   refusalsFor,
 } from "./restriction";
-import type { CheckInApp } from "./scope";
+import {
+  type CheckInApp,
+  type CheckInScope,
+  type CheckInSource,
+  serverOfRef,
+} from "./scope";
+import { pageHost, publicPageAddress } from "./source";
 import {
   PROACTIVE_RUN_KIND,
   type PriorItems,
   type ProactiveRead,
   type ProactiveStore,
+  type ProactiveRunRow,
   STOPPED_BEFORE_FINISHING,
+  unreachedApps,
   unreachedError,
 } from "./store";
 import {
@@ -130,6 +140,25 @@ export type ProactiveEngineDeps = {
   };
   /** Names of the Bot's granted tools that are not reads, answered with a refusal if called. */
   deniedToolNames?(ownerUserId: string, agentId: string): Promise<string[]>;
+  /**
+   * The Bot's tool that reads a web page by its address, or null when it holds none. A `page`
+   * check-in reads its one address with it; without one it can't look.
+   */
+  pageReader?(
+    ownerUserId: string,
+    agentId: string,
+  ): Promise<{ ref: string; name: string } | null>;
+  /**
+   * What a check-in on something this Bot read with the named tool would read (`scope.ts`): how an
+   * accepted offer's kind is worked out, from the tool and never from a label.
+   */
+  sourceOf?(
+    ownerUserId: string,
+    agentId: string,
+    toolName: string,
+  ): Promise<CheckInSource>;
+  /** The Bot's name as the person knows it, for the sentences `health` says. */
+  botName?(ownerUserId: string, agentId: string): Promise<string | null>;
   mintThreadId(): string;
   now?: () => Date;
 };
@@ -234,6 +263,42 @@ const logged = (type: string) => (error: unknown) =>
       timestamp: new Date().toISOString(),
     }),
   );
+
+/** The apps a check-in reads, of those its Bot can read: all of them, the one it names, or none. */
+function appsFor(
+  setting: Pick<ProactiveSetting, "sourceKind" | "sourceServerId">,
+  apps: CheckInApp[],
+): CheckInApp[] {
+  if (setting.sourceKind === "page") return [];
+  if (setting.sourceKind === "app")
+    return apps.filter((app) => app.serverId === setting.sourceServerId);
+  return apps;
+}
+
+/**
+ * Skips a person chose, or that pass by themselves: none of them says a check-in can't look, and
+ * none breaks or extends a run of failures.
+ */
+const CHOSEN_SKIPS: ReadonlySet<string> = new Set([
+  "off_admin",
+  "off_person",
+  "paused",
+  "capped",
+  "busy",
+]);
+/** How many failed check-ins in a row say a check-in can't look. */
+const FAILURES_TO_FLAG = 3;
+/** How long one person's answer about one Bot is kept for `health`, which the app polls. */
+const LIVE_FOR_MS = 60_000;
+
+/** What `health` asks afresh about one person and Bot, the gate's own questions. */
+type Live = {
+  canUse: boolean;
+  /** Null when this deployment can't tell (no scope wired). */
+  apps: CheckInApp[] | null;
+  page: boolean | null;
+  bot: string;
+};
 
 export function createProactiveEngine(deps: ProactiveEngineDeps) {
   const now = deps.now ?? (() => new Date());
@@ -501,7 +566,10 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
    */
   async function gateOf(
     setting: ProactiveSetting,
-  ): Promise<{ skip: ProactiveSkipReason } | { apps: CheckInApp[] }> {
+  ): Promise<
+    | { skip: ProactiveSkipReason }
+    | { apps: CheckInApp[]; pageReader?: { ref: string; name: string } }
+  > {
     if (await deps.store.personOff(setting.ownerUserId))
       return { skip: "off_person" };
     if (await deps.store.paused(setting.ownerUserId, setting.agentId))
@@ -514,10 +582,191 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       return { skip: "capped" };
     if (!(await deps.canUseBot(setting.ownerUserId, setting.agentId)))
       return { skip: "unreachable" };
+    // A page check-in reads its one address with the Bot's page-read tool, and nothing else.
+    if (setting.sourceKind === "page") {
+      const reader = await deps.pageReader?.(
+        setting.ownerUserId,
+        setting.agentId,
+      );
+      return reader ? { apps: [], pageReader: reader } : { skip: "no_sources" };
+    }
     if (!deps.readableApps) return { apps: [] };
     // Nothing the person connected that this Bot can read: there is nothing for a check-in to find.
-    const apps = await deps.readableApps(setting.ownerUserId, setting.agentId);
+    const apps = appsFor(
+      setting,
+      await deps.readableApps(setting.ownerUserId, setting.agentId),
+    );
     return apps.length === 0 ? { skip: "no_sources" } : { apps };
+  }
+
+  /**
+   * What a new check-in reads, worked out on the server and refused, with the sentence the person
+   * reads, when it could not look at all. From `readWith` (the tool the Bot read the thing with, sent
+   * back by the offer card) when there is one, else from `watches` (New routine's It watches).
+   */
+  async function sourceFor(
+    ownerUserId: string,
+    agentId: string,
+    asked: { readWith?: unknown; watches?: unknown; sourceLink?: unknown },
+  ): Promise<{ kind: CheckInSourceKind; serverId: string | null }> {
+    let kind: CheckInSourceKind = asked.watches === "page" ? "page" : "apps";
+    let app: { serverId: string; title: string } | null = null;
+    if (typeof asked.readWith === "string" && asked.readWith.trim()) {
+      const source = deps.sourceOf
+        ? await deps.sourceOf(ownerUserId, agentId, asked.readWith.trim())
+        : null;
+      if (source?.kind === "unreadable")
+        throw new ProactiveRefusedError(
+          `This Bot can't read ${source.title} as you. Connect ${source.title} first.`,
+        );
+      if (!source)
+        throw new ProactiveRefusedError(
+          "A check-in reads an app you connected or a public web page, and this Bot read that another way.",
+        );
+      kind = source.kind;
+      if (source.kind === "app") app = source;
+    }
+    if (kind === "page") {
+      if (
+        typeof asked.sourceLink !== "string" ||
+        !publicPageAddress(asked.sourceLink)
+      )
+        throw new ProactiveRefusedError(
+          "Enter the page's address, starting with https://.",
+        );
+      if (!(await deps.pageReader?.(ownerUserId, agentId)))
+        throw new ProactiveRefusedError(
+          "This Bot has no web search, so it can't read a web page.",
+        );
+      return { kind, serverId: null };
+    }
+    if (!deps.readableApps) return { kind, serverId: app?.serverId ?? null };
+    const apps = await deps.readableApps(ownerUserId, agentId);
+    if (app) {
+      const named = app;
+      if (!apps.some((readable) => readable.serverId === named.serverId))
+        throw new ProactiveRefusedError(
+          `This Bot can't read ${named.title} as you. Connect ${named.title} first.`,
+        );
+      return { kind: "app", serverId: named.serverId };
+    }
+    if (apps.length === 0)
+      throw new ProactiveRefusedError(
+        "This Bot can't read any app you've connected. Connect one in Connections first.",
+      );
+    return { kind: "apps", serverId: null };
+  }
+
+  /** What `health` asks afresh, kept for a minute per person and Bot: the app polls it. */
+  const live = new Map<string, { at: number; answer: Promise<Live> }>();
+  function liveOf(ownerUserId: string, agentId: string): Promise<Live> {
+    const key = `${ownerUserId}\u001f${agentId}`;
+    const kept = live.get(key);
+    if (kept && now().getTime() - kept.at < LIVE_FOR_MS) return kept.answer;
+    const answer = (async (): Promise<Live> => {
+      const [canUse, apps, reader, bot] = await Promise.all([
+        deps.canUseBot(ownerUserId, agentId),
+        deps.readableApps
+          ? deps.readableApps(ownerUserId, agentId)
+          : Promise.resolve(null),
+        deps.pageReader
+          ? deps.pageReader(ownerUserId, agentId)
+          : Promise.resolve(undefined),
+        deps.botName
+          ? deps.botName(ownerUserId, agentId)
+          : Promise.resolve(null),
+      ]);
+      return {
+        canUse,
+        apps,
+        page: reader === undefined ? null : reader !== null,
+        bot: bot ?? "This Bot",
+      };
+    })();
+    answer.catch(() => live.delete(key));
+    live.set(key, { at: now().getTime(), answer });
+    return answer;
+  }
+
+  /** Whether a check-in that is on can't look, and what fixes it (`CheckInHealth`). */
+  function healthOf(
+    setting: ProactiveSetting,
+    state: Live,
+    runs: readonly ProactiveRunRow[],
+    titleOf: (serverId: string) => string | undefined,
+    serverOfTitle: (title: string) => string | undefined,
+  ): CheckInHealth | null {
+    if (!setting.enabled) return null;
+    const bot = state.bot;
+    // Asked afresh, with the gate's own questions, so the row clears the moment it is fixed.
+    if (!state.canUse)
+      return {
+        why: "This Bot is no longer available to you.",
+        fix: "remove",
+        app: null,
+      };
+    if (setting.sourceKind === "apps" && state.apps?.length === 0)
+      return {
+        why: `${bot} can't read any app you've connected.`,
+        fix: "connect",
+        app: null,
+      };
+    if (setting.sourceKind === "app" && state.apps && setting.sourceServerId) {
+      const serverId = setting.sourceServerId;
+      if (!state.apps.some((app) => app.serverId === serverId)) {
+        const title = titleOf(serverId) ?? serverId;
+        return {
+          why: `${title} isn't connected, so ${bot} can't check ${setting.subject || "it"}.`,
+          fix: "connect",
+          app: { serverId, title },
+        };
+      }
+    }
+    if (setting.sourceKind === "page" && state.page === false)
+      return {
+        why: `${bot} has no web search, so it can't read this page.`,
+        fix: "connect",
+        app: null,
+      };
+    // Three failures in a row, newest first; a skip the person chose neither breaks nor extends one.
+    const counted = runs
+      .filter(
+        (run) =>
+          run.outcome !== "running" &&
+          !(
+            run.outcome === "skipped" &&
+            run.skipReason &&
+            CHOSEN_SKIPS.has(run.skipReason)
+          ),
+      )
+      .slice(0, FAILURES_TO_FLAG);
+    if (
+      counted.length < FAILURES_TO_FLAG ||
+      !counted.every((run) => run.outcome === "failed")
+    )
+      return null;
+    const unreached = counted
+      .map((run) => unreachedApps(run.error) ?? [])
+      .reduce((common, apps) => common.filter((app) => apps.includes(app)));
+    const title = unreached[0];
+    if (title) {
+      const serverId =
+        (setting.sourceKind === "app" ? setting.sourceServerId : null) ??
+        serverOfTitle(title);
+      return {
+        why: `${bot} couldn't reach ${title} the last ${FAILURES_TO_FLAG} times.`,
+        fix: "open",
+        app: serverId ? { serverId, title } : null,
+      };
+    }
+    return {
+      why:
+        setting.sourceKind === "page"
+          ? `${bot} couldn't read this page the last ${FAILURES_TO_FLAG} times.`
+          : `${bot} couldn't finish its last ${FAILURES_TO_FLAG} check-ins.`,
+      fix: "open",
+      app: null,
+    };
   }
 
   /** A check-in a gate stopped, in the ledger with its reason, where the Bot's check-ins read it. */
@@ -753,9 +1002,26 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       turn.reached = true;
       const own = toolsForRun(setting, runId, turn.catalogue);
       const ownNames = new Set(own.map((tool) => tool.definition.name));
-      const denied = (
-        (await deps.deniedToolNames?.(input.ownerUserId, input.agentId)) ?? []
-      ).filter((name) => !ownNames.has(name));
+      // A check-in on one app or one page is refused every other app's reads too.
+      const others =
+        setting.sourceKind === "apps"
+          ? []
+          : (
+              (await deps.readableApps?.(input.ownerUserId, input.agentId)) ??
+              []
+            )
+              .filter(
+                (app) =>
+                  !appsFor(setting, [app]).some(
+                    (kept) => kept.serverId === app.serverId,
+                  ),
+              )
+              .flatMap((app) => app.names);
+      const denied = [
+        ...((await deps.deniedToolNames?.(input.ownerUserId, input.agentId)) ??
+          []),
+        ...others,
+      ].filter((name) => !ownNames.has(name));
       return [...own, ...refusalsFor([...new Set(denied)])];
     },
     /** `options` as the store takes them: `refuseExisting` for a caller that asked for a new one. */
@@ -764,18 +1030,104 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       input: unknown,
       options: { refuseExisting?: boolean } = {},
     ) {
-      const parsed = input as { agentId?: unknown };
+      const {
+        readWith,
+        watches,
+        ...rest
+      }: {
+        readWith?: unknown;
+        watches?: unknown;
+        agentId?: unknown;
+        sourceLink?: unknown;
+      } = typeof input === "object" && input !== null ? input : {};
       if (
-        typeof parsed?.agentId !== "string" ||
-        !(await deps.canUseBot(ownerUserId, parsed.agentId))
+        typeof rest.agentId !== "string" ||
+        !(await deps.canUseBot(ownerUserId, rest.agentId))
       )
         throw new ProactiveRefusedError("Choose one of your Bots.");
-      return deps.store.create(
-        ownerUserId,
-        input,
-        deps.mintThreadId(),
-        options,
-      );
+      // Refused here, with what to do, when it could not look at all.
+      const source = await sourceFor(ownerUserId, rest.agentId, {
+        readWith,
+        watches,
+        sourceLink: rest.sourceLink,
+      });
+      live.clear();
+      return deps.store.create(ownerUserId, rest, deps.mintThreadId(), {
+        ...options,
+        source,
+      });
+    },
+    /** `GET /api/proactive/readable`: what a check-in for this Bot could read, for New routine. */
+    async readable(ownerUserId: string, agentId: string) {
+      if (!(await deps.canUseBot(ownerUserId, agentId)))
+        throw new ProactiveRefusedError("Choose one of your Bots.");
+      const [apps, reader] = await Promise.all([
+        deps.readableApps?.(ownerUserId, agentId) ?? [],
+        deps.pageReader?.(ownerUserId, agentId) ?? null,
+      ]);
+      return { apps: apps.map((app) => app.title), page: reader !== null };
+    },
+    /**
+     * For each of the person's check-ins: what it reads, as its row says it, and whether it can't
+     * look (`CheckInHealth`). The questions the gate asks are asked afresh (kept a minute), so a row
+     * clears the moment the app is connected; three failures clear when the next run finishes.
+     */
+    async describe(ownerUserId: string, settings: readonly ProactiveSetting[]) {
+      const [recent, servers] = await Promise.all([
+        deps.store.recentRuns(ownerUserId, 10),
+        deps.catalogue.listServers().catch(() => []),
+      ]);
+      const titleOf = (serverId: string) =>
+        servers.find((server) => server.id === serverId)?.title;
+      const serverOfTitle = (title: string) =>
+        servers.find((server) => server.title === title)?.id;
+      const described = new Map<
+        string,
+        { reads: string | null; health: CheckInHealth | null }
+      >();
+      for (const setting of settings) {
+        const reads =
+          setting.sourceKind === "page"
+            ? pageHost(setting.sourceLink)
+            : setting.sourceKind === "app" && setting.sourceServerId
+              ? (titleOf(setting.sourceServerId) ?? null)
+              : "your apps";
+        const health = setting.enabled
+          ? healthOf(
+              setting,
+              await liveOf(ownerUserId, setting.agentId),
+              recent.get(setting.id) ?? [],
+              titleOf,
+              serverOfTitle,
+            )
+          : null;
+        described.set(setting.id, { reads, health });
+      }
+      return described;
+    },
+    /**
+     * The check-in scope a proactive run's tools are offered from: a check-in on one app reads that
+     * app alone, and one on a page reads no app (its page is read by the engine, not the model).
+     * Every other initiator gets the scope as it is. A proactive run this process isn't running is
+     * offered nothing.
+     */
+    scopeForRun(
+      initiator: AuditInitiator | null | undefined,
+      scope: CheckInScope,
+    ): CheckInScope {
+      const runId = proactiveRunIdOf(initiator ?? undefined);
+      if (!runId) return scope;
+      return async (ownerUserId, agentId) => {
+        const setting = running.get(runId)?.setting;
+        if (!setting || setting.sourceKind === "page") return new Map();
+        const reads = await scope(ownerUserId, agentId);
+        if (setting.sourceKind === "apps") return reads;
+        return new Map(
+          [...reads].filter(
+            ([ref]) => serverOfRef(ref) === setting.sourceServerId,
+          ),
+        );
+      };
     },
     /**
      * Check in now, because the person asked. Either it is queued, or they are told plainly why it

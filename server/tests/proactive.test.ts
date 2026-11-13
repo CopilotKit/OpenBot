@@ -459,7 +459,12 @@ describe("what a check-in can read", () => {
       "bot",
     );
     expect(appsOf(tools, reads)).toEqual([
-      { title: "Linear", refs: ["linear/list_issues"] },
+      {
+        title: "Linear",
+        serverId: "linear",
+        refs: ["linear/list_issues"],
+        names: ["mcp__linear__list_issues"],
+      },
     ]);
   });
 

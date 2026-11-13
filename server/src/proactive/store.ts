@@ -13,6 +13,7 @@ import { botTasks } from "../db/schema/tasks";
 import { workItems } from "../db/schema/work";
 import { lockDefaults, recordOptOut } from "../memory/defaults";
 import type {
+  CheckInSourceKind,
   ProactiveRunOutcome,
   ProactiveRunTrigger,
   ProactiveSkipReason,
@@ -403,12 +404,16 @@ export function createProactiveStore(database: Database) {
         .orderBy(desc(proactiveSettings.createdAt));
     },
     /**
-     * A check-in on one thing for a Bot. The first one runs an interval from now: turning it on is
-     * not asking for one now, which is Run now's job.
+     * A check-in on one thing for a Bot, reading what `source` says (worked out by the engine, never
+     * sent by a client). It is due at once, so within a minute its row says how the first look went:
+     * a check-in the person just made, that then said nothing for a day, read as one that worked.
+     * Rows adopted from defaults are written elsewhere and keep their delay.
      *
      * A Bot watches each thing once. Accepting an offer for something it already watches (the same
      * link, or with no link the same subject) turns that one back on with the interval chosen now,
-     * rather than adding a second that reads the same page twice.
+     * and rewrites what it reads from `source`, rather than adding a second that reads the same page
+     * twice. That is how a check-in on a web page made before check-ins knew pages becomes one that
+     * reads the page. Turned back on, or reading something new, it is due at once too.
      *
      * `refuseExisting` is for a caller that asked for a new one (the New routine screen): the same
      * thing is refused with `SAME_CHECK_IN` instead of changed: the person asked for a second one
@@ -418,7 +423,10 @@ export function createProactiveStore(database: Database) {
       owner: string,
       input: unknown,
       threadId: string,
-      options: { refuseExisting?: boolean } = {},
+      options: {
+        refuseExisting?: boolean;
+        source?: { kind: CheckInSourceKind; serverId: string | null };
+      } = {},
     ): Promise<ProactiveSetting> {
       // A conversation sent by an older client is dropped: a check-in belongs to its Bot.
       const { channelId: _ignored, ...parsed } = parseWith(
@@ -426,6 +434,10 @@ export function createProactiveStore(database: Database) {
         input,
       );
       const sourceLink = parsed.sourceLink ?? null;
+      const source = options.source ?? {
+        kind: "apps" as const,
+        serverId: null,
+      };
       return database.transaction(async (transaction) => {
         await lockDefaults(transaction, owner, parsed.agentId);
         const same = (
@@ -446,8 +458,8 @@ export function createProactiveStore(database: Database) {
         );
         if (same && options.refuseExisting)
           throw new ProactiveConflictError(SAME_CHECK_IN);
-        if (same)
-          return update(
+        if (same) {
+          const updated = await update(
             owner,
             same.id,
             {
@@ -457,6 +469,22 @@ export function createProactiveStore(database: Database) {
             },
             transaction,
           );
+          const changed =
+            same.sourceKind !== source.kind ||
+            same.sourceServerId !== source.serverId;
+          if (same.enabled && !changed) return updated;
+          const [row] = await transaction
+            .update(proactiveSettings)
+            .set({
+              sourceKind: source.kind,
+              sourceServerId: source.serverId,
+              nextRunAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(proactiveSettings.id, same.id))
+            .returning();
+          return row ?? updated;
+        }
         const [row] = await transaction
           .insert(proactiveSettings)
           .values({
@@ -465,7 +493,9 @@ export function createProactiveStore(database: Database) {
             threadId,
             ...parsed,
             sourceLink,
-            nextRunAt: new Date(Date.now() + parsed.intervalMinutes * 60_000),
+            sourceKind: source.kind,
+            sourceServerId: source.serverId,
+            nextRunAt: new Date(),
           })
           .returning();
         if (!row)
@@ -853,6 +883,38 @@ export function createProactiveStore(database: Database) {
         .where(eq(proactiveRuns.ownerUserId, owner))
         .orderBy(proactiveRuns.settingId, desc(proactiveRuns.startedAt));
       return new Map(rows.map((row) => [row.settingId, row]));
+    },
+    /**
+     * Each of this person's settings' newest `perSetting` check-ins, newest first, by setting: what
+     * `health` reads for three failures in a row.
+     */
+    async recentRuns(
+      owner: string,
+      perSetting: number,
+    ): Promise<Map<string, ProactiveRunRow[]>> {
+      const ranked = database
+        .select({
+          id: proactiveRuns.id,
+          rank: sql<number>`row_number() over (partition by ${proactiveRuns.settingId} order by ${proactiveRuns.startedAt} desc)`.as(
+            "rank",
+          ),
+        })
+        .from(proactiveRuns)
+        .where(eq(proactiveRuns.ownerUserId, owner))
+        .as("ranked");
+      const rows = await database
+        .select({ run: proactiveRuns })
+        .from(proactiveRuns)
+        .innerJoin(ranked, eq(ranked.id, proactiveRuns.id))
+        .where(lte(ranked.rank, perSetting))
+        .orderBy(proactiveRuns.settingId, desc(proactiveRuns.startedAt));
+      const bySetting = new Map<string, ProactiveRunRow[]>();
+      for (const { run } of rows)
+        bySetting.set(run.settingId, [
+          ...(bySetting.get(run.settingId) ?? []),
+          run,
+        ]);
+      return bySetting;
     },
     /** Whether a check-in for this setting is on the queue and has not been run yet. */
     async runQueued(settingId: string): Promise<boolean> {

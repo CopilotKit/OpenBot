@@ -1840,6 +1840,9 @@ const loadToolsForActor =
       agentId: botId,
       allowed: (owner) => proactiveEngine.allowed(owner),
       list: (owner) => proactiveStore.list(owner),
+      sourceOf: (toolName) => checkInTools.sourceOf(actorId, botId, toolName),
+      readsPages: async () =>
+        (await checkInTools.pageReader(actorId, botId)) !== null,
     }),
     ...(await grantedTools({
       store: pluginStore,
@@ -2234,7 +2237,8 @@ const actorAgentResolver = createActorAgentResolver({
           loadToolsForActor(actorId, initiator),
         ),
       ),
-      checkInScope,
+      // A check-in on one app, or on one page, is offered that app's reads alone, or none.
+      proactiveEngine.scopeForRun(initiator, checkInScope),
     ),
   /*
    * Which apps each Bot can use for this person, by name and connection state, so a Bot holding
@@ -2681,6 +2685,16 @@ const taskSweep = repeatAfterEach(async () => {
  * routines. What one raises is listed in the app at once and reaches the person in a ping, at most
  * one an hour, folding every Bot's items (proactive/ping.ts). Started items run as tasks (above).
  */
+/*
+ * What a check-in for one person and Bot can read: the apps they connected that it can read, its
+ * page-read tool, and what a tool the Bot read something with would make a check-in read. Built
+ * lazily: the tools are loaded only when a question is asked, long after everything here exists.
+ */
+const checkInTools = checkInToolsFor(
+  (ownerUserId) => loadToolsForActor(ownerUserId),
+  checkInScope,
+  pluginStore,
+);
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
   // A check-in forms memories only where there is memory.
@@ -2713,10 +2727,10 @@ const proactiveEngine = createProactiveEngine({
    * never reaches the model. Otherwise these are the apps its instruction names, and every other
    * tool the Bot holds is answered with a refusal if the model calls it anyway.
    */
-  ...checkInToolsFor(
-    (ownerUserId) => loadToolsForActor(ownerUserId),
-    checkInScope,
-  ),
+  ...checkInTools,
+  botName: async (ownerUserId, agentId) =>
+    (await agentProfileStore.get(await actorFor(ownerUserId), agentId))?.name ??
+    null,
   catalogue: pluginStore,
   mintThreadId: () => threadIdentity.mint(),
 });
@@ -3098,7 +3112,13 @@ const app = createApp(
   hostAccessBroker,
   process.env.OPENBOT_DESKTOP_HOST_TOKEN,
   async (input) => {
-    const proactiveRefusal = await guardProactiveCallback(input, checkInScope);
+    const proactiveRefusal = await guardProactiveCallback(
+      input,
+      proactiveEngine.scopeForRun(
+        input.initiator ?? input.run?.initiator,
+        checkInScope,
+      ),
+    );
     if (proactiveRefusal) return proactiveRefusal;
     const coordinated = await coordination.call(input);
     if (coordinated) return coordinated;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ProactiveSkipReason } from "./contracts";
+import type { CheckInSourceKind, ProactiveSkipReason } from "./contracts";
 
 export type ProactiveRunStatus = "idle" | "running" | "succeeded" | "error";
 /**
@@ -214,6 +214,9 @@ export type ProactiveSetting = {
   focus: string;
   subject: string;
   sourceLink: string | null;
+  /** What it reads: every readable app, one app (`sourceServerId`), or one web page (`sourceLink`). */
+  sourceKind: CheckInSourceKind;
+  sourceServerId: string | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: Date;

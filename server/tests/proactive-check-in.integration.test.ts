@@ -80,7 +80,9 @@ const listMessages = `${mail}/list_messages`;
 /** The name a model calls the read by, which the check-in maps back to its ref. */
 const READ_TOOL = `mcp__${mail}__list_messages`;
 /** The one app the inbox Bot can read, as the engine is told it. */
-const mailApp = [{ title: "Mail", refs: [listMessages] }];
+const mailApp = [
+  { title: "Mail", serverId: mail, refs: [listMessages], names: [READ_TOOL] },
+];
 /** A second app, for a check-in that reads two and can reach only one. */
 const diary = `check-in-diary-${suite}`;
 const listEvents = `${diary}/list_events`;
@@ -1957,7 +1959,11 @@ describe("changing a Bot's check-ins", () => {
     ]);
   });
 
-  test("turning check-ins on for a Bot schedules its first check-in an interval out", async () => {
+  /*
+   * Due at once, so within a minute its row says how the first look went. FOUND IN AN AUDIT: one
+   * made with nothing it could read said nothing for a day, and read as one that worked.
+   */
+  test("a check-in the person makes is due at once, and its interval is kept for the next", async () => {
     const third = `check-in-third-${suite}`;
     await database.insert(agents).values({
       id: third,
@@ -1977,12 +1983,16 @@ describe("changing a Bot's check-ins", () => {
       });
       expect(created.status).toBe(201);
       const { setting } = (await created.json()) as {
-        setting: { id: string; nextRunAt: string; enabled: boolean };
+        setting: {
+          id: string;
+          nextRunAt: string;
+          enabled: boolean;
+          intervalMinutes: number;
+        };
       };
       expect(setting.enabled).toBe(true);
-      const out = (Date.parse(setting.nextRunAt) - Date.now()) / 60_000;
-      expect(out).toBeGreaterThan(239);
-      expect(out).toBeLessThanOrEqual(240);
+      expect(setting.intervalMinutes).toBe(240);
+      expect(Date.parse(setting.nextRunAt)).toBeLessThanOrEqual(Date.now());
     } finally {
       await database.delete(agents).where(eq(agents.id, third));
     }
