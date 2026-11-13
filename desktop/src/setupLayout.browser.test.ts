@@ -731,9 +731,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
-        await page
-          .getByRole("heading", { name: "Set up OpenBot (self-contained)" })
-          .waitFor();
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page.waitForTimeout(400);
         // The card's bottom edge: nothing under the line moves, and the card does not shrink.
         const usage = async () => {

@@ -34,6 +34,12 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **The first setup screen says where OpenBot runs.** It is headed "Set up OpenBot" and lists three
+  places: self-contained on this computer, the one setup installs and the only one to choose;
+  OpenBot for Business Cloud; and OpenBot for Business on your VPC, with AWS, Azure, Google Cloud
+  and your own servers. The two for Business are shown but can't be chosen yet, and "you can set
+  up a call" under them opens the booking page. Install is unchanged.
+
 - **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
   menu, it could seem to do nothing for a few seconds and then close the app, after saving the
   file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
