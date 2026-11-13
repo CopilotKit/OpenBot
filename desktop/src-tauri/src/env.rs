@@ -424,7 +424,7 @@ mod port_tests {
                 server: port,
                 postgres: port,
                 computer: port,
-                    langgraph: port,
+                langgraph: port,
                 supervisor: port,
                 harness: None,
             };
