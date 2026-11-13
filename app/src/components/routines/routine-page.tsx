@@ -45,6 +45,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { deleteQuestion } from "@/lib/delete-question";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -301,6 +302,8 @@ export function RoutinePage({
   const lastRun = lastRunLabel(routine.lastRun);
   const next = nextRunWords(routine);
   const does = routineDoes(routine);
+  // What the page's heading and the Routines list call it.
+  const named = routine.title ?? does;
   const facts = [
     {
       key: "schedule",
@@ -337,7 +340,7 @@ export function RoutinePage({
           ? `${routine.schedule} · ${routine.timezone} · Acts`
           : "Paused. Nothing starts it until you turn it on."
       }
-      title={routine.title ?? does}
+      title={named}
     >
       {/* What can be done to it now. The page title names it, so this section has no heading. */}
       <PageSection>
@@ -511,11 +514,13 @@ export function RoutinePage({
 
       <RoutineRuns routine={routine} />
 
-      {/* It names the schedule, the words a person reads first on the row. */}
+      {/* It names the routine as its heading and its row do, never its schedule, which two can share. */}
       <Dialog onOpenChange={setConfirming} open={confirming}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete "{routine.schedule}"?</DialogTitle>
+            <DialogTitle>
+              {deleteQuestion(named, "Delete this routine?")}
+            </DialogTitle>
             <DialogDescription>
               This routine stops for good. You can't undo this.
             </DialogDescription>

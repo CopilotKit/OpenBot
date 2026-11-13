@@ -12,6 +12,7 @@ import { tryClient } from "@/lib/client";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
+import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
 import {
   runBrowserRead,
   runHelpRequest,
@@ -605,21 +606,20 @@ export function ComputerTools() {
       );
       if (!asked.ok) return asked;
 
-      // Completion is `secretWanted` clearing; the value never returns to the model.
+      // Over when this request is, and answered only if the computer says its value was typed
+      // (`secretAnswer`). The value never returns to the model.
+      const id =
+        typeof asked.secretId === "string" ? asked.secretId : undefined;
+      const seen: { last: ControlState | null } = { last: null };
       const outcome = await waitForSecret(
         botId,
-        (state) => state.secretWanted === undefined,
+        (state) => {
+          seen.last = state;
+          return secretRequestOver(id, state);
+        },
         signal,
       );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? `The person has entered ${input.label} into the field. It was typed straight into the page and you were not told what it is.`
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : `Nobody entered ${input.label}. Do not ask for it another way.`,
-      };
+      return secretAnswer(input.label, id, outcome, seen.last);
     },
     // Rendered by ComputerView as a masked prompt.
     render: () => null,
