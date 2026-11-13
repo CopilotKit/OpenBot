@@ -183,9 +183,7 @@ test("the old uninstaller runs on the Installing page, silently and as an update
   const asked = at(
     '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
   );
-  const said = at(
-    'DetailPrint "Removing the previous version of OpenBot. Your Bots and data stay."',
-  );
+  const said = at('DetailPrint "$(removingPreviousVersion)"');
   const moving = at("!insertmacro OPENBOT_PROGRESS_MOVING 1");
   // /UPDATE keeps the data and shows no box, /S shows no window of its own, and `_?=` comes last,
   // as NSIS reads it, so the installer waits for the uninstaller.

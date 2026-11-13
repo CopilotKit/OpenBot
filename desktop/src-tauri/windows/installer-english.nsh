@@ -35,3 +35,5 @@ LangString webview2Downloading ${LANG_ENGLISH} "Downloading a part of Windows th
 LangString webview2InstallError ${LANG_ENGLISH} "Couldn't install a part of Windows that OpenBot's window needs (error $1)."
 LangString webview2InstallSuccess ${LANG_ENGLISH} "Installed a part of Windows that OpenBot's window needs."
 LangString deleteAppData ${LANG_ENGLISH} "Delete the application data"
+LangString removingPreviousVersion ${LANG_ENGLISH} "Removing the previous version of OpenBot. Your Bots and data stay."
+LangString couldNotRemovePreviousVersion ${LANG_ENGLISH} "Couldn't remove the previous version of OpenBot. Installing over it."

@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { useEffect, useRef, useState } from "react";
 import { CopilotKitSignInWait } from "./CopilotKitSignInWait";
 import { ExternalLink } from "./ExternalLink";
@@ -1105,7 +1106,7 @@ export function LocalIntelligence({
         : sequence.steps;
 
   return (
-    <section aria-label="OpenBot on this computer">
+    <section aria-label={setupText("OpenBot on this computer")}>
       {journeying && (
         <StartJourney
           sequence={sequence}
@@ -1131,7 +1132,7 @@ export function LocalIntelligence({
         <div className="row">
           {running && at !== "start" && (
             <button type="button" className="quiet" onClick={sequence.cancel}>
-              Cancel
+              {setupText("Cancel")}
             </button>
           )}
           {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
@@ -1140,19 +1141,23 @@ export function LocalIntelligence({
           {running && at === "start" && (
             <p className="cannot-cancel">
               {releasing || releaseDue
-                ? "You can't cancel this last step. Stopping it partway could leave the update half done."
-                : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
+                ? setupText(
+                    "You can't cancel this last step. Stopping it partway could leave the update half done.",
+                  )
+                : setupText(
+                    "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
+                  )}
             </p>
           )}
           {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
           {stopped && !waitingOn && !backendLost(sequence) && !plan && (
             <button type="button" onClick={sequence.retry}>
-              Retry
+              {setupText("Retry")}
             </button>
           )}
           {offerStart && !running && at === null && (
             <button type="button" onClick={sequence.start}>
-              Start OpenBot
+              {setupText("Start OpenBot")}
             </button>
           )}
         </div>
@@ -1207,14 +1212,14 @@ export function LocalStatus({
     <section
       className={`local-alert${needs ? " needs" : ""}`}
       role="alert"
-      aria-label={openBot ? "OpenBot" : "Setup"}
+      aria-label={openBot ? "OpenBot" : setupText("Setup")}
     >
       <h2>
         {needs
-          ? "Setup needs you"
+          ? setupText("Setup needs you")
           : openBot
-            ? "OpenBot did not start"
-            : "Setup stopped"}
+            ? setupText("OpenBot did not start")
+            : setupText("Setup stopped")}
       </h2>
       {needs ? (
         <LocalNeeds sequence={sequence} explain />
@@ -1316,10 +1321,10 @@ function StartFresh({
 }) {
   return (
     <div className="local-needs">
-      {said && <p>{said}</p>}
+      {said && <p>{setupText(said)}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
-          Start fresh
+          {setupText("Start fresh")}
         </button>
       </div>
     </div>
@@ -1375,7 +1380,7 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="local-needs">
       <Lockup byCopilotKit />
-      <p>Sign in to finish setting up OpenBot.</p>
+      <p>{setupText("Sign in to finish setting up OpenBot.")}</p>
       {waiting ? (
         <CopilotKitSignInWait
           attempt={waiting}
@@ -1423,27 +1428,30 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The license agreement could not be shown. Try again.
+          {setupText("The license agreement could not be shown. Try again.")}
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            {setupText("Try again")}
           </button>
         </div>
       </div>
     );
   if (terms?.status !== "required")
-    return <StatusLine>Getting the license agreement…</StatusLine>;
+    return (
+      <StatusLine>{setupText("Getting the license agreement…")}</StatusLine>
+    );
   if (terms.version === refused)
     return (
       <div className="local-needs">
         <p className="footnote">
-          OpenBot couldn't record your acceptance. If a coding agent or a script
-          opened OpenBot, quit it, open it yourself, and accept again.
+          {setupText(
+            "OpenBot couldn't record your acceptance. If a coding agent or a script opened OpenBot, quit it, open it yourself, and accept again.",
+          )}
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            {setupText("Try again")}
           </button>
         </div>
       </div>
@@ -1452,15 +1460,18 @@ function AcceptTerms({
     <div className="local-needs">
       {/* The organization and the agreement's version are the log's, as on the Account step. */}
       <p>
-        To run OpenBot on this computer, accept the OpenBot by CopilotKit
-        license agreement.
+        {setupText(
+          "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
+        )}
       </p>
       <p className="footnote">
-        <ExternalLink href={terms.url}>Read the license agreement</ExternalLink>
+        <ExternalLink href={terms.url}>
+          {setupText("Read the license agreement")}
+        </ExternalLink>
       </p>
       <div className="row">
         <button type="button" onClick={() => onAccept(terms.version)}>
-          Accept
+          {setupText("Accept")}
         </button>
       </div>
     </div>

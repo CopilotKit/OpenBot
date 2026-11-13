@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { asProblem, Failure, type Problem } from "./Problem";
@@ -182,62 +183,71 @@ export function WindowsBlocker({
     <ol className="blocker-steps">
       <li>
         {screen.administrator === "someone-else"
-          ? "Ask an administrator to open PowerShell as an administrator: "
-          : "Open PowerShell as an administrator: "}
-        right-click the Start button and choose{" "}
+          ? setupText(
+              "Ask an administrator to open PowerShell as an administrator: ",
+            )
+          : setupText("Open PowerShell as an administrator: ")}
+        {setupText("right-click the Start button and choose")}{" "}
         <strong>Terminal (Admin)</strong>.
       </li>
       {commands.length > 0 && (
         <li>
           {screen.administrator === "someone-else"
-            ? "Have them paste these commands and press Enter:"
-            : "Paste these commands and press Enter:"}
+            ? setupText("Have them paste these commands and press Enter:")
+            : setupText("Paste these commands and press Enter:")}
           <Command lines={commands} />
         </li>
       )}
       <li>
-        Restart Windows, then open OpenBot again
+        {setupText("Restart Windows, then open OpenBot again")}{" "}
         {screen.administrator === "someone-else"
-          ? " from your own account."
+          ? setupText(" from your own account.")
           : "."}
       </li>
     </ol>
   ) : blocker === "nested-virtualization-unavailable" ? (
     <ol className="blocker-steps">
-      <li>Shut down this virtual machine.</li>
+      <li>{setupText("Shut down this virtual machine.")}</li>
       <li>
-        In the virtual machine app on the host, turn on nested virtualization
-        for it. In Hyper-V, run{" "}
+        {setupText(
+          "In the virtual machine app on the host, turn on nested virtualization for it. In Hyper-V, run",
+        )}{" "}
         <code>
           Set-VMProcessor -VMName &lt;name&gt; -ExposeVirtualizationExtensions
           $true
         </code>
-        ; in VMware, <strong>Enable hypervisor applications</strong>; in
-        Parallels, <strong>Enable nested virtualization</strong>. In the cloud,
-        choose a size that supports it.
+        {setupText("; in VMware,")}{" "}
+        <strong>Enable hypervisor applications</strong>
+        {setupText("; in Parallels,")}{" "}
+        <strong>Enable nested virtualization</strong>
+        {setupText(". In the cloud, choose a size that supports it.")}
       </li>
-      <li>Start the virtual machine, then open OpenBot again.</li>
+      <li>
+        {setupText("Start the virtual machine, then open OpenBot again.")}
+      </li>
     </ol>
   ) : (
     <ol className="blocker-steps">
       <li>
-        Restart and open the firmware settings (UEFI or BIOS). The key is
-        usually F2, F10, F12 or Delete while the computer starts.
+        {setupText(
+          "Restart and open the firmware settings (UEFI or BIOS). The key is usually F2, F10, F12 or Delete while the computer starts.",
+        )}
       </li>
       <li>
-        Turn on <strong>Intel VT-x</strong> (Intel Virtualization Technology) or{" "}
-        <strong>AMD-V</strong> (SVM Mode), then save and restart.
+        {setupText("Turn on")} <strong>Intel VT-x</strong>{" "}
+        {setupText("(Intel Virtualization Technology) or")}{" "}
+        <strong>AMD-V</strong> {setupText("(SVM Mode), then save and restart.")}
       </li>
-      <li>Start OpenBot again.</li>
+      <li>{setupText("Start OpenBot again.")}</li>
     </ol>
   );
 
   return (
     <main>
       <div className="sheet blocker-sheet">
-        <p className="steps-of">Before OpenBot can start</p>
-        <h1>{screen.title}</h1>
-        <p className="lede">{screen.why}</p>
+        <p className="steps-of">{setupText("Before OpenBot can start")}</p>
+        <h1>{setupText(screen.title)}</h1>
+        <p className="lede">{setupText(screen.why)}</p>
         {screen.fix ? (
           <>
             <p className="blocker-asks">{screen.fix.asks}</p>
@@ -298,10 +308,12 @@ export function WindowsRestart({
   return (
     <main>
       <div className="sheet blocker-sheet">
-        <p className="steps-of">Before OpenBot can start</p>
-        <h1>Restart Windows to finish</h1>
-        <p className="lede">{lede}</p>
-        {restarting && <StatusLine>Restarting Windows…</StatusLine>}
+        <p className="steps-of">{setupText("Before OpenBot can start")}</p>
+        <h1>{setupText("Restart Windows to finish")}</h1>
+        <p className="lede">{setupText(lede)}</p>
+        {restarting && (
+          <StatusLine>{setupText("Restarting Windows…")}</StatusLine>
+        )}
         {failure && <Failure problem={failure} />}
         <div className="row">
           <button
@@ -318,12 +330,13 @@ export function WindowsRestart({
               }
             }}
           >
-            Restart now
+            {setupText("Restart now")}
           </button>
         </div>
         <p className="footnote">
-          Save your work in other apps first. To restart later, use the Start
-          menu, then open OpenBot.
+          {setupText(
+            "Save your work in other apps first. To restart later, use the Start menu, then open OpenBot.",
+          )}
         </p>
       </div>
     </main>
@@ -348,7 +361,7 @@ export function Command({ lines }: { lines: string[] }) {
           setTimeout(() => setCopied(false), 2000);
         }}
       >
-        {copied ? "Copied" : "Copy"}
+        {copied ? setupText("Copied") : setupText("Copy")}
       </button>
     </div>
   );

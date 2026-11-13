@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { useEffect, useRef, useState } from "react";
 import {
   CONNECT,
@@ -444,11 +445,11 @@ export function StartJourney({
   return (
     <section
       className={`journey${handingOff ? " handing-off" : ""}`}
-      aria-label="How far along"
+      aria-label={setupText("How far along")}
     >
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
-        <span className="journey-said">{said}</span>
+        <span className="journey-said">{setupText(said)}</span>
         <span className="journey-time">
           {leftSaid(view.left)}
           {/* A download's own measure, so a slow line can be told from a stuck one. On the same
@@ -463,13 +464,13 @@ export function StartJourney({
           {view.left !== null && (
             <span aria-hidden="true">
               {" · "}
-              {formatElapsed(elapsed)} so far
+              {formatElapsed(elapsed)} {setupText("so far")}
             </span>
           )}
         </span>
       </div>
       <progress
-        aria-label="How far along"
+        aria-label={setupText("How far along")}
         aria-valuetext={`${Math.round(view.fraction * 100)}%, ${leftSaid(view.left)}`}
         value={view.fraction}
         max={1}

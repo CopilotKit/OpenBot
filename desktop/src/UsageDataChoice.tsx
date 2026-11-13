@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useId, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
@@ -81,14 +82,18 @@ export function UsageDataChoice() {
         {/* The link sits outside the label, so following it never ticks the box. */}
         <label htmlFor={box}>
           {offByEnvironment
-            ? "Usage data is turned off on this computer. OpenBot sends none."
+            ? setupText(
+                "Usage data is turned off on this computer. OpenBot sends none.",
+              )
             : WHAT_IT_SHARES}
         </label>{" "}
-        <ExternalLink href={USAGE_DATA_DOC}>What OpenBot sends</ExternalLink>
+        <ExternalLink href={USAGE_DATA_DOC}>
+          {setupText("What OpenBot sends")}
+        </ExternalLink>
       </p>
       {failed && (
         <p className="usage-choice-failed inline-error" role="alert">
-          Couldn’t change this setting. Try again.
+          {setupText("Couldn't change this setting. Try again.")}
         </p>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import {
   type ReactNode,
   useCallback,
@@ -424,29 +425,33 @@ export function CopilotKitAccount({
       <Sections at="Account" byCopilotKit />
       <h1>
         {agreement
-          ? "Accept the license agreement"
+          ? setupText("Accept the license agreement")
           : connecting
-            ? "Setting up your apps"
+            ? setupText("Setting up your apps")
             : appsFailed
-              ? "Connect your apps"
+              ? setupText("Connect your apps")
               : refused
                 ? refused.switchEngine
-                  ? "Switch to Docker Desktop or Podman"
-                  : "Change this computer's setup"
+                  ? setupText("Switch to Docker Desktop or Podman")
+                  : setupText("Change this computer's setup")
                 : waitingForEngine
-                  ? "Setting up this computer"
+                  ? setupText("Setting up this computer")
                   : checkingAccount
-                    ? "Your OpenBot account"
-                    : "Get your free license key"}
+                    ? setupText("Your OpenBot account")
+                    : setupText("Get your free license key")}
       </h1>
       {!checkingAccount && (
         <p className="lede">
           {agreement
             ? // The organization and the agreement's version are the log's: on Windows F the
               // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
-              "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
+              setupText(
+                "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement.",
+              )
             : connecting || appsFailed
-              ? "OpenBot uses your account to set up apps like Gmail and Slack."
+              ? setupText(
+                  "OpenBot uses your account to set up apps like Gmail and Slack.",
+                )
               : refused
                 ? refused.said
                 : waitingForEngine
@@ -457,19 +462,23 @@ export function CopilotKitAccount({
       {refused?.switchEngine && (
         <ol className="blocker-steps">
           <li>
-            Open Docker Desktop. To use Podman instead, quit the app you use now
-            and start Podman.
+            {setupText(
+              "Open Docker Desktop. To use Podman instead, quit the app you use now and start Podman.",
+            )}
           </li>
           <li>
-            If Docker still uses the other app, run this in a terminal to switch
-            it to Docker Desktop:
+            {setupText(
+              "If Docker still uses the other app, run this in a terminal to switch it to Docker Desktop:",
+            )}{" "}
             <Command lines={["docker context use desktop-linux"]} />
           </li>
-          <li>Choose Try again.</li>
+          <li>{setupText("Choose Try again.")}</li>
         </ol>
       )}
       {refused && !refused.switchEngine && (
-        <p className="footnote">Make the change, then choose Try again.</p>
+        <p className="footnote">
+          {setupText("Make the change, then choose Try again.")}
+        </p>
       )}
       {/* Said where signing in is what the step is about, not once it is done. */}
       {!agreement &&
@@ -502,7 +511,7 @@ export function CopilotKitAccount({
           )
         : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
       {seen.at === "checking" && !handOff && !asking && (
-        <StatusLine>Checking your OpenBot account…</StatusLine>
+        <StatusLine>{setupText("Checking your OpenBot account…")}</StatusLine>
       )}
       {seen.at === "signing-in" && (
         <CopilotKitSignInWait
@@ -513,25 +522,28 @@ export function CopilotKitAccount({
           onCancel={cancelSignIn}
         />
       )}
-      {seen.at === "apps" && <StatusLine>Connecting your apps…</StatusLine>}
+      {seen.at === "apps" && (
+        <StatusLine>{setupText("Connecting your apps…")}</StatusLine>
+      )}
       {seen.at === "apps-failed" && (
         <>
           <InlineFailure problem={seen.problem} />
           <p className="footnote">
-            You can continue without them. OpenBot tries again each time it
-            starts.
+            {setupText(
+              "You can continue without them. OpenBot tries again each time it starts.",
+            )}
           </p>
         </>
       )}
       {agreement && (
         <p className="footnote">
           <ExternalLink href={agreement.url}>
-            Read the license agreement
+            {setupText("Read the license agreement")}
           </ExternalLink>
         </p>
       )}
       {seen.at === "failed" && (
-        <p className="footnote inline-error">{seen.said}</p>
+        <p className="footnote inline-error">{setupText(seen.said)}</p>
       )}
       {failure}
 
@@ -540,7 +552,7 @@ export function CopilotKitAccount({
         <div className="row">
           {seen.at === "signed-out" && (
             <button type="button" onClick={signIn}>
-              Sign in for a free local license key
+              {setupText("Sign in for a free local license key")}
             </button>
           )}
           {agreement && (
@@ -548,20 +560,20 @@ export function CopilotKitAccount({
               type="button"
               onClick={() => connectApps(agreement.version)}
             >
-              Accept
+              {setupText("Accept")}
             </button>
           )}
           {seen.at === "apps-failed" && (
             <>
               <button type="button" onClick={() => connectApps(seen.version)}>
-                Connect apps
+                {setupText("Connect apps")}
               </button>
               <button
                 type="button"
                 className="quiet"
                 onClick={() => finish(seen.version)}
               >
-                Continue
+                {setupText("Continue")}
               </button>
             </>
           )}
@@ -571,12 +583,12 @@ export function CopilotKitAccount({
               type="button"
               onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
             >
-              Try again
+              {setupText("Try again")}
             </button>
           )}
           {refused && !failure && (
             <button type="button" onClick={check}>
-              Try again
+              {setupText("Try again")}
             </button>
           )}
         </div>

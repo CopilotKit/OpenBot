@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
@@ -207,10 +208,11 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   return (
     <main>
       <div className="sheet status-sheet">
-        <h1>Status</h1>
+        <h1>{setupText("Status")}</h1>
         <p className="lede">
-          See what OpenBot is running on this computer and how much memory it
-          uses.
+          {setupText(
+            "See what OpenBot is running on this computer and how much memory it uses.",
+          )}
         </p>
 
         {!status ? (
@@ -427,7 +429,7 @@ function PartList({ parts, group }: { parts: Part[]; group: PartGroup }) {
           <span>{partLabel(part.name, group)}</span>
           <span>
             {part.memoryBytes === null
-              ? "Not measured"
+              ? setupText("Not measured")
               : formatBytes(part.memoryBytes)}
           </span>
         </li>

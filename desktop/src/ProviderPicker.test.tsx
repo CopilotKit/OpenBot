@@ -1464,7 +1464,7 @@ test("a chosen provider's text leaves room for Change", async () => {
   expect(row?.className).toContain("beside-change");
   const styles = readFileSync(join(import.meta.dir, "styles.css"), "utf8");
   const rule = styles.match(/\.tile\.beside-change\s*\{([^}]*)\}/)?.[1] ?? "";
-  const room = Number(rule.match(/padding-right:\s*(\d+)px/)?.[1] ?? 0);
+  const room = Number(rule.match(/padding-inline-end:\s*(\d+)px/)?.[1] ?? 0);
   // Change is about 50px wide, 16px in from the edge, with a gap before the text.
   expect(room).toBeGreaterThanOrEqual(80);
 });

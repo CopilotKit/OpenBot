@@ -6445,6 +6445,23 @@ So the setup screens have the buttons here too, where nothing of theirs is near 
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 31.0 };
 
+#[tauri::command]
+fn setup_language() -> Option<&'static str> {
+    #[cfg(windows)]
+    {
+        let language = windows_registry::CURRENT_USER
+            .open(r"Software\CopilotKit\OpenBot")
+            .and_then(|key| key.get_string("Installer Language"))
+            .ok();
+        match language.as_deref() {
+            Some("1025") => return Some("ar"),
+            Some("1033") => return Some("en"),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let Some(config) = app
         .config()
@@ -11259,6 +11276,7 @@ fn main() {
         .plugin(outside_links_guard())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            setup_language,
             back_end_wait_ended,
             start_early_downloads,
             early_downloads_now,

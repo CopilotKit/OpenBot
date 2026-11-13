@@ -45,6 +45,7 @@ const nsisOf = (config: unknown) =>
     ?.nsis ?? {};
 
 const LANGUAGE_FILE = "./windows/installer-english.nsh";
+const ARABIC_FILE = "./windows/installer-arabic.nsh";
 
 /** The Tauri CLI whose English.nsh the file was copied from. */
 const COPIED_FROM_CLI = "2.11.4";
@@ -58,6 +59,7 @@ const TAURI_STRINGS = [
   "appRunningOkKill",
   "chooseMaintenanceOption",
   "choowHowToInstall",
+  "couldNotRemovePreviousVersion",
   "createDesktop",
   "deleteAppData",
   "dontUninstall",
@@ -67,6 +69,7 @@ const TAURI_STRINGS = [
   "newerVersionInstalled",
   "older",
   "olderOrUnknownVersionInstalled",
+  "removingPreviousVersion",
   "silentDowngrades",
   "unableToUninstall",
   "uninstallApp",
@@ -103,8 +106,9 @@ const builds = {
 for (const [build, config] of Object.entries(builds)) {
   test(`the ${build} build uses OpenBot's English installer text`, () => {
     expect(nsisOf(config)).toMatchObject({
-      languages: ["English"],
-      customLanguageFiles: { English: LANGUAGE_FILE },
+      languages: ["English", "Arabic"],
+      displayLanguageSelector: true,
+      customLanguageFiles: { English: LANGUAGE_FILE, Arabic: ARABIC_FILE },
     });
   });
 }
@@ -164,4 +168,9 @@ test("the file defines every string Tauri's installer reads", () => {
   expect([...englishStrings().keys()].sort()).toEqual(
     [...TAURI_STRINGS].sort(),
   );
+  const arabic = readFileSync(join(tauri, ARABIC_FILE), "utf8");
+  const keys = [
+    ...arabic.matchAll(/^LangString (\w+) \$\{LANG_ARABIC\} "/gm),
+  ].map((match) => match[1]);
+  expect(keys.sort()).toEqual([...TAURI_STRINGS].sort());
 });

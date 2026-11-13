@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { type ReactNode, useState } from "react";
 import {
   EarlyDownloadsLine,
@@ -55,24 +56,31 @@ export function Welcome({
           </sup>
         </span>
       </div>
-      <h1>Set up OpenBot (self-contained)</h1>
+      <h1>{setupText("Set up OpenBot (self-contained)")}</h1>
       <p className="lede big">
-        This version of OpenBot is fully self-contained and runs entirely on
-        your computer, including the OpenBot backend.
+        {setupText(
+          "This version of OpenBot is fully self-contained and runs entirely on your computer, including the OpenBot backend.",
+        )}
       </p>
       <p className="lede big">
-        Depending on your internet speed, setup can take between 1 and 10
-        minutes.
+        {setupText(
+          "Depending on your internet speed, setup can take between 1 and 10 minutes.",
+        )}
       </p>
       <p className="lede big">
-        In production, <strong>OpenBot for Business</strong> runs on your own
-        infrastructure with Kubernetes, or on OpenBot Cloud.{" "}
-        <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink> for early
-        access.
+        {setupText("In production,")}{" "}
+        <strong>{setupText("OpenBot for Business")}</strong>{" "}
+        {setupText(
+          "runs on your own infrastructure with Kubernetes, or on OpenBot Cloud.",
+        )}{" "}
+        <ExternalLink href={BOOK_A_DEMO}>
+          {setupText("Book a demo")}
+        </ExternalLink>{" "}
+        {setupText("for early access.")}
       </p>
       <div className="row">
         <button type="button" disabled={short || checking} onClick={install}>
-          Install
+          {setupText("Install")}
         </button>
       </div>
       <EarlyDownloadsLine firstScreen />

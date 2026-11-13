@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { ExternalLink } from "./ExternalLink";
@@ -38,7 +39,7 @@ function SetupHelp() {
     "https://github.com/CopilotKit/OpenBot/issues/new/choose";
   return (
     <ExternalLink className="setup-help" href={url}>
-      Get setup help
+      {setupText("Get setup help")}
     </ExternalLink>
   );
 }
@@ -89,9 +90,9 @@ export function TroubleshootingLogs({
   return (
     <div className="troubleshooting">
       <p>
-        Paste these logs into the AI assistant you use, such as Claude or
-        ChatGPT, and ask what went wrong. OpenBot takes out keys, passwords and
-        your email address first.
+        {setupText(
+          "Paste these logs into the AI assistant you use, such as Claude or ChatGPT, and ask what went wrong. OpenBot takes out keys, passwords and your email address first.",
+        )}
       </p>
       <div className="row">
         <button
@@ -118,10 +119,10 @@ export function TroubleshootingLogs({
           }}
         >
           {busy === "copy"
-            ? "Gathering logs…"
+            ? setupText("Gathering logs…")
             : copied
-              ? "Copied"
-              : "Copy logs"}
+              ? setupText("Copied")
+              : setupText("Copy logs")}
         </button>
         <button
           type="button"
@@ -143,12 +144,14 @@ export function TroubleshootingLogs({
             }
           }}
         >
-          {busy === "save" ? "Gathering logs…" : "Save to a file"}
+          {busy === "save"
+            ? setupText("Gathering logs…")
+            : setupText("Save to a file")}
         </button>
       </div>
       {said && (
         <p className={said.failed ? "caution failed" : "caution"}>
-          {said.text}
+          {setupText(said.text)}
         </p>
       )}
     </div>
@@ -168,12 +171,12 @@ export function Failure({
 }) {
   return (
     <div className="blocker" role="alert">
-      <h2>That didn’t finish</h2>
-      <p>{problem.said}</p>
+      <h2>{setupText("That didn't finish")}</h2>
+      <p>{setupText(problem.said)}</p>
       {onRetry && (
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            {setupText("Try again")}
           </button>
         </div>
       )}
@@ -181,7 +184,7 @@ export function Failure({
           reading the sentence above never has to. */}
       {problem.detail && (
         <details className="detail-of">
-          <summary>Technical details</summary>
+          <summary>{setupText("Technical details")}</summary>
           <pre>{problem.detail}</pre>
         </details>
       )}
@@ -201,10 +204,10 @@ export function Failure({
 export function InlineFailure({ problem }: { problem: Problem }) {
   return (
     <div className="inline-failure" role="alert">
-      <p className="caution">{problem.said}</p>
+      <p className="caution">{setupText(problem.said)}</p>
       {problem.detail && (
         <details className="detail-of">
-          <summary>Technical details</summary>
+          <summary>{setupText("Technical details")}</summary>
           <pre>{problem.detail}</pre>
         </details>
       )}

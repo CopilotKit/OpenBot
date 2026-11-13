@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { type MouseEvent, type ReactNode, useState } from "react";
 
@@ -37,8 +38,9 @@ export function ExternalLink({
       </a>
       {failure && (
         <span className="external-link-error" role="alert">
-          Could not open your browser. Try the link again or open {href}{" "}
-          manually. ({failure})
+          {setupText("Could not open your browser. Try the link again or open")}{" "}
+          {href} {setupText("manually. (")}
+          {failure})
         </span>
       )}
     </>

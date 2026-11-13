@@ -1,3 +1,4 @@
+import { setupText } from "./setup-locale";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
@@ -163,7 +164,9 @@ export function EarlyDownloadsLine({
         firstScreen ? "early-downloads first-screen" : "early-downloads"
       }
     >
-      {said && <StatusLine working={download != null}>{said}</StatusLine>}
+      {said && (
+        <StatusLine working={download != null}>{setupText(said)}</StatusLine>
+      )}
       {said && download && where && (
         <DownloadProgress downloads={download} where={where} />
       )}
