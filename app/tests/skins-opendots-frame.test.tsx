@@ -144,6 +144,9 @@ function agentRoutes() {
   });
 }
 
+/** Whether the person paused all their Bots, as the server holds it. */
+let pausedAll = false;
+
 /** OpenBot's endpoints, answering in the envelopes the browser reads them in. */
 async function serve(path: string, init?: RequestInit): Promise<Response> {
   const method = init?.method ?? "GET";
@@ -196,7 +199,11 @@ async function serve(path: string, init?: RequestInit): Promise<Response> {
     return Response.json({ memories: [] });
   }
   if (url.pathname === "/api/bots/attention") {
-    return Response.json({ bots: [], lastPingId: null });
+    return Response.json({ bots: [], lastPingId: null, pausedAll });
+  }
+  if (url.pathname === "/api/bots/pause-all") {
+    pausedAll = (JSON.parse(String(init?.body)) as { paused: boolean }).paused;
+    return Response.json({ pausedAll, stoppedTurns: 0 });
   }
   const lifecycle = url.pathname.match(
     /^\/api\/bots\/([^/]+)\/(lifecycle|pause|resume)$/,
@@ -563,23 +570,33 @@ describe("OpenDots frame", () => {
     expect(view.queryByTestId("opendots-computer-pane")).toBeNull();
   });
 
-  test("the Bot on screen can be paused and resumed from the top bar", async () => {
+  test("the top bar pauses every Bot and resumes them, on every page", async () => {
+    pausedAll = false;
     const { view, user } = draw("/channel/new?agent=ada");
-    await user.click(await view.findByRole("button", { name: "Pause Ada" }));
+    await user.click(
+      await view.findByRole("button", { name: "Pause all your Bots" }),
+    );
     expect(
-      await view.findByRole("button", { name: "Resume Ada" }),
+      await view.findByRole("button", { name: "Resume all your Bots" }),
     ).toBeTruthy();
     expect(requests).toContainEqual({
+      method: "PUT",
+      path: "/api/bots/pause-all",
+    });
+    // Not one Bot's pause: OpenDots' switch is for every Bot, wherever the page is.
+    expect(requests).not.toContainEqual({
       method: "POST",
       path: "/api/bots/ada/pause",
     });
-    // A page about no one Bot offers no pause, since there would be nothing to say it applies to.
     cleanup();
     const elsewhere = draw("/connections");
     await elsewhere.view.findByText("OpenBot page");
     expect(
-      elsewhere.view.queryByRole("button", { name: /^Pause / }),
-    ).toBeNull();
+      await elsewhere.view.findByRole("button", {
+        name: "Resume all your Bots",
+      }),
+    ).toBeTruthy();
+    pausedAll = false;
   });
 });
 

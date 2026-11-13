@@ -4,9 +4,9 @@ import { MemoriesScreen, RoutinesScreen } from "./screens";
 
 /*
  * OpenDots over OpenBot. The frame is OpenDots' rail, Dots sidebar, top bar and computer pane; the
- * pages inside it are OpenBot's, chat included, in OpenDots' colours. Left out because OpenBot has
- * nothing behind them: Spaces and their pages, page chats, the Brief, and the pause-everything
- * switch (OpenBot pauses one Bot at a time, which the top bar offers for the Bot on screen).
+ * pages inside it are OpenBot's, chat included, in OpenDots' colours. Its top bar's
+ * pause-everything switch is OpenBot's pause all. Left out because OpenBot has nothing behind them:
+ * Spaces and their pages, page chats and the Brief.
  */
 export const opendots: Skin = {
   id: "opendots",
