@@ -454,6 +454,17 @@ export type DeploymentConfig = {
    */
   selfHostBanner: boolean;
   /**
+   * Whether the signed-in app asks people, once, to star OpenBot on GitHub, and lists the link in
+   * Settings → General.
+   *
+   * On by default, for the same reason as the self-host banner: a fresh install is somebody trying
+   * the open-source project, and a star is how other people find it. A deployment running OpenBot
+   * for its own organization turns it off with OPENBOT_STAR_PROMPT=false or OPENBOT_STAR_PROMPT=0,
+   * since asking its people to star a repository is not its business. Each person answering it
+   * hides it for them on every device (`starPromptAnswered` in their preferences).
+   */
+  starPrompt: boolean;
+  /**
    * Where the built app is, when this process serves it.
    *
    * Set in a container image that carries both. Unset in development, where Vite serves the app and
@@ -1543,6 +1554,12 @@ function selfHostBannerEnabled(environment: Environment): boolean {
   return value !== "false" && value !== "0";
 }
 
+/** Same rule again: on unless explicitly "false" or "0". */
+function starPromptEnabled(environment: Environment): boolean {
+  const value = optional(environment, "OPENBOT_STAR_PROMPT");
+  return value !== "false" && value !== "0";
+}
+
 /**
  * How long the audit trail is kept.
  *
@@ -1707,6 +1724,7 @@ export function loadConfig(
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     selfHostBanner: selfHostBannerEnabled(environment),
+    starPrompt: starPromptEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),

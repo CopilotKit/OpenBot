@@ -47,6 +47,8 @@ describe("runtime capabilities", () => {
       generativeUi: true,
       // Default-on: a fresh clone is somebody evaluating the template.
       selfHostBanner: true,
+      // Default-on in every edition: the ask to star OpenBot on GitHub, until somebody answers it.
+      starPrompt: true,
       // Off: this deployment has an identity provider, so it is not somebody's local trial.
       localEvaluation: false,
       // Which product this is. The app trims its screens for the personal edition.
@@ -77,6 +79,7 @@ describe("runtime capabilities", () => {
       "durableHistory",
       "generativeUi",
       "selfHostBanner",
+      "starPrompt",
       "localEvaluation",
       "edition",
       "transcription",
@@ -122,6 +125,23 @@ describe("runtime capabilities", () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).selfHostBanner).toBe(false);
+  });
+
+  // The ask to star OpenBot on GitHub is the operator's to turn off, and the browser has to hear it.
+  test("reports the star prompt as on unless the deployment opts out", async () => {
+    const on = await (
+      await createApp(loadConfig(testEnvironment())).request(
+        "http://openbot.local/api/capabilities",
+      )
+    ).json();
+    const off = await (
+      await createApp(
+        loadConfig(testEnvironment({ OPENBOT_STAR_PROMPT: "false" })),
+      ).request("http://openbot.local/api/capabilities")
+    ).json();
+
+    expect(on.starPrompt).toBe(true);
+    expect(off.starPrompt).toBe(false);
   });
 
   // One person running it for themselves is not somebody to offer help running it for a company.
