@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
+mod first_paint;
 mod intelligence_bridge;
 mod notice;
 mod outside_links;
@@ -950,6 +951,14 @@ fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progres
 /// has just loaded. Off the main thread, and it waits on nothing.
 #[tauri::command]
 async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+    // The setup page has painted: "Getting OpenBot ready" comes off the window (`first_paint`).
+    if let Some(up) = first_paint::page_painted() {
+        log::info!(
+            "[window] the setup page painted; the window said {} for {:.1}s",
+            first_paint::HEADING,
+            up.as_secs_f64()
+        );
+    }
     desktop_stall::heartbeat(&app, seen, fresh);
 }
 
@@ -6322,6 +6331,23 @@ fn setup_theme<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::Th
     theme_from_record(std::fs::read_to_string(record).ok().as_deref())
 }
 
+/// The setup screens' colours before any page has painted: OpenBot's own light or dark when its
+/// page has said, the system's otherwise, as the setup page itself follows it (`first_paint`).
+fn setup_palette<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> first_paint::Palette {
+    first_paint::palette(
+        setup_theme(app).map_or_else(first_paint::system_dark, |theme| {
+            theme == tauri::Theme::Dark
+        }),
+    )
+}
+
+/// The setup screens' ground as a window colour.
+#[cfg(target_os = "windows")]
+fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
+    let (red, green, blue) = palette.ground;
+    tauri::window::Color(red, green, blue, 0xff)
+}
+
 /// Where OpenBot's last light or dark is kept, in the app's own configuration folder.
 const APPEARANCE_FILE: &str = "appearance.json";
 
@@ -6452,6 +6478,17 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             .maximized(place.maximized),
         None => builder,
     };
+    /*
+     * Never blank white while WebView2 starts (`first_paint`): on Windows the window, and the
+     * webview's default background under the page, are the setup screens' ground, and from its
+     * first show until the setup page paints, "Getting OpenBot ready" covers it. The cover goes up
+     * while `build()` waits for WebView2, and is put back on top of WebView2's own window after.
+     */
+    let palette = setup_palette(app);
+    #[cfg(target_os = "windows")]
+    let builder = builder.background_color(ground_color(palette));
+    let watching = first_paint::watch(palette);
+    let building = std::time::Instant::now();
     let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
@@ -6461,6 +6498,19 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        first_paint::cover_now(hwnd.0 as isize);
+    }
+    drop(watching);
+    if let Some(after) = first_paint::shown_after_start() {
+        log::info!(
+            "[window] showed {:.1}s after OpenBot started, saying {} until its page paints; WebView2 was ready {:.1}s after that",
+            after.as_secs_f64(),
+            first_paint::HEADING,
+            building.elapsed().as_secs_f64()
+        );
+    }
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
@@ -11293,6 +11343,31 @@ fn main() {
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
+            // "Getting OpenBot ready" covers the main window until the setup page's first
+            // heartbeat (`first_paint`). Any other page sends none, so it goes as that page starts;
+            // and a setup page that loaded but never says it painted is shown after ten seconds.
+            if window.label() == "main" {
+                match (payload.event(), page == WindowPage::Setup) {
+                    (tauri::webview::PageLoadEvent::Started, false) => {
+                        let _ = first_paint::page_painted();
+                    }
+                    (tauri::webview::PageLoadEvent::Finished, true) => {
+                        first_paint::uncover_unless_painted(std::time::Duration::from_secs(10));
+                    }
+                    _ => {}
+                }
+            }
+            // On Windows the webview's default background, which shows before a page paints and
+            // under a page with no background of its own, is the setup screens' ground on the setup
+            // page, as the window was built, and WebView2's own white on every other page.
+            #[cfg(target_os = "windows")]
+            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                let _ = window.set_background_color(
+                    (page == WindowPage::Setup)
+                        .then(|| ground_color(setup_palette(window.app_handle()))),
+                );
+            }
             match_title_bar(&window.window(), page);
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));

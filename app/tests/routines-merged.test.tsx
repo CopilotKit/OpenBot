@@ -575,7 +575,7 @@ test("a schedule's page pauses it, runs it, shows its runs and deletes it", asyn
   );
   // Delete still asks first.
   const confirm = await within(document.body).findByRole("dialog", {
-    name: 'Delete "Weekdays at 09:00"?',
+    name: "Delete “Post the standup summary.”?",
   });
   expect(writes.map((write) => write.request)).not.toContain(
     "DELETE /api/routines/r1",
@@ -615,7 +615,7 @@ test("a refused delete is said in its confirmation, and Delete can be pressed ag
   );
   const confirm = within(
     await within(document.body).findByRole("dialog", {
-      name: 'Delete "Weekdays at 09:00"?',
+      name: "Delete “Post the standup summary.”?",
     }),
   );
   fireEvent.click(confirm.getByRole("button", { name: "Delete" }));

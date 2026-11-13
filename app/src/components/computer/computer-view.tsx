@@ -426,6 +426,11 @@ export function ComputerView({
   const secretPending = Boolean(control?.secretWanted);
   const secretPendingRef = useRef(false);
   secretPendingRef.current = secretPending;
+  // A new request is a fresh start: what went wrong with the last one is not news about it.
+  const secretAsked = control?.secretId ?? control?.secretWanted;
+  useEffect(() => {
+    if (secretAsked) setSecretProblem(null);
+  }, [secretAsked]);
   // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
   const generation = useRef(0);
   /** Force a short watch window after non-Bot actions such as secret entry. */
@@ -953,9 +958,23 @@ export function ComputerView({
               conversation, and the Bot never sees it.
             </p>
             {secretProblem ? (
-              <p className="mt-1 text-xs text-destructive">{secretProblem}</p>
+              <p className="mt-1 text-xs text-destructive" role="alert">
+                {secretProblem}
+              </p>
             ) : null}
           </form>
+        ) : secretProblem ? (
+          /*
+            A send that failed because the request had already ended closes the box with it, and the
+            reason went with the box: the person saw it vanish and nothing else. It stays here until
+            the Bot asks again.
+          */
+          <p
+            className="border-t bg-muted/40 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {secretProblem}
+          </p>
         ) : null}
 
         {/*

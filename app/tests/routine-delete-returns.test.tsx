@@ -118,8 +118,9 @@ test("Delete on a routine's page goes back to Routines", async () => {
       name: "Delete the routine scheduled Weekdays at 09:00",
     }),
   );
+  // Asked about by its name, as its heading says, never by its schedule.
   const dialog = await view.findByRole("dialog", {
-    name: 'Delete "Weekdays at 09:00"?',
+    name: "Delete “Morning leads”?",
   });
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
