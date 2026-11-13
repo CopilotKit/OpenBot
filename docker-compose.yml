@@ -46,8 +46,8 @@ services:
   migrate:
     # PULLED, NEVER BUILT HERE. This image, and the computer's and the supervisor's below, are the
     # published OpenBot images, all at one tag: OPENBOT_BACKEND_TAG, set in backend-images.env.
-    # scripts/start.sh, the end-to-end run, CI and Desktop's local build read that file and hand the
-    # tag to Compose here. SERVER_IMAGE still wins over it, which is how OpenBot Desktop pins a
+    # scripts/start.sh, CI and Desktop's local build read that file and hand the tag to Compose
+    # here. SERVER_IMAGE still wins over it, which is how OpenBot Desktop pins a
     # release's digest.
     #
     # A Compose run by hand without the tag still reads this file, so `ps`, `logs` and `down` work as
