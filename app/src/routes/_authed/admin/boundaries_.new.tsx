@@ -213,7 +213,7 @@ function NewRulePage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action."
+      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action. It is checked exactly as written, the same way every time. No model decides."
       title="Add rule"
     >
       <PageSection title="Start from">
@@ -258,7 +258,7 @@ function NewRulePage() {
                           ? "Already one of your rules."
                           : template.description
                         : describe
-                          ? "Say what no Bot may do, and your model writes the rule."
+                          ? "Say what no Bot may do, and your model drafts the rule."
                           : "Describe the action yourself, in CEL."}
                     </ItemDescription>
                   </ItemContent>

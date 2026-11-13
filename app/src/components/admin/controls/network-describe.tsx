@@ -42,7 +42,7 @@ export function DescribeAllowlist({
   return (
     <DescribeField
       action="Write list"
-      description="Say in a sentence where Bots may connect, and your model writes the list. A second reading that never sees your words says what becomes reachable."
+      description="Say in a sentence where Bots may connect, and your model drafts the list. OpenBot checks the list you save, not your words. A second reading that never sees your words says what becomes reachable."
       id="network-description-english"
       label="Describe the allowlist"
       placeholder="Only Salesforce and Google Workspace"

@@ -91,7 +91,7 @@ function DescribeTeamRulesPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
+      description="Say what Bots should do before an action, and your model drafts the team rules. Nothing changes until you save them."
       title="Describe team rules"
     >
       <form
@@ -119,7 +119,7 @@ function DescribeTeamRulesPage() {
           <FieldGroup>
             <DescribeField
               action="Write rules"
-              description="Say in a sentence what Bots should do, and your model writes rules from this OpenBot's apps and Bots. A second reading that never sees your words says what the rules do."
+              description="Say in a sentence what Bots should do, and your model drafts rules from this OpenBot's apps and Bots. OpenBot checks the rules you save, not your words. A second reading that never sees your words says what the rules do."
               id="team-rules-english"
               label="Describe the rules"
               placeholder="Ask before any Bot sends email from Gmail"
@@ -187,7 +187,7 @@ function DescribeTeamRulesPage() {
 function DescribeTeamRulesPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
+      description="Say what Bots should do before an action, and your model drafts the team rules. Nothing changes until you save them."
       backButton={BACK}
       more={<YourOwnApprovals />}
       title="Describe team rules"

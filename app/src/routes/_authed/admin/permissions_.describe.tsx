@@ -85,7 +85,7 @@ function DescribePermissionsPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      description="Say who may use what, and your model drafts the permission changes. Nothing changes until you save them. Saved permissions are checked exactly as set, the same way every time. No model decides."
       title="Describe who can do what"
     >
       <form
@@ -113,7 +113,7 @@ function DescribePermissionsPage() {
           <FieldGroup>
             <DescribeField
               action="Write changes"
-              description="Say in a sentence who may or may not do something, and your model writes the changes from this OpenBot's roles and groups. A second reading that never sees your words says what the changes do."
+              description="Say in a sentence who may or may not do something, and your model drafts the changes from this OpenBot's roles and groups. OpenBot checks the permissions you save, not your words. A second reading that never sees your words says what the changes do."
               id="permissions-english"
               label="Describe the change"
               placeholder="Contractors can't use their own computer"
@@ -181,7 +181,7 @@ function DescribePermissionsPage() {
 function DescribePermissionsPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      description="Say who may use what, and your model drafts the permission changes. Nothing changes until you save them. Saved permissions are checked exactly as set, the same way every time. No model decides."
       backButton={BACK}
       title="Describe who can do what"
     >

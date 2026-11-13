@@ -298,7 +298,7 @@ export function DescribeGrants({
       <FieldGroup>
         <DescribeField
           action="Choose actions"
-          description={`Say in a sentence what ${botName} may do in ${appTitle}, and your model picks the actions. A second reading that never sees your words says what they allow.`}
+          description={`Say in a sentence what ${botName} may do in ${appTitle}, and your model picks the actions. OpenBot checks the actions you save, not your words. A second reading that never sees your words says what they allow.`}
           id="app-grants-english"
           label={`Describe what ${botName} can do`}
           placeholder="Reads everything and writes drafts, but never sends or deletes"

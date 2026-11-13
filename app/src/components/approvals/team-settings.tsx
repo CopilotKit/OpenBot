@@ -263,7 +263,7 @@ export function TeamApprovalSettings() {
             <ItemContent>
               <ItemTitle>Describe it in words</ItemTitle>
               <ItemDescription>
-                Say what Bots should do, and your model writes the rules.
+                Say what Bots should do, and your model drafts the rules.
               </ItemDescription>
             </ItemContent>
             <ItemActions>

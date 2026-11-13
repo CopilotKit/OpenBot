@@ -158,7 +158,7 @@ export function NetworkSection() {
   >();
   return (
     <ControlsSection
-      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
+      description="Control where Bot computers can connect. Each connection is checked against the policy exactly as written, the same way every time. No model decides. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
       title="Network"
     >
       {({ data }) => {

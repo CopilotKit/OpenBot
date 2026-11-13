@@ -110,7 +110,7 @@ export function DescribeRule({
   return (
     <DescribeField
       action="Write rule"
-      description="Say in a sentence what no Bot may do, and your model writes the rule. A second reading that never sees your words says what the rule does."
+      description="Say in a sentence what no Bot may do, and your model drafts the rule. OpenBot checks the rule you save, not your words. A second reading that never sees your words says what the rule does."
       id="rule-description-english"
       label="Describe the rule"
       placeholder="Bots may not visit social media sites"

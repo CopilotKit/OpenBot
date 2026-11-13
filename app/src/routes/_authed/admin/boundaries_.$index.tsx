@@ -122,7 +122,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
       ) : null}
 
       <PageSection
-        description="Written in CEL. It is checked before every action a Bot takes."
+        description="Written in CEL. It is checked exactly as written before every action a Bot takes, the same way every time. No model decides."
         title="Rule"
       >
         <RuleEditor policy={policy} rule={rule} />
