@@ -1132,18 +1132,6 @@ traffic leaves from an address a consumer ISP owns, so a site sees what looks li
 rather than a datacenter. That is why it works, and it is a choice to make knowingly: it changes
 what the Bot appears to be, where Web Bot Auth says what it is. They can be used together.
 
-## Attested identity
-
-When optional SPIRE services are used:
-
-- the supervisor reads `SPIRE_SOCKET`, `SPIRE_AGENT_ID`, `SPIRE_TRUST_DOMAIN`, and `SPIRE_AGENT_SOCKET_VOLUME`;
-- computers read `SPIFFE_ENDPOINT_SOCKET`;
-- Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
-
-A computer fetches its identity and reports it on its own `/health` route. Nothing checks it yet:
-the server does not ask for it, and `scripts/start.sh` and the Helm chart do not start SPIRE. It
-names a computer; it does not yet gate anything.
-
 ## Images
 
 Every service `docker-compose.yml` can build is published by a release, so a machine can run the

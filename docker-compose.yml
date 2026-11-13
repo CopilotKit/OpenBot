@@ -329,63 +329,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # Bot identity is attested by SPIRE when these optional services run.
-  #
-  # SPIRE issues each computer an SVID based on the container labels set by the supervisor. A
-  # computer cannot claim another Bot's identity, and an unregistered container receives no identity.
-  #
-  # Optional. Without these two services the product runs without workload identity and reports that
-  # state explicitly.
-  # Fresh named volumes arrive owned by root, while SPIRE runs as uid 1000. This one-shot service
-  # assigns ownership without running the CA or agent as root.
-  spire-init:
-    image: busybox:1.37
-    command: ["sh", "-c", "chown -R 1000:1000 /server /agent"]
-    user: "0:0"
-    volumes:
-      - spire-server-data:/server
-      - spire-agent-data:/agent
-
-  spire-server:
-    image: ghcr.io/spiffe/spire-server:1.15.1
-    depends_on:
-      spire-init:
-        condition: service_completed_successfully
-    command: ["-config", "/opt/spire/conf/server.conf"]
-    volumes:
-      - ./spire/server.conf:/opt/spire/conf/server.conf:ro
-      # Mounted at the directory the image already owns so SPIRE can create its datastore as uid 1000.
-      - spire-server-data:/opt/spire/data
-      - spire-server-socket:/tmp/spire-server/private
-    healthcheck:
-      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  spire-agent:
-    image: ghcr.io/spiffe/spire-agent:1.15.1
-    command: ["-config", "/opt/spire/conf/agent.conf", "-joinToken", "${SPIRE_JOIN_TOKEN:-openbot-dev-token}"]
-    # The agent must see the caller's process to map the Workload API peer to a Docker container. The
-    # host PID namespace is required because the attestor reads the peer cgroup from that pid.
-    pid: host
-    depends_on:
-      spire-server:
-        condition: service_healthy
-      spire-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./spire/agent.conf:/opt/spire/conf/agent.conf:ro
-      - spire-agent-socket:/tmp/spire-agent/public
-      - spire-agent-data:/opt/spire/data
-      # Read-only, and only so the docker workload attestor can see which container is asking.
-      - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
-
   # One computer per Bot.
   #
   # Each Bot gets a container with its own files, browser session and processes. The Docker socket is
   # root-equivalent on the host, so only the supervisor holds it and only exposes Bot-level verbs.
-  # The SPIRE agent mounts the socket read-only to attest workloads and creates nothing.
   supervisor:
     # Pulled like the server's; see migrate above.
     image: ${SUPERVISOR_IMAGE:-ghcr.io/copilotkit/openbot-supervisor:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
@@ -420,12 +367,6 @@ services:
       # Set to runsc to run every computer under gVisor, when the host has it. Left unset each
       # computer is an ordinary container and shares the host kernel.
       COMPUTER_RUNTIME: ${COMPUTER_RUNTIME:-}
-      # Identity, when SPIRE is part of this deployment. The supervisor registers an entry per Bot
-      # and mounts the agent's socket into that Bot's computer so it can fetch its own SVID.
-      SPIRE_SOCKET: /tmp/spire-server/private/api.sock
-      SPIRE_TRUST_DOMAIN: openbot.local
-      SPIRE_AGENT_ID: spiffe://openbot.local/spire/agent/join_token/${SPIRE_JOIN_TOKEN:-openbot-dev-token}
-      SPIRE_AGENT_SOCKET_VOLUME: ${COMPOSE_PROJECT_NAME:-openbot}_spire-agent-socket
     ports:
       # For the server on the host to ask for a Bot's computer.
       #
@@ -451,8 +392,6 @@ services:
       # supervisor then holds a dead socket and reports that it cannot reach Docker. Point
       # ENGINE_SOCKET at $XDG_RUNTIME_DIR/podman/podman.sock there.
       - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
-      # To register an entry per Bot as each computer is created.
-      - spire-server-socket:/tmp/spire-server/private
     security_opt:
       # The engine socket carries an SELinux label this container is not allowed to read.
       - label=disable
@@ -505,9 +444,9 @@ services:
   # The image still needs a value when nothing is picked. Older Compose (v2.24.5, as
   # shipped with Docker Desktop in early 2024) checks every service before it looks at profiles,
   # and a blank image there fails `compose config` for the whole project with "has neither
-  # an image nor a build context specified". The stand-in is the one-shot image `spire-init` already
-  # uses: it is never pulled or started while the profile is off, and the desktop shell only turns
-  # the profile on after writing the picked image to `.env`.
+  # an image nor a build context specified". The stand-in is busybox: it is never pulled or started
+  # while the profile is off, and the desktop shell only turns the profile on after writing the
+  # picked image to `.env`.
   #
   # No `build:`, so `pull_policy` cannot be `build` here as it is elsewhere: this image is only ever
   # published, never built from this tree.
@@ -620,8 +559,4 @@ networks:
 volumes:
   postgres-data:
   agent-workspace:
-  spire-server-data:
-  spire-server-socket:
-  spire-agent-socket:
-  spire-agent-data:
   agent-profiles:
