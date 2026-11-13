@@ -6342,7 +6342,7 @@ fn setup_palette<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> first_paint::P
 }
 
 /// The setup screens' ground as a window colour.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
     let (red, green, blue) = palette.ground;
     tauri::window::Color(red, green, blue, 0xff)
@@ -6479,13 +6479,14 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         None => builder,
     };
     /*
-     * Never blank white while WebView2 starts (`first_paint`): on Windows the window, and the
-     * webview's default background under the page, are the setup screens' ground, and from its
-     * first show until the setup page paints, "Getting OpenBot ready" covers it. The cover goes up
-     * while `build()` waits for WebView2, and is put back on top of WebView2's own window after.
+     * Never a blank grey or white window before the page paints (`first_paint`): on macOS and
+     * Windows the window, and the webview's background under the page, are the setup screens'
+     * ground, in light or dark, from the first frame. On Windows, from its first show until the
+     * setup page paints, "Getting OpenBot ready" covers it too. The cover goes up while `build()`
+     * waits for WebView2, and is put back on top of WebView2's own window after.
      */
     let palette = setup_palette(app);
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let builder = builder.background_color(ground_color(palette));
     let watching = first_paint::watch(palette);
     let building = std::time::Instant::now();
@@ -16264,6 +16265,36 @@ mod tests {
         assert!(!body.contains(".show()"), "{body}");
         assert!(body.contains("fit_main_window_to_screen(app)"), "{body}");
         assert!(window.is_visible().unwrap_or(true));
+    }
+
+    /// The Mac pass on 806a8317f, recorded at 30 fps: before the setup page painted, the window
+    /// showed the system's dark grey for up to half a second, then WKWebView's white for a few
+    /// frames, and blank white in light. The main window is built on the setup screens' ground on
+    /// macOS as on Windows, the ground the title bar takes once the setup page loads, so the first
+    /// frame is already OpenBot's own colour in light and in dark.
+    #[test]
+    fn the_main_window_is_built_on_the_setup_ground_on_macos_and_windows() {
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let set = body
+            .find("let builder = builder.background_color(ground_color(palette));")
+            .expect("the main window's builder takes the setup ground");
+        let gate = body[..set].trim_end().lines().last().unwrap().trim();
+        assert_eq!(
+            gate, r#"#[cfg(any(target_os = "macos", target_os = "windows"))]"#,
+            "the setup ground is set on the builder on macOS and Windows"
+        );
+        assert!(body.contains("let palette = setup_palette(app);"), "{body}");
+        assert!(set < body.find(".build()?").unwrap(), "{body}");
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            assert_eq!(ground_color(first_paint::palette(false)), SETUP_BACKGROUND);
+            assert_eq!(
+                ground_color(first_paint::palette(true)),
+                SETUP_BACKGROUND_DARK
+            );
+        }
     }
 
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
