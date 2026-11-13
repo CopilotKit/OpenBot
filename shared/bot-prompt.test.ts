@@ -331,18 +331,16 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       const all = flat(sections.join(" "));
       expect(all.split("take it in the same reply").length - 1).toBe(1);
       expect(all).not.toContain("keep going");
-      expect(sections.map((section) => /^<(\w+)>/.exec(section)?.[1])).toEqual(
-        [
-          "how_to_work",
-          "asking",
-          "sources",
-          "answer_format",
-          "replies",
-          "documents",
-          "subagents",
-          "untrusted_content",
-        ],
-      );
+      expect(sections.map((section) => /^<(\w+)>/.exec(section)?.[1])).toEqual([
+        "how_to_work",
+        "asking",
+        "sources",
+        "answer_format",
+        "replies",
+        "documents",
+        "subagents",
+        "untrusted_content",
+      ]);
     }
   });
 
@@ -424,9 +422,7 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       expect(
         (
           guidance.replace(/#[A-Z]+[!?]/g, "").match(/\b[A-Z]{2,}\b/g) ?? []
-        ).filter(
-          (word) => word !== "ID",
-        ),
+        ).filter((word) => word !== "ID"),
       ).toEqual([]);
   });
 });
