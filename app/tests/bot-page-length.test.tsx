@@ -74,6 +74,22 @@ test("the activity row counts what is running and what is lined up", () => {
 });
 
 /*
+ * FOUND IN AN AUDIT: a Bot whose only standing work was a check-in, with a task open, read "No
+ * tasks, routines or goals yet" beside a Routines row that said "1 scheduled".
+ */
+test("the activity row counts a check-in that is on as scheduled and an open task as in progress", () => {
+  expect(activitySummary(activity(0, 0, 0), { checkIns: 1 })).toBe(
+    "1 scheduled",
+  );
+  expect(activitySummary(activity(0, 0, 0), { openTasks: 1 })).toBe(
+    "1 in progress",
+  );
+  expect(
+    activitySummary(activity(1, 2, 0), { checkIns: 1, openTasks: 2 }),
+  ).toBe("3 in progress · 3 scheduled");
+});
+
+/*
  * FOUND ON WINDOWS: a goal that only runs when asked sat under Scheduled, and a Bot with one routine
  * and that goal read "2 scheduled".
  */
