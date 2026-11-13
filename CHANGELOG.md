@@ -447,6 +447,11 @@ every deployment:
 
 ### Smaller changes
 
+- The Recorder keeps capturing a recording's requests when one of its tabs can't take the page
+  hook. When Chrome would not let the Recorder use its debugger, one recorded tab it could not reach,
+  such as a tab closed since or one showing a `chrome://` page, stopped request capture for every
+  tab, for the rest of the recording, and after the extension's background woke up again. That tab
+  is now skipped, and picked up once it shows a website.
 - In the OpenDots skin, the badge on Bots sits on the corner of the Bots icon. It used to hang
   off the button's corner, past the icon and almost on the rail's edge. A count is now a smaller
   circle, so the icon still shows under it. The badge on the menu button in a narrow window
