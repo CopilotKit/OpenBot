@@ -80,9 +80,10 @@ const SKIPPED_BECAUSE: Record<CheckInSkipReason, string> = {
   off_admin: "Turned off by an admin",
   off_person: "Turned off by the person",
   paused: "Bot paused",
+  paused_all: "All Bots paused",
   capped: "Over the daily limit",
   no_sources: "Nothing it could read",
-  unreachable: "Conversation gone",
+  unreachable: "Bot no longer available",
   busy: "Another one still running",
 };
 

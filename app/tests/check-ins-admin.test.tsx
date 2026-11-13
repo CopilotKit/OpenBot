@@ -51,6 +51,7 @@ const skipped = (counts: Partial<BotCheckInMetrics["runs"]["skipped"]>) => ({
   unreachable: 0,
   no_sources: 0,
   busy: 0,
+  paused_all: 0,
   ...counts,
 });
 
