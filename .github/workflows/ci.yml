@@ -128,7 +128,8 @@ jobs:
 
   # The app's and the desktop window's tests that need a real Chromium, asked for by name because a
   # machine running `bun test` is not required to have a browser. The browser is the one the root's
-  # Playwright pins.
+  # playwright-core pins, installed by that same package: a bare `bunx playwright` fetches the newest
+  # Playwright, whose Chromium is a different build from the one playwright-core launches.
   app-browser:
     name: app (real browser)
     runs-on: ubuntu-latest
@@ -140,7 +141,7 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bunx playwright install --with-deps --no-shell chromium
+      - run: bunx playwright-core install --with-deps --no-shell chromium
       # The app's real-browser tests: a running step's words
       # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
       # step's orb drawn whole under the step dashes, a conversation's rail of turns clear of the
