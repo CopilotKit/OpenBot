@@ -32,7 +32,62 @@ tags:
     description: >-
       The Bots a person can see: their own, those shared with them, the ones an
       administrator assigned them, and the ones that come with OpenBot.
+  - name: Reactions
+    description: >-
+      The reactions a Bot leaves on a person's message in place of a line of
+      its own, when the message only needs an acknowledgement.
 paths:
+  /api/v2/organizations/{organizationId}/reactions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Reactions]
+      operationId: listReactions
+      summary: List reactions in a conversation
+      description: >-
+        Return one page of the reactions Bots left on the caller's messages in
+        one of their conversations, named by its thread. Another person's
+        thread answers with an empty list. A missing cursor starts at the
+        first page and nextCursor null ends the list. Today's server returns
+        every reaction on the first page.
+      security:
+        - webSession: []
+        - appOAuth: [reactions:read]
+        - apiKey: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          description: The conversation's thread, as its messages name it.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of reactions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ReactionPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
   /api/v2/organizations/{organizationId}/bots:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -308,6 +363,7 @@ components:
           scopes:
             bots:read: Read the Bots the signed-in person can see.
             bots:write: Create, change and delete the signed-in person's Bots.
+            reactions:read: Read the reactions Bots left on the signed-in person's messages.
     apiKey:
       type: http
       scheme: bearer
@@ -507,6 +563,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Bot'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          description: Pass as cursor for the next page. Null ends the list.
+    Reaction:
+      type: object
+      required: [messageId, agentId, emoji, createdAt]
+      properties:
+        messageId:
+          type: string
+          description: The person's message the reaction is on, by the id its conversation gives it.
+        agentId:
+          type: string
+          description: The Bot that reacted.
+        emoji:
+          type: string
+          description: The reaction itself.
+          example: 👍
+        createdAt:
+          type: string
+          format: date-time
+    ReactionPage:
+      type: object
+      required: [reactions, nextCursor]
+      properties:
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reaction'
         nextCursor:
           type: [string, 'null']
           maxLength: 4096
@@ -879,6 +964,15 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    ReactionPageLast:
+      summary: Every reaction in a conversation, on one page.
+      value:
+        reactions:
+          - messageId: msg_2f0c1e7a
+            agentId: general-assistant
+            emoji: 👍
+            createdAt: '2026-11-12T22:41:07.000Z'
+        nextCursor: null
     BotPageLast:
       summary: Every Bot, on one page.
       value:

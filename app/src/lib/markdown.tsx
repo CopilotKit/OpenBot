@@ -4,6 +4,7 @@ import {
   IconPresentation,
   IconTable,
 } from "@tabler/icons-react";
+import { useRouter } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 import {
   type CodeHighlighterPlugin,
@@ -20,7 +21,7 @@ import {
  * Shared markdown rendering for Bot prose and tool results.
  *
  * Links open in a new tab with `noreferrer` because content can come from a model or remote MCP
- * server.
+ * server. A link to a page of the app itself, such as a task thread, opens in place.
  */
 
 /**
@@ -79,8 +80,77 @@ export function documentChipKind(href: string | undefined) {
   return null;
 }
 
+/**
+ * The app's own address a link names, as a path, or null for a link that leaves the app.
+ *
+ * A Bot links to one of its task threads by the path the app opens it at (`/channel/…`), and may
+ * write it as a full address on this origin. Either is a page of the app, not somewhere else.
+ */
+export function inAppPath(
+  href: string | undefined,
+  origin = typeof window === "undefined" ? undefined : window.location.origin,
+): string | null {
+  if (!href) return null;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  if (!origin) return null;
+  try {
+    const url = new URL(href);
+    return url.origin === origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A link to a page of the app, opened in place the way the app's own links open. Sent to a new tab
+ * it opened a second window inside OpenBot Desktop, and lost the conversation the person was in.
+ * A modified click still does what the browser does with it.
+ */
+function AppLink({
+  path,
+  children,
+  // Streamdown hands every link a new tab; a page of the app keeps the window it is in.
+  target: _target,
+  rel: _rel,
+  ...rest
+}: ComponentProps<"a"> & { path: string }) {
+  const router = useRouter({ warn: false });
+  return (
+    <a
+      {...rest}
+      className="underline underline-offset-2 hover:no-underline"
+      href={path}
+      onClick={(event) => {
+        if (
+          !router ||
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        void router.navigate({ to: path });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 export const markdownComponents = {
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
+    const path = inAppPath(href);
+    if (path !== null)
+      return (
+        <AppLink {...rest} path={path}>
+          {children}
+        </AppLink>
+      );
     const kind = documentChipKind(href);
 
     if (kind) {
