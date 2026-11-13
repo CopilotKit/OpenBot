@@ -6,6 +6,7 @@ import {
   frameBrief,
   readBrief,
   resultForConversation,
+  taskStands,
 } from "../orchestration";
 
 /**
@@ -98,6 +99,14 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
     expect(DELEGATING_GUIDANCE).toContain(
       "Only when the person asks for the link",
+    );
+  });
+
+  test("a finished task is said to be done, not waiting for review", () => {
+    // Told `ready_for_review`, a Bot said a finished order "may be waiting on you".
+    expect(taskStands("ready_for_review")).toStartWith("done");
+    expect(taskStands("needs_input")).toBe(
+      "waiting for the person in its thread",
     );
   });
 

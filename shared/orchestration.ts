@@ -63,6 +63,11 @@ export type LinkedThread = {
   title: string;
   /** Where it stands, in the task list's words (`TaskStatus`). */
   status: string;
+  /**
+   * Where it stands, in the words the Bot passes on (`taskStands`). Told `ready_for_review`, a Bot
+   * said a finished task "may be waiting on you".
+   */
+  stands?: string;
   /** The path that opens it in the app. */
   link: string;
 };
@@ -111,6 +116,15 @@ export function readLinkResult(text: unknown): LinkResult | null {
       typeof (thread as LinkedThread).title === "string",
   );
   return { threads };
+}
+
+/** Where a task stands, by its status, in plain words for the model to pass on. */
+export function taskStands(status: string): string {
+  if (status === "ready_for_review" || status === "resolved")
+    return "done: its result has been posted in this conversation";
+  if (status === "needs_input") return "waiting for the person in its thread";
+  if (status === "failed") return "could not finish";
+  return "still working";
 }
 
 /** The path a task thread opens at in the app. */
