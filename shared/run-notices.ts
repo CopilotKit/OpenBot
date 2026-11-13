@@ -20,9 +20,13 @@ export const LAST_STEP_NOTICE =
 /**
  * Sent when a run's answer ends on a promise of work it did not do: "I'll fetch the rest now", and
  * no call after it. `promise` is the model's own sentence, quoted back as it wrote it.
+ *
+ * "Do it now" alone turned an offer into work nobody asked for: a Bot that answered "are you able
+ * to...?" and ended on what it would do next was sent to do it. So the nudge holds the Bot to work
+ * it was asked for, and lets an offer stand.
  */
 export function promiseNudge(promise: string): string {
-  return `You said "${promise}" but made no tool call. Do it now, or finish with the result and what is missing.`;
+  return `You said "${promise}" but made no tool call. If that is part of what you were asked to do, do it now. If it is only an offer, leave it for the person and end your answer.`;
 }
 
 /** One part of a routine's checklist, by its number, as a nudge lists it. */
