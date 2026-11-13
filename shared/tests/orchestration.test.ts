@@ -44,6 +44,19 @@ describe("a delegated task's brief", () => {
     expect(framed).toContain("Never write out what a component already shows");
   });
 
+  test("asks the answer to speak to the person, not about the brief or where a chart sits", () => {
+    // A task wrote "not the 25.8% in the brief" and "the chart above" for a chart drawn below it.
+    const framed = frameBrief("Chart six months of revenue.");
+    expect(framed).toContain("never mention this brief");
+    expect(framed).toContain("never say where a component sits");
+  });
+
+  test("a thread opened before the answer was told not to name the brief still reads as the Bot's brief", () => {
+    const before =
+      "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.\nThe task:\n\nOrder the marigold seeds.";
+    expect(readBrief(before)).toBe("Order the marigold seeds.");
+  });
+
   test("a thread opened under the frame before still reads as the Bot's brief", () => {
     const before =
       "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.\nThe task:\n\nChart six months of revenue.";

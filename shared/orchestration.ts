@@ -180,22 +180,29 @@ export function readTaskReport(
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
   "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.",
-  "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.",
+  "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are, your words first; what you say while you work stays in this thread. Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'.",
   "The task:",
 ];
 
+/** The third line before a task's answer was asked not to name the brief or a component's place. */
+const POSTED_BACK =
+  "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.";
+
 /**
  * Every frame a task's thread has opened with, newest first, so a thread opened under an earlier one
- * still reads as the Bot's brief. The second line is the one that changed: first the answer's opening
- * sentences were all that came back; then the answer came back whole; then a component's rows were
- * no longer to be written out again beside it.
+ * still reads as the Bot's brief. First the answer's opening sentences were all that came back; then
+ * the answer came back whole; then a component's rows were no longer to be written out again beside
+ * it; then the answer was asked not to name the brief ("not the 25.8% in the brief") or say a chart
+ * was "above" when the conversation draws it below the words.
  */
 const BRIEF_PREFIXES = [
   BRIEF_FRAME,
+  [BRIEF_FRAME[0], BRIEF_FRAME[1], POSTED_BACK, BRIEF_FRAME[3]],
   [
     BRIEF_FRAME[0],
     "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
-    ...BRIEF_FRAME.slice(2),
+    POSTED_BACK,
+    BRIEF_FRAME[3],
   ],
   [
     BRIEF_FRAME[0],
