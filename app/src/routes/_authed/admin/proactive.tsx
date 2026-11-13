@@ -286,7 +286,7 @@ function Activity({
           </SelectContent>
         </Select>
       }
-      description="Acceptance is how many items people started, out of the ones they started or hid."
+      description="Acceptance is how many items people worked on, out of the ones they worked on or dismissed."
       title="How check-ins went"
     >
       {metrics.isPending ? null : metrics.error ? (

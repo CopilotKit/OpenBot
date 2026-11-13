@@ -419,7 +419,7 @@ describe("a ping", () => {
       "2 things need you",
       "• Inbox Bot: Reply to Dana about Friday. Dana asked about Friday. (from Mail)",
       "• Calendar Bot: Move the standup. The room is double-booked. (from Mail)",
-      "Start or hide them in OpenBot.",
+      "Open OpenBot to work on them or dismiss them.",
     ]);
     expect(
       chatSends.find((send) => send.transport === "teams")?.sender,

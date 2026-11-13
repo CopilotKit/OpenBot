@@ -799,7 +799,7 @@ describe("a check-in reads what the person connected, through the tools that say
       why: SKIPPED_BECAUSE.no_sources,
     });
     expect(SKIPPED_BECAUSE.no_sources).toBe(
-      "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.",
+      "This Bot can't read any app you've connected. Connect one in Connections.",
     );
     expect(asked).toEqual([]);
 

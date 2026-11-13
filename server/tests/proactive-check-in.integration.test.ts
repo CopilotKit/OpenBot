@@ -735,7 +735,7 @@ describe("a check-in", () => {
       [
         "One thing needs you",
         "• Inbox Bot: Reply to Dana about Friday. Dana asked whether Friday's review still stands. (from Mail)",
-        "Start or hide it in OpenBot.",
+        "Open OpenBot to work on it or dismiss it.",
       ].join("\n"),
     );
     expect(ping?.pushBody).toBe("Inbox Bot: Reply to Dana about Friday");
@@ -1598,7 +1598,7 @@ describe("the ping", () => {
     expect(ping?.text).toContain(
       "• Calendar Bot: Move the standup. The room is double-booked tomorrow. (from Mail)",
     );
-    expect(ping?.text).toEndWith("Start or hide them in OpenBot.");
+    expect(ping?.text).toEndWith("Open OpenBot to work on them or dismiss them.");
     expect((await itemsOf()).every((item) => item.pingId === ping?.id)).toBe(
       true,
     );
@@ -1992,7 +1992,7 @@ describe("Run now", () => {
       method: "POST",
     });
   const nothingToRead =
-    "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.";
+    "This Bot can't read any app you've connected. Connect one in Connections.";
 
   test("after a skip it is tried again, saying plainly why it can't, and the Bot's check-ins show the last one and why", async () => {
     let readable: CheckInApp[] = [];
