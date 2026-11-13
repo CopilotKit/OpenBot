@@ -476,12 +476,19 @@ A relaunch after a restart finds Docker Desktop quit, or OpenBot's Podman machin
 Intelligence CLI call needs the engine. The window's relaunch sequence starts with the CLI, so
 before this, the CLI answered "docker-unavailable" and setup stopped at "Waiting for the back end",
 never reaching Start, which is where the engine used to be woken. Nothing is done while OpenBot's
-own containers are up, or when the engine already answers.
+own containers are up on an engine that answers (`own_containers_up`), or when the engine already
+answers.
 */
 #[tauri::command]
 async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
     let root = stack::root_from(&root);
-    if app.state::<Shell>().containers.lock().unwrap().is_some() {
+    let shell_app = app.clone();
+    let up = tauri::async_runtime::spawn_blocking(move || {
+        own_containers_up(&shell_app.state::<Shell>(), engine::Address::responds)
+    })
+    .await
+    .unwrap_or(false);
+    if up {
         return Ok(());
     }
     let asked = std::time::Instant::now();
@@ -512,6 +519,24 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+Whether `wake_engine` leaves the engine alone because OpenBot's own containers are up on it.
+
+Held containers are up only while their engine answers. OpenBot's Podman machine stopped under a
+running OpenBot leaves this session holding them, and the window's Retry then skipped the engine as
+if they ran: the back end's check said "docker_unavailable" at once, and only Quit and a relaunch
+started the machine. Docker Desktop quit under a running OpenBot is the same.
+*/
+fn own_containers_up(shell: &Shell, answers: impl FnOnce(&engine::Address) -> bool) -> bool {
+    let held = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    held.is_some_and(|address| answers(&address))
 }
 
 /// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
@@ -14886,6 +14911,62 @@ mod tests {
         assert_eq!(run(None, true, false, false), none);
         // Linux runs Podman natively: there is no machine to start.
         assert_eq!(run(Some(Podman), false, false, true), none);
+    }
+
+    /// The EC2 Mac pass: OpenBot's Podman machine stopped under a running OpenBot, the window said
+    /// "The software OpenBot runs on isn't running. Retry to start it.", and Retry gave up at once
+    /// on `docker_unavailable`. This session still held OpenBot's containers, so waking the engine
+    /// was skipped as if they were running, and the machine was never started. Only Quit and a
+    /// relaunch, which hold no containers, started it.
+    #[test]
+    fn retry_starts_the_machine_stopped_under_a_running_openbot() {
+        use std::cell::RefCell;
+        let shell = Shell::default();
+        let address = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: PathBuf::from("/fixture/OpenBot"),
+            address: address.clone(),
+        });
+
+        // The machine is stopped: nothing answers on the engine OpenBot's containers ran on.
+        let asked = RefCell::new(Vec::new());
+        let up = own_containers_up(&shell, |on| {
+            asked.borrow_mut().push(on.clone());
+            false
+        });
+        assert!(
+            !up,
+            "containers on an engine that does not answer are not up"
+        );
+        assert_eq!(
+            asked.into_inner().len(),
+            1,
+            "the containers' own engine is asked"
+        );
+
+        // So Retry wakes the engine the installation runs on, which starts OpenBot's machine.
+        let started = RefCell::new(false);
+        wake_saved_engine(
+            Some(engine::Engine::Podman),
+            true,
+            || false,
+            || panic!("a Podman installation never opens Docker Desktop"),
+            || true,
+            || {
+                *started.borrow_mut() = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(started.into_inner(), "OpenBot's machine is started");
+
+        // While the machine answers, a running OpenBot's engine is still left alone.
+        assert!(own_containers_up(&shell, |_| true));
+        // And with no containers held, there is nothing to leave alone.
+        *shell.containers.lock().unwrap() = None;
+        assert!(!own_containers_up(&shell, |_| panic!(
+            "no containers, no engine to ask"
+        )));
     }
 
     /// Box I, step 7: "Delete the application data" took OpenBot's machine, the installation folder
