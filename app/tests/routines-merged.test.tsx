@@ -22,6 +22,7 @@ import {
   scheduleWords,
 } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
+import type { ProactiveSetting } from "@/lib/proactive";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
@@ -663,4 +664,36 @@ test("on the every-Bot list a schedule's row names its Bot, and its page leads t
   expect(
     details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),
   ).toBe("/bots/expenses/routines");
+});
+
+test("a check-in that can't look sorts first, ahead of every working row", () => {
+  const checkIn = (id: string, health: boolean) =>
+    ({
+      id,
+      agentId: "a",
+      channelId: null,
+      focus: "",
+      subject: id,
+      enabled: true,
+      intervalMinutes: 60,
+      nextRunAt: "2026-11-13T10:00:00Z",
+      lastRunAt: null,
+      lastStatus: "idle",
+      lastError: null,
+      health: health
+        ? { why: "Can't look.", fix: "connect" as const, app: null }
+        : null,
+    }) satisfies ProactiveSetting;
+  const rows = mergeRoutines({
+    routines: [
+      {
+        id: "r1",
+        agentId: "a",
+        enabled: true,
+      } as unknown as RoutineRecord,
+    ],
+    goals: [],
+    checkIns: [checkIn("fine", false), checkIn("broken", true)],
+  });
+  expect(rows.map((row) => row.id)).toEqual(["broken", "r1", "fine"]);
 });

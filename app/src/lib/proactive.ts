@@ -21,14 +21,33 @@ export type LastCheckIn = {
   finishedAt: string | null;
 };
 
+/**
+ * Why a check-in that is on can't look, and the step that fixes it, in a sentence the server wrote.
+ * `connect` opens Connections (that app's page when `app` names one); `open` opens that app's page
+ * under Connections when `app` names one, else the check-in's own page; `remove` removes it.
+ */
+export type CheckInHealth = {
+  why: string;
+  fix: "connect" | "open" | "remove";
+  app: { serverId: string; title: string } | null;
+};
+
 export type ProactiveSetting = {
   id: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in was made with, or null: a check-in belongs to its Bot. */
+  channelId: string | null;
   focus: string;
   /** What it watches, in the person's words. Empty on one that watches everything the Bot reads. */
   subject?: string;
   sourceLink?: string | null;
+  /** What it reads: every readable app, one app, or one web page. Absent from an older server. */
+  sourceKind?: "apps" | "app" | "page";
+  sourceServerId?: string | null;
+  /** What it reads, as its row says it: "Gmail", "your apps", "github.com". */
+  reads?: string | null;
+  /** Null, or why it can't look (`CheckInHealth`). Absent from an older server. */
+  health?: CheckInHealth | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: string;
@@ -96,7 +115,27 @@ export function sourceSite(link: string): string | null {
 export const proactiveKeys = {
   settings: ["proactive", "settings"] as const,
   suggestions: ["proactive", "suggestions"] as const,
+  readable: (agentId: string) => ["proactive", "readable", agentId] as const,
 };
+
+/** What a check-in for one Bot could read: the apps it can read as you, and whether a web page. */
+export type CheckInReadable = { apps: string[]; page: boolean };
+
+/** `GET /api/proactive/readable`, for New routine's It watches. */
+export const checkInReadableQueryOptions = (agentId: string) =>
+  queryOptions({
+    queryKey: proactiveKeys.readable(agentId),
+    queryFn: (): Promise<CheckInReadable> =>
+      client(`/api/proactive/readable?agentId=${encodeURIComponent(agentId)}`, {
+        fallback: "Couldn't tell what this Bot can read",
+      })
+        .then((response) => response.json())
+        .then((body: Partial<CheckInReadable>) => ({
+          apps: Array.isArray(body.apps) ? body.apps : [],
+          page: body.page === true,
+        })),
+    enabled: Boolean(agentId),
+  });
 
 /*
  * One read of `/api/proactive/settings` answers two questions: which Bots check in, and whether an
@@ -145,11 +184,14 @@ export const proactiveSuggestionsQueryOptions = () =>
 export const createProactiveSetting = (
   input: {
     agentId: string;
-    channelId: string;
     focus: string;
     subject?: string;
     sourceLink?: string;
     intervalMinutes: number;
+    /** The tool the Bot read the thing with, from its offer: the server works out what it reads. */
+    readWith?: string;
+    /** New routine's It watches: a web page at `sourceLink`, or the apps the Bot can read. */
+    watches?: "apps" | "page";
   },
   { refuseExisting = false }: { refuseExisting?: boolean } = {},
 ) =>

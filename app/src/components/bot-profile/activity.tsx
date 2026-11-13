@@ -44,6 +44,7 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { routinesQueryOptions } from "@/lib/routines/queries";
+import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -207,16 +208,32 @@ function ActivitySection({
 const GLANCE = 3;
 
 /**
- * Running work first, then what is lined up, then the goals that wait to be asked, as many as the
- * Bot's page shows.
+ * Whether an item is one of the Bot's routines or goals, or a run of one under way: the Routines
+ * section above Activity on the Bot's page lists those, so Activity leaves them out and nothing
+ * shows twice. A queued run of a goal is kept, as Scheduled keeps it.
+ */
+function inRoutinesSection(item: ActivityItem): boolean {
+  return (
+    item.kind === "routine" ||
+    (item.kind === "responsibility" &&
+      !item.id.startsWith("responsibility-run:")) ||
+    (item.kind === "responsibility" && item.status !== "queued")
+  );
+}
+
+/**
+ * What the Bot's page shows under Activity: running work first, then what is lined up, as many as
+ * fit. What is not a routine: hand-offs, follow-ups the Bot set for itself, queued runs, and what
+ * waits on the person. Its routines and goals are in the Routines section above it.
  */
 function upcomingOf(activity: BotActivity | undefined) {
   return activity
     ? [
         ...activity.inProgress.map((item) => ({ item, live: true })),
         ...activity.scheduled.map((item) => ({ item, live: false })),
-        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
-      ].slice(0, GLANCE)
+      ]
+        .filter(({ item }) => !inRoutinesSection(item))
+        .slice(0, GLANCE)
     : [];
 }
 
@@ -282,6 +299,8 @@ function AllActivityItem({
   title?: string;
   withIcon?: boolean;
 }) {
+  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const tasks = useQuery(taskListQueryOptions());
   return (
     <Item
       render={<Link params={{ agentId }} to="/bots/$agentId/activity" />}
@@ -296,7 +315,15 @@ function AllActivityItem({
         <ItemTitle>{title}</ItemTitle>
         <ItemDescription>
           {activity
-            ? activitySummary(activity)
+            ? activitySummary(activity, {
+                checkIns: (checkIns.data ?? []).filter(
+                  (checkIn) => checkIn.agentId === agentId && checkIn.enabled,
+                ).length,
+                openTasks: (tasks.data ?? []).filter(
+                  (task) =>
+                    task.agentId === agentId && task.status !== "resolved",
+                ).length,
+              })
             : "Couldn't load this Bot's activity."}
         </ItemDescription>
       </ItemContent>
@@ -311,14 +338,26 @@ function AllActivityItem({
  * The Bot page's one line about its activity: what is running, what is lined up and which goals
  * wait to be asked. Finished work is only counted when there is nothing else to say. A goal that
  * runs only when asked is never "scheduled": it was, and a Bot with one routine read "2 scheduled".
+ *
+ * Check-ins and tasks are kept apart from the activity ledger, so they are passed in. FOUND IN AN
+ * AUDIT: a Bot with a check-in on and a task open read "No tasks, routines or goals yet", beside a
+ * Routines row that said "1 scheduled".
  */
-export function activitySummary(activity: BotActivity): string {
+export function activitySummary(
+  activity: BotActivity,
+  beside: {
+    /** How many of the Bot's check-ins are on: each is lined up, as the Routines row counts it. */
+    checkIns?: number;
+    /** How many of the person's tasks with this Bot are not yet resolved: each is under way. */
+    openTasks?: number;
+  } = {},
+): string {
   const onDemand = activity.onDemand?.length ?? 0;
+  const inProgress = activity.inProgress.length + (beside.openTasks ?? 0);
+  const scheduled = activity.scheduled.length + (beside.checkIns ?? 0);
   const parts = [
-    activity.inProgress.length
-      ? `${activity.inProgress.length} in progress`
-      : null,
-    activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
+    inProgress ? `${inProgress} in progress` : null,
+    scheduled ? `${scheduled} scheduled` : null,
     onDemand ? `${onDemand} on demand` : null,
   ].filter(Boolean);
   if (parts.length) return parts.join(" · ");

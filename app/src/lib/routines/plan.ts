@@ -35,12 +35,15 @@ export type RoutinePlan =
     }
   | {
       kind: "check-in";
+      /** No conversation: a check-in belongs to its Bot, and what it finds shows under Needs you. */
       checkIn: {
         agentId: string;
-        channelId: string;
         focus: string;
         subject: string;
         intervalMinutes: number;
+        /** What it watches: the apps the Bot can read, or the page at `sourceLink`. */
+        watches: "apps" | "page";
+        sourceLink?: string;
       };
     };
 
@@ -84,10 +87,13 @@ export function planRoutine(
       kind: "check-in",
       checkIn: {
         agentId,
-        channelId,
         focus: instruction,
         subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
+        watches: values.watches,
+        ...(values.watches === "page"
+          ? { sourceLink: values.pageAddress.trim() }
+          : {}),
       },
     };
   }

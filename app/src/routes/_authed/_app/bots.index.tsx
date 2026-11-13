@@ -9,6 +9,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { BotRoster } from "@/components/bots/bot-roster";
+import { PausedAllBanner } from "@/components/bots/paused-all";
 import {
   PageRows,
   PageSection,
@@ -64,6 +65,9 @@ function BotsPage() {
       }
       title="Bots"
     >
+      <div className="mt-4 empty:hidden">
+        <PausedAllBanner />
+      </div>
       <BotRoster />
       <WhatYourBotsLearn />
       <NewBotSheet

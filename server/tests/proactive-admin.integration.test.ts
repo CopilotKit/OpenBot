@@ -306,12 +306,7 @@ function replica() {
       asked.push(input.ownerUserId);
       return turn(input);
     },
-    resolveScope: async (ownerUserId, channelId, agentId) => ({
-      ownerUserId,
-      channelId,
-      agentId,
-      threadId: `${channelId}-thread`,
-    }),
+    canUseBot: async () => true,
     attention: { notifyAttention: async () => {} },
     admin: proactiveAdmin,
     catalogue: plugins,
@@ -487,6 +482,11 @@ describe("the ping pass", () => {
           `ci-thread-${randomUUID()}`,
         );
         theirSettings.push(setting.id);
+        // Not due: a new check-in is due at once, and this case is about pings, not runs.
+        await database
+          .update(proactiveSettings)
+          .set({ nextRunAt: FAR })
+          .where(eq(proactiveSettings.id, setting.id));
         await database.insert(proactiveSuggestions).values({
           id: randomUUID(),
           ownerUserId: person.id,
@@ -749,6 +749,7 @@ describe("the numbers", () => {
           unreachable: 0,
           no_sources: 0,
           busy: 0,
+          paused_all: 0,
         },
       },
       items: { raised: 5, started: 2, hidden: 1, cleared: 1, open: 1 },

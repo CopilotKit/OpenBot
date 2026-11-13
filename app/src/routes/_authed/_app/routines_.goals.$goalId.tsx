@@ -7,13 +7,17 @@ import { searchTextEntry } from "@/lib/search-text";
  * whose Routines page it came from, so its back link returns there rather than to every Bot's.
  */
 export const Route = createFileRoute("/_authed/_app/routines_/goals/$goalId")({
-  validateSearch: (search: Record<string, unknown>): { agentId?: string } =>
-    searchTextEntry("agentId", search.agentId),
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { agentId?: string; from?: string } => ({
+    ...searchTextEntry("agentId", search.agentId),
+    ...searchTextEntry("from", search.from),
+  }),
   component: GoalRoute,
 });
 
 function GoalRoute() {
   const { goalId } = Route.useParams();
-  const { agentId } = Route.useSearch();
-  return <GoalRoutePage agentId={agentId} goalId={goalId} />;
+  const { agentId, from } = Route.useSearch();
+  return <GoalRoutePage agentId={agentId} from={from} goalId={goalId} />;
 }

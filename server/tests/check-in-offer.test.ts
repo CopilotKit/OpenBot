@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { OFFER_CHECK_IN_TOOL } from "@openbot/shared/check-in-offer";
+import {
+  NOTHING_TO_OFFER,
+  OFFER_CHECK_IN_TOOL,
+} from "@openbot/shared/check-in-offer";
 import { checkInOfferTools } from "../src/proactive/offer-tool";
+import type { CheckInSource } from "../src/proactive/scope";
 import type { ProactiveSetting } from "../src/proactive/types";
 import { researchInstruction } from "../src/proactive/window";
 
@@ -21,6 +25,8 @@ function setting(overrides: Partial<ProactiveSetting>): ProactiveSetting {
     focus: "",
     subject: "",
     sourceLink: null,
+    sourceKind: "app",
+    sourceServerId: "notion",
     enabled: true,
     intervalMinutes: 1440,
     nextRunAt: new Date(),
@@ -33,15 +39,29 @@ function setting(overrides: Partial<ProactiveSetting>): ProactiveSetting {
   };
 }
 
+/** The Bot's tools, as the server would classify them: an app it reads as the person, a web reader. */
+const SOURCES: Record<string, CheckInSource> = {
+  mcp__notion__fetch: { kind: "app", serverId: "notion", title: "Notion" },
+  mcp__parallel__web_fetch: { kind: "page" },
+  "mcp__gmail-shared__read": {
+    kind: "unreadable",
+    serverId: "gmail-shared",
+    title: "Gmail",
+  },
+};
+
 function toolWith(options: {
   allowed?: boolean;
   settings?: ProactiveSetting[];
+  readsPages?: boolean;
 }) {
   const [tool] = checkInOfferTools({
     ownerUserId: "usr_1",
     agentId: "assistant",
     allowed: async () => options.allowed ?? true,
     list: async () => options.settings ?? [],
+    sourceOf: async (name) => SOURCES[name] ?? null,
+    readsPages: async () => options.readsPages ?? true,
   });
   if (!tool) throw new Error("no tool");
   return tool;
@@ -50,6 +70,12 @@ function toolWith(options: {
 const BRIEF = {
   subject: "Launch brief in Notion",
   link: "https://www.notion.so/launch-brief",
+  readWith: "mcp__notion__fetch",
+};
+const RELEASES = {
+  subject: "OpenBot releases",
+  link: "https://github.com/CopilotKit/openbot/releases",
+  readWith: "mcp__parallel__web_fetch",
 };
 
 describe("offer_check_in", () => {
@@ -90,8 +116,58 @@ describe("offer_check_in", () => {
 
   test("arguments that name nothing are refused", async () => {
     expect(await toolWith({}).execute({ subject: " " })).toBe(
-      "Say what the check-in would watch.",
+      "Say what the check-in would watch, and name the tool you read it with as readWith.",
     );
+  });
+
+  /*
+   * FOUND IN AN AUDIT: a Bot offered a check-in on a page it read in its browser, and the check-in
+   * never ran once. What it read with decides, never a label.
+   */
+  test("read with an app the person connected: the card offers a check-in on that app alone", async () => {
+    const answer = await toolWith({}).execute(BRIEF);
+    expect(answer).toContain("reading Notion, and nothing else");
+    expect(answer).not.toStartWith(NOTHING_TO_OFFER);
+  });
+
+  test("read with a page-read tool: a check-in on that page, which needs its public address", async () => {
+    expect(await toolWith({}).execute(RELEASES)).toContain("reading that page");
+    for (const link of [undefined, "http://localhost:3000/notes"])
+      expect(await toolWith({}).execute({ ...RELEASES, link })).toStartWith(
+        NOTHING_TO_OFFER,
+      );
+  });
+
+  test("anything else, like the browser, has nothing to offer and says what to do instead", async () => {
+    const answer = String(
+      await toolWith({}).execute({
+        ...RELEASES,
+        readWith: "computer_snapshot",
+      }),
+    );
+    expect(answer).toStartWith(NOTHING_TO_OFFER);
+    expect(answer).toContain("routine");
+    const shared = String(
+      await toolWith({}).execute({
+        ...BRIEF,
+        readWith: "mcp__gmail-shared__read",
+      }),
+    );
+    expect(shared).toStartWith(NOTHING_TO_OFFER);
+    expect(shared).toContain("show_app_access for Gmail");
+  });
+
+  test("an older check-in that read every app is offered again on its page", async () => {
+    const answer = await toolWith({
+      settings: [
+        setting({
+          sourceLink: RELEASES.link,
+          sourceKind: "apps",
+          sourceServerId: null,
+        }),
+      ],
+    }).execute(RELEASES);
+    expect(answer).toContain("A card in front of the person");
   });
 });
 

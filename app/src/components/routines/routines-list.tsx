@@ -50,6 +50,7 @@ import {
   stoppedRoutinesGuidance,
 } from "@/lib/routines/queries";
 import { NewRoutineButton } from "./new-routine-button";
+import { RunningDot } from "./running-dot";
 import { lastRunLabel, scheduleWords } from "./routine-page";
 
 type BotDirectory = Map<string, AgentProfile>;
@@ -59,16 +60,25 @@ type BotDirectory = Map<string, AgentProfile>;
  * else `routineDoes`), when it starts, that it acts, and a last run worth knowing about. The
  * whole row links to its page, where it is switched, run, read back and deleted.
  */
-function RoutineItem({
+export function RoutineItem({
   routine,
   botName,
   agentId,
+  running = false,
+  paused = false,
+  from,
 }: {
+  /** The conversation the rows are shown in, which a routine's page goes back to. */
+  from?: string;
   routine: RoutineRecord;
   /** Absent on one Bot's own list. */
   botName?: string;
   /** The Bot whose own list this is, so the page's back link returns to it. */
   agentId?: string;
+  /** Running now: the pulsing dot Activity rows use. */
+  running?: boolean;
+  /** Its Bot is paused, by itself or with all: the row says so in place of when it starts. */
+  paused?: boolean;
 }) {
   const lastRun = lastRunLabel(routine.lastRun);
   const outcome = routine.lastRun?.status;
@@ -76,7 +86,9 @@ function RoutineItem({
   const line = [
     botName,
     routine.enabled
-      ? scheduleWords(routine)
+      ? paused
+        ? "Paused"
+        : scheduleWords(routine)
       : "Paused. Nothing starts it until you turn it on",
     routine.enabled ? "Acts" : null,
   ]
@@ -87,14 +99,18 @@ function RoutineItem({
       render={
         <Link
           params={{ routineId: routine.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/schedules/$routineId"
         />
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         {routine.enabled ? <IconClock /> : <IconPlayerPause />}
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent className={routine.enabled ? "" : "opacity-60"}>
         {/* The clamp is on the words: on the title itself it undid the gap before the kind label. */}
@@ -136,12 +152,21 @@ function RoutineItem({
  * A chevron rather than a Switch, although pausing is binary: the row opens a page, and a Switch
  * inside a row that is itself a link would be a control nested in a control.
  */
-function GoalItem({
+export function GoalItem({
   goal,
   routines,
   botName,
   agentId,
+  running = false,
+  paused = false,
+  from,
 }: {
+  /** The conversation the rows are shown in, which a goal's page goes back to. */
+  from?: string;
+  /** Running now: the pulsing dot Activity rows use. */
+  running?: boolean;
+  /** Its Bot is paused, by itself or with all: the row says so in place of when it starts. */
+  paused?: boolean;
   goal: ResponsibilityRecord;
   /** Undefined when the routines read failed: its starts are then not known. */
   routines: readonly RoutineRecord[] | undefined;
@@ -184,7 +209,9 @@ function GoalItem({
       ? "Paused. Nothing starts it until you resume it"
       : goal.status === "completed"
         ? "Completed"
-        : starts,
+        : paused
+          ? "Paused"
+          : starts,
     goal.status === "active" ? "Acts" : null,
   ]
     .filter(Boolean)
@@ -194,14 +221,18 @@ function GoalItem({
       render={
         <Link
           params={{ goalId: goal.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/goals/$goalId"
         />
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         <Icon />
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
         <ItemTitle>
@@ -244,11 +275,17 @@ const EMPTY_BODY =
 export function RoutinesList({
   agentId,
   embedded = false,
+  inDialog = false,
+  from,
 }: {
   /** Show only this Bot's. Absent shows all of the person's, each with its Bot. */
   agentId?: string;
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
+  /** Drawn in a dialog: the rows show on the muted fill, since a card-coloured row is invisible there. */
+  inDialog?: boolean;
+  /** The conversation this list is shown in, which each row's page goes back to. */
+  from?: string;
 } = {}) {
   const routines = useQuery(routinesQueryOptions());
   const goals = useQuery(responsibilitiesQueryOptions());
@@ -328,12 +365,13 @@ export function RoutinesList({
           </PageEmpty>
         )
       ) : (
-        <PageRows>
+        <PageRows className={inDialog ? "bg-muted" : undefined}>
           {rows.map((row, index) => (
             <Fragment key={`${row.kind}:${row.id}`}>
               {index > 0 ? <Separator /> : null}
               {row.kind === "routine" ? (
                 <RoutineItem
+                  from={from}
                   botName={
                     showBot
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
@@ -344,6 +382,7 @@ export function RoutinesList({
                 />
               ) : row.kind === "goal" ? (
                 <GoalItem
+                  from={from}
                   botName={
                     showBot
                       ? (bots.get(row.agentId)?.name ?? "A Bot")
@@ -356,6 +395,7 @@ export function RoutinesList({
               ) : (
                 <SettingRow
                   agentId={agentId}
+                  from={from}
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
                   label="Check-in"

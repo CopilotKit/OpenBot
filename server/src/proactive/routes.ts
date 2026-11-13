@@ -10,6 +10,7 @@ import {
   unreachedApps,
 } from "./store";
 import {
+  PAGE_UNREAD,
   ProactiveConflictError,
   ProactiveNotFoundError,
   ProactiveRefusedError,
@@ -37,6 +38,8 @@ function listed(apps: readonly string[]) {
  * that is what the person can do something about; the next check-in reads what it missed.
  */
 function failedBecause(error: string | null) {
+  if (error === PAGE_UNREAD)
+    return `${PAGE_UNREAD} The next check-in will try again.`;
   const apps = unreachedApps(error);
   if (apps)
     return `Couldn't reach ${listed(apps)}. The next check-in will try again.`;
@@ -101,13 +104,22 @@ export function createProactiveRoutes(
       store.latestRuns(context.var.actor.id),
       engine.allowed(context.var.actor.id),
     ]);
+    const described = await engine.describe(context.var.actor.id, settings);
     return context.json({
       settings: settings.map((setting) => ({
         ...setting,
         lastRun: lastRunOf(runs.get(setting.id)),
+        reads: described.get(setting.id)?.reads ?? null,
+        health: described.get(setting.id)?.health ?? null,
       })),
       allowed,
     });
+  });
+  /** What a check-in for one Bot could read, for New routine's It watches. */
+  routes.get("/readable", async (context) => {
+    const agentId = context.req.query("agentId");
+    if (!agentId) throw new ProactiveRefusedError("Choose one of your Bots.");
+    return context.json(await engine.readable(context.var.actor.id, agentId));
   });
   /*
    * `?refuseExisting=true` asks for a new check-in: one on a thing the Bot already watches is a 409

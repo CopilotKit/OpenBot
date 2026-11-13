@@ -23,6 +23,7 @@
  * publisher's account nor one the person has not consented to, so those tools are left out too.
  */
 
+import { researchRoleFor } from "../plugins/catalogue";
 import { PROACTIVE_OWN_READS } from "./restriction";
 
 /** A server as the catalogue lists it, as much of it as the scope reads. */
@@ -80,24 +81,93 @@ export function createCheckInScope(deps: CheckInScopeDeps): CheckInScope {
   };
 }
 
-/** One app a check-in can read, by the title the person knows it by. */
-export type CheckInApp = { title: string; refs: string[] };
+/**
+ * One app a check-in can read, by the title the person knows it by: its server, and its reads by ref
+ * and by the name the model is offered each under.
+ */
+export type CheckInApp = {
+  title: string;
+  serverId: string;
+  refs: string[];
+  names: string[];
+};
+
+/** The server a `serverId/toolName` ref belongs to. */
+export function serverOfRef(ref: string): string {
+  return ref.split("/")[0] ?? ref;
+}
 
 /**
  * The apps among a Bot's tools that a check-in can read, in the order the Bot holds them: what the
  * gate counts and what the instruction names.
  */
 export function appsOf(
-  tools: readonly { ref: string }[],
+  tools: readonly { ref: string; name?: string }[],
   reads: CheckInReads,
 ): CheckInApp[] {
-  const apps = new Map<string, string[]>();
+  const apps = new Map<string, CheckInApp>();
   for (const tool of tools) {
     const title = reads.get(tool.ref);
     if (title === undefined) continue;
-    apps.set(title, [...(apps.get(title) ?? []), tool.ref]);
+    const serverId = serverOfRef(tool.ref);
+    const app = apps.get(serverId) ?? { title, serverId, refs: [], names: [] };
+    app.refs.push(tool.ref);
+    if (tool.name) app.names.push(tool.name);
+    apps.set(serverId, app);
   }
-  return [...apps].map(([title, refs]) => ({ title, refs }));
+  return [...apps.values()];
+}
+
+/** A tool by the name a model gave it, its ref, or the `mcp__server__tool` spelling of its ref. */
+export function toolNamed<T extends { ref: string; name: string }>(
+  tools: readonly T[],
+  named: string,
+): T | undefined {
+  const spelled = named.startsWith("mcp__")
+    ? named.slice(5).replace("__", "/")
+    : named;
+  return tools.find(
+    (tool) => tool.name === named || tool.ref === named || tool.ref === spelled,
+  );
+}
+
+/**
+ * What a check-in on something the Bot read with this tool would read, worked out from the tool and
+ * never from a label the model gave:
+ * - a read in an app the person connected with their own account: that app (`app`);
+ * - a web search or page-read tool: a public web page (`page`);
+ * - anything else (the browser, the computer, a Shared app, an app on the admin's key): nothing.
+ */
+export type CheckInSource =
+  | { kind: "app"; serverId: string; title: string }
+  | { kind: "page" }
+  /**
+   * A tool in an app a check-in can't read as this person: not connected with their own account, or
+   * on an account that isn't theirs. Nothing to offer, but connecting it may fix that.
+   */
+  | { kind: "unreadable"; serverId: string; title: string }
+  | null;
+export function sourceOfTool(
+  tool: { ref: string } | undefined,
+  reads: CheckInReads,
+  titleOf: (serverId: string) => string | undefined = () => undefined,
+): CheckInSource {
+  if (!tool) return null;
+  const title = reads.get(tool.ref);
+  const serverId = serverOfRef(tool.ref);
+  if (title !== undefined) return { kind: "app", serverId, title };
+  if (researchRoleFor(tool.ref)) return { kind: "page" };
+  const app = titleOf(serverId);
+  return app === undefined
+    ? null
+    : { kind: "unreadable", serverId, title: app };
+}
+
+/** A Bot's tool that reads a web page by its address, or null when it holds none. */
+export function pageReaderOf<T extends { ref: string }>(
+  tools: readonly T[],
+): T | null {
+  return tools.find((tool) => researchRoleFor(tool.ref) === "fetch") ?? null;
 }
 
 /**
@@ -111,6 +181,8 @@ export function checkInToolsFor(
     ownerUserId: string,
   ) => (agentId: string) => Promise<readonly { ref: string; name: string }[]>,
   scope: CheckInScope,
+  /** The deployment's apps, to name one a check-in can't read. */
+  catalogue?: { listServers(): Promise<{ id: string; title: string }[]> },
 ) {
   const read = (ownerUserId: string, agentId: string) =>
     Promise.all([load(ownerUserId)(agentId), scope(ownerUserId, agentId)]);
@@ -118,6 +190,23 @@ export function checkInToolsFor(
     async readableApps(ownerUserId: string, agentId: string) {
       const [tools, reads] = await read(ownerUserId, agentId);
       return appsOf(tools, reads);
+    },
+    /** The Bot's page-read tool, which a `page` check-in reads its one address with, or null. */
+    async pageReader(ownerUserId: string, agentId: string) {
+      const reader = pageReaderOf(await load(ownerUserId)(agentId));
+      return reader ? { ref: reader.ref, name: reader.name } : null;
+    },
+    /** What a check-in on something this Bot read with `toolName` would read (`sourceOfTool`). */
+    async sourceOf(ownerUserId: string, agentId: string, toolName: string) {
+      const [[tools, reads], servers] = await Promise.all([
+        read(ownerUserId, agentId),
+        catalogue?.listServers() ?? [],
+      ]);
+      return sourceOfTool(
+        toolNamed(tools, toolName),
+        reads,
+        (serverId) => servers.find((server) => server.id === serverId)?.title,
+      );
     },
     async deniedToolNames(ownerUserId: string, agentId: string) {
       const [tools, reads] = await read(ownerUserId, agentId);

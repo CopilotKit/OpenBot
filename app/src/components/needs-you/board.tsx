@@ -1,12 +1,21 @@
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { useWaitingByBot } from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
+import { CheckInHealthFix } from "@/components/suggestions/check-in-health";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
@@ -21,10 +30,12 @@ import { useNeedsYou } from "./needs-you";
 const FINDS_SHOWN = 3;
 
 /**
- * Everything waiting on the person, in two halves, each grouped under the Bot it came from.
+ * Everything waiting on the person, in three halves, each grouped under the Bot it came from.
  *
  * WAITING ON YOU is what a Bot is stopped on: a question, an action to allow or deny, a task to
- * review or answer. Each is decided on its row. FROM CHECK-INS is what a Bot found on its own, which
+ * review, answer or try again. Each is decided on its row. WORKING ON IT is a task the person started
+ * that its Bot is still doing: nothing to decide yet, and it moves up when there is. FROM CHECK-INS is
+ * what a Bot found on its own, which
  * the person may act on or not; it is quieter, and the Bots badge does not count it
  * (`waitingOnYou`).
  *
@@ -39,17 +50,44 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const list = useNeedsYou(agentId);
 
   const blocked = new Map(waiting.byBot);
+  /*
+   * A task its Bot is still working on waits on nobody. It sat under Waiting on you as "waiting since
+   * now", counted in "1 waiting"; it has its own half now, and moves up once it is ready for review,
+   * needs input or failed.
+   */
+  const working = new Map<string, { rows: ReactNode[]; times: string[] }>();
   for (const listed of list.tasks) {
-    const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
+    const groups = listed.status === "working" ? working : blocked;
+    const group = groups.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
       <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
     );
-    group.times.push(listed.task.updatedAt);
-    blocked.set(listed.task.agentId, group);
+    group.times.push(
+      listed.status === "working"
+        ? listed.task.createdAt
+        : listed.task.updatedAt,
+    );
+    groups.set(listed.task.agentId, group);
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
     found.set(item.agentId, [...(found.get(item.agentId) ?? []), item]);
+  /*
+   * Check-ins that can't look, by Bot: each is the first row of its Bot's From check-ins, with the
+   * step that fixes it. Not news, so the header's count leaves it out, as the Bots badge does.
+   */
+  const cantLook = new Map<string, ProactiveSetting[]>();
+  for (const setting of settings.data ?? [])
+    if (
+      setting.enabled &&
+      setting.health &&
+      (agentId === undefined || setting.agentId === agentId)
+    )
+      cantLook.set(setting.agentId, [
+        ...(cantLook.get(setting.agentId) ?? []),
+        setting,
+      ]);
+  const checkInBots = [...new Set([...cantLook.keys(), ...found.keys()])];
 
   /*
    * Each read that failed, said on its own whatever else loaded. A failed read is never "nothing
@@ -71,16 +109,25 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     failure ? [{ ...source, failure }] : [],
   );
 
-  if (blocked.size === 0 && found.size === 0 && failures.length === 0)
+  if (
+    blocked.size === 0 &&
+    working.size === 0 &&
+    checkInBots.length === 0 &&
+    failures.length === 0
+  )
     return null;
 
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
-  const waitingCount = [...blocked.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
+  const count = (groups: Map<string, { rows: unknown[] }>) =>
+    [...groups.values()].reduce((total, group) => total + group.rows.length, 0);
+  const waitingCount = count(blocked);
+  const workingCount = count(working);
+  const earliest = (times: string[]) =>
+    times.reduce((first, at) =>
+      Date.parse(at) < Date.parse(first) ? at : first,
+    );
   const foundCount = list.items.length;
 
   return (
@@ -89,6 +136,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
         <span className="text-muted-foreground text-xs">
           {[
             waitingCount ? `${waitingCount} waiting` : null,
+            workingCount ? `${workingCount} working` : null,
             foundCount ? `${foundCount} found` : null,
           ]
             .filter(Boolean)
@@ -112,20 +160,31 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
-                note={`waiting since ${relativeTime(
-                  group.times.reduce((first, at) =>
-                    Date.parse(at) < Date.parse(first) ? at : first,
-                  ),
-                )}`}
+                note={`waiting since ${relativeTime(earliest(group.times))}`}
               >
                 {group.rows}
               </BotGroup>
             ))}
           </Half>
         ) : null}
-        {found.size ? (
+        {working.size ? (
+          <Half title="Working on it">
+            {[...working].map(([botId, group]) => (
+              <BotGroup
+                bot={bot(botId)}
+                botId={botId}
+                key={botId}
+                note={`started ${relativeTime(earliest(group.times))}`}
+              >
+                {group.rows}
+              </BotGroup>
+            ))}
+          </Half>
+        ) : null}
+        {checkInBots.length ? (
           <Half title="From check-ins">
-            {[...found].map(([botId, items]) => {
+            {checkInBots.map((botId) => {
+              const items = found.get(botId) ?? [];
               const watched = [
                 ...new Set(
                   items
@@ -137,6 +196,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 <FoundGroup
                   bot={bot(botId)}
                   botId={botId}
+                  cantLook={cantLook.get(botId) ?? []}
                   items={items}
                   key={botId}
                   note={
@@ -231,32 +291,55 @@ function BotGroup({
   );
 }
 
-/** One Bot's finds, the newest few with the rest a click away. */
+/** One Bot's finds, the newest few with the rest a click away, after any check-in that can't look. */
 function FoundGroup({
   bot,
   botId,
   note,
   items,
+  cantLook,
   settingOf,
 }: {
   bot: GroupBot;
   botId: string;
   note: string;
   items: ReturnType<typeof useNeedsYou>["items"];
+  cantLook: ProactiveSetting[];
   settingOf: (id: string | null | undefined) => ProactiveSetting | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const folded = expanded ? 0 : Math.max(0, items.length - FINDS_SHOWN);
   const shown = folded ? items.slice(0, FINDS_SHOWN) : items;
-  const rows: ReactNode[] = shown.map((item) => (
-    <SuggestionRow
-      botName={bot?.name ?? "Your Bot"}
-      inGroup
-      key={item.id}
-      setting={settingOf(item.settingId)}
-      suggestion={item}
-    />
+  const name = bot?.name ?? "Your Bot";
+  const rows: ReactNode[] = cantLook.map((setting) => (
+    <Item data-cant-look={setting.id} key={`cant-look-${setting.id}`} size="sm">
+      <ItemMedia variant="icon">
+        <IconAlertTriangle className="text-destructive" />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          {name} can't check {setting.subject || "your apps"}
+        </ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {setting.health?.why}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <CheckInHealthFix setting={setting} />
+      </ItemActions>
+    </Item>
   ));
+  rows.push(
+    ...shown.map((item) => (
+      <SuggestionRow
+        botName={bot?.name ?? "Your Bot"}
+        inGroup
+        key={item.id}
+        setting={settingOf(item.settingId)}
+        suggestion={item}
+      />
+    )),
+  );
   if (folded)
     rows.push(
       <button

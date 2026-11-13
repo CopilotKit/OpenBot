@@ -9,13 +9,19 @@ import { searchTextEntry } from "@/lib/search-text";
 export const Route = createFileRoute(
   "/_authed/_app/routines_/check-ins/$checkInId",
 )({
-  validateSearch: (search: Record<string, unknown>): { agentId?: string } =>
-    searchTextEntry("agentId", search.agentId),
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { agentId?: string; from?: string } => ({
+    ...searchTextEntry("agentId", search.agentId),
+    ...searchTextEntry("from", search.from),
+  }),
   component: CheckInRoute,
 });
 
 function CheckInRoute() {
   const { checkInId } = Route.useParams();
-  const { agentId } = Route.useSearch();
-  return <CheckInRoutePage agentId={agentId} checkInId={checkInId} />;
+  const { agentId, from } = Route.useSearch();
+  return (
+    <CheckInRoutePage agentId={agentId} from={from} checkInId={checkInId} />
+  );
 }

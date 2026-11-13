@@ -19,6 +19,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { usePausedAll } from "@/components/bots/paused-all";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
@@ -44,12 +45,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
-import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
+import { setPausedAllMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { type NavigationItem, useNavigationItems } from "@/lib/navigation";
@@ -57,7 +56,7 @@ import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { ComputerPane } from "./computer-pane";
 import { CoworkerPersona } from "./persona";
-import { botName, type Place, usePlace } from "./place";
+import { type Place, usePlace } from "./place";
 import { IconAction, initialsOf, OpenDotsSidebar } from "./sidebar";
 
 /** The rail's square buttons: 36px, borderless, a grey glyph that darkens on hover. */
@@ -269,29 +268,31 @@ function Rail({
 }
 
 /**
- * Pause and resume for the one Bot the page is about. OpenDots pauses every Dot at once; OpenBot
- * pauses each Bot on its own, so this is that Bot's switch and only appears where there is one.
+ * OpenDots' pause-everything switch: every one of the person's Bots, on every page. It is OpenBot's
+ * pause all (`PUT /api/bots/pause-all`), the same switch as All Bots active on Routines, so each Bot's
+ * own pause is kept underneath and turning this back on returns them as they were. A Bot's own pause
+ * stays on its page, in its Active row.
  */
-function PauseControl({ botId, name }: { botId: string; name: string }) {
-  const lifecycle = useQuery(botLifecycleQueryOptions(botId));
-  const setPaused = useMutation(setBotPausedMutationOptions(queryClient));
-  if (!lifecycle.data) return null;
-  const paused = lifecycle.data.paused;
+function PauseControl() {
+  const pausedAll = usePausedAll();
+  const setPausedAll = useMutation(setPausedAllMutationOptions(queryClient));
   return (
     <button
-      aria-label={paused ? `Resume ${name}` : `Pause ${name}`}
+      aria-label={pausedAll ? "Resume all your Bots" : "Pause all your Bots"}
       className="inline-flex items-center gap-[5px] rounded-md p-1 text-[12px] text-(--opendots-pause-ink) outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5"
-      disabled={setPaused.isPending}
-      onClick={() => setPaused.mutate({ agentId: botId, paused: !paused })}
+      disabled={setPausedAll.isPending}
+      onClick={() => setPausedAll.mutate(!pausedAll)}
       title={
-        paused
-          ? `${name} is paused. Nothing runs for you until you resume it.`
-          : `Pause ${name}. Nothing runs for you until you resume it.`
+        pausedAll
+          ? "All your Bots are paused. No Bot works for you until you resume them."
+          : "Pause all your Bots. No Bot works for you until you resume them. You can still talk to one."
       }
       type="button"
     >
-      {paused ? <IconPlayerPlay /> : <IconPlayerPause />}
-      <span className="max-md:hidden">{paused ? "Resume" : "Pause"}</span>
+      {pausedAll ? <IconPlayerPlay /> : <IconPlayerPause />}
+      <span className="max-md:hidden">
+        {pausedAll ? "Resume all" : "Pause all"}
+      </span>
     </button>
   );
 }
@@ -309,8 +310,6 @@ function Topbar({
   computerOpen: boolean;
   onToggleComputer: () => void;
 }) {
-  const agents = useQuery(agentListQueryOptions());
-  const name = botName(agents.data, place.botId);
   return (
     /*
      * The bar is the window's title bar in OpenBot Desktop on macOS: a press anywhere on it but a
@@ -367,9 +366,7 @@ function Topbar({
         ) : null}
       </nav>
       <div className="flex shrink-0 items-center gap-[15px] max-md:gap-3">
-        {place.botId && name ? (
-          <PauseControl botId={place.botId} name={name} />
-        ) : null}
+        <PauseControl />
         <IconAction
           aria-expanded={computerOpen}
           className={cn(

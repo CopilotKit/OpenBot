@@ -19,7 +19,10 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  backLabelFor,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -236,9 +239,12 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
 export function RoutineRoutePage({
   routineId,
   agentId,
+  from,
 }: {
   routineId: string;
   agentId?: string;
+  /** The conversation it was opened from, by its header's clock: the back button returns there. */
+  from?: string;
 }) {
   const routines = useQuery(routinesQueryOptions());
   const bots = useQuery(agentListQueryOptions());
@@ -247,7 +253,7 @@ export function RoutineRoutePage({
     deleteRoutineMutationKey,
     (id) => id === routineId,
   );
-  const back = routinesOf(agentId);
+  const back = routinesOf(agentId, from);
   const routine = routines.data?.routines.find((row) => row.id === routineId);
   if (!routine)
     return (
@@ -331,7 +337,7 @@ export function RoutinePage({
   ];
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: backLabelFor(back), linkProps: back }}
       description={
         routine.enabled
           ? `${routine.schedule} · ${routine.timezone} · Acts`

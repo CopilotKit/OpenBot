@@ -18,10 +18,16 @@ import {
   pluginGrants,
   vendorNameOf,
 } from "../../db/schema";
-import { isProactiveInitiator } from "../../proactive/initiator";
+import { proactiveRuns, proactiveSettings } from "../../db/schema/proactive";
+import {
+  isProactiveInitiator,
+  proactiveRunIdOf,
+} from "../../proactive/initiator";
+import { addressOfPageRead } from "../../proactive/source";
 import {
   classifyTool,
   labelledRead,
+  researchRoleFor,
   reviewedRead,
   tokenHeaderFor,
 } from "../catalogue";
@@ -45,6 +51,53 @@ import {
   UNATTRIBUTED_ACTOR,
   withoutEmptyOptionals,
 } from "./model";
+
+/**
+ * THE ONE OTHER WAY A CHECK-IN'S CALL IS LET THROUGH: a page check-in reading its own page.
+ *
+ * A check-in otherwise reads only labelled reads on the person's own account. A page read is
+ * neither (a web search app runs on no account or on the admin's key), so it is admitted here, at
+ * the door, by what the deployment knows and never by the caller's word: the tool reads a web page by
+ * its address (`researchRoleFor`), the run it belongs to is a `page` check-in's, and the address it
+ * asks for is exactly that check-in's. The engine makes this call itself with that address, and any
+ * other address, a search tool, or a page read from any other check-in is refused as before. So the
+ * one address is held in two places, and a model that reached the tool could fetch nothing else.
+ */
+async function checkInPageRead(
+  database: StoreContext["database"],
+  input: {
+    ref: string;
+    args: Record<string, unknown>;
+    botId: string;
+    actorId: string;
+    initiator?: AuditInitiator;
+  },
+): Promise<boolean> {
+  if (researchRoleFor(input.ref) !== "fetch") return false;
+  const runId = proactiveRunIdOf(input.initiator);
+  const address = addressOfPageRead(input.args);
+  if (!runId || !address) return false;
+  const [row] = await database
+    .select({
+      kind: proactiveSettings.sourceKind,
+      link: proactiveSettings.sourceLink,
+    })
+    .from(proactiveRuns)
+    .innerJoin(
+      proactiveSettings,
+      eq(proactiveSettings.id, proactiveRuns.settingId),
+    )
+    .where(
+      and(
+        eq(proactiveRuns.id, runId),
+        eq(proactiveRuns.ownerUserId, input.actorId),
+        eq(proactiveRuns.agentId, input.botId),
+        eq(proactiveRuns.outcome, "running"),
+      ),
+    )
+    .limit(1);
+  return row?.kind === "page" && row.link === address;
+}
 
 /** Deciding whether a Bot may call a tool, and calling it. */
 export function callMethods(context: StoreContext) {
@@ -197,7 +250,8 @@ export function callMethods(context: StoreContext) {
           access.ownCredential &&
           advertised[0] &&
           labelledRead(entry, toolName, advertised[0])
-        )
+        ) &&
+        !(await checkInPageRead(database, input))
       ) {
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_rejected",

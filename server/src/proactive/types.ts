@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ProactiveSkipReason } from "./contracts";
+import type { CheckInSourceKind, ProactiveSkipReason } from "./contracts";
 
 export type ProactiveRunStatus = "idle" | "running" | "succeeded" | "error";
 /**
@@ -89,7 +89,11 @@ const intervalSchema = z
 export const proactiveSettingInputSchema = z
   .object({
     agentId: z.string().trim().min(1).max(128),
-    channelId: z.string().trim().min(1).max(128),
+    /**
+     * Accepted and ignored. A check-in belongs to its Bot and has no conversation; older clients
+     * still send the one they picked or made.
+     */
+    channelId: z.string().trim().max(128).nullish(),
     focus: focusSchema.default(""),
     subject: subjectSchema.default(""),
     sourceLink: sourceLinkSchema.nullish(),
@@ -122,10 +126,11 @@ export const SKIPPED_BECAUSE: Record<ProactiveSkipReason, string> = {
   off_admin: "Your admin turned off check-ins for you.",
   off_person: "You turned off check-ins for all your Bots.",
   paused: "You paused this Bot.",
+  paused_all: "You paused all your Bots.",
   capped: "This Bot used all its check-ins for today.",
-  unreachable: "This Bot or its conversation is no longer available to you.",
+  unreachable: "This Bot is no longer available to you.",
   no_sources:
-    "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.",
+    "This Bot can't read any app you've connected. Connect one in Connections.",
   busy: "Another check-in was still running.",
 };
 
@@ -164,6 +169,16 @@ export const suggestionInputSchema = z
       .optional(),
   })
   .strict();
+/**
+ * `suggest_next_step` in a page check-in's turn: no `sourceTool` and no link, since the source is
+ * the page the engine read, whatever the model says.
+ */
+export const pageSuggestionInputSchema = suggestionInputSchema.pick({
+  title: true,
+  detail: true,
+});
+/** A page check-in whose read failed, as its run's `error` says it and the person reads it. */
+export const PAGE_UNREAD = "Couldn't read the page.";
 /** `clear_next_step`: an item this Bot raised earlier that no longer needs the person. */
 export const clearInputSchema = z
   .object({
@@ -204,11 +219,15 @@ export type ProactiveSetting = {
   id: string;
   ownerUserId: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in made. Null on every one made since; nothing reads it. */
+  channelId: string | null;
   threadId: string;
   focus: string;
   subject: string;
   sourceLink: string | null;
+  /** What it reads: every readable app, one app (`sourceServerId`), or one web page (`sourceLink`). */
+  sourceKind: CheckInSourceKind;
+  sourceServerId: string | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: Date;

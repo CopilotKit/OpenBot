@@ -17,7 +17,11 @@ made for that goal. Linking a broad routine to a goal one of its firings ran is 
 so a deployment upgrading from a tagged release has no such routine; one running `main` since that
 change has its broad routines read as made for their goal too, so completing that goal switches
 them off, and deleting it deletes them, rather than unlinking them. No existing row is rewritten
-and nothing is dropped. Upgrading from 1.0.0 or 0.3.x also runs the migrations listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
+and nothing is dropped. Four more come with check-ins and pause all, and change no
+row's behaviour: `0092_check_in_without_conversation` makes `proactive_settings.channel_id` and
+`delivery_outbox.channel_id` and `thread_id` nullable, `0093_check_in_source` adds what a check-in
+reads (`apps` on every existing one), `0094_check_in_page` adds a page check-in's kept text, and
+`0095_check_in_paused_all` widens the reasons a check-in may be skipped. Upgrading from 1.0.0 or 0.3.x also runs the migrations listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
 the upgrade instead. Three things change for an existing OpenBot Desktop installation, and one for
 every deployment:
 - On Windows OpenBot now always runs in a Podman machine of its own, `openbot`, beside any of
@@ -344,6 +348,67 @@ every deployment:
     can't be switched back on.
   - When your browser's time zone isn't one OpenBot knows, New routine says to ask your Bot to set
     the routine up. It asked you to choose a time zone the screen doesn't offer.
+
+### Check-ins and pausing your Bots
+
+- **A check-in can always look, and says so when it can't.** A Bot's offer of a check-in now names
+  the tool it read the thing with, and OpenBot works out from it what the check-in reads: the one
+  app it was offered on, or one public web page. A thing read some other way, such as in the
+  Bot's browser, gets no card. New routine's Only tell you asks what **It watches**: your connected
+  apps ("It reads Gmail and Notion") or a web page at an address you give. A check-in that could
+  never look is refused when it is made, with what to do, and a new one checks at once instead of
+  a day later. One that stops being able to look (its app disconnected, its Bot gone, or three
+  failures in a row) says why on its row, which sorts first, as the first row of its Bot under
+  Needs you, and on its page, with the button that fixes it. Rows say what they read: "Reads
+  Gmail", "Reads your apps", "Reads github.com". Migration `0093_check_in_source` adds
+  `source_kind` (`apps` on every existing check-in, which reads every app as before) and
+  `source_server_id` to `proactive_settings`.
+- **A Bot's page lists its routines.** A Routines section, between For you and Activity, shows each
+  routine, goal and check-in the Bot has on, in the Routines page's own rows: running now first,
+  then any that can't look or failed, then by what starts next, at most five, then **All routines**
+  with how many it has in all. Its header counts them, "1 running · 3 scheduled · 1 on demand".
+  Activity no longer lists the Bot's routines and goals a second time.
+- **A clock in a conversation's header shows the Bot's routines.** Before the computer and the gear,
+  it counts the routines, goals and check-ins the Bot has on, in amber when one can't look or
+  failed, and opens them all in a dialog, with Open Routines and New routine. A routine opened from
+  there goes back to the conversation. The message box's clock, which sets one up, stays.
+- **Pause all your Bots with one switch.** Routines starts with **All Bots active**. Turned off,
+  every one of your Bots behaves as a paused Bot does: nothing runs on its own, running work stops,
+  and Bots don't answer your Slack, Teams or text messages, though each still answers you in a
+  conversation in the app. Turned back on, each Bot is as it was, so a Bot you paused by itself
+  stays paused. While it is off, Bots, Routines and each Bot's page say so with **Resume all**. Work
+  on it is refused while its Bot is paused, by itself or with all, instead of making a task that
+  never starts. In the OpenDots skin the top bar's pause control now pauses every Bot. Migration
+  `0095_check_in_paused_all` adds `paused_all` to the reasons a check-in is skipped. Admin ›
+  Routines counts it, and its "Conversation gone" skip now reads "Bot no longer available".
+- **A check-in can watch a public web page.** It reads that one page each time, and only when the
+  page changed does the Bot look at what changed, with no tool that could fetch any other address.
+  The first look keeps the page as it is and raises nothing. In the personal edition this works on
+  a fresh install, through Parallel Search. In the team edition it is offered for Bots an admin gave
+  a web search app to, the keyed entries included. A page run forms no memories. Migration
+  `0094_check_in_page` adds `page_text` and `page_hash` to `proactive_settings`.
+- **A check-in belongs to its Bot, not to a conversation.** New routine's Only tell you no longer
+  asks where it posts and no longer makes an empty conversation for it; it says what it finds shows
+  under Needs you on Bots. A Bot's offer card turns a check-in on wherever it is drawn. A check-in
+  now runs while you can still use its Bot, so deleting a conversation an older check-in was made
+  with no longer stops it. A ping's phone push is filed under a Bot rather than a conversation, so
+  it is no longer dropped when those conversations are gone. A check-in whose Bot you can no longer
+  use says "This Bot is no longer available to you." Migration `0092_check_in_without_conversation`
+  makes `proactive_settings.channel_id`, and `delivery_outbox.channel_id` and `thread_id`, nullable.
+  No row is rewritten, and the API still answers `channelId` (null on new check-ins).
+- **Needs you has a third half, Working on it.** A task its Bot is still doing used to sit under
+  Waiting on you as "waiting since now" and count as waiting. It now has its own half after Waiting
+  on you, says when it started, and counts as "1 working" in the header. It moves to Waiting on you
+  once it is ready for review, needs your input or failed.
+- The ping a check-in sends by Slack, Teams or text now ends "Open OpenBot to work on it or dismiss
+  it.", matching the buttons. Admin › Routines says acceptance is how many items people worked on,
+  out of the ones they worked on or dismissed.
+- In the personal edition, Settings › Notifications names only push and text messages, since Slack
+  and Microsoft Teams are off there.
+- A Bot's Activity row counts its check-ins as scheduled and its open tasks as in progress. A Bot
+  with a check-in and a task no longer reads "No tasks, routines or goals yet".
+- A check-in skipped because its Bot can read nothing now says "This Bot can't read any app you've
+  connected. Connect one in Connections."
 
 ### Finding things
 

@@ -15,6 +15,7 @@ import {
   type DeliveryBinding,
   type DeliveryInbox,
   type DeliveryKind,
+  type DeliveryOutbox,
   DeliveryProviderError,
   DeliveryRefusedError,
   type DeliveryScope,
@@ -61,7 +62,7 @@ type RouterStore = Pick<
   | "binding"
   | "bindingsFor"
   | "bindingsByUse"
-  | "checkInConversations"
+  | "checkInBots"
   | "devices"
   | "device"
   | "removeDevice"
@@ -91,6 +92,12 @@ export function createDeliveryRouter(deps: {
     channelId: string,
     agentId: string,
   ): Promise<DeliveryScope | null>;
+  /**
+   * Whether the person may still use this Bot: not revoked, and the Bot theirs to use. A ping's push
+   * names no conversation, since a check-in has none, so it is filed under a Bot and authorised by
+   * this when it is offered and again when it goes out.
+   */
+  canUseBot(ownerUserId: string, agentId: string): Promise<boolean>;
   runTurn(
     input: DeliveryScope & {
       runId: string;
@@ -123,7 +130,9 @@ export function createDeliveryRouter(deps: {
   }): Promise<unknown>;
   audit?(event: {
     ownerUserId: string;
-    channelId: string;
+    /** Null for a ping's push, which names no conversation; `agentId` then says whose it was. */
+    channelId: string | null;
+    agentId?: string;
     id: string;
     kind: string;
     state: string;
@@ -268,22 +277,42 @@ export function createDeliveryRouter(deps: {
       });
   }
   /**
-   * The conversation a ping's push is filed under: the check-in conversation of its newest item the
-   * person can still reach, so the send is refused, as any is, once they can reach none of them.
+   * What a ping's push is filed under: the Bot of its newest item the person can still use, and no
+   * conversation. A check-in belongs to its Bot and has none, so a push used to be dropped when the
+   * conversation a check-in once made was deleted. It is sent while the person can use the Bot of
+   * at least one item it carries, and refused, as any send is, once they can use none of them.
    */
   async function pingScope(ping: AttentionPing) {
-    const tried = new Set<string>();
-    for (const { agentId, channelId } of await deps.store.checkInConversations(
+    for (const agentId of await deps.store.checkInBots(
       ping.ownerUserId,
       ping.items.map((item) => item.suggestionId),
-    )) {
-      const key = JSON.stringify([agentId, channelId]);
-      if (tried.has(key)) continue;
-      tried.add(key);
-      const scope = await deps.scopeFor(ping.ownerUserId, channelId, agentId);
-      if (scope) return scope;
-    }
+    ))
+      if (await deps.canUseBot(ping.ownerUserId, agentId))
+        return {
+          ownerUserId: ping.ownerUserId,
+          agentId,
+          channelId: null,
+          threadId: null,
+        };
     return null;
+  }
+  /**
+   * Whether an outbox row may still go out: its conversation, as for any send, or for a ping's push
+   * filed under no conversation, its Bot.
+   */
+  async function mayGo(row: DeliveryOutbox) {
+    if (row.channelId && row.threadId)
+      return deps.authoriseScope({
+        ownerUserId: row.ownerUserId,
+        channelId: row.channelId,
+        agentId: row.agentId,
+        threadId: row.threadId,
+      });
+    return (
+      row.kind === "attention" &&
+      row.transport === "push" &&
+      deps.canUseBot(row.ownerUserId, row.agentId)
+    );
   }
   async function receive(input: {
     source: "sms";
@@ -561,7 +590,7 @@ export function createDeliveryRouter(deps: {
       return;
     }
     if (current.state !== "queued") return;
-    if (!(await deps.authoriseScope(current))) {
+    if (!(await mayGo(current))) {
       await deps.store.setOutbox(
         current.id,
         "failed",
@@ -643,6 +672,7 @@ export function createDeliveryRouter(deps: {
       await deps.audit?.({
         ownerUserId: row.ownerUserId,
         channelId: row.channelId,
+        agentId: row.agentId,
         id: row.id,
         kind: row.transport,
         state: result.status,
@@ -684,6 +714,7 @@ export function createDeliveryRouter(deps: {
       await deps.audit?.({
         ownerUserId: row.ownerUserId,
         channelId: row.channelId,
+        agentId: row.agentId,
         id: row.id,
         kind: row.transport,
         state: "failed",

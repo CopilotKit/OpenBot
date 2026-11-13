@@ -69,7 +69,7 @@ function fixture(
     binding: async () => ownedBinding,
     bindingsFor: async () => [ownedBinding],
     bindingsByUse: async () => [ownedBinding],
-    checkInConversations: async () => [],
+    checkInBots: async () => [],
     devices: async () => [],
     offerInbox: async (input: unknown) => {
       offered.push(input);
@@ -123,6 +123,7 @@ function fixture(
     store,
     queue,
     owner: "worker",
+    canUseBot: async () => true,
     authoriseScope: async () => live,
     scopeFor: async () => null,
     runTurn: async (input) => {
@@ -241,6 +242,7 @@ test("provider refusal persists failure while uncertain network persists unknown
     store: f.store,
     queue: f.queue,
     owner: "w",
+    canUseBot: async () => true,
     authoriseScope: async () => true,
     scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),
@@ -335,6 +337,7 @@ test("a suspended governed turn reports its pending approval", async () => {
     store: f.store,
     queue: f.queue,
     owner: "w",
+    canUseBot: async () => true,
     authoriseScope: async () => true,
     scopeFor: async () => null,
     runTurn: async () => {
@@ -382,6 +385,7 @@ test("chat sends carry the Bot's identity; SMS after STOP is recorded opted out,
     store: refused.store,
     queue: refused.queue,
     owner: "w",
+    canUseBot: async () => true,
     authoriseScope: async () => true,
     scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),
@@ -428,6 +432,7 @@ test("the person's update routing decides which transports carry each kind", asy
     store: f.store,
     queue: f.queue,
     owner: "w",
+    canUseBot: async () => true,
     authoriseScope: async () => true,
     scopeFor: async () => null,
     runTurn: async () => ({ replyText: "" }),

@@ -59,6 +59,7 @@ const SKIP_REASONS: ProactiveSkipReason[] = [
   "unreachable",
   "no_sources",
   "busy",
+  "paused_all",
 ];
 
 /** A Bot with nothing counted yet. Its picture is drawn from its id when it has no profile. */

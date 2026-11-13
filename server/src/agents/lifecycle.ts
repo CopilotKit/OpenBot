@@ -13,9 +13,17 @@
  *
  * A process that never wired it (a unit test of some other module) answers "not paused", because
  * there is nobody who could have paused anything.
+ *
+ * PAUSE ALL IS THE SAME PAUSE, FOR EVERY BOT. A person who paused all their Bots has every one of
+ * them answer paused here, exactly as a Bot paused by itself does, so every caller of
+ * {@link isBotPaused} and {@link guardBotTurn} honours it with no change of its own, and a Bot made
+ * while paused is paused too. It is kept on the person (`users.preferences.pausedAllAt`), never
+ * written onto each Bot, so turning it back on returns every Bot to the state it had: a Bot paused by
+ * itself stays paused.
  */
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
+import { users } from "../db/schema/core";
 import { botLifecycle, updateRoutingPreferences } from "../db/schema/lifecycle";
 
 /** The sentence every skipped dispatch records, so the trail and the run rows say the same thing. */
@@ -95,24 +103,39 @@ export function resetBotLifecycleForTests() {
   state.watcher = undefined;
 }
 
-/** Whether this person has paused this Bot, or `undefined` when the read failed (and is logged). */
+/** The key in `users.preferences` that holds when a person paused all their Bots. */
+export const PAUSED_ALL_KEY = "pausedAllAt";
+/** A person who paused all their Bots, as SQL over `users`. */
+export const pausedAllSql = sql`${users.preferences}->>${PAUSED_ALL_KEY} is not null`;
+
+/**
+ * Whether this person has paused this Bot, or paused all their Bots, or `undefined` when the read
+ * failed (and is logged).
+ */
 async function readPause(
   database: Database,
   ownerUserId: string,
   agentId: string,
 ): Promise<boolean | undefined> {
   try {
-    const [row] = await database
-      .select({ pausedAt: botLifecycle.pausedAt })
-      .from(botLifecycle)
-      .where(
-        and(
-          eq(botLifecycle.ownerUserId, ownerUserId),
-          eq(botLifecycle.agentId, agentId),
-        ),
-      )
-      .limit(1);
-    return Boolean(row?.pausedAt);
+    const [[row], [person]] = await Promise.all([
+      database
+        .select({ pausedAt: botLifecycle.pausedAt })
+        .from(botLifecycle)
+        .where(
+          and(
+            eq(botLifecycle.ownerUserId, ownerUserId),
+            eq(botLifecycle.agentId, agentId),
+          ),
+        )
+        .limit(1),
+      database
+        .select({ all: sql<boolean>`${pausedAllSql}` })
+        .from(users)
+        .where(eq(users.id, ownerUserId))
+        .limit(1),
+    ]);
+    return Boolean(row?.pausedAt) || person?.all === true;
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -312,6 +335,38 @@ export function createBotLifecycleStore(database: Database) {
 
     async resume(ownerUserId: string, agentId: string): Promise<void> {
       await upsert(ownerUserId, agentId, { pausedAt: null });
+    },
+
+    /** Whether this person paused all their Bots. */
+    async pausedAll(ownerUserId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ all: sql<boolean>`${pausedAllSql}` })
+        .from(users)
+        .where(eq(users.id, ownerUserId))
+        .limit(1);
+      return row?.all === true;
+    },
+
+    /**
+     * Pause all of this person's Bots, or turn that back off, leaving each Bot's own pause as it
+     * was. Pausing stops every turn this replica is running for any of their Bots; other replicas
+     * stop theirs on their next check. Returns how many running turns were stopped here.
+     */
+    async setPausedAll(ownerUserId: string, paused: boolean): Promise<number> {
+      await database
+        .update(users)
+        .set({
+          preferences: paused
+            ? sql`coalesce(${users.preferences}, '{}'::jsonb) || jsonb_build_object(${PAUSED_ALL_KEY}::text, ${new Date().toISOString()}::text)`
+            : sql`coalesce(${users.preferences}, '{}'::jsonb) - ${PAUSED_ALL_KEY}::text`,
+        })
+        .where(eq(users.id, ownerUserId));
+      if (!paused) return 0;
+      let stopped = 0;
+      for (const key of [...state.running.keys()])
+        if ((JSON.parse(key) as [string, string])[0] === ownerUserId)
+          stopped += stopRunningTurns(key);
+      return stopped;
     },
 
     async setNotify(

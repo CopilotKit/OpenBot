@@ -284,6 +284,8 @@ import {
   REFUSAL_MARKER,
   vendorAnswer,
 } from "./plugins/tools";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { pageReadArgs } from "./proactive/source";
 import { createProactiveEngine } from "./proactive/engine";
 import { checkInOfferTools } from "./proactive/offer-tool";
 import {
@@ -1758,14 +1760,17 @@ const checkInScope = createCheckInScope({
  * The person's conversation with a Bot, as delivery addresses it, and whether a scope still names one
  * they can reach: the channel's own thread, or that Bot's own thread in a group. See delivery/scope.ts.
  */
-const { scopeFor: deliveryScopeFor, authorise: authoriseDeliveryScope } =
-  createDeliveryScopes({
-    database,
-    people: peopleStore,
-    actorFor,
-    channels: channelStore,
-    bots: agentProfileStore,
-  });
+const {
+  scopeFor: deliveryScopeFor,
+  authorise: authoriseDeliveryScope,
+  canUseBot: canUseBotFor,
+} = createDeliveryScopes({
+  database,
+  people: peopleStore,
+  actorFor,
+  channels: channelStore,
+  bots: agentProfileStore,
+});
 
 /*
  * Memory sources and background research, on by default for each person and Bot, and never switched
@@ -1837,6 +1842,9 @@ const loadToolsForActor =
       agentId: botId,
       allowed: (owner) => proactiveEngine.allowed(owner),
       list: (owner) => proactiveStore.list(owner),
+      sourceOf: (toolName) => checkInTools.sourceOf(actorId, botId, toolName),
+      readsPages: async () =>
+        (await checkInTools.pageReader(actorId, botId)) !== null,
     }),
     ...(await grantedTools({
       store: pluginStore,
@@ -2207,6 +2215,17 @@ const subagents = createSubagents({
  * invisible: it runs, and quietly holds different tools or a different role from the one the person
  * is talking to.
  */
+/**
+ * A page check-in's turn holds no granted tool at all: its only tools are its own two, to raise and
+ * to clear (`proactive/engine.ts`). Every other turn's loader is as it was.
+ */
+const withoutToolsInPageRun =
+  (
+    initiator: AuditInitiator | undefined,
+    load: (botId: string) => Promise<GrantedTool[]>,
+  ) =>
+  async (botId: string) =>
+    proactiveEngine.isPageRun(initiator) ? [] : load(botId);
 const actorAgentResolver = createActorAgentResolver({
   productTelemetry,
   loadAgents: loadAgentsForActor,
@@ -2218,20 +2237,24 @@ const actorAgentResolver = createActorAgentResolver({
     }),
   stallGuard,
   loadToolsForActor: (actorId, initiator) =>
-    restrictToolsForRun(
+    withoutToolsInPageRun(
       initiator,
-      actorId,
-      // A turn the person did not send reads the goals that repeat as it begins.
-      withRepeatingGoalsPinned(
+      restrictToolsForRun(
         initiator,
         actorId,
-        // A goal's run holds the goal's own tools; the Routines copies would be a second set.
-        withoutGoalCopiesInGoalRun(
+        // A turn the person did not send reads the goals that repeat as it begins.
+        withRepeatingGoalsPinned(
           initiator,
-          loadToolsForActor(actorId, initiator),
+          actorId,
+          // A goal's run holds the goal's own tools; the Routines copies would be a second set.
+          withoutGoalCopiesInGoalRun(
+            initiator,
+            loadToolsForActor(actorId, initiator),
+          ),
         ),
+        // A check-in on one app, or on one page, is offered that app's reads alone, or none.
+        proactiveEngine.scopeForRun(initiator, checkInScope),
       ),
-      checkInScope,
     ),
   /*
    * Which apps each Bot can use for this person, by name and connection state, so a Bot holding
@@ -2573,6 +2596,7 @@ const deliveryRouter = createDeliveryRouter({
   providers: deliveryProviders,
   authoriseScope: authoriseDeliveryScope,
   scopeFor: deliveryScopeFor,
+  canUseBot: canUseBotFor,
   notifyEvent: (event) => responsibilityEngine.ingest(event),
   runTurn: async (input) => {
     if (!(await authoriseDeliveryScope(input)))
@@ -2628,8 +2652,9 @@ const deliveryRouter = createDeliveryRouter({
             : event.state === "failed"
               ? "delivery.failed"
               : "delivery.sent",
-      targetType: "channel",
-      targetId: event.channelId,
+      // A ping's push names no conversation, only the Bot it was filed under.
+      targetType: event.channelId ? "channel" : "agent",
+      targetId: event.channelId ?? event.agentId,
       payload: { deliveryId: event.id, kind: event.kind, state: event.state },
     }),
 });
@@ -2676,6 +2701,16 @@ const taskSweep = repeatAfterEach(async () => {
  * routines. What one raises is listed in the app at once and reaches the person in a ping, at most
  * one an hour, folding every Bot's items (proactive/ping.ts). Started items run as tasks (above).
  */
+/*
+ * What a check-in for one person and Bot can read: the apps they connected that it can read, its
+ * page-read tool, and what a tool the Bot read something with would make a check-in read. Built
+ * lazily: the tools are loaded only when a question is asked, long after everything here exists.
+ */
+const checkInTools = checkInToolsFor(
+  (ownerUserId) => loadToolsForActor(ownerUserId),
+  checkInScope,
+  pluginStore,
+);
 const proactiveEngine = createProactiveEngine({
   store: proactiveStore,
   // A check-in forms memories only where there is memory.
@@ -2692,11 +2727,15 @@ const proactiveEngine = createProactiveEngine({
     // Only the run's own tools and refusals: no computer, no components.
     toolsForTurn: (input) => proactiveEngine.toolsForTurn(input),
     turnTimeoutMs: 3 * 60_000,
+    // A page check-in's turn reads text from the open web, which never becomes something learned.
     learningContainerForThread: (input) =>
-      copilotRuntime.learning?.containerForThread(input) ??
-      Promise.resolve(undefined),
+      proactiveEngine.isPageThread(input.threadId)
+        ? Promise.resolve(undefined)
+        : (copilotRuntime.learning?.containerForThread(input) ??
+          Promise.resolve(undefined)),
   }),
-  resolveScope: deliveryScopeFor,
+  // A check-in belongs to its Bot: the person may still use it, and no conversation is read.
+  canUseBot: canUseBotFor,
   // The organization's Check-ins switch and per-Bot daily cap, read fresh on every check.
   admin: proactiveAdmin,
   // A ping: push once to each phone, one message per chat platform, the app list at once.
@@ -2707,10 +2746,25 @@ const proactiveEngine = createProactiveEngine({
    * never reaches the model. Otherwise these are the apps its instruction names, and every other
    * tool the Bot holds is answered with a refusal if the model calls it anyway.
    */
-  ...checkInToolsFor(
-    (ownerUserId) => loadToolsForActor(ownerUserId),
-    checkInScope,
-  ),
+  ...checkInTools,
+  /*
+   * A page check-in's one read, made by the engine through the Bot's page-read tool, as the person
+   * and under the run's initiator: the door admits it for that check-in's own address alone.
+   */
+  readPage: async ({ ownerUserId, agentId, ref, link, initiator }) => {
+    const result = await pluginStore.callTool({
+      ref,
+      args: pageReadArgs(ref, link),
+      botId: agentId,
+      actorId: ownerUserId,
+      initiator,
+    });
+    if (result.isError) throw new Error(result.text);
+    return result.text;
+  },
+  botName: async (ownerUserId, agentId) =>
+    (await agentProfileStore.get(await actorFor(ownerUserId), agentId))?.name ??
+    null,
   catalogue: pluginStore,
   mintThreadId: () => threadIdentity.mint(),
 });
@@ -3092,7 +3146,13 @@ const app = createApp(
   hostAccessBroker,
   process.env.OPENBOT_DESKTOP_HOST_TOKEN,
   async (input) => {
-    const proactiveRefusal = await guardProactiveCallback(input, checkInScope);
+    const proactiveRefusal = await guardProactiveCallback(
+      input,
+      proactiveEngine.scopeForRun(
+        input.initiator ?? input.run?.initiator,
+        checkInScope,
+      ),
+    );
     if (proactiveRefusal) return proactiveRefusal;
     const coordinated = await coordination.call(input);
     if (coordinated) return coordinated;

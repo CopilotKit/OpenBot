@@ -92,14 +92,14 @@ function goalPlan(
   };
 }
 
-const checkInPlan = (channelId: string): RoutinePlan => ({
+const checkInPlan = (): RoutinePlan => ({
   kind: "check-in",
   checkIn: {
     agentId: "a1",
-    channelId,
     focus: "Watch the inbox",
     subject: "Inbox",
     intervalMinutes: 60,
+    watches: "apps",
   },
 });
 
@@ -158,16 +158,17 @@ test("a goal run now: the goal, then POST /api/responsibilities/g1/run", async (
 
 test("a check-in: one POST /api/proactive/settings, asking for a new one", async () => {
   const calls = stub();
-  await run(checkInPlan("c1"));
+  await run(checkInPlan());
+  // No conversation is made for it: a check-in belongs to its Bot.
   expect(methodsAndPaths(calls)).toEqual([
     "POST /api/proactive/settings?refuseExisting=true",
   ]);
   expect(calls[0]?.[2]).toEqual({
     agentId: "a1",
-    channelId: "c1",
     focus: "Watch the inbox",
     subject: "Inbox",
     intervalMinutes: 60,
+    watches: "apps",
   });
 });
 
@@ -184,19 +185,21 @@ test("a new conversation is started first and used by every write", async () => 
   expect(calls[3]?.[2]).toMatchObject({ channelId: "c9" });
 });
 
-test("a refused write takes the new conversation back", async () => {
+test("a refused check-in says why and leaves nothing behind", async () => {
   const calls = stub({
     "POST /api/proactive/settings?refuseExisting=true": {
       status: 400,
       body: { error: "x" },
     },
   });
-  const { error } = await run(checkInPlan(NEW_CONVERSATION));
-  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
+  const { error } = await run(checkInPlan());
+  expect(methodsAndPaths(calls)).toEqual([
+    "POST /api/proactive/settings?refuseExisting=true",
+  ]);
   expect(error?.message).toBe("x");
 });
 
-test("a check-in the Bot already has is refused, says so, and takes the new conversation back", async () => {
+test("a check-in the Bot already has is refused and says so", async () => {
   const same =
     "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
   const calls = stub({
@@ -205,10 +208,12 @@ test("a check-in the Bot already has is refused, says so, and takes the new conv
       body: { error: same },
     },
   });
-  const { error } = await run(checkInPlan(NEW_CONVERSATION));
+  const { error } = await run(checkInPlan());
   expect(error).not.toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(same);
-  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
+  expect(methodsAndPaths(calls)).toEqual([
+    "POST /api/proactive/settings?refuseExisting=true",
+  ]);
 });
 
 const refusedSchedule = {
@@ -404,15 +409,26 @@ test("onSettled refreshes the lists even after a refusal", async () => {
   ]);
 });
 
-for (const kind of ["routine", "goal", "check-in"] as const) {
+/*
+ * A check-in has no conversation to keep, and pressing Create again after an uncertain answer is
+ * safe: the server refuses a second check-in on the same thing.
+ */
+test("an uncertain check-in create leaves the form free to try again", async () => {
+  stub({
+    "POST /api/proactive/settings?refuseExisting=true": {
+      status: 503,
+      body: { error: "Unavailable" },
+    },
+  });
+  const { error } = await run(checkInPlan());
+  expect(error).not.toBeInstanceOf(SavedButRefused);
+});
+
+for (const kind of ["routine", "goal"] as const) {
   for (const failure of ["server", "network"] as const) {
     test(`an uncertain ${kind} create (${failure}) keeps its conversation and prevents retry`, async () => {
       const path =
-        kind === "routine"
-          ? "/api/routines"
-          : kind === "goal"
-            ? "/api/responsibilities"
-            : "/api/proactive/settings?refuseExisting=true";
+        kind === "routine" ? "/api/routines" : "/api/responsibilities";
       const calls = stub({
         [`POST ${path}`]: { status: 503, body: { error: "Unavailable" } },
       });
@@ -429,18 +445,16 @@ for (const kind of ["routine", "goal", "check-in"] as const) {
       const plan: RoutinePlan =
         kind === "goal"
           ? goalPlan(NEW_CONVERSATION)
-          : kind === "check-in"
-            ? checkInPlan(NEW_CONVERSATION)
-            : {
-                kind: "routine",
-                routine: {
-                  agentId: "a1",
-                  channelId: NEW_CONVERSATION,
-                  instruction: "Send the digest",
-                  cron,
-                  timezone,
-                },
-              };
+          : {
+              kind: "routine",
+              routine: {
+                agentId: "a1",
+                channelId: NEW_CONVERSATION,
+                instruction: "Send the digest",
+                cron,
+                timezone,
+              },
+            };
       const { error } = await run(plan);
       expect(methodsAndPaths(calls)).not.toContain("DELETE /api/channels/c9");
       expect(error).toBeInstanceOf(SavedButRefused);

@@ -12,11 +12,12 @@ import {
  * person's Needs you list: it folds several Bots' items, so no one conversation is where it leads.
  */
 function pushData(input: {
-  channelId: string;
+  /** Null only on a ping, which names no conversation. */
+  channelId: string | null;
   kind: DeliveryKind;
   requestId?: string | null;
 }): Record<string, string> {
-  if (input.kind === "attention")
+  if (input.kind === "attention" || input.channelId === null)
     return { kind: input.kind, url: "openbotmobile://needs-you" };
   const path = input.kind === "reply" ? "conversation" : "approvals";
   const query = new URLSearchParams({
@@ -62,7 +63,7 @@ export function createExpoPushTransport(
       token: string;
       title: string;
       body: string;
-      channelId: string;
+      channelId: string | null;
       kind: DeliveryKind;
       requestId?: string | null;
     }) {

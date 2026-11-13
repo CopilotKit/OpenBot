@@ -41,7 +41,12 @@ export type BotAttention = {
  * ping folds every Bot's items, so the app sends one browser notification each time it changes,
  * never one per item.
  */
-type AttentionBody = { bots: BotAttention[]; lastPingId: string | null };
+type AttentionBody = {
+  bots: BotAttention[];
+  lastPingId: string | null;
+  /** Whether the person paused all their Bots. Absent from an older server. */
+  pausedAll?: boolean;
+};
 
 export type ActivityKind =
   | "routine"
@@ -139,6 +144,17 @@ export function botAttentionQueryOptions() {
  */
 export function botAttentionBodyQueryOptions() {
   return queryOptions(attentionQuery);
+}
+
+/**
+ * Whether the person paused all their Bots: every one then behaves as a paused Bot does. The same
+ * read the sidebar polls.
+ */
+export function pausedAllQueryOptions() {
+  return queryOptions({
+    ...attentionQuery,
+    select: (body): boolean => body.pausedAll === true,
+  });
 }
 
 /** The person's newest ping, for the one browser notification each new ping sends. */

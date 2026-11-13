@@ -203,7 +203,7 @@ opens its page under Connections. The Bot is told which button the card shows, s
 (`server/src/plugins/app-access-tool.ts`).
 
 **Bots** lists your Bots and, under **What your Bots learn**, a link to Skills. A Bot's own page
-shows what it is working on and what waits for you, with its Activity beside them, then its settings
+shows what it is working on and what waits for you, the routines it has on, and its Activity, then its settings
 in this order: **Routines** (its routines, goals and check-ins in one list), **Skills**, **Apps**,
 **Computer** (its folders and its browser), **Approvals** and **Setup** (its name, instructions and
 who it hands work to). There is no Memory row, because the personal edition does not offer memory
@@ -212,7 +212,8 @@ yet.
 The main menu has **Bots**, **Routines**, **Skills** and **Connections**. **Teach a Bot** opens from
 the Skills page. **Settings** is in three
 groups: **You** (General, Notifications and Vault), **Every Bot** (Computer, Approvals and
-Activity) and **OpenBot** (Setup and the Components gallery).
+Activity) and **OpenBot** (Setup and the Components gallery). Settings → Notifications names only
+push and text messages, the two ways this edition can reach you away from the app.
 Settings → Computer is the computer your Bots share with its Reset, the folders on this computer
 they may read, what OpenBot runs here (inside OpenBot Desktop), and the browsers signed in to the
 Recorder. Activity is the trail of everything your Bots did. Beside Admin, **OpenBot for Business**
@@ -265,6 +266,11 @@ went (`GET /api/admin/proactive`). See `server/src/edition-routes.ts`.
 The first time the server starts, it turns on **Parallel Search**, Parallel's free web search that
 needs no key, so every Bot can search the web and read pages with nothing set up. Every Bot gets its
 `web_search` and `web_fetch` tools, including Bots made later.
+
+It also means a check-in can watch a public web page on a fresh install, with no app connected:
+New routine's Only tell you offers **A web page**, and a Bot that just read one offers to keep an eye
+on it (see [Routines](routines.md#watching-a-web-page)). Each look reads that one address through
+`web_fetch` and counts toward the Bot's daily check-ins.
 
 What a Bot searches for goes to Parallel: the search queries and the addresses of the pages it asks
 to read, and a session identifier for the conversation. Full conversations are not sent. See

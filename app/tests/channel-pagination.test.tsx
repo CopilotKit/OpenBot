@@ -30,6 +30,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { proactiveKeys } from "@/lib/proactive";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
@@ -199,6 +200,15 @@ function renderSidebar() {
   queryClient.setQueryData(botLifecycleKeys.attention, {
     bots: [],
     lastPingId: null,
+  });
+  // The Bots badge reads the person's check-ins for its dot; answered here so only channel requests are counted.
+  queryClient.setQueryDefaults(proactiveKeys.settings, {
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
+  });
+  queryClient.setQueryData(proactiveKeys.settings, {
+    settings: [],
+    allowed: true,
   });
   // The Browser button reads whether there is a browser once; answered here so only channel requests are counted.
   queryClient.setQueryData(browserKeys.state, {

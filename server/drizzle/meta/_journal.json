@@ -645,6 +645,34 @@
       "when": 1794506330564,
       "tag": "0091_remote_mcp_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794575246004,
+      "tag": "0092_check_in_without_conversation",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794576026131,
+      "tag": "0093_check_in_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1794577230798,
+      "tag": "0094_check_in_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1794577693129,
+      "tag": "0095_check_in_paused_all",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,120 @@ row carries it. Rows that are working (on, active, not paused) come first. The e
 holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
 or off for everybody, and limits them, in Admin → Routines.
 
+**What a check-in reads.** Every check-in records what it reads (`proactive_settings.source_kind`):
+every app you connected with your own account that its Bot can read (`apps`, what New routine's
+**Your connected apps** makes and what every check-in made before this reads), one of those apps
+(`app`, named in `source_server_id`, what accepting a Bot's offer about something in that app
+makes), or one public web page (`page`, at `source_link`). A check-in on one app is offered that
+app's reads and no other app's. The server works the kind out itself: from the tool the Bot read
+the thing with (`readWith`, which the offer card sends back), or from New routine's **It watches**,
+never from a label. A Bot's offer on something it read another way (its browser, the computer, a
+Shared app, an app on the admin's key) is answered "Nothing to offer", and no card is drawn.
+
+**A check-in that could never look is not made.** Creating one is refused, with the sentence the
+person reads, when its Bot can read no app they connected, can't read the app it was offered on,
+holds no tool that reads a web page, or the page's address isn't a public `http(s)` one. New routine
+asks the same of `GET /api/proactive/readable?agentId=` and says it on It watches before Create.
+A check-in the person makes is due at once, so its row says how its first look went within a
+minute. Rows adopted with `OPENBOT_PROACTIVE_DEFAULTS` keep their delay.
+
+**When one stops being able to look, it says so.** `GET /api/proactive/settings` gives each check-in
+a `health`: null, or why it can't look and the step that fixes it (connect an app, open an app's
+page or the check-in, or remove it). It can't look when its Bot can read no app you connected, the
+app it reads isn't connected, its Bot has no web search for its page, the Bot is no longer yours to
+use, or its last three check-ins failed. Paused, off, over the daily limit and busy are not this.
+The first four are asked afresh (kept for a minute), so the row clears once the app is connected;
+three failures clear when the next check-in finishes. It shows on the check-in's row (which sorts
+first), as the first row of its Bot's group under Needs you (not counted in the Bots badge, but the
+badge's dot shows), and on its page above On. No ping is sent for it. Each row also says what it
+reads: "Reads Gmail", "Reads your apps", "Reads github.com".
+
+### On a Bot's page
+
+A Bot's page has a **Routines** section between For you and Activity: each routine, goal and
+check-in of that Bot's that is on, drawn by the Routines page's own rows from the same merged list
+(`BotRoutinesSection` in `app/src/components/routines/bot-routines.tsx`, ordered and counted by
+`app/src/lib/routines/bot-routines.ts`). Running now first (with the pulsing dot), then the ones that
+can't look or failed last time, then by what starts next, then the goals that wait to be asked; at
+most five, then **All routines**, which opens the Bot's Routines page and says how many it has in
+all. The header counts what is on, "1 running · 3 scheduled · 1 on demand", the way the Routines
+row counts it. A Bot with nothing on gets no section. While the Bot is paused, by itself or with
+all, its rows read "Paused". Activity on a Bot's page keeps what is not a routine (hand-offs,
+follow-ups, queued runs, what waits on you), so nothing shows twice. The server is unchanged.
+
+### In a conversation
+
+A one-Bot conversation's header has a clock before the computer and the gear (`RoutinesClock` in
+`app/src/components/routines/routines-clock.tsx`), a muted pill with the clock and a number. The
+number is how many of the Bot's routines,
+goals and check-ins are on, counted as the Bot's page counts its Routines section, and it turns
+amber when one can't look or failed last time. Its name says whose and how many ("Scout's routines,
+3 on"). A press opens the Bot's Routines page in a dialog, every row on and off, drawn by
+`RoutinesList`; a row opens its own page, whose back button returns to the conversation (`from` on
+the routine pages' address). The dialog's footer has **Open Routines** and **New routine**, with
+this Bot and conversation chosen. A group conversation has no clock. The message box's own clock,
+"Set up a routine", stays.
+
+### Pause all
+
+Routines' every-Bot card starts with **All Bots active**, the person's own switch for all their Bots
+(both editions; an admin has no team-wide one). Off, every one of their Bots behaves exactly as a
+paused Bot does: no routine, goal, check-in, hand-off or follow-up starts, headless turns already
+running are stopped, and a Bot doesn't answer their Slack, Teams or text messages, take its turn in
+a group conversation or carry on after an approval. It still answers in a one-to-one conversation in
+the app. Work on it is refused up front, with no task made, while its Bot is paused by itself or
+with all.
+
+It is kept on the person (`users.preferences.pausedAllAt`), and `readPause` in
+`server/src/agents/lifecycle.ts` answers paused when the Bot is paused or the person paused all, so
+every caller of `isBotPaused` and `guardBotTurn` honours it, a Bot made meanwhile is paused too, and
+an unreadable answer is paused. Each Bot's own pause is untouched: turning it back on returns every
+Bot to the state it had. Routines and goals record "The Bot is paused, so it did not run." The
+check-in sweep claims none of the person's check-ins, and Run now answers `paused_all`, "You paused
+all your Bots." `PUT /api/bots/pause-all` with `{ paused }` writes it; `GET /api/bots/attention`
+answers `pausedAll`. While it is off, Bots, Routines and each Bot's page show "All your Bots are
+paused." with **Resume all**, and check-in rows read "Paused". In the OpenDots skin it is the top
+bar's pause control.
+
+### Watching a web page
+
+A `page` check-in reads one address and nothing else, and the model is given no tool that takes an
+address. Each run, after the usual gates, the engine reads `source_link` itself through the Bot's
+page-read tool (Parallel's `web_fetch`, Exa's `web_fetch_exa` or Firecrawl's `firecrawl_scrape`), by
+`PluginStore.callTool` as the person and under the run's proactive initiator, so grants, policy and
+the audit trail apply as to any call. The text is normalised, capped at 50,000 characters and
+hashed, and kept on the check-in (`page_text`, `page_hash`):
+
+- the first read is kept as the baseline, and nothing is raised;
+- the same page again ends quiet, with no model call;
+- a changed page runs one turn, given the earlier and the new text as quoted, untrusted data, whose
+  only tools are `suggest_next_step` and `clear_next_step`. What it raises takes the page as its
+  source: its host as the app and its address as the link. The new text becomes the baseline once
+  that turn finishes;
+- a read that fails ends failed, "Couldn't read the page."; three in a row is can't look.
+
+A page run forms no memories and its thread is given no Learning container: text from the open web
+never becomes something a Bot knows about the person. Each run counts toward the Bot's daily limit,
+changed or not. The address is fixed when the check-in is made; changing it means making a new one.
+
+**The door.** A check-in's tool call is refused unless it is a labelled read on the person's own
+account, and a page read is neither, so `callTool` admits one more call: a page-read tool
+(`researchRoleFor(ref) === "fetch"`), from a running check-in whose kind is `page`, asking for exactly
+that check-in's address. Anything else (another address, two addresses, a search tool, a page read
+from a check-in on apps) is refused and audited as `check_in_not_a_read`. This covers the keyed
+entries as well, on the admin's key: the admin gave the Bot the tool, the page is public, and the
+daily limit bounds how often a Bot reads it for one person. The address check when it is made
+(`http` or `https`, not a loopback or private host) is a courtesy: the read happens at the provider.
+
+A check-in on a web page made before check-ins knew pages reads every app, and stays that way until
+the person accepts a new offer on the same link, which makes it a `page` one.
+
+**A check-in belongs to its Bot.** It posts nowhere and needs no conversation: what it finds is
+raised under Needs you, and a ping's phone push is filed under its Bot. It runs while you can still
+use that Bot; when you can't, its runs are skipped with "This Bot is no longer available to you."
+Check-ins made before this were tied to a conversation (`proactive_settings.channel_id`). Those
+conversations are left as they are, and deleting one no longer affects the check-in.
+
 Old addresses redirect here: `/responsibilities` to Routines, and
 `/bots/<id>/responsibilities` to the Bot's Routines page.
 
@@ -45,7 +159,8 @@ Two ways, and either way a routine or a goal is written by the same store calls.
   - Act when something happens is a goal with that subscription.
   - Now, once is a goal, run at once.
   - Only tell you is a check-in, with **How often** in place of Starts and Done when. It is offered
-    only while an admin allows check-ins.
+    only while an admin allows check-ins. It has no **Posts in** and no conversation is made for
+    it: a check-in belongs to its Bot, and what it finds shows under Needs you on Bots.
 
   A Bot's own Routines page and the clock beside a conversation's message box open the same screen
   with that Bot already chosen, and from the clock that conversation too

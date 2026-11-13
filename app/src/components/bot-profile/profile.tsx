@@ -8,6 +8,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { PausedAllBanner } from "@/components/bots/paused-all";
+import { BotRoutinesSection } from "@/components/routines/bot-routines";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
@@ -92,7 +94,9 @@ export function BotProfile({
           </p>
         </div>
       </div>
-      <div className="mt-4">
+      {/* All paused says so first; the Bot's own pause stays, and its Active row stays changeable. */}
+      <div className="mt-4 flex flex-col gap-2">
+        <PausedAllBanner />
         <BotPausedBanner agentId={agent.id} />
       </div>
 
@@ -230,6 +234,8 @@ export function BotProfile({
         )}
       </PageSection>
 
+      {/* What it does by itself, between For you and Activity, from the Routines page's own rows. */}
+      <BotRoutinesSection agentId={agent.id} botName={agent.name} />
       <BotActivityGlance agentId={agent.id} />
       <DoneTasks done={done} />
       {settings}

@@ -112,7 +112,10 @@ test("pings get their own row, Something needs you", async () => {
 });
 
 /** Who is looking: an admin, or someone running OpenBot themselves, can set channels up; anyone else can't. */
-function draw(who: { role: string; localEvaluation: boolean } = ADMIN) {
+function draw(
+  who: { role: string; localEvaluation: boolean } = ADMIN,
+  edition: "team" | "personal" = "team",
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -121,7 +124,7 @@ function draw(who: { role: string; localEvaluation: boolean } = ADMIN) {
     generativeUi: true,
     selfHostBanner: false,
     localEvaluation: who.localEvaluation,
-    edition: "team",
+    edition,
   });
   return render(
     <QueryClientProvider client={client}>
@@ -220,4 +223,24 @@ test("a member who can't set channels up is told their admin does, with no link"
     ),
   ).toBeTruthy();
   expect(view.queryByRole("link", { name: "How to set them up" })).toBeNull();
+});
+
+test("the personal edition names only the channels it can have", async () => {
+  available = { slack: false, teams: false, sms: false, push: false };
+  serving();
+  const admin = draw(ADMIN, "personal");
+  expect(
+    await admin.findByText(
+      "Push and text messages show up here once they're set up where OpenBot runs.",
+    ),
+  ).toBeTruthy();
+  expect(admin.queryByText(/Slack|Microsoft Teams/)).toBeNull();
+  cleanup();
+  serving();
+  const member = draw({ role: "member", localEvaluation: false }, "personal");
+  expect(
+    await member.findByText(
+      "Push and text messages show up here once your admin sets them up.",
+    ),
+  ).toBeTruthy();
 });

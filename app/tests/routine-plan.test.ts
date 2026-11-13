@@ -119,10 +119,10 @@ describe("planRoutine", () => {
       kind: "check-in",
       checkIn: {
         agentId: "bot",
-        channelId: "c1",
         focus: "Send the numbers",
         subject: "Launch brief",
         intervalMinutes: 240,
+        watches: "apps",
       },
     });
   });
@@ -143,10 +143,10 @@ describe("planRoutine", () => {
       kind: "check-in",
       checkIn: {
         agentId: "bot",
-        channelId: "c1",
         focus: "Send the numbers",
         subject: "Send the numbers",
         intervalMinutes: 1440,
+        watches: "apps",
       },
     });
   });
@@ -239,7 +239,7 @@ describe("planRoutine", () => {
     ]);
   });
 
-  test("a new conversation passes through into a routine and a check-in", () => {
+  test("a new conversation passes through into a routine, and a check-in carries none", () => {
     const routine = planRoutine(
       { ...base, channelId: NEW_CONVERSATION },
       "UTC",
@@ -251,7 +251,24 @@ describe("planRoutine", () => {
       "UTC",
     );
     if (checkIn.kind !== "check-in") throw new Error("expected a check-in");
-    expect(checkIn.checkIn.channelId).toBe(NEW_CONVERSATION);
+    expect(checkIn.checkIn).not.toHaveProperty("channelId");
+  });
+
+  test("tell on a web page carries its address, for the server to check", () => {
+    const plan = planRoutine(
+      {
+        ...base,
+        does: "tell",
+        watches: "page",
+        pageAddress: "  https://github.com/CopilotKit/openbot/releases ",
+      },
+      "UTC",
+    );
+    if (plan.kind !== "check-in") throw new Error("expected a check-in");
+    expect(plan.checkIn).toMatchObject({
+      watches: "page",
+      sourceLink: "https://github.com/CopilotKit/openbot/releases",
+    });
   });
 
   test("answers are trimmed", () => {

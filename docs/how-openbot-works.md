@@ -53,8 +53,10 @@ A Bot's routines are one list, and each reads as a sentence:
 - When a pull request opens. Reviews it, until the release ships.
 - Every day. Watches the launch brief and tells you.
 
-A routine reports into the conversation you asked in. You make, change and stop routines by asking.
-You can also make one on the Routines page, by answering the same four parts.
+A routine reports into the conversation you asked in; a check-in reports under Needs you. You make,
+change and stop routines by asking. You can also make one on the Routines page, by answering the
+same four parts. A Bot's page lists the ones that are on, running first, and one switch on Routines
+pauses every Bot at once.
 
 ### 3. It checks its memory
 

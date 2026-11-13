@@ -5,9 +5,11 @@ import {
   IconPlus,
   IconRadar,
 } from "@tabler/icons-react";
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
+import { usePausedAll } from "@/components/bots/paused-all";
+import { RunningDot } from "@/components/routines/running-dot";
 import {
   PageEmpty,
   PageRows,
@@ -42,8 +44,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   createProactiveSettingMutationOptions,
   type LastCheckIn,
@@ -148,7 +148,10 @@ export function SuggestionsInbox({
 export function useCheckInsBlocked(): string | null {
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const preferences = useUserPreferences();
+  const pausedAll = usePausedAll();
   if (allowed.data === false) return "Turned off by your admin";
+  // Every Bot is paused, so none checks in until the person turns them back on.
+  if (pausedAll) return "Paused";
   if (preferences.data?.proactive === "off") return "Off for all your Bots";
   return null;
 }
@@ -269,18 +272,12 @@ export function TurnOnResearchDialog({
       (bot) => !settings.data?.some((setting) => setting.agentId === bot.id),
     ),
   };
-  const channels = useInfiniteQuery(channelListQueryOptions());
   const [pickedBot, setAgentId] = useState("");
   const agentId = fixedBot ?? pickedBot;
-  const [channelId, setChannelId] = useState("");
   const [focus, setFocus] = useState("");
   // Hourly, the most often a Bot checks and the default for a new Bot.
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const id = useId();
-  const eligibleChannels = (channels.data ?? []).filter(
-    (channel) =>
-      channel.active && !channel.task && channel.agentIds.includes(agentId),
-  );
   const add = useMutation(createProactiveSettingMutationOptions(queryClient));
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
@@ -288,8 +285,8 @@ export function TurnOnResearchDialog({
         <DialogHeader>
           <DialogTitle>Turn on check-ins</DialogTitle>
           <DialogDescription>
-            It reads the apps it can use in this conversation and tells you when
-            something needs you.
+            It reads the apps it can use and tells you under Needs you when
+            something there needs you.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
@@ -300,7 +297,7 @@ export function TurnOnResearchDialog({
             onSubmit={(event) => {
               event.preventDefault();
               add.mutate(
-                { agentId, channelId, focus, intervalMinutes },
+                { agentId, focus, intervalMinutes },
                 { onSuccess: onClose },
               );
             }}
@@ -314,10 +311,7 @@ export function TurnOnResearchDialog({
                       value: bot.id,
                       label: bot.name,
                     }))}
-                    onValueChange={(value) => {
-                      setAgentId(value ?? "");
-                      setChannelId("");
-                    }}
+                    onValueChange={(value) => setAgentId(value ?? "")}
                     required
                     value={agentId || null}
                   >
@@ -334,29 +328,6 @@ export function TurnOnResearchDialog({
                   </Select>
                 </Field>
               ) : null}
-              <Field>
-                <FieldLabel htmlFor={`${id}-channel`}>Conversation</FieldLabel>
-                <Select
-                  items={eligibleChannels.map((channel) => ({
-                    value: channel.id,
-                    label: conversationLabel(channel),
-                  }))}
-                  onValueChange={(value) => setChannelId(value ?? "")}
-                  required
-                  value={channelId || null}
-                >
-                  <SelectTrigger className="w-full" id={`${id}-channel`}>
-                    <SelectValue placeholder="Choose a conversation" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {eligibleChannels.map((channel) => (
-                      <SelectItem key={channel.id} value={channel.id}>
-                        {conversationLabel(channel)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
               <Field>
                 <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
                 <Select
@@ -406,7 +377,7 @@ export function TurnOnResearchDialog({
             Cancel
           </Button>
           <Button
-            disabled={add.isPending || !agentId || !channelId}
+            disabled={add.isPending || !agentId}
             form={id}
             size="sm"
             type="submit"
@@ -436,6 +407,16 @@ export function checkInStatus(
   return Date.parse(setting.nextRunAt) <= Date.now()
     ? "Next check due"
     : `Next check ${relativeTime(setting.nextRunAt)}`;
+}
+
+/**
+ * What a check-in reads, as its row says it: "Reads Gmail", "Reads your apps", "Reads github.com".
+ * Null from a server that doesn't say.
+ */
+export function readsLine(setting: ProactiveSetting): string | null {
+  if (setting.sourceKind === undefined) return null;
+  if (setting.sourceKind === "apps") return "Reads your apps";
+  return setting.reads ? `Reads ${setting.reads}` : null;
 }
 
 /** When a check-in happened, as its line says it: "just now" for the moment after a Run now. */
@@ -479,7 +460,13 @@ export function SettingRow({
   showBot = true,
   label,
   agentId,
+  running = false,
+  from,
 }: {
+  /** The conversation the row is shown in, which the check-in's page goes back to. */
+  from?: string;
+  /** Looking now: the pulsing dot Activity rows use. */
+  running?: boolean;
   setting: ProactiveSetting;
   botName: string;
   blocked: string | null;
@@ -490,23 +477,36 @@ export function SettingRow({
   /** The Bot whose own list this is, so the page's back link returns to it. */
   agentId?: string;
 }) {
-  // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
-  const summary = `${intervalLabel(setting.intervalMinutes)} · Tells you · ${checkInStatus(setting, blocked)}`;
+  // When it starts, what it does, what it reads and where it stands: the Routines list's sentence.
+  const summary = [
+    intervalLabel(setting.intervalMinutes),
+    "Tells you",
+    readsLine(setting),
+    checkInStatus(setting, blocked),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const last = lastCheckInLine(setting.lastRun);
   const outcome = setting.lastRun?.outcome;
+  // Can't look says so in place of the last run, in the tone a failed one uses: it is what to fix.
+  const health = setting.enabled ? setting.health : null;
   return (
     <Item
       render={
         <Link
           params={{ checkInId: setting.id }}
-          search={agentId ? { agentId } : {}}
+          search={{
+            ...(agentId ? { agentId } : {}),
+            ...(from ? { from } : {}),
+          }}
           to="/routines/check-ins/$checkInId"
         />
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         <IconRadar />
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent>
         {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
@@ -521,7 +521,11 @@ export function SettingRow({
         <ItemDescription>
           {setting.subject && showBot ? `${botName} · ${summary}` : summary}
         </ItemDescription>
-        {last && (outcome === "skipped" || outcome === "failed") ? (
+        {health ? (
+          <ItemDescription className="text-destructive">
+            {health.why}
+          </ItemDescription>
+        ) : last && (outcome === "skipped" || outcome === "failed") ? (
           <ItemDescription
             className={outcome === "failed" ? "text-destructive" : undefined}
           >

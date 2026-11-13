@@ -11,7 +11,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
-import { CheckInOfferCard } from "@/lib/copilot/check-in-offer-tool";
+import {
+  CheckInOfferCard,
+  drawsOffer,
+} from "@/lib/copilot/check-in-offer-tool";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -42,6 +45,8 @@ function drawn(
     settings?: unknown[];
     allowed?: boolean;
     toolCallId?: string;
+    /** Where the card is drawn: a conversation, unless a case says otherwise. */
+    at?: string;
   } = {},
 ) {
   const posted: unknown[] = [];
@@ -70,6 +75,7 @@ function drawn(
     return (
       <CheckInOfferCard
         link={BRIEF.link}
+        readWith="mcp__notion__fetch"
         subject={BRIEF.subject}
         toolCallId={options.toolCallId ?? "call_1"}
       />
@@ -81,9 +87,16 @@ function drawn(
     path: "/channel/$channelId",
     component: Card,
   });
+  const elsewhere = createRoute({
+    getParentRoute: () => root,
+    path: "/bots/$agentId",
+    component: Card,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([channel]),
-    history: createMemoryHistory({ initialEntries: ["/channel/ch_1"] }),
+    routeTree: root.addChildren([channel, elsewhere]),
+    history: createMemoryHistory({
+      initialEntries: [options.at ?? "/channel/ch_1"],
+    }),
   });
   const view = render(
     <QueryClientProvider client={client}>
@@ -106,14 +119,43 @@ test("asks about the one thing, and turns on a daily check-in only when pressed"
     expect(posted).toEqual([
       {
         agentId: "assistant",
-        channelId: "ch_1",
         subject: BRIEF.subject,
         focus: "",
         sourceLink: BRIEF.link,
         intervalMinutes: 1440,
+        // What it read with, so the server works out what the check-in reads.
+        readWith: "mcp__notion__fetch",
       },
     ]),
   );
+});
+
+test("an older check-in that read every app is offered again on its page", async () => {
+  const { view } = drawn({
+    settings: [
+      {
+        id: "set_1",
+        agentId: "assistant",
+        channelId: null,
+        focus: "",
+        subject: "Brief",
+        sourceLink: BRIEF.link,
+        sourceKind: "apps",
+        enabled: true,
+        intervalMinutes: 1440,
+      },
+    ],
+  });
+  expect(await view.findByRole("button", { name: "Turn on" })).toBeTruthy();
+});
+
+// A check-in belongs to its Bot, so the card turns one on wherever it is drawn.
+test("turns on outside a conversation too, and sends no conversation", async () => {
+  const { view, posted } = drawn({ at: "/bots/assistant" });
+  fireEvent.click(await view.findByRole("button", { name: "Turn on" }));
+  await waitFor(() => expect(posted).toHaveLength(1));
+  expect(posted[0]).not.toHaveProperty("channelId");
+  expect(view.queryByText(/Open this in a conversation/)).toBeNull();
 });
 
 test("Not now leaves nothing running, and stays said after a reload", async () => {
@@ -156,4 +198,16 @@ test("offers nothing where check-ins are turned off for the person", async () =>
   await settleReactWork();
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(view.queryByText(/Keep an eye on/)).toBeNull();
+});
+
+// FOUND IN AN AUDIT: a card offered a check-in on a page the Bot had read in its browser; it never ran.
+test("no card is drawn when the server said there is nothing to offer", () => {
+  expect(
+    drawsOffer(
+      "Nothing to offer: A check-in can only read an app the person connected…",
+    ),
+  ).toBe(false);
+  expect(drawsOffer("A card in front of the person offers…")).toBe(true);
+  // An answer from before the tool said either still draws, as it always did.
+  expect(drawsOffer(undefined)).toBe(true);
 });

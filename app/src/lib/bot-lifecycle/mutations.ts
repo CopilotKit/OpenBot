@@ -33,6 +33,28 @@ export function setBotPausedMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Pause all of the person's Bots, or turn them back on. Each Bot's own pause is kept, so turning
+ * this back on returns every Bot to the state it had.
+ */
+export function setPausedAllMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (paused: boolean) =>
+      client("/api/bots/pause-all", {
+        method: "PUT",
+        body: { paused },
+        fallback: paused
+          ? "Couldn't pause your Bots. Try again."
+          : "Couldn't turn your Bots back on. Try again.",
+      }),
+    onSuccess: () =>
+      Promise.all([
+        invalidateLifecycle(queryClient),
+        queryClient.invalidateQueries({ queryKey: ["proactive"] }),
+      ]),
+  });
+}
+
 export function setBotNotifyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: {

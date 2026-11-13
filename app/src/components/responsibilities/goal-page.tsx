@@ -23,7 +23,10 @@ import {
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  backLabelFor,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -139,9 +142,12 @@ export function summaryFor(
 export function GoalRoutePage({
   goalId,
   agentId,
+  from,
 }: {
   goalId: string;
   agentId?: string;
+  /** The conversation it was opened from, by its header's clock: the back button returns there. */
+  from?: string;
 }) {
   const goals = useQuery(responsibilitiesQueryOptions());
   const routines = useQuery(routinesQueryOptions());
@@ -149,7 +155,7 @@ export function GoalRoutePage({
     deleteResponsibilityMutationKey,
     (id) => id === goalId,
   );
-  const back = routinesOf(agentId);
+  const back = routinesOf(agentId, from);
   const goal = goals.data?.find((row) => row.id === goalId);
 
   if (goal)
@@ -251,7 +257,7 @@ export function GoalPage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: backLabelFor(back), linkProps: back }}
       description={summaryFor(goal, triggers.data, routines)}
       title={goal.title}
     >

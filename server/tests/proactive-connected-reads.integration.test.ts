@@ -633,10 +633,7 @@ function deployment(pluginStore: ReturnType<typeof pluginStoreFor>) {
     queue,
     owner: `connected-${randomUUID()}`,
     runTurn: turn,
-    resolveScope: async (ownerUserId, channelId, agentId) =>
-      ownerUserId === owner && channelId === channelOf(agentId)
-        ? { ownerUserId, channelId, agentId, threadId: `${channelId}-thread` }
-        : null,
+    canUseBot: async (ownerUserId) => ownerUserId === owner,
     attention: { notifyAttention: async () => {} },
     ...checkInToolsFor((ownerUserId) => load(ownerUserId), scope),
     catalogue: pluginStore,
@@ -799,7 +796,7 @@ describe("a check-in reads what the person connected, through the tools that say
       why: SKIPPED_BECAUSE.no_sources,
     });
     expect(SKIPPED_BECAUSE.no_sources).toBe(
-      "Nothing to check: this Bot can't read anything you've connected. Connect an app with your own account.",
+      "This Bot can't read any app you've connected. Connect one in Connections.",
     );
     expect(asked).toEqual([]);
 

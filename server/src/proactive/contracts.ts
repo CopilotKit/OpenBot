@@ -38,6 +38,12 @@ export type ProactiveRunOutcome =
   | "skipped";
 
 /**
+ * What a check-in reads: every app the person connected with their own account that its Bot can
+ * read (`apps`), one of those apps (`app`), or one public web page (`page`).
+ */
+export type CheckInSourceKind = "apps" | "app" | "page";
+
+/**
  * Why a check-in was skipped before any model call. `busy` means another check-in for the same
  * setting was already running.
  */
@@ -48,7 +54,8 @@ export type ProactiveSkipReason =
   | "capped"
   | "unreachable"
   | "no_sources"
-  | "busy";
+  | "busy"
+  | "paused_all";
 
 /* ------------------------------------------------------------------------------------------------
  * `/api/proactive` (proactive engine).
@@ -74,12 +81,21 @@ export type ProactiveSettingPayload = {
   id: string;
   ownerUserId: string;
   agentId: string;
-  channelId: string;
+  /** The conversation an older check-in made, or null: a check-in belongs to its Bot. */
+  channelId: string | null;
   threadId: string;
   focus: string;
   /** What this check-in watches, in the person's words; empty for one that watches everything. */
   subject: string;
   sourceLink: string | null;
+  /** What it reads: every readable app, one app (`sourceServerId`), or one web page (`sourceLink`). */
+  sourceKind: CheckInSourceKind;
+  sourceServerId: string | null;
+  /**
+   * What it reads, as its row says it: "Gmail", "your apps", "github.com". Null when that can't be
+   * told (an app no longer in the catalogue).
+   */
+  reads: string | null;
   enabled: boolean;
   intervalMinutes: number;
   nextRunAt: string;
@@ -90,6 +106,32 @@ export type ProactiveSettingPayload = {
   updatedAt: string;
   /** Null before its first check-in. */
   lastRun: LastCheckInPayload | null;
+  /** Null, or why it can't look and the step that fixes it (`CheckInHealth`). */
+  health: CheckInHealth | null;
+};
+
+/**
+ * Why a check-in that is on can't look, and what fixes it. A check-in can't look when the Bot can read
+ * nothing it should (no app the person connected, the app it reads is gone, no web search for a
+ * page), the Bot is no longer the person's to use, or its last three check-ins failed. Paused, turned
+ * off, over the daily limit and busy are not this: the person chose them, or they pass by themselves.
+ *
+ * `fix`: `connect` opens Connections (that app's page when `app` names one), `open` opens that app's
+ * page under Connections when `app` names one and the check-in's own page otherwise, `remove` removes
+ * the check-in.
+ */
+export type CheckInHealth = {
+  why: string;
+  fix: "connect" | "open" | "remove";
+  app: { serverId: string; title: string } | null;
+};
+
+/** `GET /api/proactive/readable?agentId=`: what a check-in for this Bot could read. */
+export type CheckInReadableResponse = {
+  /** The apps the person connected with their own account that this Bot can read, by title. */
+  apps: string[];
+  /** Whether this Bot holds a tool that reads a web page by its address. */
+  page: boolean;
 };
 
 /**
@@ -263,6 +305,8 @@ export type BotAttentionPayload = {
 export type AttentionResponse = {
   bots: BotAttentionPayload[];
   lastPingId: string | null;
+  /** Whether the person paused all their Bots: every one then behaves as a paused Bot does. */
+  pausedAll: boolean;
 };
 
 /* ------------------------------------------------------------------------------------------------

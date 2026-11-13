@@ -10,7 +10,7 @@ const ACTOR = { id: "u1", email: "person@openbot.test", role: "user" } as const;
 function app() {
   const rows: AuditEventInput[] = [];
   const calls: string[] = [];
-  const state = { paused: false, notify: "all" as string };
+  const state = { paused: false, notify: "all" as string, pausedAll: false };
   const services = {
     lifecycle: {
       get: async () => ({
@@ -31,6 +31,12 @@ function app() {
         state.notify = notify;
       },
       pausedFor: async () => (state.paused ? ["bot-1"] : []),
+      pausedAll: async () => state.pausedAll,
+      setPausedAll: async (owner: string, paused: boolean) => {
+        calls.push(`pause-all:${owner}:${paused}`);
+        state.pausedAll = paused;
+        return paused ? 3 : 0;
+      },
       notifyFor: async () => ({}),
       routing: async () => ({
         progress: "all",
@@ -112,6 +118,28 @@ const post = (body?: unknown) => ({
 });
 
 describe("Bot lifecycle routes", () => {
+  test("pause all is the caller's, audited, and the sidebar's read says so", async () => {
+    const { rows, calls, hono } = app();
+    const put = (body: unknown) =>
+      hono.request("http://t/api/bots/pause-all", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const paused = await put({ paused: true });
+    expect(await paused.json()).toEqual({ pausedAll: true, stoppedTurns: 3 });
+    expect(
+      await (await hono.request("http://t/api/bots/attention")).json(),
+    ).toMatchObject({ pausedAll: true });
+    await put({ paused: false });
+    expect(calls).toEqual(["pause-all:u1:true", "pause-all:u1:false"]);
+    expect(rows.map((row) => [row.eventType, row.payload.all])).toEqual([
+      ["bot.paused", true],
+      ["bot.resumed", true],
+    ]);
+    expect((await put({ paused: "yes" })).status).toBe(400);
+  });
+
   test("pause and resume act for the caller and are audited", async () => {
     const { rows, calls, hono } = app();
     const paused = await hono.request("http://t/api/bots/bot-1/pause", post());
@@ -203,6 +231,7 @@ describe("Bot lifecycle routes", () => {
         },
       ],
       lastPingId: "ping-7",
+      pausedAll: false,
     });
   });
 

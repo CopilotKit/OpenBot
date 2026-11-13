@@ -115,7 +115,8 @@ export type CheckInSkipReason =
   | "capped"
   | "unreachable"
   | "no_sources"
-  | "busy";
+  | "busy"
+  | "paused_all";
 
 /**
  * One Bot's check-ins over the window, as the admin's Check-ins page reads them. Counts only: the

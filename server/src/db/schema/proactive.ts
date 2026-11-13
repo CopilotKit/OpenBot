@@ -10,6 +10,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type {
+  CheckInSourceKind,
   ProactiveRunOutcome,
   ProactiveRunTrigger,
   ProactiveSkipReason,
@@ -46,7 +47,12 @@ export const proactiveSettings = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
-    channelId: text("channel_id").notNull(),
+    /**
+     * The conversation a check-in made before it belonged to its Bot alone. Null on every check-in
+     * made since: nothing was ever posted in it, and deleting it silently stopped the check-in. Kept
+     * on older rows, and read by nothing that decides whether a check-in runs.
+     */
+    channelId: text("channel_id"),
     threadId: text("thread_id").notNull(),
     focus: text("focus").notNull().default(""),
     /**
@@ -57,6 +63,24 @@ export const proactiveSettings = pgTable(
     subject: text("subject").notNull().default(""),
     /** The page or place it watches, where there is one to link to. */
     sourceLink: text("source_link"),
+    /**
+     * What it reads (`CheckInSourceKind`): every app the person connected that the Bot can read
+     * (`apps`, every check-in made before this was kept), one of them (`app`, named in
+     * `source_server_id`), or one public web page (`page`, at `source_link`). Worked out by the
+     * server from the tool the Bot read the thing with, never taken from a label.
+     */
+    sourceKind: text("source_kind")
+      .$type<CheckInSourceKind>()
+      .notNull()
+      .default("apps"),
+    /** The app an `app` check-in reads; null for any other kind. */
+    sourceServerId: text("source_server_id"),
+    /**
+     * A `page` check-in's newest read of its page, normalised and capped (`PAGE_KEPT_CHARS`), and its
+     * hash: the baseline the next run compares with. Null until its first read, and on any other kind.
+     */
+    pageText: text("page_text"),
+    pageHash: text("page_hash"),
     enabled: boolean("enabled").notNull().default(true),
     intervalMinutes: integer("interval_minutes").notNull().default(60),
     nextRunAt: timestamp("next_run_at", { withTimezone: true })
@@ -89,6 +113,10 @@ export const proactiveSettings = pgTable(
     check(
       "proactive_settings_status_check",
       sql`${table.lastStatus} IN ('idle', 'running', 'succeeded', 'error')`,
+    ),
+    check(
+      "proactive_settings_source_kind_check",
+      sql`${table.sourceKind} IN ('apps', 'app', 'page')`,
     ),
   ],
 );
@@ -236,7 +264,7 @@ export const proactiveRuns = pgTable(
      */
     check(
       "proactive_runs_skip_reason_check",
-      sql`(${table.outcome} = 'skipped' AND ${table.skipReason} IS NOT NULL AND ${table.skipReason} IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy')) OR (${table.outcome} <> 'skipped' AND ${table.skipReason} IS NULL)`,
+      sql`(${table.outcome} = 'skipped' AND ${table.skipReason} IS NOT NULL AND ${table.skipReason} IN ('off_admin', 'off_person', 'paused', 'capped', 'unreachable', 'no_sources', 'busy', 'paused_all')) OR (${table.outcome} <> 'skipped' AND ${table.skipReason} IS NULL)`,
     ),
     // Only a running check-in is unfinished.
     check(

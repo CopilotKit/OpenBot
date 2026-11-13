@@ -91,6 +91,7 @@ const router = createDeliveryRouter({
   store: createDeliveryStore(database),
   queue: createWorkQueue(database),
   owner: `${prefix}-delivery`,
+  canUseBot: scopes.canUseBot,
   authoriseScope: scopes.authorise,
   scopeFor: scopes.scopeFor,
   runTurn: async () => {

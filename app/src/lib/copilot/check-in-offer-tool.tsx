@@ -1,8 +1,10 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
-import { OFFER_CHECK_IN_TOOL } from "@openbot/shared/check-in-offer";
+import {
+  NOTHING_TO_OFFER,
+  OFFER_CHECK_IN_TOOL,
+} from "@openbot/shared/check-in-offer";
 import { IconRadar } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,7 @@ const parameters = z.object({
   subject: z.string().optional(),
   focus: z.string().optional(),
   link: z.string().optional(),
+  readWith: z.string().optional(),
 });
 
 const INTERVALS = [
@@ -65,15 +68,25 @@ function rememberDeclined(toolCallId: string) {
   }
 }
 
+/** Whether the tool's answer offered a check-in, so the card is drawn. */
+export function drawsOffer(result: unknown): boolean {
+  return !String(result ?? "").startsWith(NOTHING_TO_OFFER);
+}
+
 export function CheckInOfferTool() {
   useRenderTool({
     name: OFFER_CHECK_IN_TOOL,
     parameters,
-    render: ({ parameters: given, status, toolCallId }) =>
-      status === "complete" && given?.subject ? (
+    /*
+     * Not drawn when the server said there is nothing to offer: the thing was read some way a
+     * check-in can't read, so a card would offer a check-in that never runs.
+     */
+    render: ({ parameters: given, result, status, toolCallId }) =>
+      status === "complete" && given?.subject && drawsOffer(result) ? (
         <CheckInOfferCard
           focus={given.focus}
           link={given.link}
+          readWith={given.readWith}
           subject={given.subject}
           toolCallId={toolCallId}
         />
@@ -86,15 +99,17 @@ export function CheckInOfferCard({
   subject,
   focus,
   link,
+  readWith,
   toolCallId,
 }: {
   subject: string;
   focus?: string;
   link?: string;
+  /** The tool the Bot read it with, sent back so the server works out what the check-in reads. */
+  readWith?: string;
   toolCallId: string;
 }) {
   const agentId = useDeclaredBotId();
-  const channelId = useParams({ strict: false }).channelId;
   const bot = useQuery({
     ...agentQueryOptions(agentId ?? ""),
     enabled: Boolean(agentId),
@@ -113,6 +128,8 @@ export function CheckInOfferCard({
     (setting) =>
       setting.agentId === agentId &&
       setting.enabled &&
+      // An older one on this page read every app instead: accepting this makes it read the page.
+      !(link && setting.sourceKind === "apps") &&
       (link
         ? setting.sourceLink === link
         : (setting.subject ?? "").toLowerCase() === subject.toLowerCase()),
@@ -160,11 +177,6 @@ export function CheckInOfferCard({
           {create.error.message}
         </p>
       ) : null}
-      {channelId ? null : (
-        <p className="text-muted-foreground text-sm">
-          Open this in a conversation with {who} to turn it on.
-        </p>
-      )}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Select
           disabled={create.isPending}
@@ -197,18 +209,17 @@ export function CheckInOfferCard({
           Not now
         </Button>
         <Button
-          disabled={create.isPending || !channelId}
+          disabled={create.isPending}
           onClick={() =>
-            channelId &&
             create.mutate({
               agentId,
-              channelId,
               subject,
               focus: focus ?? "",
               ...(link && /^https?:\/\//.test(link)
                 ? { sourceLink: link }
                 : {}),
               intervalMinutes: minutes,
+              ...(readWith ? { readWith } : {}),
             })
           }
           size="sm"
