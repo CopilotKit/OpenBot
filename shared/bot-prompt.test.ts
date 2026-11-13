@@ -267,6 +267,12 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     // A question about ability gets an answer and an offer, not the work or a capability list.
     expect(said).toContain("a question about whether you can do something");
     expect(said).toContain("an offer to do it");
+    // Answered from the tools it holds, not from memory: the Smartlead tools cannot write a
+    // sequence, and a Bot that never looked said yes.
+    expect(said).toContain(
+      "answer from the tools you hold, searching for one first",
+    );
+    expect(said).toContain("say plainly what they cannot do");
     expect(said).toContain("do not do the work");
     expect(said).toContain("list everything you can do");
     // A request worded as a question is still a request.
