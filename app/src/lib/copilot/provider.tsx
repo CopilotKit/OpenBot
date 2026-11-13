@@ -17,6 +17,7 @@ import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
 import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
+import { OrchestrationTools } from "./orchestration-tools";
 import { SandboxedTools } from "./sandboxed-tools";
 import { SignInTool } from "./sign-in-tool";
 import { SkillTools } from "./skill-tools";
@@ -77,6 +78,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         */}
         <HandoffTool />
         <EscalationTool />
+        {/* A Bot handing work into a task thread, reacting, or giving a thread's link. Server-run. */}
+        <OrchestrationTools />
         {/* A Bot offering a check-in on what the two of them just looked at. Runs on the server. */}
         <CheckInOfferTool />
         {/* A coding harness Bot's own tools, which it runs itself: commands, diffs and its plan. */}
