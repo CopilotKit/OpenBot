@@ -249,6 +249,7 @@ export function createAuth(
                 clientId: authConfig.okta.clientId,
                 clientSecret: authConfig.okta.clientSecret,
                 issuer: authConfig.okta.issuer,
+                ...(authConfig.okta.scopes ? { scopes: authConfig.okta.scopes } : {}),
               }),
             ],
           }),
