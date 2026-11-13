@@ -409,16 +409,20 @@ default branch, the same run starts from a terminal:
 
 ```sh
 gh workflow run internal-build.yml --ref my-branch
+gh workflow run internal-build.yml --ref my-branch -f backend_tag=v1.0.3
 ```
 
-The run builds the images for that commit, then a Mac (Apple Silicon) installer and a Windows (x64)
-installer. The images are pushed tagged `sha-<commit>` and never `latest`, so the release images
-stay where they are.
+The run builds the Bot images for that commit, then a Mac (Apple Silicon) installer and a Windows
+(x64) installer. The Bot images are pushed tagged `sha-<commit>` and never `latest`, so the release
+images stay where they are. The OpenBot server, computer, supervisor and all-in-one images are the
+published ones at `backend_tag`: `main` unless you choose another, such as a version (`v1.0.3`) or
+a `test-<date>-<run>` tag.
 
 Each installer is pinned to what the run built:
 
 - its deployment version is `internal-<sha12>`, the first twelve characters of the commit
-- its images are the `sha-<commit>` images of that commit, by digest
+- its Bot images are the `sha-<commit>` images of that commit, and its OpenBot images those at
+  `backend_tag`, all by digest
 
 A pinned installer never asks for `releases/latest`. Opening it installs that exact build, and it
 replaces whatever deployment is installed on the machine, keeping its data. OpenBot's database does
