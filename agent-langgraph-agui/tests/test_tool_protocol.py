@@ -661,15 +661,19 @@ async def test_concurrent_requests_keep_tool_ownership_and_assertions_separate(
 
 
 @pytest.mark.asyncio
-async def test_undeclared_model_tool_is_refused_without_callback(boundary):
+async def test_undeclared_model_tool_is_handed_back_without_callback(boundary):
+    """A call to a tool this run was not offered is never run here, and never ends the run in an
+    error: it is handed back for the caller to answer, as a call the surface owns is."""
     boundary["force_call"] = "undeclared_tool"
     events = await run_protocol(
         run_input(["granted_lookup"], deployment=["granted_lookup", "undeclared_tool"]),
         allow_error=True,
     )
-    assert any(
-        e["type"] == "RUN_ERROR" and "not offered" in e["message"] for e in events
-    )
+    assert not any(e["type"] == "RUN_ERROR" for e in events)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert [
+        e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"
+    ] == ["undeclared_tool"]
     assert boundary["callback"] == []
 
 
