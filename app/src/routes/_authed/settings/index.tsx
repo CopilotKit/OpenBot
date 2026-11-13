@@ -10,6 +10,7 @@ import { AiModelSection } from "@/components/settings/ai-connection";
 import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
+import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { UsageDataSection } from "@/components/settings/usage-data";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -117,6 +118,8 @@ function RouteComponent() {
           ))}
         </PageRows>
       </PageSection>
+      {/* Last: OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
+      <StarOnGitHubSection />
     </PageShell>
   );
 }
