@@ -456,7 +456,7 @@ mod port_tests {
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 8);
+        assert_eq!(values.len(), 7);
         assert!(!values.contains(&port));
         // Checked on the binds that chose them, still open. Given back and bound again here, a
         // port can still be taken: a process another test is starting holds a copy of every open
