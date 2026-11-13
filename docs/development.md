@@ -135,10 +135,6 @@ bun run test
 bun run build
 ```
 
-`bun run test:e2e` runs the product end to end, as CI does: a fresh, isolated stack from the
-published images, this checkout's app in a real browser, and every model call answered from
-recorded fixtures. See [e2e/README.md](../e2e/README.md).
-
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests. It runs the suite in shards, one runner each, and the `tests` check passes only when every shard passed and their counts add up to the floor in `scripts/test-floor.ts`. To run one shard the way CI does, pass it to the same script: `bun run test:ci --shard=2/4`.
 
 `bun run test:smoke` is separate and needs a deployment that is up, and a session on it:
