@@ -364,6 +364,10 @@ every deployment:
   then any that can't look or failed, then by what starts next, at most five, then **All routines**
   with how many it has in all. Its header counts them, "1 running · 3 scheduled · 1 on demand".
   Activity no longer lists the Bot's routines and goals a second time.
+- **A clock in a conversation's header shows the Bot's routines.** Before the computer and the gear,
+  it counts the routines, goals and check-ins the Bot has on, in amber when one can't look or
+  failed, and opens them all in a dialog, with Open Routines and New routine. A routine opened from
+  there goes back to the conversation. The message box's clock, which sets one up, stays.
 - **Pause all your Bots with one switch.** Routines starts with **All Bots active**. Turned off,
   every one of your Bots behaves as a paused Bot does: nothing runs on its own, running work stops,
   and Bots don't answer your Slack, Teams or text messages, though each still answers you in a

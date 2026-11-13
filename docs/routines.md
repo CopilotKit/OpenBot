@@ -67,6 +67,18 @@ row counts it. A Bot with nothing on gets no section. While the Bot is paused, b
 all, its rows read "Paused". Activity on a Bot's page keeps what is not a routine (hand-offs,
 follow-ups, queued runs, what waits on you), so nothing shows twice. The server is unchanged.
 
+### In a conversation
+
+A one-Bot conversation's header has a clock before the computer and the gear (`RoutinesClock` in
+`app/src/components/routines/routines-clock.tsx`). Its number is how many of the Bot's routines,
+goals and check-ins are on, counted as the Bot's page counts its Routines section, and it turns
+amber when one can't look or failed last time. Its name says whose and how many ("Scout's routines,
+3 on"). A press opens the Bot's Routines page in a dialog, every row on and off, drawn by
+`RoutinesList`; a row opens its own page, whose back button returns to the conversation (`from` on
+the routine pages' address). The dialog's footer has **Open Routines** and **New routine**, with
+this Bot and conversation chosen. A group conversation has no clock. The message box's own clock,
+"Set up a routine", stays.
+
 ### Pause all
 
 Routines' every-Bot card starts with **All Bots active**, the person's own switch for all their Bots
