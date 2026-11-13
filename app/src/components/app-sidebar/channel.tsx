@@ -156,9 +156,9 @@ export const Channel = memo(function Channel({
         channelId={channelId}
         // Away first when this row's channel is the one on screen.
         leave={isOpen ? () => navigate({ to: "/" }) : undefined}
-        name={name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={summary || untitled || ""}
       />
     </>
   );
