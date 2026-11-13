@@ -208,16 +208,32 @@ function ActivitySection({
 const GLANCE = 3;
 
 /**
- * Running work first, then what is lined up, then the goals that wait to be asked, as many as the
- * Bot's page shows.
+ * Whether an item is one of the Bot's routines or goals, or a run of one under way: the Routines
+ * section above Activity on the Bot's page lists those, so Activity leaves them out and nothing
+ * shows twice. A queued run of a goal is kept, as Scheduled keeps it.
+ */
+function inRoutinesSection(item: ActivityItem): boolean {
+  return (
+    item.kind === "routine" ||
+    (item.kind === "responsibility" &&
+      !item.id.startsWith("responsibility-run:")) ||
+    (item.kind === "responsibility" && item.status !== "queued")
+  );
+}
+
+/**
+ * What the Bot's page shows under Activity: running work first, then what is lined up, as many as
+ * fit. What is not a routine: hand-offs, follow-ups the Bot set for itself, queued runs, and what
+ * waits on the person. Its routines and goals are in the Routines section above it.
  */
 function upcomingOf(activity: BotActivity | undefined) {
   return activity
     ? [
         ...activity.inProgress.map((item) => ({ item, live: true })),
         ...activity.scheduled.map((item) => ({ item, live: false })),
-        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
-      ].slice(0, GLANCE)
+      ]
+        .filter(({ item }) => !inRoutinesSection(item))
+        .slice(0, GLANCE)
     : [];
 }
 

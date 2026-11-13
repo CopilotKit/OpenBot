@@ -36,13 +36,18 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const items = (count: number, name = "Item", needsYou = false) =>
+const items = (
+  count: number,
+  name = "Item",
+  needsYou = false,
+  kind: ActivityItem["kind"] = "routine",
+) =>
   Array.from(
     { length: count },
     (_, index) =>
       ({
         id: `${name}-${index}`,
-        kind: "routine",
+        kind,
         title: `${name} ${index + 1}`,
         detail: null,
         status: "running",
@@ -112,9 +117,11 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
   expect(activitySummary(data)).toBe("1 scheduled · 1 on demand");
   expect(activitySummary({ ...data, scheduled: [] })).toBe("1 on demand");
 
-  const page = glance(data);
+  // The Bot's page lists its routines and goals in their own section, so Activity has none to show,
+  // and the row to all of it, under For you, counts them.
+  const page = glance(data, BotActivityRow);
   expect(await page.findByText("1 scheduled · 1 on demand")).toBeTruthy();
-  expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
+  expect(page.queryByText("Watch OpenBot releases")).toBeNull();
   cleanup();
 
   // The Activity page doesn't list them a second time: one row goes to the Bot's Routines.
@@ -259,10 +266,16 @@ function glance(
   );
 }
 
-test("running and scheduled work shows on the Bot's page, running first, three at most", async () => {
+test("running and scheduled work shows on the Bot's page, running first, three at most, and no routine or goal", async () => {
   const view = glance({
-    inProgress: items(2, "Running", true),
-    scheduled: items(3, "Scheduled"),
+    inProgress: [
+      ...items(1, "Routine run"),
+      ...items(2, "Running", true, "handoff"),
+    ],
+    scheduled: [
+      ...items(1, "A routine"),
+      ...items(3, "Scheduled", false, "follow_up"),
+    ],
     completed: items(9, "Done"),
   });
 
@@ -276,8 +289,11 @@ test("running and scheduled work shows on the Bot's page, running first, three a
     "Scheduled 1",
     "All activity",
   ]);
-  expect(view.getByText("2 in progress · 3 scheduled")).toBeTruthy();
+  expect(view.getByText("3 in progress · 4 scheduled")).toBeTruthy();
   expect(view.queryByText("Done 1")).toBeNull();
+  // The Routines section above Activity lists those; nothing shows twice.
+  expect(view.queryByText("Routine run 1")).toBeNull();
+  expect(view.queryByText("A routine 1")).toBeNull();
 });
 
 test("with nothing running or scheduled, there is no Activity section, and For you holds the one row", async () => {
@@ -302,7 +318,7 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
   // Seen on the Bot page: "...releases) and post one l", cut mid-word with nothing to say so.
   const long =
     "Check the latest release of CopilotKit/OpenBot on GitHub (https://github.com/CopilotKit/OpenBot/releases) and post one line in this conversation with its version number (tag) and release date.";
-  const [scheduled] = items(1, "Scheduled");
+  const [scheduled] = items(1, "Scheduled", false, "follow_up");
   const view = glance({
     inProgress: [],
     scheduled: [{ ...(scheduled as ActivityItem), title: long }],
@@ -319,11 +335,15 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
 
 test("a goal's activity row says Goal and opens the Bot's routines", async () => {
   const [running] = items(1, "Close the month");
-  const view = glance({
-    inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
-    scheduled: [],
-    completed: [],
-  });
+  // On the Activity page: the Bot's page lists a running goal in its Routines section instead.
+  const view = glance(
+    {
+      inProgress: [{ ...(running as ActivityItem), kind: "responsibility" }],
+      scheduled: [],
+      completed: [],
+    },
+    BotActivitySections,
+  );
   const title = await view.findByText("Close the month 1");
   const row = title.closest("a");
   expect(row?.getAttribute("href")).toBe("/bots/scout/routines");
