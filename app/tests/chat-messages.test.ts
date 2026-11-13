@@ -125,6 +125,39 @@ describe("a Bot's turn that reacts or hands work on", () => {
       "assistant-next",
     ]);
   });
+
+  test("one line, then the card: a second line after it is not drawn, and the task's report is", () => {
+    const report = "task-report:result:t1:run-1";
+    const items = toVisibleChatItems([
+      { id: "user-chart", role: "user", content: "Chart my revenue." },
+      {
+        id: "assistant-line",
+        role: "assistant",
+        content: "On it, I'll chart those figures.",
+        toolCalls: [call("call-delegate", "delegate", '{"title":"Revenue"}')],
+      },
+      {
+        id: "tool-delegate",
+        role: "tool",
+        toolCallId: "call-delegate",
+        content: '{"taskId":"t1","channelId":"c1","title":"Revenue"}',
+      },
+      {
+        id: "assistant-again",
+        role: "assistant",
+        content: "The task is running. Its chart will be posted here.",
+      },
+      { id: report, role: "assistant", content: "Revenue rose 42%." },
+      { id: "assistant-after", role: "assistant", content: "Anything else?" },
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      "user-chart",
+      "assistant-line",
+      "call-delegate",
+      report,
+      "assistant-after",
+    ]);
+  });
 });
 
 /**

@@ -4,6 +4,7 @@ import {
   LINK_TOOL,
   REACT_TOOL,
   REACTIONS,
+  readTaskReport,
 } from "@openbot/shared/orchestration";
 import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
 import { classifyAttachment } from "@/lib/channels/attachments";
@@ -650,6 +651,26 @@ function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
       const [line] = kept.splice(said, 1);
       if (line) kept.splice(card, 0, line);
     }
+    /*
+     * ONE LINE, THEN THE CARD. A model told that a started task ends its reply still wrote a second
+     * line after the result came back ("The task is running. Its chart will be posted here."), which
+     * says again what the line above and the card already say. Words after the card, up to the
+     * task's own reports (which the deployment writes later, in the same turn), are not drawn.
+     */
+    const lastCard = kept.findLastIndex((item) => named(item, DELEGATE_TOOL));
+    const firstCard = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const lineFirst = kept
+      .slice(0, Math.max(firstCard, 0))
+      .some((item) => item.kind === "text" && item.role === "assistant");
+    if (lineFirst)
+      for (let at = lastCard + 1; at < kept.length; at += 1) {
+        const item = kept[at] as VisibleChatItem;
+        if (item.kind === "text" && readTaskReport(item.id)) break;
+        if (item.kind === "text" && item.role === "assistant") {
+          kept.splice(at, 1);
+          at -= 1;
+        }
+      }
     out.push(...kept);
   };
   for (const item of items) {
