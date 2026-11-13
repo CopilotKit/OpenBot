@@ -50,6 +50,7 @@ import {
   stoppedRoutinesGuidance,
 } from "@/lib/routines/queries";
 import { NewRoutineButton } from "./new-routine-button";
+import { RunningDot } from "./running-dot";
 import { lastRunLabel, scheduleWords } from "./routine-page";
 
 type BotDirectory = Map<string, AgentProfile>;
@@ -59,16 +60,22 @@ type BotDirectory = Map<string, AgentProfile>;
  * else `routineDoes`), when it starts, that it acts, and a last run worth knowing about. The
  * whole row links to its page, where it is switched, run, read back and deleted.
  */
-function RoutineItem({
+export function RoutineItem({
   routine,
   botName,
   agentId,
+  running = false,
+  paused = false,
 }: {
   routine: RoutineRecord;
   /** Absent on one Bot's own list. */
   botName?: string;
   /** The Bot whose own list this is, so the page's back link returns to it. */
   agentId?: string;
+  /** Running now: the pulsing dot Activity rows use. */
+  running?: boolean;
+  /** Its Bot is paused, by itself or with all: the row says so in place of when it starts. */
+  paused?: boolean;
 }) {
   const lastRun = lastRunLabel(routine.lastRun);
   const outcome = routine.lastRun?.status;
@@ -76,7 +83,9 @@ function RoutineItem({
   const line = [
     botName,
     routine.enabled
-      ? scheduleWords(routine)
+      ? paused
+        ? "Paused"
+        : scheduleWords(routine)
       : "Paused. Nothing starts it until you turn it on",
     routine.enabled ? "Acts" : null,
   ]
@@ -93,8 +102,9 @@ function RoutineItem({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         {routine.enabled ? <IconClock /> : <IconPlayerPause />}
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent className={routine.enabled ? "" : "opacity-60"}>
         {/* The clamp is on the words: on the title itself it undid the gap before the kind label. */}
@@ -136,12 +146,18 @@ function RoutineItem({
  * A chevron rather than a Switch, although pausing is binary: the row opens a page, and a Switch
  * inside a row that is itself a link would be a control nested in a control.
  */
-function GoalItem({
+export function GoalItem({
   goal,
   routines,
   botName,
   agentId,
+  running = false,
+  paused = false,
 }: {
+  /** Running now: the pulsing dot Activity rows use. */
+  running?: boolean;
+  /** Its Bot is paused, by itself or with all: the row says so in place of when it starts. */
+  paused?: boolean;
   goal: ResponsibilityRecord;
   /** Undefined when the routines read failed: its starts are then not known. */
   routines: readonly RoutineRecord[] | undefined;
@@ -184,7 +200,9 @@ function GoalItem({
       ? "Paused. Nothing starts it until you resume it"
       : goal.status === "completed"
         ? "Completed"
-        : starts,
+        : paused
+          ? "Paused"
+          : starts,
     goal.status === "active" ? "Acts" : null,
   ]
     .filter(Boolean)
@@ -200,8 +218,9 @@ function GoalItem({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         <Icon />
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
         <ItemTitle>

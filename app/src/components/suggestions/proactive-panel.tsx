@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
 import { usePausedAll } from "@/components/bots/paused-all";
+import { RunningDot } from "@/components/routines/running-dot";
 import {
   PageEmpty,
   PageRows,
@@ -459,7 +460,10 @@ export function SettingRow({
   showBot = true,
   label,
   agentId,
+  running = false,
 }: {
+  /** Looking now: the pulsing dot Activity rows use. */
+  running?: boolean;
   setting: ProactiveSetting;
   botName: string;
   blocked: string | null;
@@ -494,8 +498,9 @@ export function SettingRow({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <ItemMedia className="relative" variant="icon">
         <IconRadar />
+        {running ? <RunningDot /> : null}
       </ItemMedia>
       <ItemContent>
         {/* What it watches leads, where it watches one thing; the Bot is who watches it. */}
