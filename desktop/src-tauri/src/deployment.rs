@@ -71,11 +71,13 @@ pub struct Images {
 ///
 /// A published name on the left, a Compose variable on the right, because the two vocabularies are
 /// different and neither is going to change to suit the other.
-pub const IMAGE_VARIABLES: [(&str, &str); 4] = [
+///
+/// No Bot image: Desktop starts no bundled Bot (a picked harness is pinned on its own), and the
+/// retired `agent-bot` and `agent-langgraph` are no longer published.
+pub const IMAGE_VARIABLES: [(&str, &str); 3] = [
     ("server", "SERVER_IMAGE"),
     ("supervisor", "SUPERVISOR_IMAGE"),
     ("agent-computer", "COMPUTER_IMAGE"),
-    ("agent-langgraph-agui", "LANGGRAPH_IMAGE"),
 ];
 
 /// Read the manifest laid down beside the deployment and turn it into Compose variables.
@@ -1341,9 +1343,9 @@ mod tests {
     fn a_manifest_missing_an_image_is_refused_rather_than_filled_in_from_compose() {
         // Compose's defaults are local build names. Falling back to them would run four published
         // images beside one that does not exist, and say nothing about the difference.
-        let missing = pin(&manifest(&["server", "supervisor", "agent-computer"]));
+        let missing = pin(&manifest(&["server", "supervisor"]));
         let error = missing.expect_err("an incomplete manifest is not a deployment");
-        assert!(error.contains("agent-langgraph-agui"), "{error}");
+        assert!(error.contains("agent-computer"), "{error}");
     }
 
     #[test]
