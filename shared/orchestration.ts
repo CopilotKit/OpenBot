@@ -188,7 +188,7 @@ const TABLE = /^\s*\|.*\|\s*\n\s*\|?\s*:?-{3,}/;
  * A table is generative UI as much as a component is: the transcript draws it as one, with copy,
  * download and full screen. A result that carried only the opening sentence made the answer plainer
  * for having moved into a thread, so a table the work made comes back with it, as a chart or a card
- * the work drew comes back as its component (tasks/reports.ts).
+ * the work drew comes back as its component.
  */
 export function resultForConversation(reply: string): string {
   const opening = shortResult(reply);
