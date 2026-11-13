@@ -9265,20 +9265,39 @@ async fn podman_machine_plan(short: machine_size::Short) -> Option<machine_size:
         .flatten()
 }
 
+/// Why `resize_podman_machine` did not end with a machine ready for setup, said plainly. `resized`
+/// when the machine is bigger and running but never got ready (`machine_size::Stopped::NotReady`):
+/// the window then offers Retry alone, since the steps to resize by hand are already done.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResizeStopped {
+    said: String,
+    resized: bool,
+}
+
 /// The person said yes: stop the Podman machine OpenBot runs on, give it `cpus` CPUs and
-/// `memory_mib` MiB, and start it again with the containers that were running in it. The window
-/// then retries the setup. A failure is said plainly; Podman's own words are in the log.
+/// `memory_mib` MiB, start it again with the containers that were running in it, and wait until it
+/// answers and reaches a registry (`machine_size::ready_with`). The window then retries the setup.
+/// A failure is said plainly; Podman's own words are in the log.
 #[tauri::command]
-async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), ResizeStopped> {
+    let resized = tauri::async_runtime::spawn_blocking(move || {
         machine_size::resize_here(machine_size::Size { cpus, memory_mib })
     })
     .await
-    .map_err(|error| error.to_string())
-    .and_then(|resized| resized)
-    .map_err(|_| {
-        "OpenBot couldn't resize your Podman machine. Use the steps below instead.".to_string()
-    })
+    .unwrap_or_else(|error| Err(machine_size::Stopped::Refused(error.to_string())));
+    match resized {
+        Ok(()) => Ok(()),
+        Err(machine_size::Stopped::NotReady(_)) => Err(ResizeStopped {
+            said: machine_size::NOT_READY.to_string(),
+            resized: true,
+        }),
+        Err(machine_size::Stopped::Refused(_)) => Err(ResizeStopped {
+            said: "OpenBot couldn't resize your Podman machine. Use the steps below instead."
+                .to_string(),
+            resized: false,
+        }),
+    }
 }
 
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
