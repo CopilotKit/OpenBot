@@ -22,9 +22,20 @@ thread's messages while it waits (webview2-com's `wait_with_pump`), so that is w
 to appear. An out-of-context WinEvent hook on the main thread hears the window being shown and runs
 there, on the thread that installed it, from that same message loop ([`SetWinEventHook`][hook]).
 
+On macOS the window showed a blank dark grey (the system's own window background, #1b1b1b in
+Dark Mode) for up to half a second, then one to three white frames (WKWebView's default white),
+before the setup page painted, and blank white in light. So on macOS too the window is built on the
+setup screens' ground, in light or dark from the start: Tauri's `background_color` sets the
+window's background ([`NSWindow.backgroundColor`][nswindow]), and wry turns off the webview's own
+white (`drawsBackground`) and sets the colour behind its page ([`underPageBackgroundColor`][under],
+wry 0.54.2 and later), so the ground shows through until the page paints. No cover is needed there:
+the wait is a fraction of a second, not Windows' minute.
+
 [background]: https://learn.microsoft.com/microsoft-edge/webview2/reference/win32/icorewebview2controller2#put_defaultbackgroundcolor
 [tauri]: https://docs.rs/tauri/2/tauri/webview/struct.WebviewWindowBuilder.html#method.background_color
 [hook]: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwineventhook
+[nswindow]: https://developer.apple.com/documentation/appkit/nswindow/backgroundcolor
+[under]: https://developer.apple.com/documentation/webkit/wkwebview/underpagebackgroundcolor
 */
 
 /// The cover's heading: the words the setup page uses while OpenBot gets ready.
@@ -122,7 +133,37 @@ pub fn system_dark() -> bool {
         .is_ok_and(|light| light == 0)
 }
 
-#[cfg(not(windows))]
+/**
+Whether macOS is in Dark Mode, which the setup screens follow when OpenBot's own page has not said
+yet: the application's effective appearance matched to Aqua or Dark Aqua, as tao reads it for the
+window's theme ([`effectiveAppearance`][app], [`bestMatch(from:)`][match]). The main window is built
+before it has a theme of its own to ask, so this asks the application. AppKit answers on the main
+thread only, which is where `build_main_window` runs; anywhere else this says light.
+
+[app]: https://developer.apple.com/documentation/appkit/nsapplication/effectiveappearance
+[match]: https://developer.apple.com/documentation/appkit/nsappearance/bestmatch(from:)
+*/
+#[cfg(target_os = "macos")]
+pub fn system_dark() -> bool {
+    objc2::MainThreadMarker::new().is_some_and(|main_thread| {
+        dark_appearance(
+            &objc2_app_kit::NSApplication::sharedApplication(main_thread).effectiveAppearance(),
+        )
+    })
+}
+
+/// Whether `appearance` is a dark one: closer to Dark Aqua than to Aqua.
+#[cfg(target_os = "macos")]
+fn dark_appearance(appearance: &objc2_app_kit::NSAppearance) -> bool {
+    use objc2_app_kit::{NSAppearanceNameAqua, NSAppearanceNameDarkAqua};
+    // SAFETY: AppKit's own appearance names, constants for the life of the process.
+    let (light, dark) = unsafe { (NSAppearanceNameAqua, NSAppearanceNameDarkAqua) };
+    appearance
+        .bestMatchFromAppearancesWithNames(&objc2_foundation::NSArray::from_slice(&[light, dark]))
+        .is_some_and(|name| &*name == dark)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn system_dark() -> bool {
     false
 }
@@ -133,7 +174,8 @@ pub use native::{cover_now, page_painted, shown_after_start, uncover_unless_pain
 #[cfg(not(windows))]
 pub use elsewhere::{page_painted, shown_after_start, uncover_unless_painted, watch};
 
-/// Off Windows nothing is covered: WebKit draws the window's own background until the page paints.
+/// Off Windows nothing is covered. On macOS the window and its webview are built on the setup
+/// screens' ground (`build_main_window`), so that ground is what shows until the page paints.
 #[cfg(not(windows))]
 mod elsewhere {
     use super::Palette;
@@ -804,5 +846,33 @@ mod tests {
         // At 150% the same card in physical pixels; a narrow window keeps 24px each side.
         assert_eq!(sheet(1500, 1257, 1.5).card[..3], [318, 38, 1182]);
         assert_eq!(sheet(600, 600, 1.0).card[0], 24);
+    }
+
+    /// A fresh Mac in Dark Mode opened setup on the light ground: before OpenBot's page has said
+    /// light or dark, the window follows the system's, and every dark appearance AppKit has reads
+    /// as dark.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_dark_mac_builds_the_window_on_the_dark_ground() {
+        use objc2_app_kit::{
+            NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+            NSAppearanceNameVibrantDark, NSAppearanceNameVibrantLight,
+        };
+        let dark = |name: &objc2_app_kit::NSAppearanceName| {
+            dark_appearance(&NSAppearance::appearanceNamed(name).expect("AppKit has it"))
+        };
+        // SAFETY: AppKit's own appearance names, constants for the life of the process.
+        let (aqua, dark_aqua, vibrant_light, vibrant_dark) = unsafe {
+            (
+                NSAppearanceNameAqua,
+                NSAppearanceNameDarkAqua,
+                NSAppearanceNameVibrantLight,
+                NSAppearanceNameVibrantDark,
+            )
+        };
+        assert!(dark(dark_aqua));
+        assert!(dark(vibrant_dark));
+        assert!(!dark(aqua));
+        assert!(!dark(vibrant_light));
     }
 }
