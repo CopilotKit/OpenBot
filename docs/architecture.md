@@ -27,8 +27,6 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 
 `server` and `worker` run from the server image, behind the `openbot` profile, so a plain `docker compose up` starts what it always did and `start.sh` names them. OpenBot Desktop runs those two with PostgreSQL and one `agent-computer` (and `agent-harness` when a harness was picked), and starts no supervisor and none of the bundled Bots.
 
-The compose file also defines optional SPIRE services. `start.sh` does not start them.
-
 Several API replicas can share one database. What one changes reaches the others through PostgreSQL `LISTEN`/`NOTIFY`: `channel_activity` (a conversation's new message or name, for the people watching it), `action_policy_changed` (a saved action policy), `enterprise_settings_changed` (the enterprise controls), and `openbot_work_offered` (work was queued, so a sweep starts now instead of at its next poll). A notification is never the record: the listener re-reads the row or the queue, and a missed one is covered by a re-read on reconnect or the next poll.
 
 ## Runtime flow

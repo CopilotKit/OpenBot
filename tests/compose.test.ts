@@ -419,6 +419,33 @@ test("gives every service a real image when nothing is set, so older Compose rea
   expect(blank).toEqual([]);
 });
 
+/**
+ * SPIRE issued each Bot's computer a workload identity that nothing ever checked, so it went: no
+ * service, volume, setting or mount for it, and the supervisor is not told where one would be.
+ */
+test("runs no SPIRE", () => {
+  const services = composeServices();
+  const mentions = /spire|spiffe/i;
+  expect(Object.keys(services).filter((name) => mentions.test(name))).toEqual(
+    [],
+  );
+  const volumes = Object.keys(
+    (parse(composeFile()) as { volumes?: Record<string, unknown> }).volumes ??
+      {},
+  );
+  expect(volumes.filter((name) => mentions.test(name))).toEqual([]);
+  for (const [name, service] of Object.entries(services)) {
+    const settings = Object.keys(service.environment ?? {});
+    const mounts = (service.volumes ?? []).map((volume) =>
+      typeof volume === "string" ? volume : volume.source,
+    );
+    expect({
+      name,
+      found: [...settings, ...mounts].filter((entry) => mentions.test(entry)),
+    }).toEqual({ name, found: [] });
+  }
+});
+
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();
 
