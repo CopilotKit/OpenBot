@@ -25,7 +25,6 @@ import {
   getCreateBotMockHandler,
   getCreateBotResponseMock,
 } from "@/lib/api/generated/bots/bots.msw";
-import { todayRoutes } from "@/lib/api/served-today";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -34,9 +33,8 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The server here is the spec's own: the MSW handlers Orval generates beside the client, answering
  * at the API's addresses (`/api/v2/organizations/{organizationId}/bots`) with the spec's examples.
- * The table that sends those operations to today's `/api/agents` routes is off, so this is the
- * screen talking to the API as the server will serve it. A request to `/api/agents` is recorded and
- * fails the test, so a hand-written fetch left behind in the screen cannot pass.
+ * This is the screen talking to the API as the server serves it. A request to `/api/agents` is
+ * recorded and fails the test, so a hand-written fetch or an old address left behind cannot pass.
  */
 
 const requests: string[] = [];
@@ -64,7 +62,6 @@ server.events.on("request:start", ({ request }) => {
 beforeAll(() => {
   // An address for the page, so the app's relative requests resolve as they do in a browser.
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
-  todayRoutes.on = false;
   server.listen({ onUnhandledRequest: "error" });
 });
 afterEach(() => {
@@ -74,7 +71,6 @@ afterEach(() => {
 });
 afterAll(async () => {
   server.close();
-  todayRoutes.on = true;
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
