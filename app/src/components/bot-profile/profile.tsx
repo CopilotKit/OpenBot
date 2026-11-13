@@ -9,6 +9,7 @@ import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PausedAllBanner } from "@/components/bots/paused-all";
+import { BotRoutinesSection } from "@/components/routines/bot-routines";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
@@ -233,6 +234,8 @@ export function BotProfile({
         )}
       </PageSection>
 
+      {/* What it does by itself, between For you and Activity, from the Routines page's own rows. */}
+      <BotRoutinesSection agentId={agent.id} botName={agent.name} />
       <BotActivityGlance agentId={agent.id} />
       <DoneTasks done={done} />
       {settings}
