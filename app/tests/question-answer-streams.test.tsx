@@ -22,6 +22,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 
 /**
  * The Bot asked the person a question in their conversation ("Which city?"), and they answered it
@@ -209,13 +210,13 @@ beforeAll(() => {
       );
       const request = () =>
         input instanceof Request ? input : new Request(url, init);
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === `/api/agents/${BOT}`)
+      if (url.pathname === botPath(BOT))
         return NativeResponse.json({
-          agent: { id: BOT, visibility: "public", canManage: true },
+          bot: { id: BOT, visibility: "public", canManage: true },
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });

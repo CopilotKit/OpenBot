@@ -12,6 +12,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { GroupChat } from "@/components/channels/group-chat";
 import { groupKeys } from "@/lib/groups";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -54,7 +55,10 @@ const group = () =>
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://localhost/" });
   originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: RequestInit,
+  ) => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === `/api/groups/${CHANNEL}`) {
       if (answer === "fail")
@@ -69,7 +73,8 @@ beforeAll(() => {
       return Response.json({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
-    if (url.pathname === "/api/agents") return Response.json({ agents: [] });
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
     if (url.pathname === "/api/approvals")
       return Response.json({
         enabled: true,

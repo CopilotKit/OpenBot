@@ -50,6 +50,7 @@ import {
   tabFor,
 } from "@/skins/openfuse/model";
 import { SKINS } from "@/skins/registry";
+import { answerBotsList } from "./bots-api";
 
 /*
  * The OpenFuse frame against OpenBot's own API shapes. Every payload below is what the server's
@@ -407,7 +408,6 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     },
-    "/api/agents": { agents: [scout, fuse] },
     "/api/channels": { channels, nextCursor: null },
     "/api/approvals": inbox,
     "/api/bots/attention": { bots: attention, lastPingId: null },
@@ -443,6 +443,8 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
       if (method !== "GET") return Response.json({ ok: true });
+      const bots = answerBotsList(input, init, { visible: [scout, fuse] });
+      if (bots) return bots;
       const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);
@@ -770,10 +772,10 @@ describe("the frame wears the deployment's brand, not the skin's name", () => {
     serve();
     const real = globalThis.fetch;
     globalThis.fetch = Object.assign(
-      (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) === "/api/agents"
-          ? Promise.resolve(Response.json({ agents: [] }))
-          : real(input, init),
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const bots = answerBotsList(input, init, { visible: [] });
+        return bots ? Promise.resolve(bots) : real(input, init);
+      },
       { preconnect: originalFetch.preconnect },
     );
     renderAt("/s/activity");

@@ -10,12 +10,13 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
-import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { RoutineRoutePage } from "@/components/routines/routine-page";
+import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { cronFrom, scheduleSentence } from "@/lib/routines/form";
 import type { RoutineRecord, RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -60,9 +61,9 @@ function routine(overrides: Partial<RoutineRecord>): RoutineRecord {
   };
 }
 
-/** `/api/routines` and `/api/agents` in the shapes the server sends them. */
+/** `/api/routines` and the Bots list in the shapes the server sends them. */
 function draw(element: React.ReactNode, page: RoutinesPage) {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path.startsWith("/api/routines")) return Response.json(page);
     // The same list draws goals and check-ins; none here.
@@ -70,13 +71,14 @@ function draw(element: React.ReactNode, page: RoutinesPage) {
       return Response.json({ responsibilities: [] });
     if (path === "/api/proactive/settings")
       return Response.json({ settings: [], allowed: true });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: path.includes("hidden=true")
-          ? []
-          : [{ id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" }],
-      });
-    return Response.json({});
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" },
+        ],
+        hidden: [],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),

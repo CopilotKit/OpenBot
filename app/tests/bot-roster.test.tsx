@@ -19,6 +19,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -74,7 +75,7 @@ function serving(
   hidden: AgentProfile[],
   attention: Record<string, unknown>[] = [],
 ) {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/bots/attention"))
       return Response.json({ bots: attention, lastPingId: null });
@@ -83,9 +84,9 @@ function serving(
     if (url === "/api/tasks") return Response.json({ tasks: [] });
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });
-    return Response.json({
-      agents: url.includes("hidden=true") ? hidden : visible,
-    });
+    return (
+      answerBotsList(input, init, { visible, hidden }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 

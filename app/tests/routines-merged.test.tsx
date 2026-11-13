@@ -26,6 +26,7 @@ import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
 import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -154,14 +155,13 @@ function serving({
         nextCursor: null,
       });
     }
-    if (url.startsWith("/api/agents")) {
-      return Response.json({
-        agents: [
-          { id: "expenses", name: "Expenses" },
-          { id: "knowledge", name: "Knowledge" },
-        ],
-      });
-    }
+    const bots = answerBotsList(input, init, {
+      visible: [
+        { id: "expenses", name: "Expenses" },
+        { id: "knowledge", name: "Knowledge" },
+      ],
+    });
+    if (bots) return bots;
     return Response.json({ runs: [], triggers: [], requests: [] });
   }) as unknown as typeof fetch;
 }

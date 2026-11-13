@@ -24,6 +24,7 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as BotAppRoute } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { answerBotsList } from "./bots-api";
 
 /**
  * What the per-Bot grant screen draws: which of its three pages a failed read returns, and the one
@@ -330,20 +331,17 @@ test("a failed REFETCH keeps the grant list it already had, not the error", asyn
  */
 test("a hidden Bot's own page draws its grants instead of saying there is no such Bot", async () => {
   global.fetch = Object.assign(
-    async (path: Parameters<typeof fetch>[0]) => {
-      const url = String(path);
-      if (url.startsWith("/api/agents")) {
-        const hiddenBot = {
-          id: BOT_ID,
-          name: "Tucked Bot",
-          hidden: true,
-          hasCallbackToken: false,
-        };
-        return Response.json({
-          agents: url.includes("hidden=true") ? [hiddenBot] : [],
-        });
-      }
-      return new Response(null, { status: 500 });
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const hiddenBot = {
+        id: BOT_ID,
+        name: "Tucked Bot",
+        hidden: true,
+        hasCallbackToken: false,
+      };
+      return (
+        answerBotsList(path, init, { visible: [], hidden: [hiddenBot] }) ??
+        new Response(null, { status: 500 })
+      );
     },
     { preconnect: originalFetch.preconnect },
   );

@@ -27,6 +27,7 @@ import { Route as BotsRoute } from "@/routes/_authed/_app/bots.index";
 import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabilities.memory";
 import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as SettingsMemoryRoute } from "@/routes/_authed/settings/memory";
+import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -69,9 +70,9 @@ function servingNothing() {
       const path = String(input);
       if (path === "/api/proactive/settings")
         return Response.json({ settings: [], allowed: true });
-      if (path === "/api/agents/expenses")
+      if (path === botPath("expenses"))
         return Response.json({
-          agent: { id: "expenses", name: "Expenses", mine: true },
+          bot: { id: "expenses", name: "Expenses", mine: true },
         });
       return Response.json({ error: "Not part of this test" }, { status: 404 });
     },

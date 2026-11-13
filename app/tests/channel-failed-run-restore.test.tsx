@@ -13,6 +13,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 
 /**
  * A conversation whose last run failed still says so after a reload.
@@ -194,13 +195,13 @@ beforeAll(() => {
       );
       const request = () =>
         input instanceof Request ? input : new Request(url, init);
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === "/api/plugins/for/failed-run-bot")
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/agents/failed-run-bot")
+      if (url.pathname === botPath("failed-run-bot"))
         return NativeResponse.json({
-          agent: {
+          bot: {
             id: "failed-run-bot",
             visibility: "public",
             canManage: true,

@@ -24,6 +24,7 @@ import { AppAccessCard } from "@/components/channels/app-access-card";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
 import { appAccess } from "./app-access-fixture";
+import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -124,9 +125,9 @@ function serving(before: AppAccess, signIn: Promise<void>) {
       return Response.json({
         user: { id: "usr_me", role: "admin", name: "Me" },
       });
-    if (url === "/api/agents/assistant")
+    if (url === botPath("assistant"))
       return Response.json({
-        agent: { id: "assistant", name: "Personal Assistant" },
+        bot: { id: "assistant", name: "Personal Assistant" },
       });
     if (url === "/api/plugins/for/assistant/apps/composio-gmail")
       return Response.json({ app: live });
