@@ -212,7 +212,8 @@ yet.
 The main menu has **Bots**, **Routines**, **Skills** and **Connections**. **Teach a Bot** opens from
 the Skills page. **Settings** is in three
 groups: **You** (General, Notifications and Vault), **Every Bot** (Computer, Approvals and
-Activity) and **OpenBot** (Setup and the Components gallery).
+Activity) and **OpenBot** (Setup and the Components gallery). Settings → Notifications names only
+push and text messages, the two ways this edition can reach you away from the app.
 Settings → Computer is the computer your Bots share with its Reset, the folders on this computer
 they may read, what OpenBot runs here (inside OpenBot Desktop), and the browsers signed in to the
 Recorder. Activity is the trail of everything your Bots did. Beside Admin, **OpenBot for Business**

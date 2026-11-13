@@ -106,6 +106,14 @@ export function UpdateRoutingSection() {
    * reach it (a phone, OpenTag, Twilio calling it). Its settings are the Desktop's own, so it gets no link to them.
    */
   const desktop = desktopShell() !== null;
+  /*
+   * The channels this edition can have at all, by name. The personal edition has Slack and Microsoft Teams off, so naming
+   * them there promised something no setting turns on.
+   */
+  const channels =
+    capabilities.data?.edition === "personal"
+      ? "Push and text messages"
+      : "Push, Slack, Microsoft Teams and text messages";
   return (
     <PageSection
       // Said only above the switches: above the empty state it would point at nothing to choose.
@@ -141,10 +149,10 @@ export function UpdateRoutingSection() {
           title="Updates stay in OpenBot"
         >
           {desktop
-            ? "Push, Slack, Microsoft Teams and text messages need OpenBot running on a server."
+            ? `${channels} need OpenBot running on a server.`
             : setsUp
-              ? "Push, Slack, Microsoft Teams and text messages show up here once they're set up where OpenBot runs."
-              : "Push, Slack, Microsoft Teams and text messages show up here once your admin sets them up."}
+              ? `${channels} show up here once they're set up where OpenBot runs.`
+              : `${channels} show up here once your admin sets them up.`}
         </PageEmpty>
       ) : (
         <PageRows>
