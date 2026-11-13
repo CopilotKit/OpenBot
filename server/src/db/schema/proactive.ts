@@ -75,6 +75,12 @@ export const proactiveSettings = pgTable(
       .default("apps"),
     /** The app an `app` check-in reads; null for any other kind. */
     sourceServerId: text("source_server_id"),
+    /**
+     * A `page` check-in's newest read of its page, normalised and capped (`PAGE_KEPT_CHARS`), and its
+     * hash: the baseline the next run compares with. Null until its first read, and on any other kind.
+     */
+    pageText: text("page_text"),
+    pageHash: text("page_hash"),
     enabled: boolean("enabled").notNull().default(true),
     intervalMinutes: integer("interval_minutes").notNull().default(60),
     nextRunAt: timestamp("next_run_at", { withTimezone: true })
