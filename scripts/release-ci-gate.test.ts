@@ -61,8 +61,8 @@ const lock = (desktop: string, serde = "1.0.0") =>
   `[[package]]\nname = "openbot-desktop"\nversion = "${desktop}"\n\n[[package]]\nname = "serde"\nversion = "${serde}"\n`;
 const cargo = (version: string) =>
   `[package]\nname = "openbot-desktop"\nversion = "${version}"\nedition = "2021"\n`;
-const chart = (version: string, chartVersion = "0.1.0") =>
-  `apiVersion: v2\nname: openbot\nversion: ${chartVersion}\nappVersion: "${version}"\n`;
+const images = (tag: string, comment = "# The OpenBot images.") =>
+  `${comment}\nOPENBOT_BACKEND_TAG=${tag}\n`;
 const policy = (version: string, from: string[]) =>
   `${JSON.stringify({ version, upgrade: { fromVersions: from } }, null, 2)}\n`;
 
@@ -75,7 +75,7 @@ function mainAt(): { repo: string; parent: string } {
     "package.json": pkg("0.3.1"),
     "desktop/src-tauri/Cargo.toml": cargo("0.3.1"),
     "desktop/src-tauri/Cargo.lock": lock("0.3.1"),
-    "charts/openbot/Chart.yaml": chart("0.3.1"),
+    "backend-images.env": images("main"),
     "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n- A fix.\n\n## 0.3.1\n",
     "release-policy.json": policy("v0.3.1", ["v0.3.0"]),
     "server/src/index.ts": "export const answer = 42;\n",
@@ -89,7 +89,7 @@ function release(repo: string, extra: Record<string, string> = {}): string {
     "package.json": pkg("0.3.2"),
     "desktop/src-tauri/Cargo.toml": cargo("0.3.2"),
     "desktop/src-tauri/Cargo.lock": lock("0.3.2"),
-    "charts/openbot/Chart.yaml": chart("0.3.2"),
+    "backend-images.env": images("v0.3.2"),
     "CHANGELOG.md":
       "# Changelog\n\n## Unreleased\n\n## 0.3.2\n\n- A fix.\n\n## 0.3.1\n",
     "release-policy.json": policy("v0.3.2", ["v0.3.1", "v0.3.0"]),
@@ -205,7 +205,7 @@ test("a source file renamed onto a release file's name runs the full checks", ()
     "package.json": pkg("0.3.2"),
     "desktop/src-tauri/Cargo.toml": cargo("0.3.2"),
     "desktop/src-tauri/Cargo.lock": lock("0.3.2"),
-    "charts/openbot/Chart.yaml": chart("0.3.2"),
+    "backend-images.env": images("v0.3.2"),
   });
   commit(repo, "Release v0.3.2");
   const { decision } = gate(repo, [[ciRun({ head_sha: parent })]]);
@@ -230,7 +230,7 @@ test("a version file that changes more than its version runs the full checks", (
   for (const [path, text] of [
     ["package.json", pkg("0.3.2", { dependencies: { left: "1.0.0" } })],
     ["desktop/src-tauri/Cargo.lock", lock("0.3.2", "1.0.1")],
-    ["charts/openbot/Chart.yaml", chart("0.3.2", "0.2.0")],
+    ["backend-images.env", images("v0.3.2", "# Another comment.")],
     ["desktop/src-tauri/Cargo.toml", `${cargo("0.3.2")}[features]\nx = []\n`],
     ["package.json", "{ not json"],
   ] as const) {
@@ -259,9 +259,9 @@ test("the changelog and the release policy may change freely", () => {
 test("a version file added or removed is not a version change", () => {
   expect(
     releaseFileViolations(
-      new Map([["charts/openbot/Chart.yaml", { before: "", after: "x" }]]),
+      new Map([["backend-images.env", { before: "", after: "x" }]]),
     ),
-  ).toEqual(["charts/openbot/Chart.yaml was added"]);
+  ).toEqual(["backend-images.env was added"]);
 });
 
 test("without a passing run of main's CI on the parent, the full checks run", () => {
