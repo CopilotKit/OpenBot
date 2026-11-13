@@ -32,8 +32,8 @@ export const Route = createFileRoute("/_authed/settings/components-gallery/")({
 
 /**
  * The intro and the empty state, by edition. The team edition has an admin who publishes components
- * and decides which Bot uses which. The personal edition has no Admin: every component is published
- * when OpenBot starts and every Bot can use all of them, so there is nothing to say an admin does.
+ * and decides which Bot uses which. In the personal edition every component is published when
+ * OpenBot starts and every Bot can use all of them, so there is nothing to say an admin does.
  */
 const WORDS = {
   team: {

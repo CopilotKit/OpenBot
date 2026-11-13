@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { ForATeam, useEdition } from "@/components/edition/for-a-team";
 import { PageSection } from "@/components/layout/page-shell";
 import {
   setCapabilityMutationOptions,
@@ -33,6 +34,10 @@ export type Controls = {
  * page it governs: the network policy on Computers, the MCP allowlist on Plugins, Action Recording
  * on Audit. They all read the one overview query, so a page with two of them still asks once, and
  * each keeps its own save state so a refused change is reported where it was made.
+ *
+ * IN THE PERSONAL EDITION, EVERY ONE IS FOR A TEAM. Each setting here is one the personal edition
+ * fixes for its one person (`PERSONAL_ENTERPRISE_SETTINGS`, `PERSONAL_CAPABILITIES`), and the server
+ * has no API for them there. The section keeps its title and says so, and asks the server nothing.
  */
 export function ControlsSection({
   title,
@@ -44,11 +49,29 @@ export function ControlsSection({
   description?: ReactNode | ((data: EnterpriseOverview) => ReactNode);
   children: (controls: Controls) => ReactNode;
 }) {
-  const overview = useQuery(enterpriseOverviewQueryOptions());
+  const edition = useEdition();
+  const overview = useQuery({
+    ...enterpriseOverviewQueryOptions(),
+    enabled: edition === "team",
+  });
   const setCapability = useMutation(setCapabilityMutationOptions(queryClient));
   const setSetting = useMutation(
     setEnterpriseSettingMutationOptions(queryClient),
   );
+  if (edition === undefined) return null;
+  if (edition === "personal")
+    return title ? (
+      <PageSection
+        description={
+          typeof description === "function" ? undefined : description
+        }
+        title={title}
+      >
+        <ForATeam />
+      </PageSection>
+    ) : (
+      <ForATeam />
+    );
   if (overview.isPending) return null;
   /*
    * These sections sit on pages with work of their own (Plugins, Audit, Computers), so one that

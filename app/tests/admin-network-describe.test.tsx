@@ -23,6 +23,7 @@ import type {
   NetworkPolicy,
   NetworkReplayReport,
 } from "@/lib/enterprise/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import recorded from "../../server/tests/fixtures/network-allowlist-recorded.json";
 import { settleReactWork } from "./settle-react-work";
@@ -172,8 +173,19 @@ function serving() {
   }) as unknown as typeof fetch;
 }
 
+/** The team edition, as a server from before the edition switch reads. */
+function seedTeamEdition() {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: false,
+    edition: "team",
+  });
+}
+
 beforeEach(() => {
   queryClient.clear();
+  seedTeamEdition();
   serving();
 });
 

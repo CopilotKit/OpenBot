@@ -13,6 +13,7 @@ import {
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { ForATeam, useEdition } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -110,7 +111,15 @@ const skipped = (bot: BotCheckInMetrics) =>
  * and no people, because what a check-in raised came from somebody's own apps.
  */
 export function CheckInsPage() {
-  const overview = useQuery(enterpriseOverviewQueryOptions());
+  /*
+   * The switch and the limit are settings the personal edition fixes (check-ins on, 24 a day), so
+   * there they say they are for a team. How check-ins went is the one person's own, and shows.
+   */
+  const edition = useEdition();
+  const overview = useQuery({
+    ...enterpriseOverviewQueryOptions(),
+    enabled: edition === "team",
+  });
   const [days, setDays] = useState<Days>(7);
   /*
    * The previous window's numbers stay up while the other loads, so switching between 7 and 30 days
@@ -126,7 +135,11 @@ export function CheckInsPage() {
       description="People set their own Bots' routines and goals. Check-ins are set here, for everybody: Bots check the apps people connected and say when something needs them, at most once an hour, and never act without asking."
       title="Routines"
     >
-      {overview.isPending ? null : overview.error ? (
+      {edition === "personal" ? (
+        <PageSection title="Check-ins">
+          <ForATeam />
+        </PageSection>
+      ) : overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load check-in settings. Reload the page.
         </p>
