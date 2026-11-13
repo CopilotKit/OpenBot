@@ -1936,6 +1936,14 @@ const SEND_SCROLL_MS = 700;
  * of a channel being opened: the conversation visibly loaded and then slid. The first id seen once
  * history is in is the baseline, never a send.
  *
+ * And history keeps arriving after that baseline, too: the gateway snapshot can lag the store, so
+ * the stored thread merges in once the restore gate lifts (a join still answering at its deadline
+ * shows what has arrived so far); a slow voice service delivers its cards late; a roster re-read
+ * can add a turn. Any of those can bring a newer user message, which is the same signal a send
+ * gives — so the glide also watches how much arrived with the new id. A send is one row arriving.
+ * History arrives in batches: the snapshot, the stored merge, the voice archive, a re-read. One row
+ * is a send; more than one is history, and history never glides.
+ *
  * Exported so it can be checked without mounting anything.
  */
 export function shouldGlideOnSend({
@@ -1943,18 +1951,22 @@ export function shouldGlideOnSend({
   next,
   restoring,
   reducedMotion,
+  arrivedRows,
 }: {
   previous: string | null;
   next: string | null;
   restoring: boolean;
   reducedMotion: boolean;
+  /** How many rows arrived with the new id: one for a send, a batch for history. */
+  arrivedRows: number;
 }): boolean {
   return (
     !restoring &&
     !reducedMotion &&
     previous !== null &&
     next !== null &&
-    previous !== next
+    previous !== next &&
+    arrivedRows === 1
   );
 }
 
@@ -1963,6 +1975,7 @@ function useSmoothSendScroll(
   newestUserMessageId: string | null,
   restoring: boolean,
   onSend: () => void,
+  itemIds: readonly string[],
 ) {
   const reducedMotion = useReducedMotion();
   const seenRef = useRef<string | null>(null);
@@ -1972,6 +1985,24 @@ function useSmoothSendScroll(
    * that holds only firings, the person's first message has nothing before it and is still a send.
    */
   const openRef = useRef(false);
+  /*
+   * How many rows arrived with this render, decided here rather than in the effect below: the
+   * effect only runs when the newest person-sent id changes, but by then the rows that arrived
+   * with it are any number of renders back. A ref, not state: it is read once, in that effect,
+   * and setting it must not re-render anything. The previous set is the last render's, so the
+   * count is exactly what this commit brought.
+   */
+  const previousIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const arrivedRowsRef = useRef(0);
+  const previousIds = previousIdsRef.current;
+  arrivedRowsRef.current =
+    previousIds === null
+      ? itemIds.length
+      : itemIds.reduce(
+          (count, id) => count + (previousIds.has(id) ? 0 : 1),
+          0,
+        );
+  previousIdsRef.current = new Set(itemIds);
 
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -1998,6 +2029,7 @@ function useSmoothSendScroll(
         next: newestUserMessageId,
         restoring,
         reducedMotion: reducedMotion ?? false,
+        arrivedRows: arrivedRowsRef.current,
       })
     ) {
       return;
@@ -2148,6 +2180,7 @@ export function ChatTranscript({
     newestUserMessageId,
     restoring,
     followOnSend,
+    items.map((item) => item.id),
   );
 
   /* Which tool calls are still the latest thing, for an app card: see `latestFrom`. */
