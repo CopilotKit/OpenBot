@@ -172,7 +172,10 @@ cd OpenBot
 To run the open-source template locally, you’ll need the following.
 
 - Docker, for PostgreSQL, the API server and the shipped Bots. The server, its routine worker and
-  the Bots' computers run from the published OpenBot images, at the tag in `backend-images.env`.
+  the Bots' computers run from the published OpenBot images, which `scripts/start.sh` pulls at the
+  tag in `backend-images.env`: `main` in a checkout of `main`, the images built from main, and the
+  release's own version in a release (`v1.0.3` in the v1.0.3 tag). Nothing else is built or needed
+  for them.
 - [Bun](https://bun.sh) 1.4+, for the app, the setup helpers and the tests (some tests fail on 1.3).
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
@@ -250,7 +253,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 5. Open <http://localhost:3010>.
 
-`scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001 and the routine worker from the OpenBot server image, starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. The server's log is `docker compose logs server`.
+`scripts/start.sh` pulls the OpenBot images at the tag in `backend-images.env`, starts Docker services, applies migrations, starts the API server on port 3001 and the routine worker from the OpenBot server image, starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. It pulls on every start, so a checkout of `main` runs the images built from main now; offline, it uses the copies already on the machine. The server's log is `docker compose logs server`.
 
 `scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
 

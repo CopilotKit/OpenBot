@@ -191,6 +191,23 @@ test("the merge-back still follows a published final, whether or not the full ch
   );
 });
 
+test("a stable release from main opens the PR that runs main's images again", () => {
+  expect(needs("main-images")).toEqual(["metadata", "github-release"]);
+  expect(condition("main-images")).toBe(
+    "!cancelled() && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'true' && needs.github-release.result == 'success'",
+  );
+  const run = job("main-images").steps?.[0]?.run ?? "";
+  expect(run).toContain("FILE=backend-images.env");
+  expect(run).toContain("gh pr create");
+});
+
+test("the merge-back keeps main's own image tag and CLI", () => {
+  const run = job("merge-back").steps?.[0]?.run ?? "";
+  expect(run).toContain(
+    "MAIN_KEEPS=(desktop/intelligence-cli.json backend-images.env)",
+  );
+});
+
 // v0.3.1's checks waited five minutes for a run of main's CI they shared a group with, and cancelled
 // the pending run of the commit the release sat on, so that commit never got the result the gate
 // now needs.

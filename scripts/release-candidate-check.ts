@@ -25,10 +25,11 @@ function withoutPackageVersion(text: string): string {
   return JSON.stringify(parsed);
 }
 
-function withoutAppVersion(text: string): string {
+// A release pins the OpenBot images to its own version, and nothing else in the file moves.
+function withoutImageTag(text: string): string {
   return text
     .split("\n")
-    .filter((line) => !/^appVersion:/.test(line))
+    .filter((line) => !/^OPENBOT_BACKEND_TAG=/.test(line))
     .join("\n");
 }
 
@@ -58,7 +59,7 @@ function withoutPolicyVersion(text: string): string {
 export const VERSION_ONLY_RULES: Record<string, (text: string) => string> = {
   "package.json": withoutPackageVersion,
   "release-policy.json": withoutPolicyVersion,
-  "charts/openbot/Chart.yaml": withoutAppVersion,
+  "backend-images.env": withoutImageTag,
   "desktop/src-tauri/Cargo.toml": withoutDesktopVersion,
   "desktop/src-tauri/Cargo.lock": withoutDesktopVersion,
 };

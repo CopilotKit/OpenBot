@@ -342,8 +342,24 @@ export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
 # variable rather than `--progress`, because a Compose too old to know the flag refuses it, and one
 # too old to know the variable ignores it.
-# `--build` for the Bots, which are built from this checkout. The computer and the supervisor are
-# pulled at OPENBOT_BACKEND_TAG.
+# The OpenBot images at OPENBOT_BACKEND_TAG, fetched on every start. `main` moves with every build,
+# so a checkout of main runs the build that is current now, not a copy pulled weeks ago; a version
+# tag never moves, so fetching it again only checks. Compose's own pull policy (`missing`) would keep
+# whatever copy is here, so this pull asks for `always`. Offline, or with IMAGE_PULL_POLICY=never,
+# the copies already on this machine are used.
+if [ "${IMAGE_PULL_POLICY:-missing}" != never ]; then
+  PULL=(migrate)
+  if [ "$ONE_COMPUTER_EACH" = "true" ]; then
+    PULL+=(supervisor)
+  fi
+  PULL+=(agent-computer)
+  info "  OpenBot images: $OPENBOT_BACKEND_TAG"
+  if ! IMAGE_PULL_POLICY=always COMPOSE_PROGRESS=quiet docker compose pull --quiet "${PULL[@]}" >"$LOGS/pull.log" 2>&1; then
+    info "  Could not fetch the OpenBot images at $OPENBOT_BACKEND_TAG ($LOGS/pull.log). Using the copies on this machine."
+  fi
+fi
+# `--build` for the Bots, which are built from this checkout. The server, computer and supervisor
+# images were fetched above.
 if ! COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null; then
   red "  The Docker services did not start. The OpenBot images are at $OPENBOT_BACKEND_TAG (backend-images.env)."
   exit 1
