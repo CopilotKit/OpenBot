@@ -1,9 +1,14 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { agents, users } from "../src/db/schema";
-import { proactiveRuns, proactiveSettings } from "../src/db/schema/proactive";
+import { botLifecycle } from "../src/db/schema/lifecycle";
+import {
+  proactiveRuns,
+  proactiveSettings,
+  proactiveSuggestions,
+} from "../src/db/schema/proactive";
 import type { ProactiveSkipReason } from "../src/proactive/contracts";
 import { createProactiveEngine } from "../src/proactive/engine";
 import { proactiveInitiator } from "../src/proactive/restriction";
@@ -58,6 +63,8 @@ const world = {
   usable: true,
 };
 let clock = Date.now();
+/** Tasks Work on it made. */
+const tasksMade: string[] = [];
 
 function engineNow() {
   return createProactiveEngine({
@@ -70,6 +77,12 @@ function engineNow() {
     pageReader: async () => world.reader,
     sourceOf: async (_owner, _agent, name) => SOURCES[name] ?? null,
     botName: async () => "Inbox Bot",
+    tasks: {
+      startFromItem: async ({ item }) => {
+        tasksMade.push(item.id);
+        return { id: `task-${item.id}`, channelId: "c" };
+      },
+    },
     attention: { notifyAttention: async () => {} },
     catalogue: {
       listServers: async () => [
@@ -415,4 +428,66 @@ test("readable: what New routine offers for this Bot", async () => {
   await expect(engine.readable(owner, bot)).rejects.toThrow(
     "Choose one of your Bots.",
   );
+});
+
+/*
+ * Pause all: no check-in of the person's is claimed, Run now says why, and Work on it is refused up
+ * front with no task made, as it is for a Bot paused by itself.
+ */
+test("while all are paused, nothing is claimed, Run now says so, and Work on it makes no task", async () => {
+  const inbox = await create({
+    subject: "Your Gmail inbox",
+    readWith: "mcp__gmail__list_messages",
+  });
+  const pauseAll = (paused: boolean) =>
+    database
+      .update(users)
+      .set({
+        preferences: paused
+          ? sql`coalesce(${users.preferences}, '{}'::jsonb) || '{"pausedAllAt":"2026-11-13T00:00:00Z"}'::jsonb`
+          : sql`coalesce(${users.preferences}, '{}'::jsonb) - 'pausedAllAt'`,
+      })
+      .where(eq(users.id, owner));
+  await pauseAll(true);
+  try {
+    expect(await store.claimDue(10)).not.toContainEqual(
+      expect.objectContaining({ id: inbox.id }),
+    );
+    expect(await engine.runNow(owner, inbox.id)).toEqual({
+      queued: false,
+      skipped: "paused_all",
+      why: "You paused all your Bots.",
+    });
+    const item = await store.addSuggestion({
+      ownerUserId: owner,
+      agentId: bot,
+      settingId: inbox.id,
+      runId: randomUUID(),
+      title: "Reply to Dana",
+      detail: "She asked twice.",
+      sourceApp: "Gmail",
+      sourceRef: "gmail/list_messages",
+      sourceLink: null,
+    });
+    await expect(engine.start(owner, item.id)).rejects.toThrow(
+      "Your Bots are paused. Resume them to work on this.",
+    );
+    await pauseAll(false);
+    await database
+      .insert(botLifecycle)
+      .values({ ownerUserId: owner, agentId: bot, pausedAt: new Date() });
+    await expect(engine.start(owner, item.id)).rejects.toThrow(
+      "Inbox Bot is paused. Resume it to work on this.",
+    );
+    expect(tasksMade).toEqual([]);
+    expect((await store.suggestion(owner, item.id)).status).toBe("open");
+  } finally {
+    await pauseAll(false);
+    await database
+      .delete(botLifecycle)
+      .where(eq(botLifecycle.ownerUserId, owner));
+    await database
+      .delete(proactiveSuggestions)
+      .where(eq(proactiveSuggestions.ownerUserId, owner));
+  }
 });

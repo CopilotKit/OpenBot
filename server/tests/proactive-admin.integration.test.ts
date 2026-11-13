@@ -749,6 +749,7 @@ describe("the numbers", () => {
           unreachable: 0,
           no_sources: 0,
           busy: 0,
+          paused_all: 0,
         },
       },
       items: { raised: 5, started: 2, hidden: 1, cleared: 1, open: 1 },

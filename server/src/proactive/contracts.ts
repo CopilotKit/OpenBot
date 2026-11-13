@@ -54,7 +54,8 @@ export type ProactiveSkipReason =
   | "capped"
   | "unreachable"
   | "no_sources"
-  | "busy";
+  | "busy"
+  | "paused_all";
 
 /* ------------------------------------------------------------------------------------------------
  * `/api/proactive` (proactive engine).
@@ -304,6 +305,8 @@ export type BotAttentionPayload = {
 export type AttentionResponse = {
   bots: BotAttentionPayload[];
   lastPingId: string | null;
+  /** Whether the person paused all their Bots: every one then behaves as a paused Bot does. */
+  pausedAll: boolean;
 };
 
 /* ------------------------------------------------------------------------------------------------

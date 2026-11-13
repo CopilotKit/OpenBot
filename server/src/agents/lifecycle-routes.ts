@@ -110,13 +110,14 @@ export function createBotLifecycleRoutes(
    */
   routes.get("/attention", requireUser, async (context) => {
     const ownerUserId = context.var.actor.id;
-    const [counts, paused, taskCounts, lastPingId, waitingIn] =
+    const [counts, paused, taskCounts, lastPingId, waitingIn, pausedAll] =
       await Promise.all([
         activity.attention(ownerUserId),
         lifecycle.pausedFor(ownerUserId),
         tasks?.counts(ownerUserId) ?? Promise.resolve([]),
         activity.lastPing(ownerUserId),
         activity.waitingIn(ownerUserId),
+        lifecycle.pausedAll(ownerUserId),
       ]);
     const ids = [
       ...new Set([
@@ -160,7 +161,31 @@ export function createBotLifecycleRoutes(
         waitingIn: asks > 0 ? (waitingIn.get(agentId) ?? null) : null,
       });
     }
-    return context.json({ bots, lastPingId } satisfies AttentionResponse);
+    return context.json({
+      bots,
+      lastPingId,
+      pausedAll,
+    } satisfies AttentionResponse);
+  });
+
+  /**
+   * Pause all of the caller's Bots, or turn them back on. Each Bot's own pause is left as it was, so
+   * turning this back on returns every Bot to the state it had.
+   */
+  routes.put("/pause-all", requireUser, async (context) => {
+    const { paused } = await body(context);
+    if (typeof paused !== "boolean")
+      return context.json(
+        { error: "Say whether to pause all your Bots." },
+        400,
+      );
+    const ownerUserId = context.var.actor.id;
+    const stopped = await lifecycle.setPausedAll(ownerUserId, paused);
+    await record(context, paused ? "bot.paused" : "bot.resumed", "all", {
+      all: true,
+      ...(paused ? { stoppedTurns: stopped } : {}),
+    });
+    return context.json({ pausedAll: paused, stoppedTurns: stopped });
   });
 
   routes.get("/routing", requireUser, async (context) =>

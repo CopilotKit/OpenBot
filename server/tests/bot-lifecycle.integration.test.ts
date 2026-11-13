@@ -296,6 +296,102 @@ describe("pause", () => {
   });
 });
 
+/*
+ * Pause all: every one of a person's Bots behaves exactly as a paused Bot does, and turning it back
+ * on returns each to the state it had.
+ */
+describe("pause all", () => {
+  const lifecycle = createBotLifecycleStore(database);
+
+  test("every Bot of the person answers paused, a Bot made meanwhile too, and nobody else's", async () => {
+    const later = `${prefix}-made-while-paused`;
+    expect(await lifecycle.setPausedAll(owner, true)).toBe(0);
+    expect(await lifecycle.pausedAll(owner)).toBe(true);
+    for (const agentId of [bot, helper, later])
+      expect(await isBotPaused(owner, agentId)).toBe(true);
+    expect(await isBotPaused(other, bot)).toBe(false);
+    await expect(
+      guardBotTurn({ ownerUserId: owner, agentId: helper }),
+    ).rejects.toBeInstanceOf(BotPausedError);
+    await lifecycle.setPausedAll(owner, false);
+    expect(await isBotPaused(owner, helper)).toBe(false);
+  });
+
+  test("it stops every turn running for the person's Bots, and only theirs", async () => {
+    const one = await guardBotTurn({ ownerUserId: owner, agentId: bot });
+    const two = await guardBotTurn({ ownerUserId: owner, agentId: helper });
+    const others = await guardBotTurn({ ownerUserId: other, agentId: bot });
+    expect(await lifecycle.setPausedAll(owner, true)).toBe(2);
+    expect(one.aborted).toBe(true);
+    expect(two.aborted).toBe(true);
+    expect(others.aborted).toBe(false);
+    await lifecycle.setPausedAll(owner, false);
+  });
+
+  test("turning it back on leaves a Bot the person paused by itself still paused", async () => {
+    await lifecycle.pause(owner, bot);
+    await lifecycle.setPausedAll(owner, true);
+    await lifecycle.setPausedAll(owner, false);
+    expect(await isBotPaused(owner, bot)).toBe(true);
+    expect(await isBotPaused(owner, helper)).toBe(false);
+    await lifecycle.resume(owner, bot);
+    // The rest of the person's preferences are kept as they were.
+    const [row] = await database
+      .select({ preferences: users.preferences })
+      .from(users)
+      .where(eq(users.id, owner));
+    expect(row?.preferences).not.toHaveProperty("pausedAllAt");
+  });
+
+  test("a routine firing while all are paused is skipped, never run", async () => {
+    await lifecycle.setPausedAll(owner, true);
+    const finished: [string, string, string | undefined][] = [];
+    let ran = false;
+    const runner = createRoutineRunner({
+      routineStore: {
+        runContext: async () => ({
+          routineId: "r",
+          ownerUserId: owner,
+          agentId: helper,
+          channelId: direct,
+          instruction: "x",
+          enabled: true,
+        }),
+        finishRun: async (id: string, status: string, reason?: string) =>
+          void finished.push([id, status, reason]),
+      } as never,
+      channelStore: {
+        get: async () => ({ id: direct, threadId: "t" }),
+        recordActivity: async () => {},
+      } as never,
+      runTurn: async () => {
+        ran = true;
+        return { replyText: "no" };
+      },
+    });
+    await runner.run("run-all");
+    expect(ran).toBe(false);
+    expect(finished[0]?.[1]).toBe("skipped");
+    expect(finished[0]?.[2]).toBe("The Bot is paused, so it did not run.");
+    await lifecycle.setPausedAll(owner, false);
+  });
+
+  test("an unreadable pause answers paused", async () => {
+    configureBotLifecycle({
+      database: {
+        select: () => {
+          throw new Error("down");
+        },
+      } as never,
+    });
+    try {
+      expect(await isBotPaused(owner, helper)).toBe(true);
+    } finally {
+      configureBotLifecycle({ database });
+    }
+  });
+});
+
 describe("Activity and attention", () => {
   const activity = createActivityStore(database);
 

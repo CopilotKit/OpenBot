@@ -303,6 +303,7 @@ const CHOSEN_SKIPS: ReadonlySet<string> = new Set([
   "off_admin",
   "off_person",
   "paused",
+  "paused_all",
   "capped",
   "busy",
 ]);
@@ -651,6 +652,8 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
   > {
     if (await deps.store.personOff(setting.ownerUserId))
       return { skip: "off_person" };
+    if (await deps.store.pausedAll(setting.ownerUserId))
+      return { skip: "paused_all" };
     if (await deps.store.paused(setting.ownerUserId, setting.agentId))
       return { skip: "paused" };
     if (!(await allowed(setting.ownerUserId))) return { skip: "off_admin" };
@@ -1434,6 +1437,18 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       if (!(await deps.canUseBot(ownerUserId, suggestion.agentId)))
         throw new ProactiveRefusedError(
           "This Bot is no longer available to you.",
+        );
+      /*
+       * Refused up front while its Bot is paused, by itself or with all: no task is made. It used to
+       * be made, and its turn then refused by the pause, leaving a task that never started.
+       */
+      if (await deps.store.pausedAll(ownerUserId))
+        throw new ProactiveRefusedError(
+          "Your Bots are paused. Resume them to work on this.",
+        );
+      if (await deps.store.paused(ownerUserId, suggestion.agentId))
+        throw new ProactiveRefusedError(
+          `${(await deps.botName?.(ownerUserId, suggestion.agentId)) ?? "This Bot"} is paused. Resume it to work on this.`,
         );
       const started = await deps.store.resolveSuggestion(
         ownerUserId,

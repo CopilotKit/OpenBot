@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { auditEvents, users } from "../db/schema/core";
+import { pausedAllSql } from "../agents/lifecycle";
 import { botLifecycle } from "../db/schema/lifecycle";
 import {
   proactivePings,
@@ -167,7 +168,8 @@ function violates(error: unknown, constraint: string): boolean {
  */
 const claimable = and(
   eq(proactiveSettings.enabled, true),
-  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and ${users.preferences}->>'proactive' = 'off')`,
+  // Check-ins off for all their Bots, or every Bot paused: either way none is claimed.
+  sql`not exists (select 1 from ${users} where ${users.id} = ${proactiveSettings.ownerUserId} and (${users.preferences}->>'proactive' = 'off' or ${pausedAllSql}))`,
   sql`not exists (select 1 from ${botLifecycle} where ${botLifecycle.ownerUserId} = ${proactiveSettings.ownerUserId} and ${botLifecycle.agentId} = ${proactiveSettings.agentId} and ${botLifecycle.pausedAt} is not null)`,
 );
 
@@ -713,6 +715,15 @@ export function createProactiveStore(database: Database) {
         .where(eq(users.id, owner))
         .limit(1);
       return row?.off === true;
+    },
+    /** Whether this person paused all their Bots. */
+    async pausedAll(owner: string): Promise<boolean> {
+      const [row] = await database
+        .select({ all: sql<boolean>`${pausedAllSql}` })
+        .from(users)
+        .where(eq(users.id, owner))
+        .limit(1);
+      return row?.all === true;
     },
     /** Whether this person paused this Bot. */
     async paused(owner: string, agentId: string): Promise<boolean> {

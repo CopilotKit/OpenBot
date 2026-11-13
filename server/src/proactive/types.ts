@@ -126,6 +126,7 @@ export const SKIPPED_BECAUSE: Record<ProactiveSkipReason, string> = {
   off_admin: "Your admin turned off check-ins for you.",
   off_person: "You turned off check-ins for all your Bots.",
   paused: "You paused this Bot.",
+  paused_all: "You paused all your Bots.",
   capped: "This Bot used all its check-ins for today.",
   unreachable: "This Bot is no longer available to you.",
   no_sources:
