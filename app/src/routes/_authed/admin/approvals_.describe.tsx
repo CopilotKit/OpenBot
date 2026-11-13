@@ -43,8 +43,8 @@ const same = (
 /**
  * Team approval rules described in words, as a boundary is on Add rule.
  *
- * The model's rules land as fields the admin can change, beside an independent reading of them and
- * whether they check. What they would have changed is replayed over the approval gate's own history
+ * The model's rules land as fields the admin can change, labelled as what OpenBot matches actions
+ * against, with an independent reading of them and whether they check under them. What they would have changed is replayed over the approval gate's own history
  * as they are edited: the asks they would remove, and which of those a person had denied, and the
  * asks they would add. Only Save adds them, with the sentence they were written from.
  */
@@ -119,7 +119,7 @@ function DescribeTeamRulesPage() {
           <FieldGroup>
             <DescribeField
               action="Write rules"
-              description="Say in a sentence what Bots should do, and your model drafts rules from this OpenBot's apps and Bots. OpenBot checks the rules you save, not your words. A second reading that never sees your words says what the rules do."
+              description="Say in a sentence what Bots should do, and your model drafts rules from this OpenBot's apps and Bots. A second reading that never sees your words says what the rules do."
               id="team-rules-english"
               label="Describe the rules"
               placeholder="Ask before any Bot sends email from Gmail"
@@ -131,6 +131,15 @@ function DescribeTeamRulesPage() {
                 return null;
               }}
             />
+            {written && (rules.length > 0 || written.rules.length > 0) ? (
+              <RuleRowsEditor
+                onChange={setRules}
+                problems={
+                  current && !current.check.ok ? current.check.problems : []
+                }
+                rules={rules}
+              />
+            ) : null}
             {written ? (
               <ReadingStatus
                 check={written.check}
@@ -149,15 +158,6 @@ function DescribeTeamRulesPage() {
                 heading="What these rules do"
                 passed="Checks. Every rule matches tools and Bots this OpenBot has."
                 warning={written.warning}
-              />
-            ) : null}
-            {written && (rules.length > 0 || written.rules.length > 0) ? (
-              <RuleRowsEditor
-                onChange={setRules}
-                problems={
-                  current && !current.check.ok ? current.check.problems : []
-                }
-                rules={rules}
               />
             ) : null}
             {current &&
