@@ -22,7 +22,11 @@
 ;
 ; And every OpenBot this installer starts, after an in-app update and from the last page, is started
 ; by OPENBOT_RUN_AFTER_INSTALL (windows/hooks.nsh), so it comes to the front as its window first
-; shows rather than behind the window Windows put in front when the old version closed.
+; shows rather than behind the window Windows put in front when the old version closed. From the
+; last page the installer stays until OpenBot's window is up (OPENBOT_STAY_UNTIL_OPEN).
+;
+; And no ExecWait puts its command on the page: each one is said to the details list only, while
+; the plain line before it stays on the status line (installingWebview2 in installer-english.nsh).
 ; <<< OpenBot
 Unicode true
 ManifestDPIAware true
@@ -391,14 +395,28 @@ Function PageLeaveReinstall
 
     ${If} $WixMode = 1
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
+      ; >>> OpenBot
+      ; Every ExecWait says "Execute: <the command>" on the page's status line while it waits, so
+      ; each one says it to the details list only, as OPENBOT_UNINSTALL_OLD_VERSION does.
+      SetDetailsPrint listonly
+      ; <<< OpenBot
       ExecWait '$R1' $0
+      ; >>> OpenBot
+      SetDetailsPrint both
+      ; <<< OpenBot
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
+      ; >>> OpenBot
+      SetDetailsPrint listonly
+      ; <<< OpenBot
       ExecWait '$R1' $0
+      ; >>> OpenBot
+      SetDetailsPrint both
+      ; <<< OpenBot
     ${EndIf}
 
     BringToFront
@@ -460,8 +478,10 @@ Var AppStartMenuFolder
 Function RunMainBinary
   ; >>> OpenBot
   ; Started as every OpenBot the installer starts: free to come to the front, and told the
-  ; installer started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh).
+  ; installer started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh). Then this page stays on
+  ; screen, saying OpenBot is opening, until OpenBot's window is up (OPENBOT_STAY_UNTIL_OPEN).
   !insertmacro OPENBOT_RUN_AFTER_INSTALL ""
+  !insertmacro OPENBOT_STAY_UNTIL_OPEN
   Return
   ; <<< OpenBot
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
@@ -642,7 +662,19 @@ Section WebView2
       install_webview2:
         DetailPrint "$(installingWebview2)"
         ; $6 holds the path to the webview2 installer
+        ; >>> OpenBot
+        ; Box H: while Microsoft's WebView2 Runtime installed, the status line said "Execute:
+        ; C:\Users\ADMINI~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe /silent /install" in
+        ; place of the plain line above, for as long as it took. Said to the details list only, so
+        ; the plain line stays, and the bar moves while it waits.
+        !insertmacro OPENBOT_PROGRESS_MOVING 1
+        SetDetailsPrint listonly
+        ; <<< OpenBot
         ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+        ; >>> OpenBot
+        SetDetailsPrint both
+        !insertmacro OPENBOT_PROGRESS_MOVING 0
+        ; <<< OpenBot
         ${If} $1 = 0
           DetailPrint "$(webview2InstallSuccess)"
         ${Else}
@@ -668,7 +700,15 @@ Section WebView2
           ${If} $R1 != ""
             ; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:docs/updater/user_manual.md
             ; Modified from "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView\ModifyPath"
+            ; >>> OpenBot
+            !insertmacro OPENBOT_PROGRESS_MOVING 1
+            SetDetailsPrint listonly
+            ; <<< OpenBot
             ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
+            ; >>> OpenBot
+            SetDetailsPrint both
+            !insertmacro OPENBOT_PROGRESS_MOVING 0
+            ; <<< OpenBot
             ${If} $1 = 0
               DetailPrint "$(webview2InstallSuccess)"
             ${Else}

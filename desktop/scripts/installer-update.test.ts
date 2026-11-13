@@ -306,12 +306,141 @@ test("every OpenBot the installer starts may come to the front and is told the i
     '!insertmacro OPENBOT_RUN_AFTER_INSTALL "$R0"',
     "Return",
   ]);
-  // From the last page: no arguments, then nothing of Tauri's runs.
+  // From the last page: no arguments, the page stays until OpenBot's window is up, then nothing
+  // of Tauri's runs.
   const finish = code(
     between(template(), "Function RunMainBinary", "FunctionEnd"),
   );
-  expect(finish.slice(0, 2)).toEqual([
+  expect(finish.slice(0, 3)).toEqual([
     '!insertmacro OPENBOT_RUN_AFTER_INSTALL ""',
+    "!insertmacro OPENBOT_STAY_UNTIL_OPEN",
     "Return",
   ]);
+});
+
+/**
+ * Box H, a clean install of 1.0.2: while Microsoft's WebView2 Runtime installed, the Installing
+ * page's status line said "Execute: C:\Users\ADMINI~1\AppData\Local\Temp\
+ * MicrosoftEdgeWebview2Setup.exe /silent /install" for as long as it took. NSIS's ExecWait writes
+ * its command there itself. Box I saw the same for the old version's uninstaller (#1462). So every
+ * ExecWait, in Tauri's template and in OpenBot's hooks, says it to the details list only
+ * (`SetDetailsPrint listonly`) and puts the status line back after (`SetDetailsPrint both`),
+ * https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint, so the plain line before it
+ * stays on screen.
+ */
+test("no ExecWait in the installer puts its command on the page", () => {
+  for (const [file, text, count] of [
+    ["windows/installer.nsi", template(), 4],
+    ["windows/hooks.nsh", hooks(), 1],
+  ] as const) {
+    const lines = code(text);
+    const waits = lines.flatMap((line, at) =>
+      line.startsWith("ExecWait ") || line.startsWith("ExecWait\t") ? [at] : [],
+    );
+    expect({ file, waits: waits.length }).toEqual({ file, waits: count });
+    for (const at of waits) {
+      expect({ file, wait: lines[at], before: lines[at - 1] }).toEqual({
+        file,
+        wait: lines[at],
+        before: "SetDetailsPrint listonly",
+      });
+      expect({ file, wait: lines[at], after: lines[at + 1] }).toEqual({
+        file,
+        wait: lines[at],
+        after: "SetDetailsPrint both",
+      });
+    }
+    // Nothing else of NSIS's own runs a program and says so (Exec, ExecShell).
+    expect(
+      lines.filter((line) => /^Exec(Shell)?\b(?!Wait)/.test(line)),
+    ).toEqual([]);
+  }
+});
+
+/**
+ * The WebView2 Runtime installs under the plain line (installingWebview2 in
+ * windows/installer-english.nsh), with the page's bar moving, as the old version's uninstall does.
+ */
+test("the WebView2 Runtime installs under a plain line with the bar moving", () => {
+  const install = code(
+    between(template(), "install_webview2:", "webview2_done:"),
+  );
+  expect(install.slice(0, 6)).toEqual([
+    'DetailPrint "$(installingWebview2)"',
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    "SetDetailsPrint listonly",
+    'ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1',
+    "SetDetailsPrint both",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  // An older Runtime brought up to date the same way.
+  const update = code(between(template(), "update_webview:", "SectionEnd"));
+  const run = update.findIndex((line) => line.startsWith("ExecWait "));
+  expect(update.slice(run - 2, run + 3)).toEqual([
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    "SetDetailsPrint listonly",
+    'ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1',
+    "SetDetailsPrint both",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  expect(update[0]).toBe('DetailPrint "$(installingWebview2)"');
+});
+
+/**
+ * Box H: after Finish on a clean computer nothing was on screen for about ten seconds, the
+ * installer gone and OpenBot's window not up yet. The last page stays, saying OpenBot is opening,
+ * until a visible window with the class and title Tauri gives OpenBot's (tauri-runtime-wry's
+ * "Tauri Window", tauri.conf.json's title), for a minute at most; nothing on it can be pressed
+ * meanwhile, and it hands on its messages so Windows never shows it as not responding.
+ */
+test("after Finish the installer stays on screen until OpenBot's window is up", () => {
+  const config = readJson("tauri.conf.json");
+  const main = config.app.windows.find(
+    (window: { label?: string }) => (window.label ?? "main") === "main",
+  );
+  expect(main.title).toBe(config.productName);
+  expect(hooks()).toContain('!define OPENBOT_WINDOW_CLASS "Tauri Window"');
+  expect(hooks()).toContain("!define OPENBOT_OPEN_WAIT_TENTHS 600");
+  const stay = code(
+    between(hooks(), "!macro OPENBOT_STAY_UNTIL_OPEN\n", "!macroend"),
+  );
+  const at = (line: string) => {
+    const index = stay.indexOf(line);
+    expect({ line, found: index > -1 }).toEqual({ line, found: true });
+    return index;
+  };
+  // Finish, Cancel and Back, both boxes and the close button are off before it waits.
+  for (const button of [1, 2, 3]) {
+    at(`GetDlgItem $OpenBotWaitWindow $HWNDPARENT ${button}`);
+  }
+  at("EnableWindow $mui.FinishPage.Run 0");
+  at("EnableWindow $mui.FinishPage.ShowReadme 0");
+  const closed = at(
+    "System::Call 'user32::EnableMenuItem(p $OpenBotWaitWindow, i ${SC_CLOSE}, i ${MF_GRAYED})'",
+  );
+  const said = at(
+    'SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 "STR:Opening OpenBot. This can take a minute."',
+  );
+  const found = at(
+    'FindWindow $OpenBotWaitWindow "${OPENBOT_WINDOW_CLASS}" "${PRODUCTNAME}"',
+  );
+  const visible = at(
+    "System::Call 'user32::IsWindowVisible(p $OpenBotWaitWindow) i.s'",
+  );
+  const handed = at(
+    "System::Call 'user32::DispatchMessageW(p $OpenBotWaitMessage)'",
+  );
+  const slept = at("Sleep 100");
+  expect(closed).toBeLessThan(found);
+  expect(said).toBeLessThan(found);
+  expect(found).toBeLessThan(visible);
+  expect(visible).toBeLessThan(handed);
+  expect(handed).toBeLessThan(slept);
+  at(
+    "System::Call 'user32::PeekMessageW(p $OpenBotWaitMessage, p 0, i 0, i 0, i ${PM_REMOVE}) i.s'",
+  );
+  at("${If} $OpenBotWaitTenths >= ${OPENBOT_OPEN_WAIT_TENTHS}");
+  at("IntOp $OpenBotWaitTenths $OpenBotWaitTenths + 1");
+  // A silent install has no page to keep.
+  expect(stay[0]).toBe("${IfNot} ${Silent}");
 });
