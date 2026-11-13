@@ -835,7 +835,21 @@ Section Install
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
 
+  ; >>> OpenBot
+  ; FileFunc's GetSize says "Size:190 Kb  Files:1  Folders:" on the status line, whatever it was set
+  ; to, and sets it back to "both" when it ends, so the lines after it were said there too: "Create
+  ; shortcut: C:\Users\<person>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\OpenBot.lnk".
+  ; The uninstaller's size in KB, as GetSize gives it, read quietly instead, and GetSize skipped.
+  FileOpen $0 "$INSTDIR\uninstall.exe" r
+  FileSeek $0 0 END $1
+  FileClose $0
+  IntOp $0 $1 / 1024
+  Goto openbot_uninstaller_sized
+  ; <<< OpenBot
   ${GetSize} "$INSTDIR" "/M=uninstall.exe /S=0K /G=0" $0 $1 $2
+  ; >>> OpenBot
+  openbot_uninstaller_sized:
+  ; <<< OpenBot
   IntOp $0 $0 + ${ESTIMATEDSIZE}
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD SHCTX "${UNINSTKEY}" "EstimatedSize" "$0"

@@ -428,17 +428,31 @@ const SAYS_A_PATH =
   /^(SetOutPath|CreateDirectory|File|Delete|RMDir|Rename|CopyFiles|WriteUninstaller|CreateShortcut|ExecWait|ExecShell|Exec)\b|^Call CreateOrUpdate\w*Shortcut$/;
 
 /**
- * What `lines` put on the status line, run in order from `SetDetailsPrint both`: the plain lines
- * said there, the instructions that put a path there, and the details mode left at the end.
+ * FileFunc's GetSize and Locate say their counts on the status line whatever the mode is
+ * ("Size:190 Kb  Files:1  Folders:"), and set it back to `both` when they end.
+ */
+const SAYS_ITS_OWN = /^\$\{(GetSize|Locate)\}/;
+
+/**
+ * What `lines` put on the status line, run in order from `SetDetailsPrint both`, a `Goto` going on
+ * from its label: the plain lines said there, the instructions that put a path or a count there, and
+ * the details mode left at the end.
  */
 function statusLine(lines: string[]) {
   let mode = "both";
   const said: string[] = [];
   const paths: string[] = [];
-  for (const line of lines) {
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at];
+    const jump = /^Goto (\w+)$/.exec(line);
+    const label = jump ? lines.indexOf(`${jump[1]}:`, at) : -1;
     const set = /^SetDetailsPrint (\w+)$/.exec(line);
-    if (set) mode = set[1];
-    else if (mode !== "both" && mode !== "textonly") continue;
+    if (label > at) at = label;
+    else if (set) mode = set[1];
+    else if (SAYS_ITS_OWN.test(line)) {
+      paths.push(line);
+      mode = "both";
+    } else if (mode !== "both" && mode !== "textonly") continue;
     else if (SAYS_A_PATH.test(line)) paths.push(line);
     else if (line.startsWith("DetailPrint ")) said.push(line);
   }
@@ -451,7 +465,9 @@ function statusLine(lines: string[]) {
  * OpenBot's files, the person's own folders and nothing they could act on. A person reads plain
  * lines only: "Copying OpenBot's files." while the files go in, and the WebView2 Runtime's own
  * lines while it comes. NSIS's lines still go to the details list
- * (https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint).
+ * (https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint). On the first live run of that
+ * fix, FileFunc's GetSize still said "Size:190 Kb  Files:1  Folders:" and put the status line back,
+ * so "Create shortcut: C:\Users\Administrator\...\OpenBot.lnk" showed after it.
  */
 test("the Installing page's status line says plain lines, never a folder or a file", () => {
   const install = code(between(template(), "Section Install", "SectionEnd"));
