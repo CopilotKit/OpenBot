@@ -8,7 +8,7 @@ import {
   type GrantState,
   groupGrants,
 } from "@/lib/plugins/grants";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
  * The copy shown before redirecting somebody to a consent screen (spec D30). The action list is

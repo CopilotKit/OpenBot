@@ -211,6 +211,19 @@ export function acceptedBuildEnvironment(root: string): Record<string, string> {
 /** What the candidate runs with. A host install builds its own images from the checked-out source
  * (`start.sh` runs `up --build`), and Docker refuses to tag a build with a digest reference, so only
  * image topology names the release's pinned images. */
+/** The OpenBot images' tag a tree names in backend-images.env, or nothing when it names none. */
+function backendTag(root: string): string | undefined {
+  try {
+    const line = readFileSync(join(root, "backend-images.env"), "utf8")
+      .split("\n")
+      .filter((entry) => entry.startsWith("OPENBOT_BACKEND_TAG="))
+      .at(-1);
+    return line?.slice("OPENBOT_BACKEND_TAG=".length).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function candidateEnvironment(
   topology: "host" | "image",
   manifest: ReleaseManifest,
@@ -1090,27 +1103,25 @@ export async function applyLocalUpdate(
       });
     journal.databaseMayHaveChanged = true;
     phase("migrating");
-    if (options.topology === "host")
-      await run(["bun", "--env-file=../.env", "scripts/migrate.ts"], {
-        cwd: join(root, "server"),
-        env: candidateEnv,
-      });
-    else
-      await run(
-        compose(
-          [
-            "up",
-            "--no-build",
-            "--no-deps",
-            "--exit-code-from",
-            "migrate",
-            "migrate",
-          ],
-          root,
-          initial.composeProject,
-        ),
-        { cwd: root, env: candidateEnv },
-      );
+    // The host topology runs the server from the OpenBot images at the tag the activated tree names
+    // (backend-images.env), so its migrations are that image's, run as the image topology runs them.
+    if (options.topology === "host" && !candidateEnv.OPENBOT_BACKEND_TAG)
+      candidateEnv.OPENBOT_BACKEND_TAG = backendTag(root);
+    await run(
+      compose(
+        [
+          "up",
+          "--no-build",
+          "--no-deps",
+          "--exit-code-from",
+          "migrate",
+          "migrate",
+        ],
+        root,
+        initial.composeProject,
+      ),
+      { cwd: root, env: candidateEnv },
+    );
     phase("starting");
     if (options.topology === "host")
       await run(["bash", "scripts/start.sh"], { cwd: root, env: candidateEnv });

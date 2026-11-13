@@ -187,7 +187,7 @@ jobs:
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
-          # Writes the version, the chart's appVersion, the Cargo files and the changelog, and
+          # Writes the version, the OpenBot image tag, the Cargo files and the changelog, and
           # refuses a changelog with nothing under Unreleased. It appends version, base and the path
           # of a file holding the notes to $GITHUB_OUTPUT for the steps below.
           bun scripts/release-prepare.ts "$BUMP" "$KIND"
@@ -219,6 +219,8 @@ jobs:
               echo
               echo "Before merging:"
               echo "- [ ] The notes below describe what this $KIND changes"
+              echo "- [ ] The OpenBot server images are published at v$VERSION, the tag"
+              echo "      backend-images.env now names"
               echo
               echo "Merging checks this commit before it builds: the full suite, or, when this PR"
               echo "changes only the release files, main's passing CI on the commit it merges onto."
@@ -241,6 +243,8 @@ jobs:
             echo
             echo "Before merging:"
             echo "- [ ] The notes below describe what a deployment does differently"
+            echo "- [ ] The OpenBot server images are published at v$VERSION, the tag"
+            echo "      backend-images.env now names"
             echo "- [ ] The smoke journey passed against a licensed deployment, and the result is"
             echo "      pasted in a comment: \`bash scripts/start.sh && bun run test:smoke\`,"
             echo "      with OPENBOT_SMOKE_COOKIE set to a signed-in session (docs/releasing.md)"
@@ -262,7 +266,7 @@ jobs:
       - name: Preview
         if: inputs.dry_run
         run: |
-          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock desktop/intelligence-cli.json
+          git --no-pager diff -- package.json CHANGELOG.md backend-images.env desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock desktop/intelligence-cli.json
           cat /tmp/pr-body.md
 
       # The first candidate or beta needs its branch before a PR can target it. It is made through

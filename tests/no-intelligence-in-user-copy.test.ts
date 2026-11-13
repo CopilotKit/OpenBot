@@ -8,63 +8,22 @@ import ts from "typescript";
  * OpenBot they mean is the backend (see .claude/skills/openbot-copy), one word.
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
- * server, the Recorder extension and the shared Recorder disclosure, and the string literals of the
- * desktop's native side, whose problems, notices, progress lines and menu items reach the window and
- * the tray.
+ * Recorder extension and the shared Recorder disclosure, and the string literals of the desktop's
+ * native side, whose problems, notices, progress lines and menu items reach the window and the tray.
  * Not read: code identifiers and env names (`intelligenceStack`, `INTELLIGENCE_API_URL`; the check
- * is for the capitalised word), comments, tests, log calls, and docs/ and charts/, which operators
- * read to configure Intelligence by name.
+ * is for the capitalised word), comments, tests, log calls, and docs/, which operators read to
+ * configure Intelligence by name. The server's text comes with the published OpenBot images, not
+ * from this tree.
  */
 const REPO = join(import.meta.dir, "..");
 const WORD = /\bIntelligence\b/;
 
 /**
- * Text that names Intelligence and never reaches a person: written only to the server's log, or
- * refused before the server serves anything. Each entry must still match, so one that goes stale
- * is removed rather than kept as a hole.
+ * Text that names Intelligence and never reaches a person: written only to a log, or refused
+ * before anything is served. None today. Each entry must still match, so one that goes stale is
+ * removed rather than kept as a hole.
  */
-const NOT_SHOWN: { file: string; text: string; why: string }[] = [
-  {
-    file: "server/src/config.ts",
-    text: "CopilotKit Intelligence is required and is not configured",
-    why: "a boot refusal, printed to the operator's terminal before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "both say where the browser reaches the Intelligence gateway",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "must be the Intelligence project's numeric ID",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence has no valid licence. Give Intelligence's own deployment",
-    why: "the boot log's advice, which names the Helm keys an operator sets",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Managed Intelligence could not resolve this project's entitlement",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence answers that this deployment's entitlement is not active",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence did not confirm this deployment's entitlement",
-    why: "the boot log's advice",
-  },
-];
+const NOT_SHOWN: { file: string; text: string; why: string }[] = [];
 
 /** Calls whose arguments are written to a log, never shown. */
 const LOGGING =
@@ -169,9 +128,9 @@ function nativeText(path: string, word = WORD): string[] {
 
 function shown(word = WORD): string[] {
   const found = [
-    ...["desktop/src", "app/src", "server/src", "extension/src"].flatMap(
-      (root) => [...files(join(REPO, root), /\.tsx?$/)],
-    ),
+    ...["desktop/src", "app/src", "extension/src"].flatMap((root) => [
+      ...files(join(REPO, root), /\.tsx?$/),
+    ]),
     join(REPO, "shared/recorder-disclosure.ts"),
   ].flatMap((path) => scriptText(path, word));
   found.push(
@@ -187,7 +146,7 @@ const isNotShown = (hit: string) =>
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
-test("no text a person reads in the desktop app, the app, the server or the Recorder says Intelligence", () => {
+test("no text a person reads in the desktop app, the app or the Recorder says Intelligence", () => {
   expect(shown().filter((hit) => !isNotShown(hit))).toEqual([]);
 });
 
@@ -227,21 +186,6 @@ const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
     file: "desktop/src/Sections.tsx",
     text: "by CopilotKit",
     why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "CopilotKit Intelligence is required and is not configured",
-    why: "a boot refusal, printed to the operator's terminal before the server listens",
-  },
-  {
-    file: "server/src/request-actor.ts",
-    text: "A CopilotKit run requires",
-    why: "a refusal of a run with no signed-in user, which the signed-in app never makes",
-  },
-  {
-    file: "server/src/learning/ensure-container.ts",
-    text: "CopilotKit",
-    why: "the operator's Learning setup, which names the CopilotKit CLI the operator runs",
   },
 ];
 

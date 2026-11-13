@@ -13,10 +13,13 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
 4. Review the pull request it opens. It updates `package.json`, promotes the changelog's
-   `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
-   Cargo package/lockfile to the same version. Tauri reads its version directly from the root
-   `package.json`.
-5. Merge it. That is the publish.
+   `## Unreleased` heading to `## X.Y.Z`, moves the desktop Cargo package/lockfile to the same
+   version, and pins `backend-images.env` to `vX.Y.Z`, so a checkout of the release runs the
+   OpenBot server, computer and supervisor images of that release. Those images must be published
+   at `vX.Y.Z` before it merges. Tauri reads its version directly from the root `package.json`.
+5. Merge it. That is the publish. After a stable release, the publish workflow opens a PR that puts
+   `main` back in `backend-images.env`, so main runs the images built from main again; merge it
+   once its checks pass.
 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
@@ -406,16 +409,20 @@ default branch, the same run starts from a terminal:
 
 ```sh
 gh workflow run internal-build.yml --ref my-branch
+gh workflow run internal-build.yml --ref my-branch -f backend_tag=v1.0.3
 ```
 
-The run builds the images for that commit, then a Mac (Apple Silicon) installer and a Windows (x64)
-installer. The images are pushed tagged `sha-<commit>` and never `latest`, so the release images
-stay where they are.
+The run builds the Bot images for that commit, then a Mac (Apple Silicon) installer and a Windows
+(x64) installer. The Bot images are pushed tagged `sha-<commit>` and never `latest`, so the release
+images stay where they are. The OpenBot server, computer, supervisor and all-in-one images are the
+published ones at `backend_tag`: `main` unless you choose another, such as a version (`v1.0.3`) or
+a `test-<date>-<run>` tag.
 
 Each installer is pinned to what the run built:
 
 - its deployment version is `internal-<sha12>`, the first twelve characters of the commit
-- its images are the `sha-<commit>` images of that commit, by digest
+- its Bot images are the `sha-<commit>` images of that commit, and its OpenBot images those at
+  `backend_tag`, all by digest
 
 A pinned installer never asks for `releases/latest`. Opening it installs that exact build, and it
 replaces whatever deployment is installed on the machine, keeping its data. OpenBot's database does
@@ -509,7 +516,6 @@ anything, and fails if anything else changed. The allowed difference is:
 
 - the `version` in `package.json`
 - `CHANGELOG.md`
-- `appVersion` in `charts/openbot/Chart.yaml`
 - the `openbot-desktop` version in `desktop/src-tauri/Cargo.toml` and `Cargo.lock`
 
 A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
@@ -755,10 +761,11 @@ Then, in order:
 - the commit is checked, as described under [What has to be green](#what-has-to-be-green): the full
   CI suite, or, when the release PR changed only the release files on a commit main's CI passed,
   that run and the checks that read the release files
-- one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the
-  commit as `sha-<commit>` and `latest` only when the release becomes Latest (a stable release with
-  no newer release already out). A candidate or beta is never tagged `latest`
-- the services `docker-compose.yml` can build are published too, one image each, at
+- the OpenBot images, `ghcr.io/copilotkit/openbot` and `openbot-server`, `openbot-agent-computer`
+  and `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
+  and pinned by digest in `container-images.json`. The run stops if one is missing or lacks an
+  architecture it needs
+- the services `docker-compose.yml` can build are published, one image each, at
   `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
   are laptops as well as servers. `.github/published-images.json` is the list, and CI fails if it
@@ -767,7 +774,7 @@ Then, in order:
   every one of them
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
-  archive, the chart and the release manifest as assets. A candidate or beta is marked as a
+  archive and the release manifest as assets. A candidate or beta is marked as a
   prerelease and never Latest. A stable release is published not Latest, with no installers yet
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag straight
   away. It waits for a `macos-signing` reviewer, then builds both Macs and attaches the signed `.dmg`
@@ -828,8 +835,8 @@ wants the `build` sections overridden away rather than this variable alone.
 A tag can be moved to point at a different image; a digest cannot. The same digest that CI smoke
 tested is the one that runs, and rolling back is the same command with an earlier version.
 
-On Kubernetes the chart takes the same digest as `image.digest`; see
-[charts/openbot/README.md](../charts/openbot/README.md#pin-the-image-by-digest).
+On Kubernetes the chart takes the same digest as `image.digest`; see "Pin the image by digest" in
+the Helm guide that comes with the chart.
 
 Before deploying, you can check an image is the one this repository built. Every published image
 carries its own attestation:
@@ -874,8 +881,7 @@ release commit:
   (its first parent), and main's CI passed on that commit, they do not. That commit's tree has been
   through all of them already. The release files are `CHANGELOG.md` and `release-policy.json`, which
   may change freely, and the `version` in `package.json`, the `openbot-desktop` version line in
-  `desktop/src-tauri/Cargo.toml` and `Cargo.lock` and `appVersion` in `charts/openbot/Chart.yaml`,
-  which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
+  `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
   skips `image` unless it was labelled. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and

@@ -25,7 +25,6 @@ function fixture(version: string, unreleased = "- Something new.\n") {
   mkdirSync(join(root, "desktop/src-tauri"), { recursive: true });
   mkdirSync(join(root, "desktop/scripts"));
   mkdirSync(join(root, "scripts"));
-  mkdirSync(join(root, "charts/openbot"), { recursive: true });
   const write = (path: string, text: string) =>
     writeFileSync(join(root, path), text);
   write("package.json", `${JSON.stringify({ version }, null, 2)}\n`);
@@ -33,13 +32,16 @@ function fixture(version: string, unreleased = "- Something new.\n") {
     "CHANGELOG.md",
     `# Changelog\n\n## Unreleased\n\n${unreleased}\n## 0.1.0\n\n- First.\n`,
   );
-  write("charts/openbot/Chart.yaml", 'name: openbot\nappVersion: "0.0.1"\n');
   write(
     "desktop/src-tauri/tauri.conf.json",
     '{"version":"../../package.json"}',
   );
   write("desktop/src-tauri/Cargo.toml", cargo(version));
   write("desktop/src-tauri/Cargo.lock", lock(version));
+  write(
+    "backend-images.env",
+    "# The OpenBot images.\n#\n# Pinned by tag.\nOPENBOT_BACKEND_TAG=main\n",
+  );
   copyFileSync(
     join(import.meta.dir, "../desktop/scripts/desktop-version.ts"),
     join(root, "desktop/scripts/desktop-version.ts"),
@@ -58,7 +60,7 @@ afterEach(() => {
   }
 });
 
-test("a stable patch promotes the changelog and moves the chart and Cargo", () => {
+test("a stable patch promotes the changelog and moves Cargo", () => {
   const { root, read } = fixture("0.2.0");
   const result = prepareRelease(root, "patch", "stable");
   expect(result.version).toBe("0.2.1");
@@ -68,11 +70,37 @@ test("a stable patch promotes the changelog and moves the chart and Cargo", () =
   expect(read("CHANGELOG.md")).toContain(
     "## Unreleased\n\n## 0.2.1\n\n- Something new.",
   );
-  expect(read("charts/openbot/Chart.yaml")).toContain('appVersion: "0.2.1"');
   expect(read("desktop/src-tauri/Cargo.toml")).toContain('version = "0.2.1"');
   expect(read("desktop/src-tauri/Cargo.lock")).toContain(
     'name = "openbot-desktop"\nversion = "0.2.1"',
   );
+});
+
+test("a release pins the OpenBot images to its own version", () => {
+  for (const [version, kind, expected] of [
+    ["0.2.0", "stable", "v0.2.1"],
+    ["0.2.0", "rc", "v0.2.1-rc.1"],
+    ["0.3.0-rc.2", "final", "v0.3.0"],
+  ] as const) {
+    const { root, read } = fixture(version);
+    prepareRelease(root, "patch", kind);
+    expect(read("backend-images.env")).toBe(
+      `# The OpenBot images.\n#\n# Pinned by tag.\nOPENBOT_BACKEND_TAG=${expected}\n`,
+    );
+  }
+});
+
+test("a release refuses a backend-images.env with no single tag line", () => {
+  for (const text of [
+    "# Nothing pinned.\n",
+    "OPENBOT_BACKEND_TAG=a\nOPENBOT_BACKEND_TAG=b\n",
+  ]) {
+    const { root } = fixture("0.2.0");
+    writeFileSync(join(root, "backend-images.env"), text);
+    expect(() => prepareRelease(root, "patch", "stable")).toThrow(
+      "must set OPENBOT_BACKEND_TAG on exactly one line",
+    );
+  }
 });
 
 test("a minor release candidate leaves the changelog alone", () => {
@@ -83,9 +111,6 @@ test("a minor release candidate leaves the changelog alone", () => {
   expect(result.base).toBe("release/0.3");
   expect(result.notes).toBe("- Something new.");
   expect(read("CHANGELOG.md")).toBe(before);
-  expect(read("charts/openbot/Chart.yaml")).toContain(
-    'appVersion: "0.3.0-rc.1"',
-  );
 });
 
 test("final finishes a candidate under its own heading", () => {

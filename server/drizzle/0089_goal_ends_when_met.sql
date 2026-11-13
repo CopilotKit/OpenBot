@@ -1,1 +1,0 @@
-ALTER TABLE "responsibilities" ADD COLUMN "ends_when_met" boolean DEFAULT false NOT NULL;

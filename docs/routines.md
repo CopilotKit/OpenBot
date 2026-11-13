@@ -171,7 +171,7 @@ Two settings carry this:
 
 On Kubernetes, the chart runs a CronJob of `fire-routines.ts` on `routines.schedule`, on by default
 (`routines.enabled`), and generates the shared secret for it and the API server unless one is
-supplied (see [the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)). It is a
+supplied (see the routines sweep in the Helm guide that comes with the chart). It is a
 CronJob the same way the computer culler is a CronJob rather than a timer inside the API: a timer fires in
 every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
 starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two

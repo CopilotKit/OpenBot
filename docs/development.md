@@ -83,11 +83,13 @@ Ubuntu 26.04.
 
 ## Running services
 
-Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server, the app, and the routine worker, and verifies health routes.
+Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server and the routine worker, starts the app, and verifies health routes.
+
+The API server, the routine worker, the migrations, the computer and the supervisor run from the published OpenBot images, pulled at the one tag in `backend-images.env`: `main` on the `main` branch, the images built from main, and the release's own version (`v1.0.3`) in a release's checkout, which the release PR pins. `start.sh` pulls them on every start, so `main` is current; offline, or with `IMAGE_PULL_POLICY=never`, it uses the copies already on the machine. An `OPENBOT_BACKEND_TAG` in the environment or `.env` runs another build. The app runs from this checkout, with Vite, so a change to it shows as you save; its `/api` calls go to the server's container on port 3001. The server's log is `docker compose logs server`, and the worker's `docker compose logs worker`. Run Compose by hand with `--env-file backend-images.env --env-file .env`, so it pulls the same images.
 
 Use `bash scripts/stop.sh` to take it down: the app, the routine worker, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
 
-Use `bun run dev` only when you want the app and API server without starting the Docker Bots and computers.
+Use `bun run dev` only when you want the app on its own, against a server that is already running.
 
 | Service           | Port                       |
 | ----------------- | -------------------------- |
@@ -99,13 +101,15 @@ Use `bun run dev` only when you want the app and API server without starting the
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 
-`start.sh` hands every selected Docker service to `docker compose up -d` on every run, so one whose configuration changed is recreated and an unchanged one is left as it is. It leaves an API server or app that already answers as OpenBot alone, restarts the API server when it refuses the worker's secret or has no routines route, and reports when a port is held by another process.
+`start.sh` hands every selected Docker service, the API server and the worker included, to `docker compose up -d` on every run, so one whose configuration or image changed is recreated and an unchanged one is left as it is. It recreates the server when it generated a secret, leaves an app that already answers as OpenBot alone, and reports when a port is held by another process.
 
 **Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
-message is sent, and the only thing that reclaims the ones never sent is
-`bun scripts/cull-staged-attachments.ts` from `server/`, which the Helm chart runs hourly and which
-neither `docker-compose.yml` nor `start.sh` starts. It needs only `DATABASE_URL`, and takes a
-retention window in hours as its one optional argument, defaulting to 24. On a laptop that is
+message is sent, and the only thing that reclaims the ones never sent is the server image's
+`openbot cull-staged-attachments`, which the Helm chart runs hourly and which neither
+`docker-compose.yml` nor `start.sh` starts. Run it with
+`docker compose --env-file backend-images.env --env-file .env run --rm --no-deps server openbot cull-staged-attachments`.
+It needs only `DATABASE_URL`, and takes a retention window in hours as its one optional argument,
+defaulting to 24. On a laptop that is
 usually nothing, because the rows are small and the database is yours. It stops being nothing at
 thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
 the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
@@ -115,55 +119,9 @@ in the composer deletes it outright, so it takes abandoned drafts rather than or
 
 ## Migrations
 
-After changing the Drizzle schema:
-
-```sh
-bun run --filter server db:generate
-bun run --filter server db:migrate
-```
-
-Review generated migration files before sharing them. `start.sh` applies existing migrations when it starts the stack.
-
-**Do not hand-edit a generated migration.** It leaves a file that no longer matches what the
-generator produced. If the generated SQL will not work — `ADD COLUMN ... NOT NULL` fails on a table
-that already has rows — split it instead: generate the column nullable, add the data step, then
-generate the constraint.
-
-**A constraint that tightens an existing column belongs to a later release**, not to the release that
-adds the column. A rolling deploy runs the migrations and then serves from old and new replicas at
-once, and an old replica writes rows without the new column: under `NOT NULL` its writes start
-failing, so the release that added the column breaks for everybody who lands on a replica that has
-not been replaced yet. Ship the column nullable, let the fleet turn over, then tighten it. `issuer`
-on `accounts` is the worked example: the column is nullable and no migration tightens it.
-
-**A data step is its own migration**, created with the flag that exists for it:
-
-```sh
-bun run --filter server db:generate -- --custom --name=backfill_something
-```
-
-A generator diffs schema against schema, so a rule like "the rows whose provider is Google get
-Google's issuer" can never come out of one: it is not in the schema. `--custom` writes an empty file
-registered in the journal, and it is the only migration anybody should be writing by hand.
-
-CI enforces two things about this: `drizzle-kit check` for collisions and gaps between migrations,
-and a generate-and-fail-if-dirty probe that refuses a schema change with no migration written for it.
-
-**If `db:migrate` refuses with "the migrator only runs migrations stamped after the row it
-reads"**, your database ran a branch's migrations before that branch was merged. Merging renumbers
-the branch's migrations to sit after the ones it merged in, and those merged-in migrations are now
-stamped older than what your database already recorded — so the migrator would skip them and report
-success over the tables they should have created. Nothing is applied; the refusal names them. Drop
-and recreate the database, which is almost always the right answer for a development one; see
-[deployment.md](deployment.md) for how to repair one you have to keep.
-
-**If `db:migrate` stops with `ENOENT` naming a `server/drizzle/<tag>.sql` file**, the journal names
-a migration file that is not there. `db:migrate` reads every file the journal lists before it
-applies anything, so nothing has been applied. A rebase does this: `meta/_journal.json` is a
-checked-in file, so restoring it can reinstate entries for migrations that were renamed.
-`drizzle-kit check` reports "Everything's fine" in that state, because it compares schemas rather
-than checking that the journal and the directory agree. Compare `meta/_journal.json` against
-`ls server/drizzle/*.sql`.
+The database schema and its migrations come with the server image. `start.sh` applies them with the
+`migrate` service before it starts the server, every run, and a database that is already current is
+left as it is.
 
 ## Quality checks
 
@@ -176,10 +134,6 @@ bun run typecheck
 bun run test
 bun run build
 ```
-
-Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABASE_URL` at a dedicated database such as `postgres://openbot:openbot@localhost:5432/openbot_test` before running them.
-
-They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
 
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests. It runs the suite in shards, one runner each, and the `tests` check passes only when every shard passed and their counts add up to the floor in `scripts/test-floor.ts`. To run one shard the way CI does, pass it to the same script: `bun run test:ci --shard=2/4`.
 
@@ -202,22 +156,6 @@ a broken deployment when nothing is broken. Take the cookie from a browser alrea
 deployment under test, from DevTools under Application, Cookies. It is a credential with that
 person's reach: it belongs in the environment of the run, not in a file or a pull request comment.
 Asked for without it, the run stops before the first test and names the variable.
-
-`bun run test:live-screen` is separate for a related reason and needs no deployment, only this
-directory's own dependencies:
-
-```sh
-cd agent-computer && bun install
-cd .. && bun run test:live-screen
-```
-
-It drives the live screen against the real computer process with a real Chromium: a socket closing
-while the browser is still starting, a second connection taking the screen from the first, the wheel
-refusing input from the socket that owns it, and a browser closing by request or by the idle sweep.
-Those need `agent-computer/src/index.ts`, which imports Playwright at module scope, and `playwright`
-is declared only in `agent-computer/package.json`, which `bun install` at the root does not reach. So
-without `OPENBOT_LIVE_SCREEN=1` the files skip before importing anything, which is what keeps
-`bun run test` and CI working where that dependency was never installed.
 
 ## Contribution checklist
 

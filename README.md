@@ -100,7 +100,7 @@ OpenBot enforces sign-in, tool permissions, action policies, and audit at its AP
 
 Computer execution is pluggable: use the default Kubernetes setup or connect a compatible external computer provider.
 
-[Architecture details](docs/architecture.md) · [Services and ports](#services-and-ports) · [Kubernetes deployment](charts/openbot/README.md)
+[Architecture details](docs/architecture.md) · [Services and ports](#services-and-ports) · [Kubernetes deployment](#deploy-on-kubernetes)
 
 ## Open source, local operation, and licensing
 
@@ -120,37 +120,32 @@ Computer execution is pluggable: use the default Kubernetes setup or connect a c
 
 Deploy OpenBot and CopilotKit Intelligence together on **AWS EKS, Azure AKS, Google GKE, or your own Kubernetes cluster**. The chart installs Intelligence by default; no separate hosted project is required.
 
-For a first evaluation, you need a cluster with **amd64 nodes**, a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The commands below use an OpenAI key. For Anthropic, a model router, cluster sizing, or an existing Intelligence deployment, use the [full Helm guide](charts/openbot/README.md).
+For a first evaluation, you need a cluster with **amd64 nodes**, a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The commands below use an OpenAI key. For Anthropic, a model router, cluster sizing, or an existing Intelligence deployment, use the full Helm guide that comes with the chart (`helm show readme` on the chart below).
 
-> **Setting up with an AI assistant?** Give it this README and [the Helm guide](charts/openbot/README.md). The guide covers cloud-specific values, storage, secrets, sign-in, networking, upgrades, and troubleshooting. Use the evaluation below only through a local port-forward; configure sign-in and TLS before sharing a deployment.
+> **Setting up with an AI assistant?** Give it this README and the Helm guide (`helm show readme` on the chart below). The guide covers cloud-specific values, storage, secrets, sign-in, networking, upgrades, and troubleshooting. Use the evaluation below only through a local port-forward; configure sign-in and TLS before sharing a deployment.
 
-1. **Get the source.** Skip this if you already have a checkout.
-
-   ```sh
-   git clone https://github.com/CopilotKit/OpenBot.git
-   cd OpenBot
-   ```
-
-2. **Create `openbot-secrets.yaml` locally.** Replace the placeholders with your license and model key. Keep this file out of source control.
+1. **Create `openbot-values.yaml` locally.** Replace the placeholders with your license and model key. Keep this file out of source control.
 
    ```yaml
+   config:
+     singleUser: true
+   postgresql:
+     enabled: true
    secrets:
      licenseToken: "<your CopilotKit trial or production license>"
      modelApiKey: "<your OpenAI API key>"
    ```
 
-3. **Install.**
+2. **Install** the chart published with the release.
 
    ```sh
-   helm dependency build charts/openbot
-   helm install openbot charts/openbot \
+   helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz \
      --namespace openbot --create-namespace \
-     --values charts/openbot/ci/vanilla-values.yaml \
-     --values openbot-secrets.yaml \
+     --values openbot-values.yaml \
      --timeout 15m
    ```
 
-4. **Open your evaluation.**
+3. **Open your evaluation.**
 
    ```sh
    kubectl -n openbot get pods,jobs
@@ -161,7 +156,7 @@ For a first evaluation, you need a cluster with **amd64 nodes**, a **default Sto
 
 The chart creates the runtime credentials, installs the databases, bootstraps Intelligence, and sets up the Learning container and scheduled jobs. Automatic Learning uses your model key too.
 
-For a team deployment, follow the [Helm guide](charts/openbot/README.md) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
+For a team deployment, follow the Helm guide (`helm show readme` on the chart) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
 
 ## Run from source
 
@@ -176,8 +171,12 @@ cd OpenBot
 
 To run the open-source template locally, you’ll need the following.
 
-- Docker, for PostgreSQL and the shipped Bots.
-- [Bun](https://bun.sh) 1.4+, for the app, the API server and the tests (some tests fail on 1.3).
+- Docker, for PostgreSQL, the API server and the shipped Bots. The server, its routine worker and
+  the Bots' computers run from the published OpenBot images, which `scripts/start.sh` pulls at the
+  tag in `backend-images.env`: `main` in a checkout of `main`, the images built from main, and the
+  release's own version in a release (`v1.0.3` in the v1.0.3 tag). Nothing else is built or needed
+  for them.
+- [Bun](https://bun.sh) 1.4+, for the app, the setup helpers and the tests (some tests fail on 1.3).
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
@@ -254,7 +253,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 5. Open <http://localhost:3010>.
 
-`scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the routine worker, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
+`scripts/start.sh` pulls the OpenBot images at the tag in `backend-images.env`, starts Docker services, applies migrations, starts the API server on port 3001 and the routine worker from the OpenBot server image, starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. It pulls on every start, so a checkout of `main` runs the images built from main now; offline, it uses the copies already on the machine. The server's log is `docker compose logs server`.
 
 `scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
 
@@ -294,11 +293,6 @@ One image carries the app, the API, the browser the Bots drive, and optionally P
 docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
   ghcr.io/copilotkit/openbot:latest
-
-# Or the tree you have in front of you.
-docker build -t openbot .
-docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
 
 Everything is on 3001 here, the app included, rather than the 3010 the clone uses. `latest` is the
@@ -619,7 +613,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/routines.md](docs/routines.md)
 - [docs/automatic-learning.md](docs/automatic-learning.md)
 - [docs/deployment.md](docs/deployment.md)
-- [charts/openbot/README.md](charts/openbot/README.md): the Helm chart
+- The Helm chart, published with each release: `helm show readme` on it is the Helm guide
 - [docs/releasing.md](docs/releasing.md)
 - [docs/web-research.md](docs/web-research.md): public-web search and extraction through Parallel, Exa or Firecrawl
 

@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
-import type { RunCli } from "../server/src/learning/ensure-container";
+import type { RunCli } from "./copilotkit-cli";
 import { setupComposio } from "./setup-composio";
 
 const directories: string[] = [];

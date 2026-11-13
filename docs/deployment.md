@@ -16,9 +16,9 @@ docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql "$image"
 ```
 
-`docker build -t openbot .` from a clone produces the same thing, for anyone deploying a tree of
-their own. What a release publishes is digest-pinned in its `container-images.json`, and deploying
-those digests rather than a moving tag is what [releasing.md](releasing.md) recommends.
+The image is published, and a deployment pulls it; this tree does not build it. What a release
+publishes is digest-pinned in its `container-images.json`, and deploying those digests rather than a
+moving tag is what [releasing.md](releasing.md) recommends.
 
 ## Checking an image's signature
 
@@ -59,8 +59,8 @@ point at a managed database instead: set `DATABASE_URL` and leave `EMBEDDED_POST
 creates it. The first migration creates it and migration `0010` drops it again, since nothing stores
 vectors any more, and only the extension's owner can drop it. So do not enable it ahead of time as
 an administrator: that leaves the migrations failing with `must be owner of extension vector`. RDS,
-Cloud SQL and Azure Database all offer it; [Your own database](../charts/openbot/README.md#your-own-database-which-is-what-a-real-deployment-uses)
-has the grant each one needs.
+Cloud SQL and Azure Database all offer it; "Your own database" in the Helm guide that comes with
+the chart (`helm show readme`) has the grant each one needs.
 
 **Not in it:**
 
@@ -217,7 +217,7 @@ by hand and record it, which leaves the high-water mark where it is and lets the
 
 ```sql
 insert into drizzle.__drizzle_migrations (hash, created_at)
-values ('<sha256 of server/drizzle/<tag>.sql>', <that entry's "when" in meta/_journal.json>);
+values ('<sha256 of /app/server/drizzle/<tag>.sql in the server image>', <that entry's "when" in meta/_journal.json>);
 ```
 
 ## Replicas
@@ -242,9 +242,9 @@ No shared-memory configuration is needed or possible.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
 and it is the only one that gives each person (or an Isolated Bot) a computer of its own, runs the routines schedule without
-something outside the container, and scales the API past a single replica. That is the Helm chart:
-[charts/openbot/README.md](../charts/openbot/README.md), which covers EKS, GKE, AKS and a plain
-self-hosted cluster from the same templates.
+something outside the container, and scales the API past a single replica. That is the Helm chart published with each release, whose
+guide (`helm show readme`) covers EKS, GKE, AKS and a plain self-hosted cluster from the same
+templates.
 
 **Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
@@ -255,12 +255,11 @@ which makes them the shortest path from nothing to a running deployment.
 
 ## Known costs
 
-**The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
-published `agent-computer` Dockerfile both build from Ubuntu and run Playwright's pinned
-`install --with-deps --no-shell chromium` path, so Firefox and WebKit are never introduced into the
-final image layers. `--no-shell` leaves out Playwright's separate headless shell: every launch names a
-Chromium channel, and Playwright runs the full browser for a named channel even when headless. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
-the other can make the browser protocol and executable revision diverge. The images keep the
+**The browser images carry only the Chromium browser family.** The all-in-one image and the
+`openbot-agent-computer` image both build from Ubuntu and install Playwright's pinned Chromium
+without its separate headless shell, so Firefox and WebKit are never in their layers: every launch
+names a Chromium channel, and Playwright runs the full browser for a named channel even when
+headless. The images keep the
 baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.
 Measured as local zstd OCI layer descriptors against the previous Playwright-base `agent-computer`
 image, the compressed image fell from 884.2 MiB to 535.0 MiB on arm64 and from 894.6 MiB to
