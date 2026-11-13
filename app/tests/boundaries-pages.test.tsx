@@ -350,3 +350,26 @@ test("a rule's page lists the app calls it stopped", async () => {
     { mode: "enforce", deny: [], allow: ["true"], labels: {} },
   ]);
 });
+
+test("the list and a rule's page say rules are checked as written, and the describe field only drafts one", async () => {
+  serving({ mode: "enforce", deny: [custom], allow: ["true"] });
+  const list = open("/admin/boundaries").view;
+  expect(
+    await list.findByText(
+      /Each rule is checked exactly as written, the same way every time\. No model decides\./,
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  const rule = open("/admin/boundaries/0").view;
+  expect(
+    await rule.findByText(
+      /It is checked exactly as written before every action a Bot takes, the same way every time\. No model decides\./,
+    ),
+  ).toBeTruthy();
+  expect(
+    rule.getByText(
+      /your model drafts the rule\. OpenBot checks the rule you save, not your words\./,
+    ),
+  ).toBeTruthy();
+});
