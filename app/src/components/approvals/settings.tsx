@@ -50,7 +50,7 @@ import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 export function ApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
   const me = useQuery(currentUserQueryOptions()).data;
-  // The personal edition has no Admin to point at, and no team for team settings to govern.
+  // The personal edition has no team for team settings to govern, so no team rules to point at.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());

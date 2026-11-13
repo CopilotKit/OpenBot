@@ -4,6 +4,7 @@ import {
   CLOCK,
   computerPanel,
   expect,
+  expectEveryRowTimed,
   expectWholeReply,
   named,
   newConversation,
@@ -98,6 +99,8 @@ test("a Bot opens a page, reads it and answers, live on its computer", async ({
     await expect(opened).toHaveCount(1);
     await expect(opened).toContainText(`${SITE}/`);
     await expect(panel.getByText(/^Nothing yet/)).toHaveCount(0);
+    // Every step keeps its time across the reload: its answer says when it finished.
+    await expectEveryRowTimed(page);
     await shot("activity-after-reload");
   });
 });

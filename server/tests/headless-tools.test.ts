@@ -375,6 +375,34 @@ function computerHarness(deny: string[] = []) {
   return { gateway, audit, received };
 }
 
+/**
+ * A step the server takes says when it finished, in the answer the conversation keeps.
+ *
+ * After a person allows a step, the server takes it and carries the turn on with steps of its own,
+ * none of which pass through the browser. Activity beside the Bot's screen read the time of each step
+ * from the browser watching it, so every one of those rows had no time (found by the approvals
+ * journeys). The answer now carries it, read by `conversationActivity` in the app.
+ */
+test("a computer step the server runs answers with the time it finished", async () => {
+  const { gateway } = computerHarness();
+  const tools = headless.createHeadlessComputerTools({
+    gateway,
+    seat: botSeat("bot"),
+    actor: { id: "owner", userId: "owner" },
+  });
+  const click = tools.find((tool) => tool.definition.name === "computer_click");
+  const before = Date.now();
+  const answer = (await click?.execute(
+    { ref: "e1", snapshotId: 7 },
+    { toolCallId: "place-order", signal: new AbortController().signal },
+  )) as { ok?: boolean; finishedAt?: unknown };
+  expect(answer.ok).toBe(true);
+  expect(typeof answer.finishedAt).toBe("string");
+  const at = Date.parse(String(answer.finishedAt));
+  expect(at).toBeGreaterThanOrEqual(before);
+  expect(at).toBeLessThanOrEqual(Date.now());
+});
+
 test("scheduled computer actions carry the owner and routine into both policy and audit", async () => {
   const { gateway, received, audit } = computerHarness([
     'initiator.kind == "routine" && intent == "run_command"',

@@ -1,10 +1,13 @@
 import { ITEMS, SITE, SITE_HOST } from "../site/site";
 import { answer, approvalCard, expectAsksToPay, PAYS } from "./approval-steps";
 import {
+  activityRows,
   expect,
+  expectEveryRowTimed,
   expectWholeReply,
   named,
   newConversation,
+  openComputer,
   replyAfter,
   runsSoFar,
   send,
@@ -55,6 +58,17 @@ test("Allow once places one order and the next one asks again; Deny buys nothing
     await expectWholeReply(page, reply);
     await named(page, channelId);
     expect(ordered()).toEqual(["tomato"]);
+    // The order placed is named, and the steps the server took after the approval have their time too.
+    await openComputer(page);
+    await expect(
+      activityRows(page)
+        .filter({ hasText: "Clicked on page" })
+        .filter({ hasText: "Place order" }),
+    ).toHaveCount(1);
+    await expect(
+      activityRows(page).filter({ hasText: "Read page" }),
+    ).toHaveCount(1);
+    await expectEveryRowTimed(page);
     await shot("allowed-once");
   });
 
@@ -100,6 +114,14 @@ test("Allow once places one order and the next one asks again; Deny buys nothing
     await expectWholeReply(page, reply);
     expect(reply).not.toContain(ITEMS.basil.order);
     expect(ordered(), "a denied order is not placed").toEqual(["tomato"]);
+    // Activity names the button that was declined, as it names one that was clicked, never its ref.
+    await openComputer(page);
+    const declined = activityRows(page).filter({ hasText: "Declined" });
+    await expect(declined).toHaveCount(1);
+    await expect(declined).toContainText("Place order");
+    await expect(declined).toContainText("You declined it.");
+    // This page was opened again after the Deny, and every row kept its time, the declined one too.
+    await expectEveryRowTimed(page);
     await shot("denied");
   });
 });

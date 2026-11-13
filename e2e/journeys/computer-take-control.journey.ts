@@ -4,6 +4,7 @@ import {
   activityRows,
   computerPanel,
   expect,
+  expectScreenFillsFrame,
   expectWholeReply,
   named,
   newConversation,
@@ -130,6 +131,8 @@ test("the person takes the Bot's browser over, browses, and hands it back", asyn
       "Fernhill Garden Supply",
     );
     await expect(address).toHaveValue(`${SITE}/`);
+    // The tab left in front fills the screen, with no black band under the page.
+    await expectScreenFillsFrame(view.locator("canvas"));
     await shot("tab-closed");
   });
 
@@ -153,6 +156,7 @@ test("the person takes the Bot's browser over, browses, and hands it back", asyn
         view.getByRole("button", { name, exact: true }),
       ).toBeDisabled();
     }
+    await expectScreenFillsFrame(view.locator("canvas"));
     await shot("handed-back");
     await view.getByRole("button", { name: "Close the Bot's screen" }).click();
     await expect(view).toBeHidden();
@@ -183,8 +187,27 @@ test("the person takes the Bot's browser over, browses, and hands it back", asyn
     });
     await expect(confirm).toContainText("You can't undo this.");
     await shot("reset-asks");
+    // Every title the dialog shows from here until it has gone, as it fades out.
+    await confirm.evaluate((dialog) => {
+      const titles = new Set<string>();
+      const heading = () =>
+        dialog.querySelector('[data-slot="dialog-title"]')?.textContent ?? "";
+      titles.add(heading());
+      new MutationObserver(() => titles.add(heading())).observe(dialog, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+      (window as unknown as { resetTitles: Set<string> }).resetTitles = titles;
+    });
     await confirm.getByRole("button", { name: "Reset it" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    // It says whose browser it resets until it has gone: it never falls back to another title as it closes.
+    expect(
+      await page.evaluate(() => [
+        ...(window as unknown as { resetTitles: Set<string> }).resetTitles,
+      ]),
+    ).toEqual(["Reset Fernhill Guide's browser?"]);
     // Reset deletes the Bot's browser: it leaves the list until the Bot next opens a page.
     await expect(row).toHaveCount(0);
     await shot("reset-done");

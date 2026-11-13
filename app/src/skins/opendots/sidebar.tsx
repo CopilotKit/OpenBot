@@ -38,7 +38,7 @@ import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -368,9 +368,9 @@ function ThreadRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={open ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );

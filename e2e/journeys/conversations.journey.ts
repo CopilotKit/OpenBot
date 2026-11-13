@@ -8,6 +8,7 @@ import {
   generatedName,
   send,
   transcript,
+  watchForStop,
 } from "./chat";
 
 /**
@@ -231,12 +232,20 @@ test("a person starts, finds, renames, pins and deletes conversations", async ({
     ).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // From its panel.
+    // From its panel. Opened, a conversation whose Bot has finished never offers to stop it, not
+    // even while its history loads.
+    await expect(
+      page.getByRole("button", { name: "Stop the Bot" }),
+    ).toHaveCount(0);
+    const stopShown = await watchForStop(page);
     await conversationRow(page, lighthouse.name).click();
     await expect(page).toHaveURL(new RegExp(`/channel/${lighthouse.id}$`));
     await expect(
       transcript(page).getByText(LIGHTHOUSE, { exact: true }),
     ).toBeVisible();
+    expect(await stopShown(), "Stop the Bot shown with nothing running").toBe(
+      false,
+    );
     const settings = page.getByRole("button", {
       name: "This conversation's Bot",
     });
@@ -355,10 +364,16 @@ test("a person starts, finds, renames, pins and deletes conversations", async ({
 
     await page.getByRole("button", { name: "This conversation's Bot" }).click();
     await page.getByRole("button", { name: "Delete conversation…" }).click();
-    const dialog = page.getByRole("dialog", { name: /^Delete .*\?$/ });
+    // Named by the conversation's own name, not its Bot's.
+    const dialog = page.getByRole("dialog", {
+      name: `Delete “${kingfisher.name}”?`,
+    });
     await expect(dialog).toContainText(
       "It disappears for everyone in the conversation.",
     );
+    await expect(
+      page.getByRole("dialog", { name: `Delete ${ASSISTANT}?` }),
+    ).toHaveCount(0);
     await expectSettled(dialog);
     await shot("delete-from-panel");
     await dialog.getByRole("button", { name: "Delete", exact: true }).click();
@@ -370,7 +385,9 @@ test("a person starts, finds, renames, pins and deletes conversations", async ({
   await test.step("delete from the list: Cancel keeps it, Delete removes it", async () => {
     await conversationRow(page, kitten.name).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Delete conversation…" }).click();
-    const dialog = page.getByRole("dialog", { name: /^Delete .*\?$/ });
+    const dialog = page.getByRole("dialog", {
+      name: `Delete “${kitten.name}”?`,
+    });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();

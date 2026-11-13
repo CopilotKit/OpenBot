@@ -19,6 +19,7 @@ import {
   WhoApprovesSection,
 } from "@/components/admin/controls/people-learning";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
+import { TeamPage, YourOwnLearning } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -60,7 +61,7 @@ import {
 import { queryClient as appQueryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/learning")({
-  component: LearningPage,
+  component: LearningPageInEveryEdition,
 });
 const selectClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
 
@@ -833,5 +834,18 @@ function PublishedSkills({ agentId }: { agentId?: string }) {
         source={{ kind: "admin", agentId }}
       />
     </PageSection>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function LearningPageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Learn from finished conversations, review the skills OpenBot proposes, and give published skills to Bots."
+      more={<YourOwnLearning />}
+      title="Automatic learning"
+    >
+      <LearningPage />
+    </TeamPage>
   );
 }

@@ -121,30 +121,41 @@ export async function fitWindowsToViewport(
   viewport: { width: number; height: number },
   botId: string,
 ): Promise<void> {
-  const fit = async (page: Page) => {
-    const session = await context.newCDPSession(page);
+  context.on("page", (page) => void fitWindowToViewport(page, viewport, botId));
+  await Promise.all(
+    context.pages().map((page) => fitWindowToViewport(page, viewport, botId)),
+  );
+}
+
+/**
+ * Make the window hold exactly this tab's page, now. Fitting is measured from the tab as it is laid
+ * out at that moment, so fitting again corrects a window fitted for a tab laid out differently.
+ */
+export async function fitWindowToViewport(
+  page: Page,
+  viewport: { width: number; height: number },
+  botId: string,
+): Promise<void> {
+  try {
+    const session = await page.context().newCDPSession(page);
     try {
       const { windowId } = await session.send("Browser.getWindowForTarget");
       await session.send("Browser.setContentsSize", { windowId, ...viewport });
     } finally {
       await session.detach().catch(() => undefined);
     }
-  };
-  const fitting = (page: Page) =>
-    fit(page).catch((error: unknown) => {
-      // A tab that closed while it was being fitted needs nothing; anything else is said, because
-      // the live screen then shows less than the whole page.
-      if (page.isClosed()) return;
-      console.info(
-        JSON.stringify({
-          type: "computer-window-not-fitted",
-          botId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-  context.on("page", (page) => void fitting(page));
-  await Promise.all(context.pages().map(fitting));
+  } catch (error) {
+    // A tab that closed while it was being fitted needs nothing; anything else is said, because
+    // the live screen then shows less than the whole page.
+    if (page.isClosed()) return;
+    console.info(
+      JSON.stringify({
+        type: "computer-window-not-fitted",
+        botId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 
 /**

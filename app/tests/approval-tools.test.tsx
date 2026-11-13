@@ -254,6 +254,8 @@ test("a change the computer could not make comes back to the Bot as a result, no
     reason:
       "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
     staleRefs: true,
+    // Every answer says when it finished, for the time beside it in Activity (`withFinishedAt`).
+    finishedAt: expect.any(String),
   });
 });
 
@@ -269,6 +271,7 @@ test("a refused change comes back as a refusal the Bot can explain", async () =>
     reason: "Your team does not allow this.",
     refused: true,
     rule: "team-rule-1",
+    finishedAt: expect.any(String),
   });
 });
 
@@ -280,10 +283,15 @@ test("a gate that cannot be reached, or answers with no result, is still a resul
   ).toEqual({
     ok: false,
     reason: "The assistant's computer could not be reached.",
+    finishedAt: expect.any(String),
   });
   expect(
     await clickAgainstGate(async () => Response.json({}, { status: 200 })),
-  ).toEqual({ ok: false, reason: "The computer action returned no result." });
+  ).toEqual({
+    ok: false,
+    reason: "The computer action returned no result.",
+    finishedAt: expect.any(String),
+  });
 });
 
 /*
@@ -436,7 +444,11 @@ test("a look nothing asks about goes straight to the computer and nowhere else",
   expect(looked).toHaveLength(1);
   // Asked once about the conversation, and the answer kept: it never changes.
   expect(paths).toEqual(["/api/approvals/threads/thread"]);
-  expect(result).toEqual({ ok: true, title: "Example Domain" });
+  expect(result).toEqual({
+    ok: true,
+    title: "Example Domain",
+    finishedAt: expect.any(String),
+  });
 });
 
 test("in a task's own conversation, opened with no conversation list loaded, a look goes to the gate first", async () => {
@@ -474,7 +486,11 @@ test("a look whose conversation couldn't be checked goes through the gate, where
     "/api/approvals/threads/thread",
     "/api/approvals/computer/default",
   ]);
-  expect(result).toEqual({ ok: true, title: "Example Domain" });
+  expect(result).toEqual({
+    ok: true,
+    title: "Example Domain",
+    finishedAt: expect.any(String),
+  });
 });
 
 test("in a task's own conversation, a look with no conversation to ask in is not taken at all", async () => {
@@ -492,6 +508,7 @@ test("in a task's own conversation, a look with no conversation to ask in is not
     ok: false,
     reason:
       "Not done: this conversation asks before every step, and this step couldn't be asked about here.",
+    finishedAt: expect.any(String),
   });
 });
 

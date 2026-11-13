@@ -11,7 +11,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
-import { PageEmpty, PageRows } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -33,10 +37,14 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { modelUsageQueryOptions } from "@/lib/enterprise/queries";
+import {
+  enterpriseOverviewQueryOptions,
+  modelUsageQueryOptions,
+} from "@/lib/enterprise/queries";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import {
+  type AvailableModels,
   availableModelsQueryOptions,
   type ModelOption,
   type ModelSource,
@@ -74,47 +82,52 @@ const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
  */
 export function ProviderSection() {
   const available = useQuery(availableModelsQueryOptions());
+  /*
+   * A section of its own, not one of the admin's controls: it reads the model listing and nothing
+   * an edition fixes, so it shows in the personal edition's Admin as in the team's.
+   */
   return (
-    <ControlsSection
+    <PageSection
       description="Built-in Bots and the framework picked at setup run on models from this provider."
       title="Connected"
     >
-      {() => {
-        if (available.isPending) return null;
-        if (available.error)
-          return (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              Couldn't load the provider. Reload the page.
-            </p>
-          );
-        const { source } = available.data;
-        const name = SOURCE_NAMES[source] ?? source;
-        const vendor = SOURCE_VENDORS[source];
-        return (
-          <PageRows>
-            <Item size="sm">
-              {vendor && markFor(vendor) ? (
-                <ItemMedia>
-                  <HarnessMark id={vendor} name={name} />
-                </ItemMedia>
-              ) : (
-                <ItemMedia variant="icon">
-                  <IconCloud />
-                </ItemMedia>
-              )}
-              <ItemContent>
-                <ItemTitle>{name}</ItemTitle>
-                <ItemDescription>
-                  {available.data.listed
-                    ? `Default ${available.data.default} · ${available.data.models.length} models listed`
-                    : `Default ${available.data.default} · couldn't read its models`}
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-          </PageRows>
-        );
-      }}
-    </ControlsSection>
+      {available.isPending ? null : available.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load the provider. Reload the page.
+        </p>
+      ) : (
+        <ProviderRow listing={available.data} />
+      )}
+    </PageSection>
+  );
+}
+
+function ProviderRow({ listing }: { listing: AvailableModels }) {
+  const { source } = listing;
+  const name = SOURCE_NAMES[source] ?? source;
+  const vendor = SOURCE_VENDORS[source];
+  return (
+    <PageRows>
+      <Item size="sm">
+        {vendor && markFor(vendor) ? (
+          <ItemMedia>
+            <HarnessMark id={vendor} name={name} />
+          </ItemMedia>
+        ) : (
+          <ItemMedia variant="icon">
+            <IconCloud />
+          </ItemMedia>
+        )}
+        <ItemContent>
+          <ItemTitle>{name}</ItemTitle>
+          <ItemDescription>
+            {listing.listed
+              ? `Default ${listing.default} · ${listing.models.length} models listed`
+              : `Default ${listing.default} · couldn't read its models`}
+          </ItemDescription>
+        </ItemContent>
+      </Item>
+    </PageRows>
   );
 }
 
@@ -125,52 +138,61 @@ export function ProviderSection() {
  */
 export function ModelChoiceSection() {
   const available = useQuery(availableModelsQueryOptions());
+  const data = available.data;
+  /*
+   * The allowlist is read only where models are picked from it. Everything else here is the model
+   * listing, so the section shows in the personal edition's Admin too, where the server has no
+   * admin settings to read.
+   */
+  const overview = useQuery({
+    ...enterpriseOverviewQueryOptions(),
+    enabled: data?.exposure === "allowed",
+  });
+  if (!data) return null;
+  const allowed =
+    overview.data?.settings.modelAllowlist.models.filter((name) =>
+      data.models.some((model) => `${data.provider}/${model.id}` === name),
+    ).length ?? 0;
+  if (data.exposure === "allowed" && overview.isPending) return null;
   return (
-    <ControlsSection
-      description={() => {
-        const data = available.data;
-        if (!data) return "Which models people can pick in each conversation.";
-        return data.exposure === "all"
+    <PageSection
+      description={
+        data.exposure === "all"
           ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
-          : `People pick among the models you allow below, and their thinking level, in each conversation. Until you allow one, every conversation runs on ${data.default}.`;
-      }}
+          : `People pick among the models you allow below, and their thinking level, in each conversation. Until you allow one, every conversation runs on ${data.default}.`
+      }
       title="In conversations"
     >
-      {({ data }) => {
-        const listing = available.data;
-        if (!listing) return null;
-        const allowed = data.settings.modelAllowlist.models.filter((name) =>
-          listing.models.some(
-            (model) => `${listing.provider}/${model.id}` === name,
-          ),
-        ).length;
-        return (
-          <PageRows>
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                <IconBrain />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>
-                  {listing.exposure === "all"
-                    ? "Every listed model"
-                    : allowed === 0
-                      ? "No models allowed yet"
-                      : `${allowed} ${allowed === 1 ? "model" : "models"} allowed`}
-                </ItemTitle>
-                <ItemDescription>
-                  {listing.exposure === "all"
-                    ? `${listing.models.length} models, kept current from your provider.`
-                    : allowed === 0
-                      ? "People don't see a model picker. Allow models below to offer them."
-                      : "People see them in the composer's model picker, with the default."}
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-          </PageRows>
-        );
-      }}
-    </ControlsSection>
+      {overview.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load these settings. Reload the page.
+        </p>
+      ) : (
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconBrain />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                {data.exposure === "all"
+                  ? "Every listed model"
+                  : allowed === 0
+                    ? "No models allowed yet"
+                    : `${allowed} ${allowed === 1 ? "model" : "models"} allowed`}
+              </ItemTitle>
+              <ItemDescription>
+                {data.exposure === "all"
+                  ? `${data.models.length} models, kept current from your provider.`
+                  : allowed === 0
+                    ? "People don't see a model picker. Allow models below to offer them."
+                    : "People see them in the composer's model picker, with the default."}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        </PageRows>
+      )}
+    </PageSection>
   );
 }
 
@@ -451,8 +473,9 @@ export function AllowedModelsDialog({
  */
 export function ModelUsageSection({ team }: { team: boolean }) {
   const usage = useQuery(modelUsageQueryOptions(30));
+  // Its own read, not one of the admin's controls, so it shows in the personal edition's Admin too.
   return (
-    <ControlsSection
+    <PageSection
       description={
         team
           ? "Runs on each model in the last 30 days, including runs the allowlist refused."
@@ -460,46 +483,44 @@ export function ModelUsageSection({ team }: { team: boolean }) {
       }
       title="Usage"
     >
-      {() =>
-        usage.isPending ? null : usage.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load model usage. Reload the page.
-          </p>
-        ) : usage.data.summary.length === 0 ? (
-          <PageEmpty icon={IconChartBar} title="No recent runs">
-            Runs will appear here once a Bot answers.
-          </PageEmpty>
-        ) : (
-          <PageRows>
-            {usage.data.summary.map((row, index) => (
-              <div key={`${row.model}-${row.source}`}>
-                {index > 0 ? <Separator /> : null}
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <IconChartBar />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{row.model}</ItemTitle>
-                    <ItemDescription>
-                      {row.runs} runs by {row.people}{" "}
-                      {row.people === 1 ? "person" : "people"}
-                      {row.refused > 0
-                        ? ` · ${row.refused} off the allowlist`
-                        : ""}{" "}
-                      · {row.source}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <span className="text-muted-foreground text-sm">
-                      {new Date(row.lastUsedAt).toLocaleDateString()}
-                    </span>
-                  </ItemActions>
-                </Item>
-              </div>
-            ))}
-          </PageRows>
-        )
-      }
-    </ControlsSection>
+      {usage.isPending ? null : usage.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load model usage. Reload the page.
+        </p>
+      ) : usage.data.summary.length === 0 ? (
+        <PageEmpty icon={IconChartBar} title="No recent runs">
+          Runs will appear here once a Bot answers.
+        </PageEmpty>
+      ) : (
+        <PageRows>
+          {usage.data.summary.map((row, index) => (
+            <div key={`${row.model}-${row.source}`}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconChartBar />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{row.model}</ItemTitle>
+                  <ItemDescription>
+                    {row.runs} {row.runs === 1 ? "run" : "runs"} by {row.people}{" "}
+                    {row.people === 1 ? "person" : "people"}
+                    {row.refused > 0
+                      ? ` · ${row.refused} off the allowlist`
+                      : ""}{" "}
+                    · {row.source}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-sm">
+                    {new Date(row.lastUsedAt).toLocaleDateString()}
+                  </span>
+                </ItemActions>
+              </Item>
+            </div>
+          ))}
+        </PageRows>
+      )}
+    </PageSection>
   );
 }

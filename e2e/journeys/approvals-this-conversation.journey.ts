@@ -6,10 +6,13 @@ import {
   expectAsksToPay,
 } from "./approval-steps";
 import {
+  activityRows,
   expect,
+  expectEveryRowTimed,
   expectWholeReply,
   named,
   newConversation,
+  openComputer,
   replyAfter,
   runsSoFar,
   send,
@@ -54,6 +57,14 @@ test("Allow for this conversation lets the next order through, until it is turne
     await expectWholeReply(page, reply);
     await named(page, channelId);
     expect(ordered()).toEqual(["sunflower"]);
+    // Activity says how the order was allowed, as it says when one is declined.
+    await openComputer(page);
+    await expect(
+      activityRows(page)
+        .filter({ hasText: "Place order" })
+        .filter({ hasText: "Allowed for this conversation." }),
+    ).toHaveCount(1);
+    await expectEveryRowTimed(page);
   });
 
   const allowed = allowances(page);
@@ -101,5 +112,18 @@ test("Allow for this conversation lets the next order through, until it is turne
     // Allowed once, not for the conversation: the banner does not come back.
     await expect(allowed).toHaveCount(0);
     await shot("allowed-once-after-turn-off");
+  });
+
+  await test.step("after a reload, Activity still says how each order was allowed, and when", async () => {
+    await page.reload();
+    await openComputer(page);
+    const orders = activityRows(page).filter({ hasText: "Place order" });
+    await expect(orders).toHaveCount(3);
+    await expect(
+      orders.filter({ hasText: "Allowed for this conversation." }),
+    ).toHaveCount(1);
+    await expect(orders.filter({ hasText: "Allowed once." })).toHaveCount(1);
+    await expectEveryRowTimed(page);
+    await shot("activity-after-reload");
   });
 });

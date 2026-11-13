@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../harness/test";
 import { conversationRow, createBot, expectSettled } from "./chat";
 
@@ -15,6 +16,20 @@ const QUESTION =
   "Is a steady 15 km/h breeze good for flying a kite? Answer in one short plain sentence.";
 
 type GroupMessage = { status: string; agentId: string | null; text: string };
+
+/**
+ * The colors a Bot is drawn in, read off its still orb (`BotOrb`): its palette's four stops. Empty
+ * for anything that is not the orb, such as the generated face a surface outside the skin's look
+ * drew instead.
+ */
+function colorsOf(avatar: Locator): Promise<string> {
+  return avatar.evaluate((element) =>
+    ["--c1", "--c2", "--c3", "--c4"]
+      .map((name) => (element as HTMLElement).style.getPropertyValue(name))
+      .join(" ")
+      .trim(),
+  );
+}
 
 test("a person starts a conversation with two Bots", async ({ page, shot }) => {
   let channelId = "";
@@ -108,5 +123,57 @@ test("a person starts a conversation with two Bots", async ({ page, shot }) => {
     await row.click();
     await expect(page).toHaveURL(new RegExp(`/group/${channelId}$`));
     await expect(page.getByText(QUESTION, { exact: true })).toBeVisible();
+  });
+
+  await test.step("each Bot is one color everywhere it is drawn", async () => {
+    // The orbs beside the conversation's name are hidden from screen readers, so they are found
+    // with the hidden ones included; the name beside them is what is read.
+    const avatar = (scope: Locator, bot: string) =>
+      scope
+        .getByRole("img", { name: bot, exact: true, includeHidden: true })
+        .first();
+    const row = conversationRow(page, /Is a steady 15 km\/h breeze/);
+    const said = (bot: string) =>
+      page.locator("[data-speaker]").filter({ hasText: bot });
+    const seen: Record<string, Record<string, string>> = {};
+    for (const bot of [ASSISTANT, KITE]) {
+      seen[bot] = {
+        "group message": await colorsOf(avatar(said(bot), bot)),
+        sidebar: await colorsOf(avatar(row, bot)),
+      };
+    }
+
+    await page.goto("/bots");
+    const main = page.getByRole("main");
+    await expect(
+      main.getByRole("heading", { name: "Bots", level: 1 }),
+    ).toBeVisible();
+    for (const bot of [ASSISTANT, KITE]) {
+      seen[bot]["Bots list"] = await colorsOf(avatar(main, bot));
+    }
+
+    await page.keyboard.press("ControlOrMeta+K");
+    const menu = page.getByRole("dialog", { name: "Command palette" });
+    await expectSettled(menu);
+    const bots = menu.getByRole("group", { name: "Bots" });
+    for (const bot of [ASSISTANT, KITE]) {
+      seen[bot]["command menu"] = await colorsOf(
+        avatar(bots.getByRole("option", { name: new RegExp(`^${bot}`) }), bot),
+      );
+    }
+    await shot("command-menu-colors");
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+
+    for (const bot of [ASSISTANT, KITE]) {
+      const colors = seen[bot]["Bots list"];
+      expect(colors, `${bot} is drawn as its orb`).not.toBe("");
+      expect(seen[bot], bot).toEqual({
+        "group message": colors,
+        sidebar: colors,
+        "Bots list": colors,
+        "command menu": colors,
+      });
+    }
   });
 });

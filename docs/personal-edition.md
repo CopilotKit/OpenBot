@@ -112,8 +112,9 @@ variable to change:
 
 ## What is fixed
 
-Settings an admin changes in the team edition are fixed here. Values left in the database by a team
-deployment are not read: capability switches, enterprise settings, network policies, team approval
+Settings an admin changes in the team edition are fixed here. Admin shows each one where the team
+edition sets it, and says it applies when OpenBot runs for a team (see [Admin](#admin)). Values left
+in the database by a team deployment are not read: capability switches, enterprise settings, network policies, team approval
 settings and team rules, and a paused Automatic Learning. Every Bot takes part in Automatic
 Learning: a Bot those settings left out is taken back in at the next start, or its first run.
 
@@ -166,9 +167,10 @@ Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser 
 
 ## What the app shows
 
-The menu is **Bots**, **Routines**, **Memory**, **Skills**, **Connections** and **Settings**. There
-is no Admin. Each of the eight things a Bot has is set in two places, for one Bot on its page and
-for every Bot in the main menu or Settings. See [How OpenBot works](how-openbot-works.md).
+The main menu is **Bots**, **Routines**, **Skills** and **Connections**. Under your name are
+**Admin**, **OpenBot for Business** and **Settings**. Each of the eight things a Bot has is set in two
+places, for one Bot on its page and for every Bot in the main menu or Settings. See
+[How OpenBot works](how-openbot-works.md).
 
 **Connections** is every way a Bot signs in to something, because adding an app and connecting your
 account are the same decision when one person makes both:
@@ -213,9 +215,9 @@ groups: **You** (General, Notifications and Vault), **Every Bot** (Computer, App
 Activity) and **OpenBot** (Setup and the Components gallery).
 Settings → Computer is the computer your Bots share with its Reset, the folders on this computer
 they may read, what OpenBot runs here (inside OpenBot Desktop), and the browsers signed in to the
-Recorder. Activity is the trail of everything your Bots did. Where Admin was, **OpenBot for Business** opens a list of what the team edition adds. An old
-`/admin/...`, `/settings/plugins/...`, `/capabilities/...`, `/settings/skills/...` or `/settings/learning` address opens the
-same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
+Recorder. Activity is the trail of everything your Bots did. Beside Admin, **OpenBot for Business**
+opens a list of what the team edition adds. An old `/settings/plugins/...`, `/capabilities/...`,
+`/settings/skills/...` or `/settings/learning` address opens the same page where it is now. There is no Sharing, Visibility, Isolated, or Reaching you, which are
 all about other people, other computers or Slack and Teams.
 
 **Skills** lists **Your skills**: the skills you wrote and the skills learned from your
@@ -231,9 +233,32 @@ every 15 minutes, and when you switch it on. Turn it off on Skills to review eac
 yourself. **Your recordings** on Teach a Bot lists what you have recorded, which needs Intelligence
 0.16 with recordings switched on. Recordings can't be deleted from OpenBot.
 
+### Admin
+
+Admin is in every edition. Here you are its admin: single-user mode signs you in as one. Every Admin
+page opens at its own address. Skills, Connections, and the Vault, Computer and Activity pages under
+Settings stay where they are, so some pages can be reached both ways.
+
+A page or section that sets something only a team has keeps its place, and says "This applies when
+OpenBot runs for a team." with a button that opens OpenBot for Business. It offers no control,
+because the server reads no value saved for it here:
+
+| Admin page | In the personal edition |
+| --- | --- |
+| Routines | How check-ins went shows. The check-ins switch and daily limit are for a team. |
+| Automatic learning | For a team. You review what OpenBot learns on **Skills**. |
+| Apps | Works. The MCP server allowlist is for a team. |
+| Computers | Works. Idle computers and Network are for a team. |
+| Approvals, with Describe team rules and Guidance for auto-review | For a team. Your own approvals are in Settings → Approvals. |
+| Activity | Works. Recording and export is for a team. |
+| People, Permissions (with Describe who can do what) and Identity providers | For a team. |
+| Overview, Skills, UI components, Playground, Boundaries, What would happen, Vault, Providers | Work as in the team edition. |
+
 The server answers `404` for the API behind the team-only screens: people, identity providers,
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
-and check-in settings, and SCIM and SSO registration. See `server/src/edition-routes.ts`.
+and check-in settings, and SCIM and SSO registration. Admin reads two of them to show your own
+Bots: which models they ran on (`GET /api/admin/enterprise/models/usage`) and how their check-ins
+went (`GET /api/admin/proactive`). See `server/src/edition-routes.ts`.
 
 ## Web search is on from the start
 

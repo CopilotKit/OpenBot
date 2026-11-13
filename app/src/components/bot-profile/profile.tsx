@@ -166,7 +166,14 @@ export function BotProfile({
                   <SelectTrigger aria-label="Notifications">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  {/* Below the control and level with its right edge, as wide as the longest label.
+                      Laid over the trigger at its width, "Only when it needs me" was cut off and the
+                      list ran past the card's edge. */}
+                  <SelectContent
+                    align="end"
+                    alignItemWithTrigger={false}
+                    className="w-max min-w-(--anchor-width)"
+                  >
                     {(Object.keys(NOTIFY_LABEL) as BotNotify[]).map((value) => (
                       <SelectItem key={value} value={value}>
                         {NOTIFY_LABEL[value]}

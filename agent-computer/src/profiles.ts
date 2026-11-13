@@ -83,6 +83,7 @@ import { seatIdsIn } from "./profile-listing";
 import { findRecorder, isRecorderPage, type Recorder } from "./recorder";
 import {
   fitWindowsToViewport,
+  fitWindowToViewport,
   holdFilterCredentials,
   keepRecorderCurrent,
   reachRecorder,
@@ -489,6 +490,8 @@ export type OpenBotBrowser = {
    * `fitWindowsToViewport`). Not at launch: a Bot's browser nobody works stays exactly as it launches.
    */
   fitWindows(): Promise<void>;
+  /** Fit the window to this tab now, as it is laid out (see `fitWindowToViewport`). */
+  fitWindow(page: Page): Promise<void>;
 };
 
 /** A person's open browser, for the browser routes. */
@@ -556,6 +559,7 @@ export function createProfiles(
       pin(page: Page): void;
       session(): Promise<CDPSession>;
       fitWindows(): Promise<void>;
+      fitWindow(page: Page): Promise<void>;
     };
   };
 
@@ -1251,6 +1255,10 @@ export function createProfiles(
               fitted ??= fitWindowsToViewport(context, VIEWPORT, botId);
               return fitted;
             },
+            fitWindow: (shown: Page) =>
+              local
+                ? Promise.resolve()
+                : fitWindowToViewport(shown, VIEWPORT, botId),
           },
         };
         touchTab(page);
@@ -1532,6 +1540,7 @@ export function createProfiles(
             .pages()
             .filter((page) => !page.isClosed() && bot.own(page)),
         fitWindows: bot.fitWindows,
+        fitWindow: bot.fitWindow,
       };
     },
 

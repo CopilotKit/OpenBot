@@ -34,8 +34,8 @@ export type DeploymentCapabilities = {
    */
   localEvaluation: boolean;
   /**
-   * Which product this is. `personal` is one person on their own machine: no Admin, and what they
-   * need of it under Settings. A server from before the switch reads as `team`.
+   * Which product this is. `personal` is one person on their own machine, who is its admin, with
+   * what they use most of Admin under Settings too. A server from before the switch reads as `team`.
    */
   edition: "team" | "personal";
   transcription?: boolean;
