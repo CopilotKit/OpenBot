@@ -70,7 +70,8 @@ follow-ups, queued runs, what waits on you), so nothing shows twice. The server 
 ### In a conversation
 
 A one-Bot conversation's header has a clock before the computer and the gear (`RoutinesClock` in
-`app/src/components/routines/routines-clock.tsx`). Its number is how many of the Bot's routines,
+`app/src/components/routines/routines-clock.tsx`), a muted pill with the clock and a number. The
+number is how many of the Bot's routines,
 goals and check-ins are on, counted as the Bot's page counts its Routines section, and it turns
 amber when one can't look or failed last time. Its name says whose and how many ("Scout's routines,
 3 on"). A press opens the Bot's Routines page in a dialog, every row on and off, drawn by

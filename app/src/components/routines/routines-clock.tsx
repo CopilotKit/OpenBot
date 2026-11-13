@@ -25,9 +25,9 @@ import { RoutinesList } from "./routines-list";
  * The clock in a one-Bot conversation's header, before the computer and the gear: how many of this
  * Bot's routines are on, and one press lists them without leaving the conversation.
  *
- * The number is counted as the Bot's page counts its Routines section (`useBotRoutines`), so the two
- * always agree, and it takes the amber the computer's dot has when one can't look or failed last
- * time. The message box keeps its own clock, "Set up a routine": that one sets a routine up, this
+ * Drawn as a muted pill, the clock and then the number. The number is counted as the Bot's page
+ * counts its Routines section (`useBotRoutines`), so the two always agree, and it takes the amber the
+ * computer's dot has when one can't look or failed last time. The message box keeps its own clock, "Set up a routine": that one sets a routine up, this
  * one shows what there is.
  */
 export function RoutinesClock({
@@ -54,11 +54,17 @@ export function RoutinesClock({
                 count ? `${name}'s routines, ${count} on` : `${name}'s routines`
               }
               aria-expanded={open}
-              className={open ? "relative bg-foreground/5" : "relative"}
+              /*
+               * A muted pill, the clock and the number side by side, as tall as the computer and the
+               * gear beside it. With nothing on it is the clock alone, square like its neighbours.
+               */
+              className={cn(
+                "h-8 gap-1.5 bg-muted px-2 hover:bg-foreground/10 aria-expanded:bg-foreground/10",
+                count ? "min-w-8" : "w-8 px-0",
+              )}
               data-slot="conversation-routines"
               disabled={agentId === undefined}
               onClick={() => setOpen(true)}
-              size="icon"
               variant="ghost"
             >
               <IconClock className="size-4.5" />
@@ -66,10 +72,9 @@ export function RoutinesClock({
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "absolute top-0.5 right-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-0.5 font-medium text-[9px] leading-none tabular-nums ring-2 ring-background",
-                    needsLook
-                      ? "bg-amber-500 text-white"
-                      : "bg-foreground text-background",
+                    "font-medium text-sm tabular-nums leading-none",
+                    // The amber the computer's dot has, when one can't look or failed last time.
+                    needsLook && "text-amber-600 dark:text-amber-500",
                   )}
                   data-needs-look={needsLook || undefined}
                 >
