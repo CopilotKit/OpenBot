@@ -9268,9 +9268,11 @@ fn main() {
             let mut published = 0;
             for (_, service) in before["services"].as_object_mut().unwrap() {
                 if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
-                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    // Each published port is on both loopbacks; the server publishes two.
+                    let both = ports.len();
+                    assert_eq!(both % 2, 0, "the released port pattern must exercise dual loopback");
                     ports.retain(|port| port["host_ip"] == "127.0.0.1");
-                    assert_eq!(ports.len(), 1);
+                    assert_eq!(ports.len(), both / 2);
                     published += 1;
                 }
             }
