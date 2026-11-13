@@ -466,92 +466,13 @@ jobs:
             echo "::endgroup::"
           done < <(jq -r '.[]' .github/published-images.json)
 
-  # The product end to end, as a person uses it: this tree's app in a real browser, against a fresh
-  # local stack that scripts/start.sh brings up from the published OpenBot images at the tag in
-  # backend-images.env. Every model call is answered by aimock from the recorded fixtures, so a run
-  # is the same every time and needs no model key (e2e/README.md). A screenshot of every step is
-  # kept with the run.
-  e2e:
-    name: end to end
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    # A key Intelligence accepts is a secret, which a pull request from a fork is not given.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-      - run: bun install --frozen-lockfile
-      - run: bunx playwright install --with-deps chromium
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # The settings a developer's `.env` supplies to a run (e2e/harness/stack.ts sets the rest):
-      # the Intelligence key, which the run's conversations are stored with, and a key encryption key
-      # of the run's own. Nothing else, and never printed.
-      - name: The run's settings
-        env:
-          INTELLIGENCE_KEY: ${{ secrets.OPENBOT_E2E_INTELLIGENCE_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$INTELLIGENCE_KEY" ]; then
-            echo "::error::The OPENBOT_E2E_INTELLIGENCE_API_KEY secret is not set, so OpenBot cannot start for the end-to-end run."
-            exit 1
-          fi
-          umask 077
-          grep -vE '^(CPK_INTELLIGENCE_API_KEY|INTELLIGENCE_API_KEY|KEY_ENCRYPTION_KEY)=' .env.example > .env
-          printf 'CPK_INTELLIGENCE_API_KEY=%s\nKEY_ENCRYPTION_KEY=%s\n' "$INTELLIGENCE_KEY" "$(openssl rand -base64 32)" >> .env
-      # aimock, the Composio stub and the test site on every interface of this runner, because a
-      # Linux engine reaches the host at its bridge address rather than at loopback. Nothing outside
-      # the runner can reach them.
-      - name: Journeys
-        run: bun run test:e2e
-        env:
-          E2E_BIND_HOST: 0.0.0.0
-      # Strict replay: a request no fixture answered fails its test, and this says so for the run.
-      - name: Every model request was answered from a fixture
-        run: |
-          set -euo pipefail
-          misses="$(grep -c -E 'NO FIXTURE MATCH|STRICT:' e2e/.artifacts/logs/aimock.log || true)"
-          if [ "$misses" != 0 ]; then
-            echo "::error::$misses model requests were not answered by a fixture."
-            grep -E 'NO FIXTURE MATCH|STRICT:' e2e/.artifacts/logs/aimock.log | head -20
-            exit 1
-          fi
-      - name: The stack's logs
-        if: always()
-        run: |
-          mkdir -p e2e/.artifacts/logs
-          docker compose -p openbot-e2e logs --no-color > e2e/.artifacts/logs/compose.log 2>&1 || true
-          docker compose -p openbot-e2e down --volumes --remove-orphans > /dev/null 2>&1 || true
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: e2e
-          path: |
-            e2e/.artifacts/screenshots
-            e2e/.artifacts/report
-            e2e/.artifacts/logs
-          if-no-files-found: warn
-          retention-days: 14
-
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
   verify:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, api, mobile, app-browser, test, test-total, startup, python-harness, build, component-dockerfiles, e2e]
+    needs: [static, api, mobile, app-browser, test, test-total, startup, python-harness, build, component-dockerfiles]
     steps:
       - name: Require every check
         env:

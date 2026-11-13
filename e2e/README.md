@@ -4,7 +4,8 @@ The real OpenBot, in a real browser, against a real local stack, as a person use
 call OpenBot makes is answered by [aimock](https://aimock.copilotkit.dev) from recorded fixtures,
 so a run is the same every time, needs no model key and costs nothing.
 
-They run on a developer's machine and in CI (the `end to end` check), against the published OpenBot
+These run on a developer's machine, not in GitHub: the machine already has the licence, the keys in
+`.env`, and Docker or Podman. The server, worker, computer and supervisor are the published OpenBot
 images at the tag in `backend-images.env`.
 
 ## Run
