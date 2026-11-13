@@ -583,13 +583,13 @@ mod native {
             }
         }
 
-        /// A child standing in for the webview's own window, made after the window showed, as
-        /// WebView2 makes its own: on top of the window's other children.
+        /// A child standing in for the webview's own window: a new child goes under its siblings,
+        /// and wry then puts its container on top of them (`SetWindowPos` with `HWND_TOP`).
         fn webview_in(window: HWND) -> HWND {
             // SAFETY: plain calls.
             unsafe {
                 let instance: HINSTANCE = GetModuleHandleW(PCWSTR::null()).map(Into::into).unwrap();
-                CreateWindowExW(
+                let webview = CreateWindowExW(
                     Default::default(),
                     w!("Static"),
                     w!("webview"),
@@ -603,7 +603,17 @@ mod native {
                     Some(instance),
                     None,
                 )
-                .unwrap()
+                .unwrap();
+                let _ = SetWindowPos(
+                    webview,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+                webview
             }
         }
 
@@ -635,8 +645,8 @@ mod native {
                 assert!(IsWindowVisible(cover).as_bool());
                 assert_eq!(GetAncestor(cover, GA_ROOT), window);
             }
-            // WebView2's own window, made after the cover, lands on top of it; once `build()` returns
-            // the cover is put back on top.
+            // The webview's own window put on top of it meanwhile; once `build()` returns the cover
+            // is put back on top.
             let webview = webview_in(window);
             // SAFETY: plain calls on windows this test made.
             unsafe {
