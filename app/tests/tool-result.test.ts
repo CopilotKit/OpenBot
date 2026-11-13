@@ -149,6 +149,17 @@ describe("telling a failed tool from a successful one", () => {
     expect(toolResultFailed("Error: Something else entirely.")).toBe(false);
   });
 
+  test("a folder action that broke on the person's computer is a failure, and a decline there is not", () => {
+    expect(
+      toolResultFailed(
+        "Error: That host operation could not be completed: The local sandbox could not complete the operation. Trying the same command again will fail the same way.",
+      ),
+    ).toBe(true);
+    expect(toolResultFailed("Refused. Declined in OpenBot Desktop.")).toBe(
+      false,
+    );
+  });
+
   test("ordinary results, refusals, and running calls are not failures", () => {
     expect(toolResultFailed("Found 12 results.")).toBe(false);
     expect(toolResultFailed("Refused. The rule says no.")).toBe(false);
