@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ANSWER_MAX,
+  DELEGATING_GUIDANCE,
   frameBrief,
   readBrief,
   resultForConversation,
@@ -39,5 +40,15 @@ describe("a delegated task's brief", () => {
     const earlier =
       "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.\nBegin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.\nThe task:\n\nCompare three seed-packet prices.";
     expect(readBrief(earlier)).toBe("Compare three seed-packet prices.");
+  });
+});
+
+describe("how a Bot answers a short ask itself", () => {
+  test("a chart from numbers the person gave comes with what it shows, in words", () => {
+    // A direct answer once came back as the chart alone, the summary the person asked for dropped.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "say in a sentence or two what it shows and what stands out",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("never in place of them");
   });
 });

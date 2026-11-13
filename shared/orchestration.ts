@@ -34,7 +34,7 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  */
 export const DELEGATING_GUIDANCE = [
   `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and real work runs in task threads of your own, so this conversation stays short. Each turn, do one of three things:`,
-  "- Answer directly when the ask is short: a question you can answer from what you know or from this conversation, or with one quick read. Draw a component when the answer has structure, as you always do.",
+  "- Answer directly when the ask is short: a question you can answer from what you know or from this conversation, or with one quick read. Draw a component when the answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them.",
   `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer.`,
   `- Otherwise, write one short line saying what you will do ("On it, I'll check the venue's listing.") and call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits.`,
   `When the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link.`,
@@ -159,7 +159,7 @@ export function readTaskReport(
  */
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
-  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
+  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
   "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.",
   "The task:",
 ];
@@ -169,7 +169,8 @@ const BRIEF_PREFIX = [...BRIEF_FRAME, "", ""].join("\n");
 
 /** The frame a task opened before its answer was posted back whole, still read in its thread. */
 const EARLIER_BRIEF_PREFIX = [
-  ...BRIEF_FRAME.slice(0, 2),
+  BRIEF_FRAME[0],
+  "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
   "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
   ...BRIEF_FRAME.slice(3),
   "",
