@@ -54,6 +54,12 @@ export const DOES = ["act", "tell"] as const;
 /** When it starts: on a schedule, when an event happens, or right now. */
 export const STARTS = ["schedule", "event", "now"] as const;
 
+/**
+ * What an Only tell you watches: the apps the person connected that the Bot can read, or one public
+ * web page.
+ */
+export const WATCHES = ["apps", "page"] as const;
+
 /** Where an event that starts a routine comes from. */
 export const EVENT_SOURCES = ["github", "slack", "connector"] as const;
 
@@ -61,9 +67,16 @@ export const EVENT_SOURCES = ["github", "slack", "connector"] as const;
 export type RoutineEventSource = (typeof EVENT_SOURCES)[number];
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** A web address, as far as the form can tell: the server checks it is a public one. */
+const PAGE_ADDRESS = /^https?:\/\/[^\s/]+\.[^\s]+$/i;
 
 /** A field whose rule reads other answers, so its message changes when they do. */
-export type CrossFieldName = "instruction" | "time" | "eventType" | "doneWhen";
+export type CrossFieldName =
+  | "instruction"
+  | "time"
+  | "eventType"
+  | "doneWhen"
+  | "pageAddress";
 
 export interface CrossFieldIssue {
   path: CrossFieldName;
@@ -78,6 +91,7 @@ export interface CrossFieldIssue {
  * - time: does, starts and repeat (asked only on a schedule that is not hourly)
  * - eventType: does and starts (asked only when an event starts it)
  * - doneWhen: does (not drawn, so not measured, for Only tell you)
+ * - pageAddress: does and watches (asked only for Only tell you on a web page)
  */
 export function crossFieldIssues(
   value: Pick<
@@ -89,6 +103,8 @@ export function crossFieldIssues(
     | "time"
     | "eventType"
     | "doneWhen"
+    | "watches"
+    | "pageAddress"
   >,
 ): CrossFieldIssue[] {
   const issues: CrossFieldIssue[] = [];
@@ -100,6 +116,14 @@ export function crossFieldIssues(
       refuse(
         "instruction",
         "Keep it under 1000 characters when it only tells you.",
+      );
+    if (
+      value.watches === "page" &&
+      !PAGE_ADDRESS.test(value.pageAddress.trim())
+    )
+      refuse(
+        "pageAddress",
+        "Enter the page's address, starting with https://.",
       );
     return issues; // Starts, its branches and Done when are not drawn.
   }
@@ -151,6 +175,10 @@ export const routineFormSchema = z
     eventType: z.string(),
     /** Minutes between check-ins, as one of the `CHECK_IN_INTERVALS`. */
     interval: z.string(),
+    /** What an Only tell you watches. */
+    watches: z.enum(WATCHES),
+    /** The page it reads, when it watches a web page. */
+    pageAddress: z.string(),
   })
   .superRefine((value, ctx) => {
     for (const { path, message } of crossFieldIssues(value))
@@ -175,6 +203,8 @@ export const ROUTINE_FORM_DEFAULTS: Omit<
   eventSource: "github",
   eventType: "",
   interval: "1440",
+  watches: "apps",
+  pageAddress: "",
 };
 
 type Schedule = Pick<

@@ -41,6 +41,9 @@ export type RoutinePlan =
         focus: string;
         subject: string;
         intervalMinutes: number;
+        /** What it watches: the apps the Bot can read, or the page at `sourceLink`. */
+        watches: "apps" | "page";
+        sourceLink?: string;
       };
     };
 
@@ -87,6 +90,10 @@ export function planRoutine(
         focus: instruction,
         subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
+        watches: values.watches,
+        ...(values.watches === "page"
+          ? { sourceLink: values.pageAddress.trim() }
+          : {}),
       },
     };
   }

@@ -99,6 +99,7 @@ const checkInPlan = (): RoutinePlan => ({
     focus: "Watch the inbox",
     subject: "Inbox",
     intervalMinutes: 60,
+    watches: "apps",
   },
 });
 
@@ -167,6 +168,7 @@ test("a check-in: one POST /api/proactive/settings, asking for a new one", async
     focus: "Watch the inbox",
     subject: "Inbox",
     intervalMinutes: 60,
+    watches: "apps",
   });
 });
 

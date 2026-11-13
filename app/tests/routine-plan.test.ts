@@ -122,6 +122,7 @@ describe("planRoutine", () => {
         focus: "Send the numbers",
         subject: "Launch brief",
         intervalMinutes: 240,
+        watches: "apps",
       },
     });
   });
@@ -145,6 +146,7 @@ describe("planRoutine", () => {
         focus: "Send the numbers",
         subject: "Send the numbers",
         intervalMinutes: 1440,
+        watches: "apps",
       },
     });
   });
@@ -250,6 +252,23 @@ describe("planRoutine", () => {
     );
     if (checkIn.kind !== "check-in") throw new Error("expected a check-in");
     expect(checkIn.checkIn).not.toHaveProperty("channelId");
+  });
+
+  test("tell on a web page carries its address, for the server to check", () => {
+    const plan = planRoutine(
+      {
+        ...base,
+        does: "tell",
+        watches: "page",
+        pageAddress: "  https://github.com/CopilotKit/openbot/releases ",
+      },
+      "UTC",
+    );
+    if (plan.kind !== "check-in") throw new Error("expected a check-in");
+    expect(plan.checkIn).toMatchObject({
+      watches: "page",
+      sourceLink: "https://github.com/CopilotKit/openbot/releases",
+    });
   });
 
   test("answers are trimmed", () => {

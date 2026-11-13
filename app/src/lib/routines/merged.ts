@@ -41,6 +41,18 @@ function working(row: MergedRoutine): boolean {
   }
 }
 
+/**
+ * Whether a row needs a look: a check-in that is on and can't look. It sorts first, since it says it
+ * checks something it can't.
+ */
+export function needsALook(row: MergedRoutine): boolean {
+  return (
+    row.kind === "check-in" &&
+    row.checkIn.enabled &&
+    Boolean(row.checkIn.health)
+  );
+}
+
 const KIND_ORDER: Record<MergedRoutine["kind"], number> = {
   routine: 0,
   goal: 1,
@@ -48,7 +60,8 @@ const KIND_ORDER: Record<MergedRoutine["kind"], number> = {
 };
 
 /**
- * The rows, for one Bot or (with no `agentId`) every Bot. Working rows first; within that, routines,
+ * The rows, for one Bot or (with no `agentId`) every Bot. A check-in that can't look first, then
+ * working rows; within that, routines,
  * then goals, then check-ins, each in the order its own read gave it. A routine whose goal is not
  * in the goals read (deleted, or another person's) stays a row of its own, so nothing goes missing.
  */
@@ -99,6 +112,7 @@ export function mergeRoutines({
     .map((row, index) => ({ row, index }))
     .sort(
       (a, b) =>
+        Number(needsALook(b.row)) - Number(needsALook(a.row)) ||
         Number(working(b.row)) - Number(working(a.row)) ||
         KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind] ||
         a.index - b.index,

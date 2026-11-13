@@ -57,8 +57,15 @@ function writes(): Write[] {
 let proactiveAnswer: unknown;
 
 /** Answers what the page reads and records and answers what it writes. */
+/** What `GET /api/proactive/readable` says the Bot can read, unless a case says otherwise. */
+let readableAnswer: { apps: string[]; page: boolean } = {
+  apps: ["Gmail"],
+  page: true,
+};
+
 function serving({
   proactive = { allowed: true, settings: [] } as unknown,
+  readable = { apps: ["Gmail"], page: true },
   routines = () => Response.json({ routine: { id: "r1" } }, { status: 201 }),
   goalDeletes = true,
   edition = "team",
@@ -70,8 +77,11 @@ function serving({
   routines?: () => Response | Promise<Response>;
   /** Whether `DELETE /api/responsibilities/g1` succeeds. When it fails, a refused schedule keeps the goal. */
   goalDeletes?: boolean;
+  /** What a check-in for the chosen Bot could read. */
+  readable?: { apps: string[]; page: boolean };
 } = {}) {
   recorded.length = 0;
+  readableAnswer = readable;
   proactiveAnswer = proactive;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -110,6 +120,8 @@ function serving({
     if (url === "/api/proactive/settings")
       return Response.json(proactiveAnswer);
     if (url === "/api/capabilities") return Response.json({ edition });
+    if (url.startsWith("/api/proactive/readable"))
+      return Response.json(readableAnswer);
     return Response.json({});
   }) as unknown as typeof fetch;
 }
@@ -1488,4 +1500,77 @@ test("after a partial save, focus moves to Go to Routines", async () => {
   const user = userEvent.setup({ document });
   const goTo = await partialSave(view, user);
   await waitFor(() => expect(document.activeElement).toBe(goTo));
+});
+
+/*
+ * FOUND IN AN AUDIT: Only tell you made a check-in for a Bot that could read nothing, and it was
+ * skipped on every run with nobody told. It watches says what it reads, and refuses what it can't.
+ */
+test("It watches says which apps it reads", async () => {
+  serving({ readable: { apps: ["Gmail", "Notion"], page: true } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await choose(view, user, "It should", "Only tell you");
+  expect(await view.findByText("It reads Gmail and Notion.")).toBeTruthy();
+});
+
+test("with no app it can read, Create routine is refused on It watches, and nothing is written", async () => {
+  serving({ readable: { apps: [], page: true } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
+  await choose(view, user, "It should", "Only tell you");
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  expect(
+    await view.findByText(
+      "This Bot can't read any app you've connected. Connect one in Connections, or choose a web page.",
+    ),
+  ).toBeTruthy();
+  expect(
+    (await view.findByLabelText("It watches")).getAttribute("aria-invalid"),
+  ).toBe("true");
+  await settleReactWork();
+  expect(writes()).toEqual([]);
+});
+
+test("A web page asks for its address and sends it with what it watches", async () => {
+  serving({ readable: { apps: [], page: true } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await user.type(
+    await view.findByLabelText("What to do"),
+    "Tell me about new releases",
+  );
+  await choose(view, user, "It should", "Only tell you");
+  await choose(view, user, "It watches", "A web page");
+  expect(
+    await view.findByText(
+      "It reads this page each time and tells you when something there needs you.",
+    ),
+  ).toBeTruthy();
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  expect(
+    await view.findByText("Enter the page's address, starting with https://."),
+  ).toBeTruthy();
+  await user.type(
+    await view.findByLabelText("Page address"),
+    "https://github.com/CopilotKit/openbot/releases",
+  );
+  await user.click(await view.findByRole("button", { name: "Create routine" }));
+  await waitFor(() => expect(writes()).not.toHaveLength(0));
+  expect(writes()[0][2]).toMatchObject({
+    watches: "page",
+    sourceLink: "https://github.com/CopilotKit/openbot/releases",
+  });
+});
+
+test("A web page stays listed but can't be chosen for a Bot with no web search", async () => {
+  serving({ readable: { apps: ["Gmail"], page: false } });
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await choose(view, user, "It should", "Only tell you");
+  await user.click(await view.findByLabelText("It watches"));
+  const page = await view.findByRole("option", { name: /A web page/ });
+  expect(page.getAttribute("aria-disabled")).toBe("true");
+  expect(page.textContent).toContain("This Bot has no web search.");
 });

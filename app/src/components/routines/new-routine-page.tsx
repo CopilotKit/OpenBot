@@ -34,6 +34,8 @@ import {
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
+  type CheckInReadable,
+  checkInReadableQueryOptions,
   type ProactiveSetting,
   proactiveAllowedQueryOptions,
   proactiveSettingsQueryOptions,
@@ -53,6 +55,7 @@ import {
   routineFormSchema,
   STARTS,
   scheduleSentence,
+  type WATCHES,
   WEEKDAY_LABEL,
 } from "@/lib/routines/form";
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
@@ -105,6 +108,24 @@ function sameCheckIn(
   );
 }
 
+/** What It watches says when the Bot can read no app the person connected. */
+const NO_APPS =
+  "This Bot can't read any app you've connected. Connect one in Connections, or choose a web page.";
+/** Beside A web page, for a Bot with no tool that reads one. */
+const NO_PAGES = "This Bot has no web search.";
+
+const WATCHES_LABEL: Record<(typeof WATCHES)[number], string> = {
+  apps: "Your connected apps",
+  page: "A web page",
+};
+
+/** "Gmail", "Gmail and Notion", "Gmail, Notion and Slack". */
+function listed(apps: readonly string[]): string {
+  return apps.length <= 1
+    ? (apps[0] ?? "")
+    : `${apps.slice(0, -1).join(", ")} and ${apps.at(-1)}`;
+}
+
 /** What It should says when Only tell you was picked and an admin then turned check-ins off. */
 const TELL_OFF =
   "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
@@ -126,6 +147,7 @@ function brokenRules(
   values: RoutineFormValues,
   allowed: boolean,
   checkIns: ProactiveSetting[] | undefined,
+  readable?: CheckInReadable,
 ): Messages {
   const messages: Messages = {};
   const add = (name: FieldName, message: string) => {
@@ -135,6 +157,12 @@ function brokenRules(
   if (!parsed.success)
     for (const issue of parsed.error.issues)
       add(issue.path[0] as FieldName, issue.message);
+  // A check-in that could never look is not made: the server would refuse it too.
+  if (values.does === "tell" && allowed && readable) {
+    if (values.watches === "apps" && readable.apps.length === 0)
+      add("watches", NO_APPS);
+    if (values.watches === "page" && !readable.page) add("watches", NO_PAGES);
+  }
   if (values.does === "tell" && !allowed) add("does", TELL_OFF);
   // Only a check-in can clash: not acting, and not a tell held because check-ins are off.
   else if (
@@ -267,7 +295,10 @@ export function NewRoutinePage({
     onSubmit: async ({ value }) => {
       if (saved) return;
       // Answers that break a rule write nothing. Pressing Create shows every message (`shown`).
-      if (Object.keys(brokenRules(value, allowed, checkIns.data)).length > 0)
+      if (
+        Object.keys(brokenRules(value, allowed, checkIns.data, readable.data))
+          .length > 0
+      )
         return;
       try {
         // A tell with check-ins off is held by the rule on It should, so this is what was chosen.
@@ -293,13 +324,17 @@ export function NewRoutinePage({
    * Here a message is there exactly while its rule fails, and only the person's own edits and Create
    * count as working on a field. Nothing is asked again when an answer, or `allowed`, changes.
    */
+  // What a check-in for the chosen Bot could read, for It watches.
+  const chosenBot = useSelector(form.store, (state) => state.values.agentId);
+  const readable = useQuery(checkInReadableQueryOptions(chosenBot));
+
   const shown = useSelector(
     form.store,
     (state) => {
       const pressed = state.submissionAttempts > 0;
       const messages: Messages = {};
       for (const [name, message] of Object.entries(
-        brokenRules(state.values, allowed, checkIns.data),
+        brokenRules(state.values, allowed, checkIns.data, readable.data),
       ) as [FieldName, string][])
         if (name === "does" || pressed || state.fieldMeta[name]?.isTouched)
           messages[name] = message;
@@ -522,6 +557,126 @@ export function NewRoutinePage({
                         );
                       }}
                     </form.Field>
+                  ) : null
+                }
+              </form.Subscribe>
+
+              {/*
+               * What an Only tell you watches, refused here when it could never look. FOUND IN AN
+               * AUDIT: a check-in made for a Bot that could read nothing ran no check at all, and
+               * nobody was told.
+               */}
+              <form.Subscribe
+                selector={(state) => [state.values.does, state.values.watches]}
+              >
+                {([does, watches]) =>
+                  allowed && does === "tell" ? (
+                    <>
+                      <form.Field name="watches">
+                        {(field) => {
+                          const isInvalid = field.name in shown;
+                          const apps = readable.data?.apps;
+                          const noPage = readable.data?.page === false;
+                          return (
+                            <Field data-invalid={isInvalid}>
+                              <FieldLabel htmlFor={field.name}>
+                                It watches
+                              </FieldLabel>
+                              <Select
+                                disabled={saved}
+                                items={WATCHES_LABEL}
+                                onValueChange={(value) =>
+                                  field.handleChange(
+                                    value as (typeof WATCHES)[number],
+                                  )
+                                }
+                                value={field.state.value}
+                              >
+                                <SelectTrigger
+                                  aria-describedby={
+                                    isInvalid ? errorId(field.name) : undefined
+                                  }
+                                  aria-invalid={isInvalid}
+                                  className="w-full"
+                                  id={field.name}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    <SelectItem value="apps">
+                                      {WATCHES_LABEL.apps}
+                                    </SelectItem>
+                                    {/* Listed even when it can't be chosen, saying why. */}
+                                    <SelectItem disabled={noPage} value="page">
+                                      {WATCHES_LABEL.page}
+                                      {noPage ? (
+                                        <span className="text-muted-foreground text-xs">
+                                          {NO_PAGES}
+                                        </span>
+                                      ) : null}
+                                    </SelectItem>
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                              {field.state.value === "apps" &&
+                              apps &&
+                              !isInvalid ? (
+                                <FieldDescription>
+                                  {apps.length
+                                    ? `It reads ${listed(apps)}.`
+                                    : NO_APPS}
+                                </FieldDescription>
+                              ) : null}
+                              {isInvalid ? (
+                                <FieldError id={errorId(field.name)}>
+                                  {shown[field.name]}
+                                </FieldError>
+                              ) : null}
+                            </Field>
+                          );
+                        }}
+                      </form.Field>
+                      {watches === "page" ? (
+                        <form.Field name="pageAddress">
+                          {(field) => {
+                            const isInvalid = field.name in shown;
+                            return (
+                              <Field data-invalid={isInvalid}>
+                                <FieldLabel htmlFor={field.name}>
+                                  Page address
+                                </FieldLabel>
+                                <FieldDescription>
+                                  It reads this page each time and tells you
+                                  when something there needs you.
+                                </FieldDescription>
+                                <Input
+                                  aria-describedby={
+                                    isInvalid ? errorId(field.name) : undefined
+                                  }
+                                  aria-invalid={isInvalid}
+                                  disabled={saved}
+                                  id={field.name}
+                                  inputMode="url"
+                                  name={field.name}
+                                  onBlur={field.handleBlur}
+                                  onChange={(event) =>
+                                    field.handleChange(event.target.value)
+                                  }
+                                  placeholder="https://github.com/your/project/releases"
+                                  value={field.state.value}
+                                />
+                                {isInvalid ? (
+                                  <FieldError id={errorId(field.name)}>
+                                    {shown[field.name]}
+                                  </FieldError>
+                                ) : null}
+                              </Field>
+                            );
+                          }}
+                        </form.Field>
+                      ) : null}
+                    </>
                   ) : null
                 }
               </form.Subscribe>
