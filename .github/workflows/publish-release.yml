@@ -649,10 +649,11 @@ jobs:
   #
   # The PR comes from `merge-back/vX.Y.Z`, a branch made at the tip of the release branch, and not
   # from the release branch itself. The first candidate pinned `desktop/intelligence-cli.json` to
-  # an exact CLI version, and a final cannot change it. Merged as it is, that pin would replace
-  # main's own choice, such as `latest`, and every later build from main would keep the old CLI.
-  # So main's file is put back on the merge-back branch first. The branch is outside `release/`,
-  # so a push to it is not a release.
+  # an exact CLI version, and every release PR pins `backend-images.env` to its own version, and a
+  # final cannot change either. Merged as they are, those pins would replace main's own choices,
+  # such as `latest` and `main`, and every later build from main would keep the old CLI and the old
+  # OpenBot images. So main's files are put back on the merge-back branch first. The branch is
+  # outside `release/`, so a push to it is not a release.
   merge-back:
     name: merge back
     needs: [metadata, github-release]
@@ -669,7 +670,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.metadata.outputs.version }}
-          CLI_FILE: desktop/intelligence-cli.json
         run: |
           set -euo pipefail
           # The release branch is the one the version names: v0.3.0 was cut from release/0.3.
@@ -689,15 +689,18 @@ jobs:
             exit 0
           fi
 
-          # Reads the file at a ref as "<blob sha> <base64 content>". Prints nothing when the
+          # The files a release pins that main keeps its own copy of.
+          MAIN_KEEPS=(desktop/intelligence-cli.json backend-images.env)
+
+          # Reads a file at a ref as "<blob sha> <base64 content>". Prints nothing when the
           # file is not there. Any other error stops the run.
-          read_cli() {
+          read_file() {
             local out
-            if out="$(gh api "$repo/contents/$CLI_FILE?ref=$1" \
+            if out="$(gh api "$repo/contents/$1?ref=$2" \
               --jq '.sha + " " + (.content | gsub("\n"; ""))' 2>&1)"; then
               printf '%s\n' "$out"
             elif ! grep -q 'HTTP 404' <<<"$out"; then
-              echo "::error::Could not read $CLI_FILE on $1: $out" >&2
+              echo "::error::Could not read $1 on $2: $out" >&2
               return 1
             fi
           }
@@ -714,24 +717,97 @@ jobs:
             exit 1
           fi
 
-          main_cli="$(read_cli main)"
-          branch_cli="$(read_cli "$MERGE_BRANCH")"
-          if [ -z "$main_cli" ]; then
-            echo "main has no $CLI_FILE, so the release branch's is left as it is."
-          elif [ "${main_cli#* }" = "${branch_cli#* }" ]; then
-            echo "$CLI_FILE is the same on main and $MERGE_BRANCH."
-          else
-            put=(-X PUT "$repo/contents/$CLI_FILE" -f message="Keep main's Intelligence CLI choice"
-              -f content="${main_cli#* }" -f branch="$MERGE_BRANCH")
-            if [ -n "$branch_cli" ]; then
-              put+=(-f sha="${branch_cli%% *}")
+          for file in "${MAIN_KEEPS[@]}"; do
+            main_copy="$(read_file "$file" main)"
+            branch_copy="$(read_file "$file" "$MERGE_BRANCH")"
+            if [ -z "$main_copy" ]; then
+              echo "main has no $file, so the release branch's is left as it is."
+            elif [ "${main_copy#* }" = "${branch_copy#* }" ]; then
+              echo "$file is the same on main and $MERGE_BRANCH."
+            else
+              put=(-X PUT "$repo/contents/$file" -f message="Keep main's own $file"
+                -f content="${main_copy#* }" -f branch="$MERGE_BRANCH")
+              if [ -n "$branch_copy" ]; then
+                put+=(-f sha="${branch_copy%% *}")
+              fi
+              gh api "${put[@]}" >/dev/null
+              echo "Put main's $file back on $MERGE_BRANCH."
             fi
-            gh api "${put[@]}" >/dev/null
-            echo "Put main's $CLI_FILE back on $MERGE_BRANCH."
-          fi
+          done
 
           body="$VERSION was released from $BRANCH. This brings its version and the fixes made on that branch to main."
-          body="$body"$'\n\n'"It comes from $MERGE_BRANCH, which is $BRANCH with main's own \`$CLI_FILE\`. The release pinned the Intelligence CLI to an exact version, and main keeps its own choice."
+          body="$body"$'\n\n'"It comes from $MERGE_BRANCH, which is $BRANCH with main's own \`desktop/intelligence-cli.json\` and \`backend-images.env\`. The release pinned the Intelligence CLI and the OpenBot images to exact versions, and main keeps its own choices."
           body="$body"$'\n\n'"A PR opened with GITHUB_TOKEN does not trigger CI. Push an empty commit to $MERGE_BRANCH or close and reopen this PR to run the checks before merging."
           gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$MERGE_BRANCH" \
             --title "Merge $BRANCH back into main" --body "$body"
+
+  # A stable release is cut from main, and its release PR pinned `backend-images.env` to the release's
+  # version, so a checkout of the release runs the OpenBot images of that release. main runs the
+  # images built from main (`main`), so this opens the PR that puts main's line back, from the
+  # commit the release PR merged onto. It is a PR and not a push, so a person reviews it. A PR
+  # opened with the workflow's token does not start CI, so the body says to push or close and reopen
+  # it before merging. A candidate, beta or final is published from `release/X.Y`, which keeps its
+  # pin; the merge-back above puts main's copy back for a final.
+  main-images:
+    name: main images
+    needs: [metadata, github-release]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      needs.metadata.outputs.is_release == 'true' &&
+      needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Open the PR that runs main's images again
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          FILE=backend-images.env
+          BRANCH="main-images/$VERSION"
+          repo="repos/$GITHUB_REPOSITORY"
+
+          # A re-run, or a PR somebody opened by hand, is already what this job is for.
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --state open --json url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "A PR for $BRANCH is already open: $existing"
+            exit 0
+          fi
+
+          # Reads the file at a ref as "<blob sha> <base64 content>".
+          read_file() {
+            gh api "$repo/contents/$FILE?ref=$1" --jq '.sha + " " + (.content | gsub("\n"; ""))'
+          }
+
+          # main's line is the one the release PR replaced: the file on the commit it merged onto.
+          before="$(gh api "$repo/commits/$RELEASE_SHA" --jq '.parents[0].sha')"
+          main_copy="$(read_file "$before")"
+
+          # A re-run after a failure may find the branch already made. It is used as it is.
+          if out="$(gh api "$repo/git/ref/heads/$BRANCH" --jq .object.sha 2>&1)"; then
+            echo "$BRANCH already exists at $out."
+          elif grep -q 'HTTP 404' <<<"$out"; then
+            gh api "$repo/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$RELEASE_SHA" >/dev/null
+            echo "Created $BRANCH at $RELEASE_SHA, the release commit."
+          else
+            echo "::error::Could not read $BRANCH: $out"
+            exit 1
+          fi
+
+          branch_copy="$(read_file "$BRANCH")"
+          if [ "${main_copy#* }" = "${branch_copy#* }" ]; then
+            echo "$FILE on $BRANCH is already main's own. Nothing to open."
+            exit 0
+          fi
+          gh api -X PUT "$repo/contents/$FILE" -f message="Run main's OpenBot images again after $VERSION" \
+            -f content="${main_copy#* }" -f branch="$BRANCH" -f sha="${branch_copy%% *}" >/dev/null
+
+          body="$VERSION pinned \`$FILE\` to its own version, so a checkout of $VERSION runs the OpenBot images of that release. This puts main's own line back, so main runs the images built from main again."
+          body="$body"$'\n\n'"A PR opened with GITHUB_TOKEN does not trigger CI. Push an empty commit to $BRANCH or close and reopen this PR to run the checks before merging."
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "Run main's OpenBot images again after $VERSION" --body "$body"

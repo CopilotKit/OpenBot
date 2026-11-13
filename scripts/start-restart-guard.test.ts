@@ -192,7 +192,10 @@ exit 0
     join(fakeBin, "docker"),
     `#!/usr/bin/env bash
 args="$*"
+# A pull says which policy it ran with, and fails when the test asks it to.
+if [[ "$args" == *"compose pull"* ]]; then args="$args policy=\${IMAGE_PULL_POLICY:-}"; fi
 printf '%s tool=%s network=%s tag=%s\\n' "$args" "$OPENBOT_TOOL_URL" "$COMPUTER_NETWORK" "$OPENBOT_BACKEND_TAG" >> "$DOCKER_LOG"
+if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then echo "registry unreachable" >&2; exit 1; fi
 # The settings the server's container would be created with, kept for the test to read.
 if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
@@ -695,6 +698,47 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.dockerLog).toContain(
       "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
     );
+  });
+
+  /**
+   * `main` moves with every build, so a checkout of main must run the build that is current, not a
+   * copy pulled the week before. Compose's own policy keeps a copy it already has, so start.sh
+   * fetches the images itself, before anything starts from them.
+   */
+  test("fetches the OpenBot images at the tag on every start, before anything starts", async () => {
+    const result = await runStart({ pinnedTag: "main" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("OpenBot images: main");
+    const pull = result.dockerLog.indexOf(
+      "compose pull --quiet migrate supervisor agent-computer policy=always",
+    );
+    expect(pull).toBeGreaterThan(-1);
+    expect(pull).toBeLessThan(
+      result.dockerLog.indexOf("compose up -d --build"),
+    );
+  });
+
+  test("offline, it starts from the copies already on this machine", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_PULL_FAILS: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "Could not fetch the OpenBot images at sha-pinned-for-the-test",
+    );
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+  });
+
+  test("IMAGE_PULL_POLICY=never fetches nothing", async () => {
+    const result = await runStart({
+      processEnvironment: { IMAGE_PULL_POLICY: "never" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toContain("compose pull");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
   });
 
   test("a tag in .env or the environment runs another build", async () => {

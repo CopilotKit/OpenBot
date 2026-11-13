@@ -38,6 +38,10 @@ function fixture(version: string, unreleased = "- Something new.\n") {
   );
   write("desktop/src-tauri/Cargo.toml", cargo(version));
   write("desktop/src-tauri/Cargo.lock", lock(version));
+  write(
+    "backend-images.env",
+    "# The OpenBot images.\n#\n# Pinned by tag.\nOPENBOT_BACKEND_TAG=main\n",
+  );
   copyFileSync(
     join(import.meta.dir, "../desktop/scripts/desktop-version.ts"),
     join(root, "desktop/scripts/desktop-version.ts"),
@@ -70,6 +74,33 @@ test("a stable patch promotes the changelog and moves Cargo", () => {
   expect(read("desktop/src-tauri/Cargo.lock")).toContain(
     'name = "openbot-desktop"\nversion = "0.2.1"',
   );
+});
+
+test("a release pins the OpenBot images to its own version", () => {
+  for (const [version, kind, expected] of [
+    ["0.2.0", "stable", "v0.2.1"],
+    ["0.2.0", "rc", "v0.2.1-rc.1"],
+    ["0.3.0-rc.2", "final", "v0.3.0"],
+  ] as const) {
+    const { root, read } = fixture(version);
+    prepareRelease(root, "patch", kind);
+    expect(read("backend-images.env")).toBe(
+      `# The OpenBot images.\n#\n# Pinned by tag.\nOPENBOT_BACKEND_TAG=${expected}\n`,
+    );
+  }
+});
+
+test("a release refuses a backend-images.env with no single tag line", () => {
+  for (const text of [
+    "# Nothing pinned.\n",
+    "OPENBOT_BACKEND_TAG=a\nOPENBOT_BACKEND_TAG=b\n",
+  ]) {
+    const { root } = fixture("0.2.0");
+    writeFileSync(join(root, "backend-images.env"), text);
+    expect(() => prepareRelease(root, "patch", "stable")).toThrow(
+      "must set OPENBOT_BACKEND_TAG on exactly one line",
+    );
+  }
 });
 
 test("a minor release candidate leaves the changelog alone", () => {

@@ -44,7 +44,7 @@ function npmViewVersion(spec: string): string {
   return view.stdout.toString().trim();
 }
 
-// Writes the version, the Cargo files and the
+// Writes the version, the Cargo files, the OpenBot image tag and the
 // changelog for one release, and says what the release is called, which branch
 // it is cut from, and what its notes say.
 export function prepareRelease(
@@ -88,6 +88,7 @@ export function prepareRelease(
   }
 
   carryReleasePolicy(root, version);
+  pinReleaseImages(root, version);
 
   // The final release must bundle the CLI its candidate bundled. A candidate or beta whose
   // CLI names an npm dist-tag ("latest", "next", "alpha") would let the final pick up a newer
@@ -174,6 +175,29 @@ export function carryReleasePolicy(root: string, version: string): boolean {
   }
   writeFileSync(policyPath, updated);
   return true;
+}
+
+// A checkout of a release runs the OpenBot server, computer and supervisor images of that release,
+// so the release PR pins backend-images.env to its version: `v0.3.1`, `v0.4.0-rc.1`. main pins
+// `main`, the images built from main, and after a stable release the publish workflow opens the PR
+// that puts main's line back. Only the tag line is rewritten, so the rest of the file stays as it
+// was reviewed.
+export function pinReleaseImages(root: string, version: string): void {
+  const path = join(root, "backend-images.env");
+  const text = readFileSync(path, "utf8");
+  const lines = text.match(/^OPENBOT_BACKEND_TAG=.*$/gm) ?? [];
+  if (lines.length !== 1) {
+    throw new Error(
+      `${path} must set OPENBOT_BACKEND_TAG on exactly one line, not ${lines.length}.`,
+    );
+  }
+  writeFileSync(
+    path,
+    text.replace(
+      /^OPENBOT_BACKEND_TAG=.*$/m,
+      `OPENBOT_BACKEND_TAG=v${version}`,
+    ),
+  );
 }
 
 const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
