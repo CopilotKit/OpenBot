@@ -347,6 +347,18 @@ every deployment:
 
 ### Check-ins and pausing your Bots
 
+- **A check-in can always look, and says so when it can't.** A Bot's offer of a check-in now names
+  the tool it read the thing with, and OpenBot works out from it what the check-in reads: the one
+  app it was offered on, or one public web page. A thing read some other way, such as in the
+  Bot's browser, gets no card. New routine's Only tell you asks what **It watches**: your connected
+  apps ("It reads Gmail and Notion") or a web page at an address you give. A check-in that could
+  never look is refused when it is made, with what to do, and a new one checks at once instead of
+  a day later. One that stops being able to look (its app disconnected, its Bot gone, or three
+  failures in a row) says why on its row, which sorts first, as the first row of its Bot under
+  Needs you, and on its page, with the button that fixes it. Rows say what they read: "Reads
+  Gmail", "Reads your apps", "Reads github.com". Migration `0093_check_in_source` adds
+  `source_kind` (`apps` on every existing check-in, which reads every app as before) and
+  `source_server_id` to `proactive_settings`.
 - **A check-in belongs to its Bot, not to a conversation.** New routine's Only tell you no longer
   asks where it posts and no longer makes an empty conversation for it; it says what it finds shows
   under Needs you on Bots. A Bot's offer card turns a check-in on wherever it is drawn. A check-in

@@ -26,6 +26,34 @@ row carries it. Rows that are working (on, active, not paused) come first. The e
 holds the switch for check-ins from all your Bots. In the team edition an admin turns check-ins on
 or off for everybody, and limits them, in Admin → Routines.
 
+**What a check-in reads.** Every check-in records what it reads (`proactive_settings.source_kind`):
+every app you connected with your own account that its Bot can read (`apps`, what New routine's
+**Your connected apps** makes and what every check-in made before this reads), one of those apps
+(`app`, named in `source_server_id`, what accepting a Bot's offer about something in that app
+makes), or one public web page (`page`, at `source_link`). A check-in on one app is offered that
+app's reads and no other app's. The server works the kind out itself: from the tool the Bot read
+the thing with (`readWith`, which the offer card sends back), or from New routine's **It watches**,
+never from a label. A Bot's offer on something it read another way (its browser, the computer, a
+Shared app, an app on the admin's key) is answered "Nothing to offer", and no card is drawn.
+
+**A check-in that could never look is not made.** Creating one is refused, with the sentence the
+person reads, when its Bot can read no app they connected, can't read the app it was offered on,
+holds no tool that reads a web page, or the page's address isn't a public `http(s)` one. New routine
+asks the same of `GET /api/proactive/readable?agentId=` and says it on It watches before Create.
+A check-in the person makes is due at once, so its row says how its first look went within a
+minute. Rows adopted with `OPENBOT_PROACTIVE_DEFAULTS` keep their delay.
+
+**When one stops being able to look, it says so.** `GET /api/proactive/settings` gives each check-in
+a `health`: null, or why it can't look and the step that fixes it (connect an app, open an app's
+page or the check-in, or remove it). It can't look when its Bot can read no app you connected, the
+app it reads isn't connected, its Bot has no web search for its page, the Bot is no longer yours to
+use, or its last three check-ins failed. Paused, off, over the daily limit and busy are not this.
+The first four are asked afresh (kept for a minute), so the row clears once the app is connected;
+three failures clear when the next check-in finishes. It shows on the check-in's row (which sorts
+first), as the first row of its Bot's group under Needs you (not counted in the Bots badge, but the
+badge's dot shows), and on its page above On. No ping is sent for it. Each row also says what it
+reads: "Reads Gmail", "Reads your apps", "Reads github.com".
+
 **A check-in belongs to its Bot.** It posts nowhere and needs no conversation: what it finds is
 raised under Needs you, and a ping's phone push is filed under its Bot. It runs while you can still
 use that Bot; when you can't, its runs are skipped with "This Bot is no longer available to you."
