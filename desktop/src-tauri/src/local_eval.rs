@@ -2665,6 +2665,9 @@ const INHERITED: &[&str] = &[
     "DOCKER_HOST",
     "DOCKER_CONTEXT",
     "DOCKER_CONFIG",
+    // Where rootless Podman's socket is on Linux (`$XDG_RUNTIME_DIR/podman/podman.sock`). Without
+    // it the CLI can't find the engine OpenBot runs on there, and reports no engine at all.
+    "XDG_RUNTIME_DIR",
     // The CLI's telemetry opt-outs (`services/consent/gate.ts`). Dropping them would turn
     // telemetry back on for somebody who turned it off.
     "DO_NOT_TRACK",
