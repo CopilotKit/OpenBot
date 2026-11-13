@@ -8,8 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** No migrations run in this release: the database stays at
-`0088_approval_reviewer_guidance`, and a 1.0.1 database is used as it is. Upgrading from 1.0.0 or
+**The sidebar in sections.** The conversation sidebar now draws its conversations in three
+collapsible sections — Group chats, Direct chats and Projects — and a person can make folders and
+file conversations into them. A folder is one person's filing, so two people can file the same
+conversation differently, and filing one takes it out of Group/Direct for that person only. Which
+sections are folded is kept on the account, so it follows a person across devices. Upgrading runs
+`0089`, which only adds: `projects` and `channel_projects` with a unique index, and nothing
+existing is altered.
+
+**Before upgrading.** Apart from `0089` above, no migrations run in this release: the database
+stays at `0088_approval_reviewer_guidance`, and a 1.0.1 database is used as it is. Upgrading from 1.0.0 or
 0.3.x runs the migrations listed under 1.0.1, and a database that has run them does not go back:
 restore the backup taken before the upgrade instead. Three things change for an existing OpenBot
 Desktop installation:
