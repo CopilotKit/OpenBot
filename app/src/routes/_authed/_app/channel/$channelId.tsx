@@ -13,8 +13,10 @@ import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { RoutinesClock } from "@/components/routines/routines-clock";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
@@ -51,6 +53,9 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
+  const botName = useQuery(agentListQueryOptions()).data?.find(
+    (bot) => bot.id === agentId,
+  )?.name;
 
   useMarkOpenChannelRead(channelId);
 
@@ -162,6 +167,12 @@ function RouteComponent() {
             </motion.span>
           </div>
           <div className="flex flex-row gap-1.5">
+            {/* First of three: what this Bot does by itself, beside its computer and its settings. */}
+            <RoutinesClock
+              agentId={agentId}
+              botName={botName}
+              channelId={channelId}
+            />
             <ComputerChatControls
               computerId={agentId}
               open={isWatching}
