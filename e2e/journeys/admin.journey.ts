@@ -172,6 +172,14 @@ test("the personal edition's one person opens Admin and every page in it loads",
       await expect(
         main.getByRole("heading", { name: section, level: 2 }),
       ).toBeVisible();
+    // Read from the server: no desktop runs this stack, and the Bots' browsers, or that there are none.
+    await expect(main.getByText("Needs OpenBot Desktop")).toBeVisible();
+    await expect(
+      main
+        .getByText("No browsers yet")
+        .or(main.getByRole("button", { name: "Reset" }))
+        .first(),
+    ).toBeVisible();
     await expectNoError(main);
     await shot("computers");
     await expectForATeam(main, "Idle computers");
@@ -244,7 +252,7 @@ test("the personal edition's one person opens Admin and every page in it loads",
       main.getByRole("heading", { name: "Saved keys", level: 2 }),
     ).toBeVisible();
     await expect(main.getByText("openai", { exact: true })).toBeVisible();
-    await expect(main.getByRole("link", { name: "Add key" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Add key" })).toBeVisible();
     await expectNoError(main);
     await shot("vault");
     await page.goto("/admin/credentials/new");

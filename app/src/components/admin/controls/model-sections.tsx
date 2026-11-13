@@ -503,7 +503,7 @@ export function ModelUsageSection({ team }: { team: boolean }) {
                 <ItemContent>
                   <ItemTitle>{row.model}</ItemTitle>
                   <ItemDescription>
-                    {row.runs} runs by {row.people}{" "}
+                    {row.runs} {row.runs === 1 ? "run" : "runs"} by {row.people}{" "}
                     {row.people === 1 ? "person" : "people"}
                     {row.refused > 0
                       ? ` · ${row.refused} off the allowlist`
