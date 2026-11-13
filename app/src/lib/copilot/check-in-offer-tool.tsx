@@ -1,5 +1,8 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
-import { OFFER_CHECK_IN_TOOL } from "@openbot/shared/check-in-offer";
+import {
+  NOTHING_TO_OFFER,
+  OFFER_CHECK_IN_TOOL,
+} from "@openbot/shared/check-in-offer";
 import { IconRadar } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -33,6 +36,7 @@ const parameters = z.object({
   subject: z.string().optional(),
   focus: z.string().optional(),
   link: z.string().optional(),
+  readWith: z.string().optional(),
 });
 
 const INTERVALS = [
@@ -64,15 +68,25 @@ function rememberDeclined(toolCallId: string) {
   }
 }
 
+/** Whether the tool's answer offered a check-in, so the card is drawn. */
+export function drawsOffer(result: unknown): boolean {
+  return !String(result ?? "").startsWith(NOTHING_TO_OFFER);
+}
+
 export function CheckInOfferTool() {
   useRenderTool({
     name: OFFER_CHECK_IN_TOOL,
     parameters,
-    render: ({ parameters: given, status, toolCallId }) =>
-      status === "complete" && given?.subject ? (
+    /*
+     * Not drawn when the server said there is nothing to offer: the thing was read some way a
+     * check-in can't read, so a card would offer a check-in that never runs.
+     */
+    render: ({ parameters: given, result, status, toolCallId }) =>
+      status === "complete" && given?.subject && drawsOffer(result) ? (
         <CheckInOfferCard
           focus={given.focus}
           link={given.link}
+          readWith={given.readWith}
           subject={given.subject}
           toolCallId={toolCallId}
         />
@@ -85,11 +99,14 @@ export function CheckInOfferCard({
   subject,
   focus,
   link,
+  readWith,
   toolCallId,
 }: {
   subject: string;
   focus?: string;
   link?: string;
+  /** The tool the Bot read it with, sent back so the server works out what the check-in reads. */
+  readWith?: string;
   toolCallId: string;
 }) {
   const agentId = useDeclaredBotId();
@@ -111,6 +128,8 @@ export function CheckInOfferCard({
     (setting) =>
       setting.agentId === agentId &&
       setting.enabled &&
+      // An older one on this page read every app instead: accepting this makes it read the page.
+      !(link && setting.sourceKind === "apps") &&
       (link
         ? setting.sourceLink === link
         : (setting.subject ?? "").toLowerCase() === subject.toLowerCase()),
@@ -200,6 +219,7 @@ export function CheckInOfferCard({
                 ? { sourceLink: link }
                 : {}),
               intervalMinutes: minutes,
+              ...(readWith ? { readWith } : {}),
             })
           }
           size="sm"
