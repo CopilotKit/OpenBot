@@ -27,8 +27,8 @@ every deployment:
 - At setup and at every Start, a Docker Desktop or Podman too old to run OpenBot is updated
   (below). Docker Desktop quits while it updates, which stops its containers; the ones that were
   running are started again afterwards.
-- OpenBot Desktop's back end and the Helm chart move to CopilotKit Intelligence 0.16.0-rc.12, and
-  the bundled CLI to `copilotkit@7ba85b5` (below).
+- OpenBot Desktop's back end moves to CopilotKit Intelligence 0.16.0-rc.13 and the Helm chart to
+  0.16.0-rc.12, and the bundled CLI to `copilotkit@7334f7d` (below).
 - Settings and Admin are grouped differently and several pages have new names (below). Old
   addresses and bookmarks open the new pages.
 
@@ -244,13 +244,19 @@ every deployment:
   `localhost`, `127.0.0.1` and `[::1]` with the same port as the same address, connects again, and
   leaves OpenBot's addresses as they are. An address changed to another port or host is still
   refused.
-- **CopilotKit Intelligence 0.16.0-rc.12, CLI `copilotkit@7ba85b5`.** OpenBot Desktop's back end
-  and the Helm chart move to Intelligence 0.16.0-rc.12, and the bundled CLI to its production
-  build. The CLI is `6bfaa0f5c`, which added `telemetry link`, with `--app-path` added to its
-  `local` commands and a second `local connect` accepted after OpenBot rewrote its addresses to
+- **CopilotKit Intelligence 0.16.0-rc.13, CLI `copilotkit@7334f7d`.** OpenBot Desktop's back end
+  moves to Intelligence 0.16.0-rc.13 and the Helm chart to 0.16.0-rc.12, and the bundled CLI to its
+  production build. The CLI is `6bfaa0f5c`, which added `telemetry link`, with `--app-path` added to
+  its `local` commands and a second `local connect` accepted after OpenBot rewrote its addresses to
   `127.0.0.1`, and CopilotKit v1.87.0 templates. The back end now streams an answer whole to a
   conversation that starts following it mid-reply: before, it could send the reply's pieces out of
   order, so the answer drew with words missing and a step's browser actions never ran.
+- **A reply read right after it finished could be missing a piece.** The back end saves a reply's
+  pieces to its database a moment after they stream, and it used to save them in no particular
+  order. A conversation opened, or a reply read, just as the reply finished could get it with a
+  piece missing from the middle, though the person had watched it stream whole, until the rest was
+  saved about a second later. Intelligence 0.16.0-rc.13 saves each reply's pieces in the order they
+  streamed, so a reply read early is at most cut short at the end, never missing a piece.
 - **A 4-CPU Docker or Podman no longer fails setup because something else is running in it.**
   Setup's resource check counted the CPUs left free, the engine's less what its running containers
   used at that moment, so OpenBot's own 4-CPU Podman machine with anything at all running in it
@@ -360,6 +366,11 @@ every deployment:
 
 ### Conversations
 
+- **A Bot no longer does an app change twice after you answer an approval.** When a built-in Bot
+  asked for several app changes at once and one of them waited for your Allow, the others that
+  needed no approval still went ahead, but the Bot was told they had not run. It then did them
+  again: a Google Sheet ended up with each new tab twice, as "Summary" and "Summary_2". The Bot is
+  now told what those changes did, and the conversation shows them as done.
 - **A file you attach stays a file once the Bot answers.** On a Bot OpenBot runs in a harness, such
   as the Personal Assistant on LangChain, a text file you sent turned into one giant block of its
   own contents when the answer finished, and an image's thumbnail disappeared. A reload showed the

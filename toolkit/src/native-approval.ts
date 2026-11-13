@@ -23,6 +23,12 @@ type NativeRun = {
   state: unknown;
   waiting?: HeadlessToolSuspension;
   pending: Set<Promise<unknown>>;
+  /**
+   * What each call that ran came back with, by its id. A call in the step of one that waits is
+   * started beside it and finishes while the run is stopping, after the provider's stream that would
+   * have carried its result is gone; see `suspend`.
+   */
+  results: Map<string, unknown>;
   abort(): void;
   waitForCall(id: string): Promise<void>;
   suspend(error: HeadlessToolSuspension): Promise<void>;
@@ -106,7 +112,9 @@ export async function executeNativeApprovalTool<T>(
   );
   run.pending.add(pending);
   try {
-    return await pending;
+    const result = await pending;
+    run.results.set(toolCallId, result);
+    return result;
   } catch (error) {
     if (error instanceof HeadlessToolSuspension && !run.waiting) {
       run.waiting = error;
@@ -137,6 +145,8 @@ class NativeApprovalMiddleware extends Middleware {
     return new Observable<BaseEvent>((subscriber) => {
       let subscription: Subscription | undefined;
       const captured = new Set<string>();
+      /** The calls whose result has already gone out in this run. */
+      const answered = new Set<string>();
       const awaiting = new Map<
         string,
         {
@@ -150,6 +160,7 @@ class NativeApprovalMiddleware extends Middleware {
         messages: input.messages,
         state: input.state,
         pending: new Set(),
+        results: new Map(),
         abort: () => subscriber.complete(),
         waitForCall(id) {
           if (captured.has(id)) return Promise.resolve();
@@ -172,6 +183,25 @@ class NativeApprovalMiddleware extends Middleware {
           subscription?.unsubscribe();
           await Promise.allSettled(run.pending);
           if (subscriber.closed) return;
+          /*
+           * A CALL THAT RAN IS ANSWERED WITH WHAT IT DID. The AI SDK starts a step's calls together,
+           * so one allowed beside the call that waits has reached the app by now, and its result
+           * would have come back on the stream this stopped. Left out, the turn picked up after the
+           * person decides answered it "Not run", and the Bot did it a second time: a sheet's tabs
+           * added twice. Sent as the provider's stream sends a result, so the thread keeps it and
+           * the picked-up turn answers with it (`notRunBeside` in run-turn.ts).
+           */
+          for (const [toolCallId, result] of run.results) {
+            if (answered.has(toolCallId)) continue;
+            answered.add(toolCallId);
+            subscriber.next({
+              type: EventType.TOOL_CALL_RESULT,
+              role: "tool",
+              messageId: crypto.randomUUID(),
+              toolCallId,
+              content: serializedResult(result),
+            } as BaseEvent);
+          }
           subscriber.next({
             type: EventType.CUSTOM,
             name: "openbot.headless.waiting",
@@ -216,7 +246,14 @@ class NativeApprovalMiddleware extends Middleware {
           next({ event, messages, state }) {
             run.messages = messages;
             run.state = state;
-            if (!run.waiting) subscriber.next(event);
+            if (!run.waiting) {
+              subscriber.next(event);
+              if (
+                event.type === EventType.TOOL_CALL_RESULT &&
+                typeof event.toolCallId === "string"
+              )
+                answered.add(event.toolCallId);
+            }
             if (
               event.type === EventType.TOOL_CALL_END &&
               typeof event.toolCallId === "string"
@@ -245,6 +282,15 @@ class NativeApprovalMiddleware extends Middleware {
     });
   }
 }
+/** A tool's result as the built-in agent puts it on the stream: as JSON. */
+function serializedResult(result: unknown): string {
+  try {
+    return JSON.stringify(result) ?? "null";
+  } catch {
+    return "[Unserializable tool result]";
+  }
+}
+
 export function nativeApprovalRun(
   input: RunAgentInput,
   source: () => Observable<BaseEvent>,
