@@ -73,7 +73,8 @@ const engine = createProactiveEngine({
     },
   },
   runTurn: async (input) => {
-    if (!input.initiator) throw new Error("A check-in's turn has an initiator.");
+    if (!input.initiator)
+      throw new Error("A check-in's turn has an initiator.");
     const tools = await engine.toolsForTurn({
       ownerUserId: input.ownerUserId,
       agentId: input.agentId,
