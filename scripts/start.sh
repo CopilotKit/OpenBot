@@ -477,10 +477,30 @@ if [ "$SECRETS_ROTATED" = "true" ]; then
   info "  a secret was generated this run, so the server is restarted to pick it up"
   RECREATE=(--force-recreate)
 fi
-if ! COMPOSE_PROGRESS=quiet docker compose up -d --no-deps ${RECREATE[@]+"${RECREATE[@]}"} server worker >/dev/null; then
+# Docker Desktop can refuse the server's container with "bind source path does not exist" for
+# `.openbot`, a folder that is there. Compose mounts it strictly (create_host_path: false, see
+# docker-compose.yml), and Docker Desktop's view of a folder in a checkout made where another was
+# deleted can be stale until something resolves it; waiting does not put it right. A plain `-v`
+# bind of the folder does, so on that refusal this makes one and starts the server again. Any other
+# failure stops the start at once, as before.
+start_server() {
+  COMPOSE_PROGRESS=quiet docker compose up -d --no-deps ${RECREATE[@]+"${RECREATE[@]}"} server worker \
+    >/dev/null 2>"$LOGS/server-start.log"
+}
+server_did_not_start() {
+  cat "$LOGS/server-start.log" >&2
   red "  The server did not start from ghcr.io/copilotkit/openbot-server:$OPENBOT_BACKEND_TAG."
   red "  Log: docker compose logs server"
   exit 1
+}
+if ! start_server; then
+  if ! grep -q 'bind source path does not exist' "$LOGS/server-start.log"; then
+    server_did_not_start
+  fi
+  info "  Docker did not see $ROOT/.openbot; showing it the folder and starting the server again"
+  docker run --rm -v "$ROOT/.openbot:/openbot" --entrypoint true \
+    "$(setting SERVER_IMAGE "ghcr.io/copilotkit/openbot-server:$OPENBOT_BACKEND_TAG")" >/dev/null 2>&1 || true
+  start_server || server_did_not_start
 fi
 rm -f "$SERVER_ENV"
 unset OPENBOT_SERVER_ENV_FILE
