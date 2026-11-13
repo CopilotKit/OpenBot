@@ -39,9 +39,9 @@ const same = (a: readonly CapabilityChange[], b: readonly CapabilityChange[]) =>
 /**
  * Who can do what, described in words, as team approval rules are on Describe team rules.
  *
- * The model's switch changes land as rows the admin can remove, beside an independent reading of them
- * and whether they check. Who they would change is worked out on the server for every member, with
- * the recent use of what anybody would lose. Only Save writes them, together, with the sentence they
+ * The model's switch changes land as rows the admin can remove, labelled as what OpenBot checks, with
+ * an independent reading of them and whether they check under them. Who they would change is worked
+ * out on the server for every member, with the recent use of what anybody would lose. Only Save writes them, together, with the sentence they
  * were written from.
  */
 function DescribePermissionsPage() {
@@ -113,7 +113,7 @@ function DescribePermissionsPage() {
           <FieldGroup>
             <DescribeField
               action="Write changes"
-              description="Say in a sentence who may or may not do something, and your model drafts the changes from this OpenBot's roles and groups. OpenBot checks the permissions you save, not your words. A second reading that never sees your words says what the changes do."
+              description="Say in a sentence who may or may not do something, and your model drafts the changes from this OpenBot's roles and groups. A second reading that never sees your words says what the changes do."
               id="permissions-english"
               label="Describe the change"
               placeholder="Contractors can't use their own computer"
@@ -125,6 +125,18 @@ function DescribePermissionsPage() {
                 return null;
               }}
             />
+            {changes.length > 0 ? (
+              <ChangeRows
+                changes={changes}
+                onRemove={(index) =>
+                  setChanges(changes.filter((_, at) => at !== index))
+                }
+                problems={
+                  current && !current.check.ok ? current.check.problems : []
+                }
+                titles={titles}
+              />
+            ) : null}
             {written ? (
               <ReadingStatus
                 check={written.check}
@@ -143,18 +155,6 @@ function DescribePermissionsPage() {
                 heading="What these changes do"
                 passed="Checks. Every change names a permission, role or group this OpenBot has."
                 warning={written.warning}
-              />
-            ) : null}
-            {changes.length > 0 ? (
-              <ChangeRows
-                changes={changes}
-                onRemove={(index) =>
-                  setChanges(changes.filter((_, at) => at !== index))
-                }
-                problems={
-                  current && !current.check.ok ? current.check.problems : []
-                }
-                titles={titles}
               />
             ) : null}
             {current &&
