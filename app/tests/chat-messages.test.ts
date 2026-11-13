@@ -62,6 +62,36 @@ describe("a Bot's turn that reacts or hands work on", () => {
     ]);
   });
 
+  test("a thread link the Bot looked up in the turn that started the task is not drawn under the card", () => {
+    const linked = (asked: boolean) =>
+      toVisibleChatItems([
+        {
+          id: "user-chart",
+          role: "user",
+          content: asked
+            ? "Send me the link to that thread."
+            : "Chart my revenue and summarise it.",
+        },
+        {
+          id: "assistant-turn",
+          role: "assistant",
+          content: asked ? "Here it is." : "On it.",
+          toolCalls: [
+            ...(asked
+              ? []
+              : [call("call-delegate", "delegate", '{"title":"Revenue"}')]),
+            call("call-link", "link_to_thread", "{}"),
+          ],
+        },
+      ]).map((item) => item.id);
+    expect(linked(false)).toEqual([
+      "user-chart",
+      "assistant-turn",
+      "call-delegate",
+    ]);
+    expect(linked(true)).toEqual(["user-chart", "assistant-turn", "call-link"]);
+  });
+
   test("the Bot's line comes before the task card, whichever it wrote first", () => {
     const ask: Message = {
       id: "user-chart",

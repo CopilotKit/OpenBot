@@ -84,6 +84,21 @@ describe("how a Bot that holds delegate is told to work", () => {
 
   test("a reaction is the whole answer, with no words, not even the emoji", () => {
     expect(DELEGATING_GUIDANCE).toContain("not even the emoji");
+    // The LangGraph Bot reacted 👀 to an ask it then handed to a task.
+    expect(DELEGATING_GUIDANCE).toContain("exactly one of these three things");
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Never react to a message you answer or hand to a task",
+    );
+  });
+
+  test("a started task ends the reply, and a thread's link is only for when the person asks", () => {
+    // It then looked up the thread it had just started and wrote a second line under the card.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "your reply is finished: the task's card already shows it",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Only when the person asks for the link",
+    );
   });
 
   test("is a section of the prompt for a run that holds delegate, and of no other", () => {

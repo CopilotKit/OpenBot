@@ -1,6 +1,7 @@
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
 import {
   DELEGATE_TOOL,
+  LINK_TOOL,
   REACT_TOOL,
   REACTIONS,
 } from "@openbot/shared/orchestration";
@@ -633,6 +634,14 @@ function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
             ),
         )
       : turn;
+    /*
+     * THE CARD IS THE LINK. A Bot that started a task and then looked up its thread in the same
+     * turn drew the task twice, the card and a one-row link list under it. Asked for in a turn of
+     * its own, the list is drawn as always.
+     */
+    if (kept.some((item) => named(item, DELEGATE_TOOL)))
+      for (let at = kept.length - 1; at >= 0; at -= 1)
+        if (named(kept[at] as VisibleChatItem, LINK_TOOL)) kept.splice(at, 1);
     const card = kept.findIndex((item) => named(item, DELEGATE_TOOL));
     const said = kept.findIndex(
       (item) => item.kind === "text" && item.role === "assistant",
