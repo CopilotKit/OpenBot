@@ -8,7 +8,13 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { UserPreferences } from "@openbot/shared/user-preferences";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { NOTIFY_PROMPT_KEY } from "@/components/notifications/notify-prompt";
 import { StarPrompt } from "@/components/star-prompt/star-prompt";
@@ -25,6 +31,7 @@ import {
   starPromptEarned,
 } from "@/lib/star-prompt";
 import { queryClient } from "@/query-client";
+import { closeDesktop, launchDesktop } from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -96,6 +103,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  closeDesktop();
   queryClient.clear();
   window.localStorage.clear();
   globalThis.fetch = originalFetch;
@@ -331,6 +339,84 @@ test("a conversation counts each message sent, and asks above the composer at th
   resolveSend();
 
   await waitFor(() => expect(starPromptEarned("prompts")).toBe(true));
+  await waitFor(() =>
+    expect(view.container.querySelector("[data-star-prompt]")).not.toBeNull(),
+  );
+});
+
+test("a send the conversation refuses is not counted", async () => {
+  seed();
+  sendPrompts(STAR_PROMPT_AFTER_PROMPTS - 1);
+  let refuse = (_reason: Error) => {};
+  const view = render(
+    <ConversationView
+      channelId="c-1"
+      messages={[{ id: "u1", role: "user", content: "Book a table" }]}
+      onSubmit={() =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        })
+      }
+    />,
+  );
+  const box = view.getByRole("textbox");
+  fireEvent.input(box, { target: { textContent: "And a taxi" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  refuse(new Error("Agent unavailable"));
+
+  // The words go back in the box when a send is refused; wait for that, then check nothing counted.
+  await waitFor(() => expect(box.textContent).toContain("And a taxi"));
+  expect(starPromptEarned("prompts")).toBe(false);
+  expect(view.container.querySelector("[data-star-prompt]")).toBeNull();
+});
+
+test("a conversation that cannot take messages never asks", () => {
+  seed();
+  sendPrompts(STAR_PROMPT_AFTER_PROMPTS);
+  const view = render(
+    <ConversationView
+      channelId="c-1"
+      disabled
+      messages={[{ id: "u1", role: "user", content: "Book a table" }]}
+      onSubmit={() => {}}
+    />,
+  );
+  expect(view.container.querySelector("[data-star-prompt]")).toBeNull();
+});
+
+test("in OpenBot Desktop the card waits until the app has said whether notifications are on", async () => {
+  const desktop = launchDesktop({ plugin: true, answersLate: true });
+  refreshNotificationPermission();
+  seed();
+  sendPrompts(STAR_PROMPT_AFTER_PROMPTS);
+  const view = render(
+    <ConversationView
+      channelId="c-1"
+      messages={[{ id: "u1", role: "user", content: "Book a table" }]}
+      onSubmit={() => {}}
+    />,
+  );
+  expect(view.container.querySelector("[data-star-prompt]")).toBeNull();
+  expect(posted("star_prompt_shown")).toHaveLength(0);
+
+  await act(async () => desktop.answer());
+
+  await waitFor(() =>
+    expect(view.container.querySelector("[data-star-prompt]")).not.toBeNull(),
+  );
+});
+
+test("a card drawn again in the same browser is counted as shown once", async () => {
+  seed();
+  sendPrompts(STAR_PROMPT_AFTER_PROMPTS);
+  render(<StarPrompt />);
+  await waitFor(() => expect(posted("star_prompt_shown")).toHaveLength(1));
+  cleanup();
+
+  render(<StarPrompt />);
+  expect(render(<StarPrompt />).getAllByText(ASK).length).toBeGreaterThan(0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(posted("star_prompt_shown")).toHaveLength(1);
 });
 
 test("waits while the notifications offer is still open, so the two never stack", () => {

@@ -668,6 +668,10 @@ export async function createProductTelemetry(options: {
     /*
      * Keyed on the person, the answer and the trigger, so a card shown on every visit, or a link
      * clicked twice, is one event: PostHog counts people who were asked and people who starred.
+     *
+     * `prompt_trigger` and `prompt_surface`, not `trigger` and `surface`: run events already carry
+     * those names with other values (`human`, `routine`), and a breakdown across every OpenBot event
+     * would mix the two, as `consumption_surface` already avoids.
      */
     starPrompt: async (actor: string, event: ProductStarPrompt) => {
       await emit(
@@ -675,8 +679,8 @@ export async function createProductTelemetry(options: {
         `star:${user(actor)}:${event.kind}:${event.trigger}`,
         {
           user_id: user(actor),
-          trigger: event.trigger,
-          surface: event.surface,
+          prompt_trigger: event.trigger,
+          prompt_surface: event.surface,
         },
       );
     },

@@ -103,11 +103,14 @@ test("a star prompt event is forwarded under the person's pseudonym, with its tr
   expect((await f.request(star)).status).toBe(204);
   expect(f.sent).toHaveLength(1);
   expect(f.sent[0]?.event).toBe("oss.runtime.openbot.star_prompt_clicked");
+  // Named for the prompt: run events already use `trigger` and `surface` for something else.
   expect(f.sent[0]?.properties).toMatchObject({
-    trigger: "prompts",
-    surface: "desktop",
+    prompt_trigger: "prompts",
+    prompt_surface: "desktop",
     user_id: expect.stringMatching(/^ob_/),
   });
+  expect(f.sent[0]?.properties).not.toHaveProperty("trigger");
+  expect(f.sent[0]?.properties).not.toHaveProperty("surface");
   expect(String(f.sent[0]?.properties?.user_id)).not.toContain(
     "private-user-one",
   );

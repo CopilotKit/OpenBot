@@ -328,7 +328,13 @@ export function ConversationView({
     setRunning(true);
     try {
       await onSubmit(draft);
-      // Once the run has started, not when the box was pressed: a send that failed asked for nothing.
+      /*
+       * Once `onSubmit` has resolved, which in a conversation is when the turn it started is over
+       * (a stopped turn included), so the card can appear as the answer lands. A send that throws,
+       * whose words go back in the box, is not counted. A first message that opens a new
+       * conversation resolves once the conversation is made, so it counts even if its run then
+       * fails, which is fine for a nudge counted to five.
+       */
       notePromptSent();
     } finally {
       setRunning(false);
@@ -518,10 +524,17 @@ export function ConversationView({
         {/*
          * The ask to star OpenBot on GitHub, once this browser has earned it, and never beside the
          * notifications offer: one card above the composer at a time, and the offer that is useful
-         * to this person goes first. Read on each render, which a sent message always causes.
+         * to this person goes first. Read on each render, which a finished turn always causes.
+         *
+         * It also waits while OpenBot Desktop has not yet said whether notifications are on
+         * (`checking`), or the card could draw, be counted as shown, and vanish when the answer is
+         * "not asked yet". And never in a conversation that cannot take a message: the brief
+         * "Picking a Bot" screen, or one whose Bot was deleted.
          */}
-        {notificationPermission === "default" &&
-        !notifyPromptAnswered() ? null : (
+        {disabled ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
           <StarPrompt />
         )}
         {/*

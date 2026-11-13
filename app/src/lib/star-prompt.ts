@@ -15,8 +15,10 @@ import { desktopShell } from "@/lib/desktop/shell";
  * trigger that asked (docs/TELEMETRY.md, "The star prompt"), which is what lets two releases be
  * compared when the project's own star count also moves with every launch and post.
  *
- * - `prompts`: once this person has sent five messages from this browser. A fresh install already
- *   has Bots to talk to, so this reaches everybody who uses OpenBot at all.
+ * - `prompts`: once five of this person's messages from this browser have been answered. A fresh
+ *   install already has Bots to talk to, so this reaches nearly everybody who uses OpenBot. (In a
+ *   browser that has not answered the notifications offer, the card waits behind it; see
+ *   `conversation-view.tsx`.)
  * - `bot_created`: once they create a Bot from this browser, which fewer people ever do.
  *
  * What earned it is kept in this browser rather than on the account: it is a nudge, not a record, and
@@ -48,6 +50,10 @@ export const STAR_PROMPT_PROMPTS_KEY = "openbot-star-prompt-prompts";
 /** Set once a Bot is created from this browser. */
 export const STAR_PROMPT_BOT_CREATED_KEY = "openbot-star-prompt-bot-created";
 
+/** Set once this browser has reported the card shown for a trigger, so it reports it once. */
+const shownKey = (trigger: StarPromptTrigger) =>
+  `openbot-star-prompt-shown-${trigger}`;
+
 function read(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -70,7 +76,11 @@ function promptsSent(): number {
   return Number.isFinite(count) && count > 0 ? count : 0;
 }
 
-/** One message this person sent from a conversation. Called once its run has started. */
+/**
+ * One message this person sent from a conversation. Called once the conversation's `onSubmit` has
+ * resolved: in a conversation, when the turn it started is over; for the first message of a new
+ * one, when the conversation is made.
+ */
 export function notePromptSent(): void {
   const sent = promptsSent();
   // Stops at the threshold: past it, the count changes nothing, so there is nothing to write.
@@ -90,6 +100,18 @@ export function starPromptEarned(
   return trigger === "prompts"
     ? promptsSent() >= STAR_PROMPT_AFTER_PROMPTS
     : read(STAR_PROMPT_BOT_CREATED_KEY) !== null;
+}
+
+/**
+ * Whether this is the first time this browser draws the card for `trigger`, marking it drawn. The
+ * server counts people either way; this keeps a card somebody ignores from sending a show, and a
+ * billed event, for every conversation they open. Storage that refuses answers yes every time, which
+ * the server still counts once.
+ */
+export function firstStarPromptShow(trigger: StarPromptTrigger): boolean {
+  if (read(shownKey(trigger)) !== null) return false;
+  write(shownKey(trigger), new Date().toISOString());
+  return true;
 }
 
 /**

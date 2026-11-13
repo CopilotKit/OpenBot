@@ -16,6 +16,7 @@ import {
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
 import {
+  firstStarPromptShow,
   OPENBOT_REPO_URL,
   recordStarPrompt,
   STAR_PROMPT_TRIGGER,
@@ -62,9 +63,10 @@ export function StarPrompt({
     preferences.starPromptAnswered !== true &&
     starPromptEarned(trigger);
 
-  // Once each time the card is drawn. The server keys the count on the person, so this is people.
+  // Once per browser and trigger; the server keys the count on the person, so this is people.
   useEffect(() => {
-    if (shown) void recordStarPrompt("star_prompt_shown", trigger);
+    if (shown && firstStarPromptShow(trigger))
+      void recordStarPrompt("star_prompt_shown", trigger);
   }, [shown, trigger]);
 
   if (!shown) return null;
