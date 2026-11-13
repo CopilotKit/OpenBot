@@ -146,19 +146,23 @@ export function TaskCard({
       </TaskFrame>
     );
   const state = cardState(taskId ? task.data?.status : undefined);
+  /*
+   * What it waits for is said once, on the needs-you line the task posts, not here as well: the
+   * card says only that it needs the person, and leads into the thread.
+   */
   const next =
     state === "failed"
       ? (task.data?.failure ?? null)
-      : state === "needs"
-        ? task.data?.next
-        : state === "working" && !taskId
-          ? "Starting…"
-          : null;
+      : state === "working" && !taskId
+        ? "Starting…"
+        : null;
   return (
     <TaskFrame
       action={
         channelId ? (
-          <OpenThread channelId={channelId} primary={state === "needs"} />
+          <OpenThread channelId={channelId} primary={state === "needs"}>
+            {state === "needs" ? "Go to thread" : "Open thread"}
+          </OpenThread>
         ) : null
       }
       state={state}
@@ -228,10 +232,13 @@ function TaskFrame({
 export function TaskReport({
   taskId,
   kind,
+  words,
   children,
 }: {
   taskId: string;
   kind: TaskReportKind;
+  /** What the report said, as text, to tell a request still waiting from one answered since. */
+  words?: string;
   children: ReactNode;
 }) {
   const task = useQuery(taskQueryOptions(taskId));
@@ -264,8 +271,18 @@ export function TaskReport({
     );
   const state: CardState = kind === "needs" ? "needs" : "failed";
   const live = cardState(task.data?.status);
-  // A request that was answered since reads as what it was, without asking again.
-  const answered = kind === "needs" && task.data && live !== "needs";
+  /*
+   * A request answered since changes in place: it says it was answered and where the task is now,
+   * and no longer asks. The task waiting on something else now is this one answered too.
+   */
+  const waitingNow = task.data?.next?.trim();
+  const answered =
+    kind === "needs" &&
+    task.data !== undefined &&
+    (live !== "needs" ||
+      (waitingNow !== undefined &&
+        words !== undefined &&
+        waitingNow !== words.trim()));
   return (
     <section
       aria-label={
@@ -294,7 +311,13 @@ export function TaskReport({
               <span className="text-muted-foreground"> · {title}</span>
             ) : null}
           </p>
-          <div className="text-sm">{children}</div>
+          <div className="text-sm">
+            {answered ? (
+              <p className="text-muted-foreground">{ANSWERED[live]}</p>
+            ) : (
+              children
+            )}
+          </div>
         </div>
       </div>
       {channelId ? (
@@ -310,6 +333,14 @@ export function TaskReport({
     </section>
   );
 }
+
+/** What a needs-you line says once the person has answered, by where the task is now. */
+const ANSWERED: Record<CardState, string> = {
+  working: "You answered this in its thread. It's carrying on.",
+  needs: "You answered this in its thread. It needs you again there.",
+  done: "You answered this in its thread, and it's done.",
+  failed: "You answered this in its thread, but it couldn't finish.",
+};
 
 /** The task threads the Bot found when the person asked for a link, each with the way in. */
 export function ThreadLinks({ threads }: { threads: LinkedThread[] }) {

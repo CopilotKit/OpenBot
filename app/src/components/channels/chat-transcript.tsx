@@ -941,7 +941,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
                      * A task the Bot handed out, saying how it went: its words, framed with the
                      * task they are about and the way into its thread. See `taskReportMessageId`.
                      */
-                    <TaskReport kind={report.kind} taskId={report.taskId}>
+                    <TaskReport
+                      kind={report.kind}
+                      taskId={report.taskId}
+                      words={text}
+                    >
                       <Streamdown
                         components={markdownComponents}
                         mode={mode}

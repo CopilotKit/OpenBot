@@ -152,20 +152,29 @@ export function readTaskReport(
 /**
  * The words in front of the brief, in the task thread's first message.
  *
- * Addressed to the model doing the work: it is in a thread of its own, and its opening sentences are
- * what the person reads back in the conversation that asked, with any component it draws. So it is
+ * Addressed to the model doing the work: it is in a thread of its own, and its answer is what the
+ * person reads back in the conversation that asked, whole, with any component it draws. So it is
  * asked to lead with the result and to draw components as it would in that conversation, never to
  * write plainer because the work moved.
  */
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
   "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
-  "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
+  "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.",
   "The task:",
 ];
 
 /** The frame and the blank line under it, which is what `readBrief` strips. */
 const BRIEF_PREFIX = [...BRIEF_FRAME, "", ""].join("\n");
+
+/** The frame a task opened before its answer was posted back whole, still read in its thread. */
+const EARLIER_BRIEF_PREFIX = [
+  ...BRIEF_FRAME.slice(0, 2),
+  "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
+  ...BRIEF_FRAME.slice(3),
+  "",
+  "",
+].join("\n");
 
 /** The brief, wrapped in the words that tell the turn it is a delegated task. */
 export function frameBrief(brief: string): string {
@@ -174,59 +183,37 @@ export function frameBrief(brief: string): string {
 
 /** The brief back out of a framed message, or null if this was not one. See `readFiring`. */
 export function readBrief(text: string): string | null {
-  if (!text.startsWith(BRIEF_PREFIX)) return null;
-  return text.slice(BRIEF_PREFIX.length);
+  for (const prefix of [BRIEF_PREFIX, EARLIER_BRIEF_PREFIX])
+    if (text.startsWith(prefix)) return text.slice(prefix.length);
+  return null;
 }
 
-/** A paragraph that is a Markdown table: a header row, then its `---` divider. */
-const TABLE = /^\s*\|.*\|\s*\n\s*\|?\s*:?-{3,}/;
+/** How much of an answer a task posts back, in characters: an answer, not a report of the work. */
+export const ANSWER_MAX = 8_000;
 
 /**
- * What a task's reply says in the conversation that asked for it: its short opening, and every table
- * the reply drew in Markdown, under it.
+ * What a task's answer says in the conversation that asked for it: the answer whole, as the work
+ * gave it after its last step, so its summary, its tables and the line under a chart all come back
+ * with the components it drew. An answer longer than `ANSWER_MAX` is cut at a paragraph, and says
+ * the rest is in the thread.
  *
- * A table is generative UI as much as a component is: the transcript draws it as one, with copy,
- * download and full screen. A result that carried only the opening sentence made the answer plainer
- * for having moved into a thread, so a table the work made comes back with it, as a chart or a card
- * the work drew comes back as its component.
+ * It used to be the opening sentence and any tables. A task that drew a chart and then said what it
+ * showed came back as the chart and "Here's the chart", the summary dropped.
  */
 export function resultForConversation(reply: string): string {
-  const opening = shortResult(reply);
-  const tables = reply
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(
-      (paragraph) => TABLE.test(paragraph) && !opening.includes(paragraph),
-    );
-  return [opening, ...tables].filter(Boolean).join("\n\n");
-}
-
-/** How long the short result posted back may be, in characters. One or two sentences. */
-export const SHORT_RESULT_MAX = 480;
-
-/**
- * The short result a task's reply leads with: its first paragraph of prose, clipped.
- *
- * The task was asked to lead with one or two sentences giving the result (see `BRIEF_FRAME`). A
- * reply that opens with a heading or a list instead still has a first paragraph of prose somewhere;
- * one that has none gives its first paragraph, whatever it is.
- */
-export function shortResult(reply: string): string {
-  const paragraphs = reply
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter((paragraph) => /[\p{L}\p{N}]/u.test(paragraph));
-  const prose =
-    paragraphs.find(
-      (paragraph) => !/^(#{1,6}\s|[-*+•]\s|\d+[.)]\s|>|```|\|)/.test(paragraph),
-    ) ??
-    paragraphs[0] ??
-    "";
-  const characters = Array.from(prose);
-  if (characters.length <= SHORT_RESULT_MAX) return prose;
-  const cut = characters.slice(0, SHORT_RESULT_MAX - 1).join("");
-  const sentence = cut.match(/^[\s\S]*[.!?](?=\s)/)?.[0];
-  return sentence && sentence.length > SHORT_RESULT_MAX / 3
-    ? sentence
-    : `${cut.trimEnd()}…`;
+  const answer = reply.trim();
+  if (Array.from(answer).length <= ANSWER_MAX) return answer;
+  const paragraphs = answer.split(/\n\s*\n/);
+  const kept: string[] = [];
+  let length = 0;
+  for (const paragraph of paragraphs) {
+    const size = Array.from(paragraph).length + 2;
+    if (length + size > ANSWER_MAX) break;
+    kept.push(paragraph);
+    length += size;
+  }
+  const head = kept.length
+    ? kept.join("\n\n")
+    : `${Array.from(answer).slice(0, ANSWER_MAX).join("").trimEnd()}…`;
+  return `${head}\n\nThe rest is in the task's thread.`;
 }

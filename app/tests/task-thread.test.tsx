@@ -6,18 +6,21 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
+import { Streamdown } from "streamdown";
 import {
   MessageReactions,
   TaskCard,
   TaskReport,
 } from "@/components/tasks/task-thread";
 import { todayRoutes } from "@/lib/api/served-today";
+import { inAppPath, markdownComponents } from "@/lib/markdown";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -28,6 +31,10 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The server is faked at the HTTP boundary only, answering where today's server answers.
  */
+
+/** What the task waits for, as its needs-you line says it. */
+const WAITING =
+  "Waiting for your approval: click the button “Place order” on shop.example";
 
 let task = {
   id: "task-1",
@@ -44,7 +51,7 @@ let task = {
   status: "needs_input",
   failure: null,
   failedAt: null,
-  next: "Waiting for your approval: click the button “Place order” on shop.example",
+  next: WAITING as string | null,
   resolvedAt: null,
   createdAt: "2026-11-12T22:00:00.000Z",
   updatedAt: "2026-11-12T22:00:00.000Z",
@@ -102,12 +109,19 @@ afterAll(async () => {
 });
 
 function draw(children: ReactNode) {
-  const rootRoute = createRootRoute({ component: () => <>{children}</> });
+  const rootRoute = createRootRoute({
+    component: () => (
+      <>
+        {children}
+        <Outlet />
+      </>
+    ),
+  });
   const routeTree = rootRoute.addChildren([
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/channel/$channelId",
-      component: () => null,
+      component: () => <p>the thread</p>,
     }),
   ]);
   const router = createRouter({
@@ -126,7 +140,7 @@ function draw(children: ReactNode) {
 }
 
 test("a task's card reads where the task stands, and Needs you leads into its thread", async () => {
-  task = { ...task, status: "needs_input" };
+  task = { ...task, status: "needs_input", next: WAITING };
   const view = draw(
     <TaskCard
       channelId="channel_task"
@@ -135,8 +149,9 @@ test("a task's card reads where the task stands, and Needs you leads into its th
     />,
   );
   await view.findByText("Needs you");
-  expect(view.getByText(task.next)).toBeTruthy();
-  const open = view.getByRole("button", { name: /Open thread/ });
+  // What it waits for is said once, on the needs-you line, not on the card as well.
+  expect(view.queryByText(WAITING)).toBeNull();
+  const open = view.getByRole("button", { name: /Go to thread/ });
   expect(open.getAttribute("href")).toBe("/channel/channel_task");
   expect(
     view.container
@@ -165,16 +180,77 @@ test("a finished task's card reads Done, and its result links to the thread abov
   expect(report?.firstElementChild).toBe(link);
 });
 
-test("a task that needed the person and was answered says so without asking again", async () => {
-  task = { ...task, status: "working" };
-  const view = draw(
-    <TaskReport kind="needs" taskId="task-1">
-      <p>{task.next}</p>
+test("a needs-you line asks while the task waits, and changes in place once it is answered", async () => {
+  task = { ...task, status: "needs_input", next: WAITING };
+  const waiting = draw(
+    <TaskReport kind="needs" taskId="task-1" words={WAITING}>
+      <p>{WAITING}</p>
     </TaskReport>,
   );
-  await view.findByText("Needed you");
-  expect(view.getByRole("button", { name: /Open thread/ })).toBeTruthy();
-  expect(view.queryByRole("button", { name: /Go to thread/ })).toBeNull();
+  await waiting.findByText("Needs you");
+  expect(waiting.getByText(WAITING)).toBeTruthy();
+  expect(waiting.getByRole("button", { name: /Go to thread/ })).toBeTruthy();
+  cleanup();
+
+  // Answered in the thread: the task carries on, and the line no longer says it is waiting.
+  task = { ...task, status: "working", next: null };
+  const answered = draw(
+    <TaskReport kind="needs" taskId="task-1" words={WAITING}>
+      <p>{WAITING}</p>
+    </TaskReport>,
+  );
+  await answered.findByText("Needed you");
+  expect(
+    answered.getByText("You answered this in its thread. It's carrying on."),
+  ).toBeTruthy();
+  expect(answered.queryByText(WAITING)).toBeNull();
+  expect(answered.getByRole("button", { name: /Open thread/ })).toBeTruthy();
+  expect(answered.queryByRole("button", { name: /Go to thread/ })).toBeNull();
+  cleanup();
+
+  // Waiting on something else now: this request was answered too.
+  task = {
+    ...task,
+    status: "needs_input",
+    next: "Waiting for your answer: Which size?",
+  };
+  const askedAgain = draw(
+    <TaskReport kind="needs" taskId="task-1" words={WAITING}>
+      <p>{WAITING}</p>
+    </TaskReport>,
+  );
+  await askedAgain.findByText("Needed you");
+  expect(askedAgain.queryByText(WAITING)).toBeNull();
+});
+
+test("a Bot's link to a task thread opens in the app, not in a new tab", async () => {
+  expect(inAppPath("/channel/channel_task", "http://openbot.invalid")).toBe(
+    "/channel/channel_task",
+  );
+  expect(
+    inAppPath(
+      "http://openbot.invalid/channel/channel_task?x=1",
+      "http://openbot.invalid",
+    ),
+  ).toBe("/channel/channel_task?x=1");
+  expect(
+    inAppPath(
+      "https://example.com/channel/channel_task",
+      "http://openbot.invalid",
+    ),
+  ).toBeNull();
+  expect(inAppPath("//example.com/x", "http://openbot.invalid")).toBeNull();
+
+  const view = draw(
+    <Streamdown components={markdownComponents}>
+      {"Here it is: [the seed thread](/channel/channel_task)."}
+    </Streamdown>,
+  );
+  const link = await view.findByRole("link", { name: "the seed thread" });
+  expect(link.getAttribute("target")).toBeNull();
+  expect(link.getAttribute("href")).toBe("/channel/channel_task");
+  link.click();
+  await view.findByText("the thread");
 });
 
 test("a Bot's reaction is read through the generated client and drawn under its message", async () => {
