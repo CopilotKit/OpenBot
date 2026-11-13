@@ -17,7 +17,11 @@ made for that goal. Linking a broad routine to a goal one of its firings ran is 
 so a deployment upgrading from a tagged release has no such routine; one running `main` since that
 change has its broad routines read as made for their goal too, so completing that goal switches
 them off, and deleting it deletes them, rather than unlinking them. No existing row is rewritten
-and nothing is dropped. Upgrading from 1.0.0 or 0.3.x also runs the migrations listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
+and nothing is dropped. Four more come with check-ins and pause all, and change no
+row's behaviour: `0092_check_in_without_conversation` makes `proactive_settings.channel_id` and
+`delivery_outbox.channel_id` and `thread_id` nullable, `0093_check_in_source` adds what a check-in
+reads (`apps` on every existing one), `0094_check_in_page` adds a page check-in's kept text, and
+`0095_check_in_paused_all` widens the reasons a check-in may be skipped. Upgrading from 1.0.0 or 0.3.x also runs the migrations listed under 1.0.1. A database that has run them does not go back: restore the backup taken before
 the upgrade instead. Three things change for an existing OpenBot Desktop installation, and one for
 every deployment:
 - On Windows OpenBot now always runs in a Podman machine of its own, `openbot`, beside any of
