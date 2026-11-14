@@ -57,7 +57,9 @@ jobs:
   #   spec without regenerating or edited the output by hand;
   # - on a pull request, it breaks nothing a client of the base branch relies on. oasdiff compares the
   #   base branch's spec with this one and fails on any breaking change, warnings included: a field a
-  #   client reads going away is a warning to oasdiff and a broken screen to a person.
+  #   client reads going away is a warning to oasdiff and a broken screen to a person. A change that
+  #   takes nothing from a client (a rule the server already enforced, now written in the spec) is
+  #   listed with its reason in api/accepted-breaking-changes.md, and only that change passes.
   api:
     name: API spec
     runs-on: ubuntu-latest
@@ -105,9 +107,12 @@ jobs:
           curl -fsSL -o "$archive" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
           echo "${OASDIFF_SHA256}  $archive" | sha256sum -c -
           tar -xzf "$archive" -C "$RUNNER_TEMP" oasdiff
+          # A change listed in api/accepted-breaking-changes.md, with its reason, is let through; oasdiff
+          # matches each line by method, path and the change's own words, so nothing else is.
+          accepted=api/accepted-breaking-changes.md
           # Twice: once readable in the log, once as annotations on the pull request's diff.
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof || true
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --err-ignore "$accepted" --warn-ignore "$accepted" || true
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions --err-ignore "$accepted" --warn-ignore "$accepted"
 
   mobile:
     name: native types

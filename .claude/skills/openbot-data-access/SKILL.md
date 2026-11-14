@@ -39,7 +39,9 @@ is built on `clientRequest` in `lib/client.ts`: the same session cookie, and a r
 `fallback` the caller passes. A screen cannot tell which kind of request it made.
 
 The generated code is checked in. CI regenerates it and fails when it differs, lints the spec, and
-fails a pull request that breaks a client of the base branch's spec (oasdiff).
+fails a pull request that breaks a client of the base branch's spec (oasdiff). A change that takes
+nothing from a client, such as writing down a rule the server already enforces, goes through only
+when it is listed with its reason in `api/accepted-breaking-changes.md`.
 
 ## The Shape
 

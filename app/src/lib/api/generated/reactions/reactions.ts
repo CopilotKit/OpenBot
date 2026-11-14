@@ -22,6 +22,7 @@ import type {
   ReactionPage,
   ServerErrorResponse,
   UnauthenticatedResponse,
+  UnexpectedErrorResponse,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -101,7 +102,8 @@ export const getListReactionsQueryOptions = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | ServerErrorResponse,
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
 >(
   organizationId: string,
   params: ListReactionsParams,
@@ -141,7 +143,8 @@ export type ListReactionsQueryError =
   | UnauthenticatedResponse
   | ForbiddenResponse
   | OrganizationNotFoundResponse
-  | ServerErrorResponse;
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
 
 export function useListReactions<
   TData = Awaited<ReturnType<typeof listReactions>>,
@@ -150,7 +153,8 @@ export function useListReactions<
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | ServerErrorResponse,
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
 >(
   organizationId: string,
   params: ListReactionsParams,
@@ -179,7 +183,8 @@ export function useListReactions<
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | ServerErrorResponse,
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
 >(
   organizationId: string,
   params: ListReactionsParams,
@@ -208,7 +213,8 @@ export function useListReactions<
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | ServerErrorResponse,
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
 >(
   organizationId: string,
   params: ListReactionsParams,
@@ -233,7 +239,8 @@ export function useListReactions<
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | ServerErrorResponse,
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
 >(
   organizationId: string,
   params: ListReactionsParams,

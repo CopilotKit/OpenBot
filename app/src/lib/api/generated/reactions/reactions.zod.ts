@@ -24,6 +24,8 @@ export const listReactionsQueryLimitMax = 100;
 
 export const listReactionsQueryCursorMax = 4096;
 
+export const listReactionsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
 export const ListReactionsQueryParams = zod.object({
   threadId: zod
     .string()
@@ -40,13 +42,18 @@ export const ListReactionsQueryParams = zod.object({
     .string()
     .min(1)
     .max(listReactionsQueryCursorMax)
+    .regex(listReactionsQueryCursorRegExp)
     .optional()
     .describe(
-      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it.",
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
 export const listReactionsResponseNextCursorMax = 4096;
+
+export const listReactionsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
 
 export const ListReactionsResponse = zod.object({
   reactions: zod.array(
@@ -64,6 +71,9 @@ export const ListReactionsResponse = zod.object({
   nextCursor: zod
     .string()
     .max(listReactionsResponseNextCursorMax)
+    .regex(listReactionsResponseNextCursorRegExp)
     .nullable()
-    .describe("Pass as cursor for the next page. Null ends the list."),
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
 });
