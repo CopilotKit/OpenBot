@@ -291,8 +291,9 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         if let Some(window) = self.0.get_webview_window("main") {
             dialog = dialog.parent(&window);
         }
-        // Not waited for: the Bot's next action must not queue behind a notice.
-        dialog.show(|_| {});
+        // Waited for, like any dialog here: the next one is shown when this one is closed, never
+        // on top of it (`prompt_turn` in `host_access.rs`).
+        dialog.blocking_show();
     }
 }
 
