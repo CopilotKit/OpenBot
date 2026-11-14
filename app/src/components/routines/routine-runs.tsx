@@ -174,10 +174,10 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                   : "Scheduled"}{" "}
               · {relativeTime(run.startedAt)}
             </span>
-            {routine.channel.gone ? null : (
+            {routine.conversation.gone ? null : (
               <Link
                 className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                params={{ channelId: routine.channel.id }}
+                params={{ channelId: routine.conversation.id }}
                 to="/channel/$channelId"
               >
                 Open conversation

@@ -109,6 +109,17 @@ function operationsOf(pathItem) {
   ]);
 }
 
+/**
+ * The shared Problem schema, or an area's own that is the shared one and more: `allOf` whose first
+ * entry is the shared Problem, so an area can name what its problems carry beside the shared members
+ * without editing the shared schema.
+ */
+function isProblemSchema(ctx, schema) {
+  if (schema?.$ref === PROBLEM_SCHEMA) return true;
+  const own = resolved(ctx, schema);
+  return Array.isArray(own?.allOf) && own.allOf[0]?.$ref === PROBLEM_SCHEMA;
+}
+
 /** Every error response is application/problem+json, and nothing else, with the shared Problem schema. */
 function ProblemDetailsErrors() {
   return {
@@ -126,10 +137,10 @@ function ProblemDetailsErrors() {
             if (
               types.length !== 1 ||
               types[0] !== PROBLEM_JSON ||
-              schema?.$ref !== PROBLEM_SCHEMA
+              !isProblemSchema(ctx, schema)
             ) {
               ctx.report({
-                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA} (RFC 9457, as Intelligence's v2 API).`,
+                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA}, or one that is allOf it and more (RFC 9457, as Intelligence's v2 API).`,
                 location: ctx.location.child([method, "responses", status]),
               });
             }

@@ -4,7 +4,7 @@ import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { ApiError, api } from "./api";
+import { ApiError, api, ORGANIZATION } from "./api";
 
 const key = "openbot-device-id";
 export async function registerPush() {
@@ -64,5 +64,5 @@ export async function unregisterPush() {
 }
 /** This phone, as one of the signed-in person's devices. */
 function devicePath(id: string) {
-  return `/api/v2/organizations/default/people/me/devices/${encodeURIComponent(id)}`;
+  return `${ORGANIZATION}/people/me/devices/${encodeURIComponent(id)}`;
 }

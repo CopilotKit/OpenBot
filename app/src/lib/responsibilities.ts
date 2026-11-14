@@ -3,70 +3,81 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  completeGoal,
+  createGithubEventSource,
+  createGoal,
+  createGoalTrigger,
+  deleteGithubEventSource,
+  deleteGoal,
+  deleteGoalTrigger,
+  disableGoalTrigger,
+  enableGoalTrigger,
+  getGoalTriggerSecret,
+  listGithubEventSources,
+  listGoalRuns,
+  listGoals,
+  listGoalTriggers,
+  pauseGoal,
+  replaceGoalTriggerSecret,
+  resumeGoal,
+  runGoal,
+  updateGoal,
+} from "@/lib/api/generated/goals/goals";
+import type {
+  CreateGoalRequest,
+  GithubEventSource,
+  Goal,
+  GoalRun,
+  GoalTrigger,
+  GoalTriggerConfig,
+  GoalTriggerFilter,
+  GoalTriggerKind,
+  UpdateGoalRequest,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
-import { ROUTINES_REFETCH_MS, routineKeys } from "@/lib/routines/queries";
+import {
+  everyPage,
+  ROUTINES_REFETCH_MS,
+  routineKeys,
+} from "@/lib/routines/queries";
 
-export type ResponsibilityRecord = {
-  id: string;
-  agentId: string;
-  channelId: string;
-  threadId: string;
-  title: string;
-  instruction: string;
-  successCriteria: string;
-  status: "active" | "paused" | "completed";
-  progress: string;
-  lastResult: string | null;
-  subscriptions: {
-    source:
-      | "manual"
-      | "slack"
-      | "github"
-      | "schedule"
-      | "connector"
-      | "webhook"
-      | "linear"
-      | "sentry"
-      | "pagerduty"
-      | "email";
-    eventType: string;
-  }[];
-  /** Runs again and again with no end. Refused alongside `endsWhenMet`. */
-  recurring: boolean;
-  endsWhenMet: boolean;
-  updatedAt: string;
-};
-export type ResponsibilityRunRecord = {
-  id: string;
-  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped";
-  replyText: string | null;
-  error: string | null;
-  waiting: { kind: string; requestId?: string } | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  createdAt: string;
-};
-export type GithubBindingRecord = {
-  id: string;
-  source: "github";
-  repository: string;
-  createdAt: string;
-  webhookPath?: string;
-};
+/** A goal: the API's `Goal`. `recurring` runs again and again with no end, and is refused alongside `endsWhenMet`. */
+export type ResponsibilityRecord = Goal;
+/** One run of a goal, with what the Bot said: the API's `GoalRun`. */
+export type ResponsibilityRunRecord = GoalRun;
+/** A GitHub repository whose events reach the person's goals: the API's `GithubEventSource`. */
+export type GithubBindingRecord = GithubEventSource;
 export const responsibilityKeys = {
   all: ["responsibilities"] as const,
   runs: (id: string) => ["responsibilities", id, "runs"] as const,
   bindings: ["responsibilities", "github-bindings"] as const,
   triggers: (id: string) => ["responsibilities", id, "triggers"] as const,
 };
+
+/**
+ * A fresh key for each write a person asks for. TanStack does not retry a mutation, so each attempt
+ * is a new write; a retry of the same write would reuse its key.
+ */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
 export function responsibilitiesQueryOptions() {
   return queryOptions({
     queryKey: responsibilityKeys.all,
-    queryFn: (): Promise<ResponsibilityRecord[]> =>
-      client("/api/responsibilities", "responsibilities", {
-        fallback: "Couldn't load your goals. Reload the page.",
-      }),
+    queryFn: async ({ signal }): Promise<ResponsibilityRecord[]> => {
+      const goals = await everyPage(async (params) => {
+        const page = await listGoals(organizationId(), params, {
+          signal,
+          fallback: "Couldn't load your goals. Reload the page.",
+        });
+        return { items: page.goals, nextCursor: page.nextCursor };
+      });
+      // The API lists goals by when each was made. The screens show the one changed last first.
+      return goals.sort((a, b) =>
+        a.updatedAt === b.updatedAt ? 0 : a.updatedAt < b.updatedAt ? 1 : -1,
+      );
+    },
     // The routines' interval: the Routines list builds a goal's row from both reads.
     refetchInterval: ROUTINES_REFETCH_MS,
   });
@@ -74,9 +85,13 @@ export function responsibilitiesQueryOptions() {
 export function responsibilityRunsQueryOptions(id: string) {
   return queryOptions({
     queryKey: responsibilityKeys.runs(id),
-    queryFn: (): Promise<ResponsibilityRunRecord[]> =>
-      client(`/api/responsibilities/${encodeURIComponent(id)}/runs`, "runs", {
-        fallback: "Couldn't load this goal's runs. Reload the page.",
+    queryFn: ({ signal }): Promise<ResponsibilityRunRecord[]> =>
+      everyPage(async (params) => {
+        const page = await listGoalRuns(organizationId(), id, params, {
+          signal,
+          fallback: "Couldn't load this goal's runs. Reload the page.",
+        });
+        return { items: page.runs, nextCursor: page.nextCursor };
       }),
     refetchInterval: 10_000,
   });
@@ -84,39 +99,30 @@ export function responsibilityRunsQueryOptions(id: string) {
 export function githubBindingsQueryOptions() {
   return queryOptions({
     queryKey: responsibilityKeys.bindings,
-    queryFn: (): Promise<GithubBindingRecord[]> =>
-      client("/api/responsibilities/sources/github", "bindings", {
-        fallback: "Could not load GitHub event sources",
+    queryFn: ({ signal }): Promise<GithubBindingRecord[]> =>
+      everyPage(async (params) => {
+        const page = await listGithubEventSources(organizationId(), params, {
+          signal,
+          fallback: "Could not load GitHub event sources",
+        });
+        return {
+          items: page.githubEventSources,
+          nextCursor: page.nextCursor,
+        };
       }),
   });
 }
-export function createResponsibility(input: {
-  agentId: string;
-  channelId: string;
-  title: string;
-  instruction: string;
-  successCriteria: string;
-  subscriptions: ResponsibilityRecord["subscriptions"];
-  recurring?: boolean;
-  endsWhenMet?: boolean;
-}) {
-  return client<ResponsibilityRecord>(
-    "/api/responsibilities",
-    "responsibility",
-    {
-      method: "POST",
-      body: input,
+export async function createResponsibility(
+  input: CreateGoalRequest,
+): Promise<ResponsibilityRecord> {
+  return (
+    await createGoal(organizationId(), input, once(), {
       fallback: "Couldn't save the goal. Try again.",
-    },
-  );
+    })
+  ).goal;
 }
-export function updateResponsibility(
-  id: string,
-  patch: { title: string; instruction: string; successCriteria: string },
-) {
-  return client(`/api/responsibilities/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: patch,
+export function updateResponsibility(id: string, patch: UpdateGoalRequest) {
+  return updateGoal(organizationId(), id, patch, once(), {
     fallback: "Couldn't save your changes to the goal. Try again.",
   });
 }
@@ -130,143 +136,118 @@ export const GOAL_ACTION_FALLBACK = {
   complete: "Couldn't complete the goal. Try again.",
   run: "Couldn't start the goal. Try again.",
 } as const;
-export function responsibilityAction(
+const GOAL_ACTIONS = {
+  pause: pauseGoal,
+  resume: resumeGoal,
+  complete: completeGoal,
+  run: runGoal,
+} as const;
+export async function responsibilityAction(
   id: string,
   action: keyof typeof GOAL_ACTION_FALLBACK,
-) {
-  return client(`/api/responsibilities/${encodeURIComponent(id)}/${action}`, {
-    method: "POST",
+): Promise<void> {
+  await GOAL_ACTIONS[action](organizationId(), id, once(), {
     fallback: GOAL_ACTION_FALLBACK[action],
   });
 }
 /** Delete a goal, and on the server the routines that run it. */
 export function deleteResponsibility(id: string) {
-  return client(`/api/responsibilities/${encodeURIComponent(id)}`, {
-    method: "DELETE",
+  return deleteGoal(organizationId(), id, once(), {
     fallback: "Couldn't delete the goal. Try again.",
   });
 }
-export function createGithubBinding(repository: string, secret: string) {
-  return client<GithubBindingRecord>(
-    "/api/responsibilities/sources/github",
-    "binding",
-    {
-      method: "POST",
-      body: { repository, secret },
-      fallback: "Could not connect GitHub events",
-    },
-  );
+export async function createGithubBinding(
+  repository: string,
+  secret: string,
+): Promise<GithubBindingRecord> {
+  return (
+    await createGithubEventSource(
+      organizationId(),
+      { repository, secret },
+      once(),
+      { fallback: "Could not connect GitHub events" },
+    )
+  ).githubEventSource;
 }
 export function removeGithubBinding(id: string) {
-  return client(
-    `/api/responsibilities/sources/github/${encodeURIComponent(id)}`,
-    { method: "DELETE", fallback: "Could not disconnect GitHub events" },
-  );
+  return deleteGithubEventSource(organizationId(), id, once(), {
+    fallback: "Could not disconnect GitHub events",
+  });
 }
 
-export type TriggerKind =
-  | "webhook"
-  | "github"
-  | "linear"
-  | "sentry"
-  | "pagerduty"
-  | "email"
-  | "slack";
-export type TriggerFilter = {
-  eventTypes: string[];
-  field?: { path: string; equals: string };
-};
-export type TriggerConfig =
-  | {
-      kind: "webhook" | "linear" | "sentry" | "pagerduty";
-      filter: TriggerFilter;
-    }
-  | { kind: "github"; repository?: string; filter: TriggerFilter }
-  | { kind: "email"; allowedSenders: string[]; filter: TriggerFilter }
-  | {
-      kind: "slack";
-      teamId: string;
-      mode: "mention" | "phrase" | "reaction" | "message";
-      phrases: string[];
-      reactions: string[];
-      channels: string[];
-    };
-export type TriggerRecord = {
-  id: string;
-  responsibilityId: string;
-  kind: TriggerKind;
-  config: TriggerConfig;
-  hasSecret: boolean;
-  /** Paused triggers acknowledge deliveries but never start a run. */
-  enabled: boolean;
-  /** Public path to POST to, for webhook and provider kinds. */
-  path: string | null;
-  /** Inbound address, for email when the deployment has inbound email configured. */
-  address: string | null;
-  emailConfigured?: boolean;
-  createdAt: string;
-};
+export type TriggerKind = GoalTriggerKind;
+export type TriggerFilter = GoalTriggerFilter;
+export type TriggerConfig = GoalTriggerConfig;
+/**
+ * A registered way for an outside event to start a run of a goal: the API's `GoalTrigger`. A trigger
+ * that is off acknowledges deliveries but never starts a run. `path` is where a webhook or provider
+ * posts, and `address` where mail is sent when the deployment has inbound email.
+ */
+export type TriggerRecord = GoalTrigger;
+/** Which trigger, and the goal it belongs to: the API addresses a trigger under its goal. */
+type TriggerRef = Pick<TriggerRecord, "id" | "goalId">;
+
 export function triggersQueryOptions(id: string) {
   return queryOptions({
     queryKey: responsibilityKeys.triggers(id),
-    queryFn: (): Promise<TriggerRecord[]> =>
-      client(
-        `/api/responsibilities/${encodeURIComponent(id)}/triggers`,
-        "triggers",
-        { fallback: "Could not load triggers" },
-      ),
+    queryFn: ({ signal }): Promise<TriggerRecord[]> =>
+      everyPage(async (params) => {
+        const page = await listGoalTriggers(organizationId(), id, params, {
+          signal,
+          fallback: "Could not load triggers",
+        });
+        return { items: page.triggers, nextCursor: page.nextCursor };
+      }),
   });
 }
-export async function createTrigger(
-  responsibilityId: string,
+export function createTrigger(
+  goalId: string,
   input: { config: TriggerConfig; secret?: string },
-) {
-  const response = await client(
-    `/api/responsibilities/${encodeURIComponent(responsibilityId)}/triggers`,
-    { method: "POST", body: input, fallback: "Could not add the trigger" },
-  );
-  return (await response.json()) as {
-    trigger: TriggerRecord;
-    secret: string | null;
-  };
+): Promise<{ trigger: TriggerRecord; secret: string | null }> {
+  return createGoalTrigger(organizationId(), goalId, input, once(), {
+    fallback: "Could not add the trigger",
+  });
 }
 /** Rotate a generated secret, or store the provider's newly pasted one. */
-export async function setTriggerSecret(triggerId: string, secret?: string) {
-  const response = await client(
-    `/api/responsibilities/triggers/${encodeURIComponent(triggerId)}/secret`,
-    {
-      method: "POST",
-      body: secret ? { secret } : {},
-      fallback: "Could not change the trigger secret",
-    },
-  );
-  return (await response.json()) as {
-    trigger: TriggerRecord;
-    secret: string | null;
-  };
-}
-export function revealTriggerSecret(triggerId: string) {
-  return client<string>(
-    `/api/responsibilities/triggers/${encodeURIComponent(triggerId)}/secret`,
-    "secret",
-    { fallback: "Could not read the trigger secret" },
+export function setTriggerSecret(
+  trigger: TriggerRef,
+  secret?: string,
+): Promise<{ trigger: TriggerRecord; secret: string | null }> {
+  return replaceGoalTriggerSecret(
+    organizationId(),
+    trigger.goalId,
+    trigger.id,
+    once(),
+    secret ? { secret } : {},
+    { fallback: "Could not change the trigger secret" },
   );
 }
-export function removeTrigger(triggerId: string) {
-  return client(
-    `/api/responsibilities/triggers/${encodeURIComponent(triggerId)}`,
-    { method: "DELETE", fallback: "Could not remove the trigger" },
+export async function revealTriggerSecret(
+  trigger: TriggerRef,
+): Promise<string | null> {
+  return (
+    await getGoalTriggerSecret(organizationId(), trigger.goalId, trigger.id, {
+      fallback: "Could not read the trigger secret",
+    })
+  ).secret;
+}
+export function removeTrigger(trigger: TriggerRef) {
+  return deleteGoalTrigger(
+    organizationId(),
+    trigger.goalId,
+    trigger.id,
+    once(),
+    { fallback: "Could not remove the trigger" },
   );
 }
 
-export function setTriggerEnabled(triggerId: string, enabled: boolean) {
-  return client(
-    `/api/responsibilities/triggers/${encodeURIComponent(triggerId)}/enabled`,
-    {
-      method: "PUT",
-      body: { enabled },
-      fallback: "Could not change the trigger",
-    },
+export function setTriggerEnabled(trigger: TriggerRef, enabled: boolean) {
+  return (enabled ? enableGoalTrigger : disableGoalTrigger)(
+    organizationId(),
+    trigger.goalId,
+    trigger.id,
+    once(),
+    { fallback: "Could not change the trigger" },
   );
 }
 
@@ -406,20 +387,19 @@ export function setTriggerSecretMutationOptions(queryClient: QueryClient) {
       trigger,
       secret,
     }: {
-      trigger: Pick<TriggerRecord, "id" | "responsibilityId">;
+      trigger: TriggerRef;
       secret?: string;
-    }) => setTriggerSecret(trigger.id, secret),
+    }) => setTriggerSecret(trigger, secret),
     onSuccess: (_result, { trigger }) =>
-      settleTriggers(queryClient, trigger.responsibilityId),
+      settleTriggers(queryClient, trigger.goalId),
   });
 }
 
 export function removeTriggerMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (trigger: Pick<TriggerRecord, "id" | "responsibilityId">) =>
-      removeTrigger(trigger.id),
+    mutationFn: (trigger: TriggerRef) => removeTrigger(trigger),
     onSuccess: (_result, trigger) =>
-      settleTriggers(queryClient, trigger.responsibilityId),
+      settleTriggers(queryClient, trigger.goalId),
   });
 }
 
@@ -430,10 +410,10 @@ export function setTriggerEnabledMutationOptions(queryClient: QueryClient) {
       trigger,
       enabled,
     }: {
-      trigger: Pick<TriggerRecord, "id" | "responsibilityId">;
+      trigger: TriggerRef;
       enabled: boolean;
-    }) => setTriggerEnabled(trigger.id, enabled),
+    }) => setTriggerEnabled(trigger, enabled),
     onSuccess: (_result, { trigger }) =>
-      settleTriggers(queryClient, trigger.responsibilityId),
+      settleTriggers(queryClient, trigger.goalId),
   });
 }

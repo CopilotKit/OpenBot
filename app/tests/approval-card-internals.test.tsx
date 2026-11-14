@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { WaitingForYou } from "@/components/approvals/waiting";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { answerBotsList } from "./bots-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -81,8 +82,8 @@ function serving() {
           ),
         ],
       });
-    if (url === "/api/proactive/suggestions")
-      return Response.json({ suggestions: [] });
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: [], nextCursor: null });
     if (url === "/api/tasks") return Response.json({ tasks: [] });
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });

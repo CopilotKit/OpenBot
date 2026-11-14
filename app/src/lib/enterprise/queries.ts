@@ -3,6 +3,8 @@ import {
   getPersonCapabilities,
   listCapabilities,
 } from "@/lib/api/generated/capabilities/capabilities";
+import { getCheckInUsage } from "@/lib/api/generated/check-ins/check-ins";
+import type { BotCheckInUsage, CheckInUsage } from "@/lib/api/generated/model";
 import {
   listNetworkPolicies,
   replayNetworkPolicy,
@@ -13,7 +15,6 @@ import {
   listComputerActions,
 } from "@/lib/api/generated/organization-settings/organization-settings";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { client } from "@/lib/client";
 
 export type CapabilityKey =
   | "useBots"
@@ -139,38 +140,13 @@ export type CheckInSkipReason =
  * `items` are the ones raised in the window, by where each stands now, so `raised` is the sum of the
  * other four. `acceptance` is started out of started and hidden, null until somebody answered one.
  */
-export type BotCheckInMetrics = {
-  agentId: string;
-  name: string;
-  avatarSeed: string;
-  /** People whose check-ins with this Bot are on now. */
-  peopleOn: number;
-  runs: {
-    quiet: number;
-    raised: number;
-    failed: number;
-    skipped: Record<CheckInSkipReason, number>;
-  };
-  items: {
-    raised: number;
-    started: number;
-    hidden: number;
-    cleared: number;
-    open: number;
-  };
-  acceptance: number | null;
-  /** This Bot's items that a ping carried. */
-  pinged: number;
-};
+export type BotCheckInMetrics = BotCheckInUsage;
 
-export type CheckInMetrics = {
-  days: 7 | 30;
-  /** The daily cap in force. */
-  dailyRuns: number;
-  bots: BotCheckInMetrics[];
-  /** One ping folds every Bot's items for a person, so pings are counted for everybody at once. */
-  pings: { sent: number; itemsPerPing: number | null };
-};
+/**
+ * How check-ins are going: the API's `CheckInUsage`. `dailyRuns` is the daily cap in force. One
+ * ping folds every Bot's items for a person, so `pings` are counted for everybody at once.
+ */
+export type CheckInMetrics = CheckInUsage;
 
 export const enterpriseKeys = {
   all: ["enterprise"] as const,
@@ -179,7 +155,7 @@ export const enterpriseKeys = {
     ["enterprise", "model-usage", { days }] as const,
   actions: () => ["enterprise", "actions"] as const,
   /*
-   * Under the enterprise root although the route is `/api/admin/proactive`: who has check-ins on and
+   * Under the enterprise root although the numbers are check-ins' own: who has check-ins on and
    * the cap in force both move when a switch or a setting is saved, and every enterprise write
    * invalidates this root.
    */
@@ -340,12 +316,12 @@ export function modelUsageQueryOptions(days = 30) {
 export function checkInMetricsQueryOptions(days: 7 | 30) {
   return queryOptions({
     queryKey: enterpriseKeys.checkIns(days),
-    queryFn: async (): Promise<CheckInMetrics> =>
-      (
-        await client(`/api/admin/proactive?days=${days}`, {
-          fallback: "Couldn't load check-ins",
-        })
-      ).json(),
+    queryFn: ({ signal }): Promise<CheckInMetrics> =>
+      getCheckInUsage(
+        organizationId(),
+        { days },
+        { signal, fallback: "Couldn't load check-ins" },
+      ),
   });
 }
 

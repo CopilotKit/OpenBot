@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { cancelFollowUp } from "@/lib/api/generated/follow-ups/follow-ups";
 import {
   updateBotNotificationSettings,
   updateNotificationSettings,
@@ -86,11 +87,13 @@ export function stopHandoffMutationOptions(queryClient: QueryClient) {
 export function cancelFollowUpMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; id: string }) => {
-      await client(`${botPath(variables.agentId)}/follow-ups/cancel`, {
-        method: "POST",
-        body: { id: variables.id },
-        fallback: "Could not cancel the follow-up",
-      });
+      await cancelFollowUp(
+        organizationId(),
+        variables.agentId,
+        variables.id,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Could not cancel the follow-up" },
+      );
     },
     onSuccess: () => invalidateLifecycle(queryClient),
   });
