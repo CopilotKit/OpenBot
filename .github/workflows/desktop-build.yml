@@ -52,7 +52,7 @@ jobs:
   # the thing that breaks when a dependency is not portable.
   app:
     name: app (${{ matrix.platform }})
-    runs-on: ${{ matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'windows' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'windows' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core') }}
     strategy:
       fail-fast: false
       matrix:
