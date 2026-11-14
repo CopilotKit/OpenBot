@@ -25,7 +25,6 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
-import { attachmentUrl } from "@/lib/channels/attachments";
 import { newId } from "../../lib/new-id";
 
 export function ConversationView({
