@@ -100,11 +100,25 @@ test("a send the computer refuses because the request ended leaves its reason on
     "That request has ended, so nothing was typed. The Bot will ask again if it still needs it.";
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path.endsWith("/human/secret") && init?.method === "POST") {
+    // The API's addresses for typing the secret and for who is driving, and its problem for a refusal.
+    if (
+      path.endsWith("/human-input/secret") &&
+      path.startsWith("/api/v2/organizations/default/computers/") &&
+      init?.method === "POST"
+    ) {
       ended = true;
-      return Response.json({ error: refusal }, { status: 409 });
+      return Response.json(
+        { code: "CONFLICT", status: 409, detail: refusal },
+        {
+          status: 409,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     }
-    if (path.endsWith("/control"))
+    if (
+      path.endsWith("/control") &&
+      path.startsWith("/api/v2/organizations/default/computers/")
+    )
       return Response.json(
         ended
           ? base

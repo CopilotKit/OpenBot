@@ -65,7 +65,9 @@ const capturedEvent = (name: string, value: unknown): CapturedEvent => ({
 
 const openbot = { calls: [] as string[] };
 const asked = () =>
-  openbot.calls.filter((call) => call !== "POST /api/recorder/activity");
+  openbot.calls.filter(
+    (call) => call !== "POST /api/v2/organizations/default/recorder/activity",
+  );
 
 let server: ReturnType<typeof Bun.serve>;
 let origin = "";
@@ -679,7 +681,8 @@ test("a service-worker restart mid-recording goes on checking the connection wit
   expect(asked()).toEqual([]);
   await advance(30_000);
   await until(
-    () => openbot.calls.includes("GET /api/recorder/me"),
+    () =>
+      openbot.calls.includes("GET /api/v2/organizations/default/recorder/me"),
     "the check after the restart",
   );
   // OpenBot's answer here says nothing about the connection: the recording goes on.

@@ -287,7 +287,11 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`))
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      )
         return NativeResponse.json({ botId: bot, state: "ready" });
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
