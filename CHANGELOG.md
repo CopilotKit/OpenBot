@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.0.3
+
 - The OpenMuse skin is now called OpenFuse. Anyone who picked it keeps it, with nothing to
   choose again.
 - A Microsoft Agent Framework Bot on an Anthropic key sends the key again. Its image holds
