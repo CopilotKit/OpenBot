@@ -56,6 +56,8 @@ tags:
   - { name: Voice, description: "Voice calls with a conversation's Bot: how a call connects, and the calls a person saved in a conversation with their transcripts." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
+  - { name: Components, description: "The charts, cards and other components a Bot draws in a conversation instead of answering in text. Most come with OpenBot, and an admin can write more in Playground. An admin decides what each tells the model, which Bots may draw it and which data it may read." }
+  - { name: Skills, description: "Named instructions a person runs by typing / in a conversation. Anybody can write their own, and an admin writes the organization's. A skill adds no access: a Bot that runs one uses only the apps it can already use." }
   - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
   - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
   - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
@@ -148,6 +150,20 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/components: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components' }
+  /api/v2/organizations/{organizationId}/components/announce: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1announce' }
+  /api/v2/organizations/{organizationId}/components/{componentId}: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}' }
+  /api/v2/organizations/{organizationId}/components/{componentId}/draft: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}~1draft' }
+  /api/v2/organizations/{organizationId}/components/{componentId}/publish: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}~1publish' }
+  /api/v2/organizations/{organizationId}/components/{componentId}/unpublish: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}~1unpublish' }
+  /api/v2/organizations/{organizationId}/components/{componentId}/functions: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}~1functions' }
+  /api/v2/organizations/{organizationId}/components/{componentId}/functions/{functionId}: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}~1functions~1{functionId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/components: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components~1{componentId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}/check: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components~1{componentId}~1check' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}/call: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components~1{componentId}~1call' }
+  /api/v2/organizations/{organizationId}/skills: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills' }
+  /api/v2/organizations/{organizationId}/skills/{skillId}: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills~1{skillId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
   /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
@@ -360,6 +376,10 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            components:read: Read the components Bots draw, check whether a Bot may draw one, and read the data a component shows.
+            components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
+            skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
+            skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
             devices:read: Read the phones the signed-in person registered for push notifications.
             devices:write: Register the signed-in person's phones for push notifications, and remove them.
             destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
