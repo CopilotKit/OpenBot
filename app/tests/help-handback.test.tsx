@@ -162,7 +162,10 @@ function runEvents(input: RunAgentInput): unknown[] {
 
 /** The computer's control routes, answering as `agent-computer/src/control.ts` does. */
 async function computer(path: string, request: Request): Promise<Response> {
-  const route = path.replace(`/api/computers/${BOT}`, "");
+  const route = path.replace(
+    `/api/v2/organizations/default/computers/${BOT}`,
+    "",
+  );
   if (route === "/control" && request.method === "GET")
     return NativeResponse.json(control);
   if (route === "/control/request") {
@@ -223,8 +226,8 @@ async function computer(path: string, request: Request): Promise<Response> {
       capturedAt: SINCE,
       url: "https://forms.example/order",
     });
-  if (route === "/status")
-    return NativeResponse.json({ botId: BOT, state: "ready" });
+  // The computer itself: its state.
+  if (route === "") return NativeResponse.json({ botId: BOT, state: "ready" });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }
 
@@ -246,7 +249,11 @@ beforeAll(() => {
         "http://localhost",
       );
       const request = input instanceof Request ? input : new Request(url, init);
-      if (url.pathname.startsWith(`/api/computers/${BOT}/`))
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${BOT}`,
+        )
+      )
         return computer(url.pathname, request);
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

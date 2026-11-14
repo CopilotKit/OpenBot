@@ -5,7 +5,36 @@ import {
   openbotRaw,
 } from "../src/shared/openbot-client";
 
-type Seen = { auth: string | null; cookie: string | null; method: string };
+type Seen = {
+  auth: string | null;
+  cookie: string | null;
+  method: string;
+  key: string | null;
+};
+
+/** A refusal as OpenBot's API answers one: problem details (RFC 9457). */
+function problem(
+  status: number,
+  code: string,
+  detail: string,
+  extra: Record<string, unknown> = {},
+): Response {
+  return new Response(
+    JSON.stringify({
+      type: `https://open.bot/errors/${code.toLowerCase().replaceAll("_", "-")}`,
+      title: detail,
+      status,
+      detail,
+      code,
+      category: "auth",
+      retryable: false,
+      requestId: "req_test",
+      traceId: "trace_test",
+      ...extra,
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+}
 let seen: Seen | null = null;
 
 async function failure(path: string): Promise<OpenBotError> {
@@ -30,6 +59,7 @@ beforeAll(() => {
         auth: request.headers.get("authorization"),
         cookie: request.headers.get("cookie"),
         method: request.method,
+        key: request.headers.get("idempotency-key"),
       };
       if (url.pathname === "/ok") {
         return Response.json({
@@ -37,22 +67,24 @@ beforeAll(() => {
         });
       }
       if (url.pathname === "/signed-out") {
-        return Response.json(
-          { error: "Sign in again.", code: "RECORDER_SIGNED_OUT" },
-          { status: 401 },
-        );
+        return problem(401, "RECORDER_SIGNED_OUT", "Sign in again.", {
+          reason: "removed",
+        });
       }
       if (url.pathname === "/identity") {
-        return Response.json(
-          { error: "Identity required.", code: "IDENTITY_REQUIRED" },
-          { status: 401 },
-        );
+        return problem(401, "AUTH_UNAUTHENTICATED", "Identity required.");
       }
       if (url.pathname === "/plain-401") {
         return new Response("nope", { status: 401 });
       }
       if (url.pathname === "/bad") {
-        return Response.json({ error: "Bad batch." }, { status: 400 });
+        return problem(400, "VALIDATION_ERROR", "Bad batch.");
+      }
+      if (url.pathname === "/older-shape") {
+        return Response.json(
+          { error: "Sign in again.", code: "RECORDER_SIGNED_OUT" },
+          { status: 401 },
+        );
       }
       if (url.pathname === "/redirect") {
         return new Response(null, {
@@ -93,12 +125,38 @@ test("sends no Authorization header without a token and posts a JSON body", asyn
   expect(seen?.method).toBe("POST");
 });
 
+test("every write carries an Idempotency-Key of its own, and a read carries none", async () => {
+  const target = { openbotUrl, token: "obr_t" };
+  await openbotJson(target, "/ok");
+  expect(seen?.key).toBeNull();
+  const keys: (string | null)[] = [];
+  await openbotJson(target, "/ok", { method: "POST", body: { a: 1 } });
+  keys.push(seen?.key ?? null);
+  await openbotJson(target, "/ok", { method: "POST", body: { a: 1 } });
+  keys.push(seen?.key ?? null);
+  await openbotJson(target, "/no-content", { method: "DELETE" });
+  keys.push(seen?.key ?? null);
+  for (const key of keys) expect(key).toMatch(/^[0-9a-f]{32}$/);
+  expect(new Set(keys).size).toBe(3);
+});
+
 test("throws OpenBotError with the status and the server's message on a 4xx", async () => {
   const error = await failure("/bad");
   expect(error).toBeInstanceOf(OpenBotError);
   expect(error.status).toBe(400);
   expect(error.message).toBe("Bad batch.");
-  expect(error.body).toEqual({ error: "Bad batch." });
+  expect(error.body).toMatchObject({
+    detail: "Bad batch.",
+    code: "VALIDATION_ERROR",
+  });
+  expect(error.signedOut).toBe(false);
+});
+
+test("a refusal that is not problem details carries no sentence, code or sign-out", async () => {
+  const error = await failure("/older-shape");
+  expect(error.status).toBe(401);
+  expect(error.message).toBe("OpenBot answered 401.");
+  expect(error.body).toBeNull();
   expect(error.signedOut).toBe(false);
 });
 
@@ -106,6 +164,8 @@ test("signedOut is true only for a 401 carrying RECORDER_SIGNED_OUT", async () =
   const out = await failure("/signed-out");
   expect(out.status).toBe(401);
   expect(out.signedOut).toBe(true);
+  expect(out.message).toBe("Sign in again.");
+  expect(out.body?.reason).toBe("removed");
   const identity = await failure("/identity");
   expect(identity.status).toBe(401);
   expect(identity.signedOut).toBe(false);

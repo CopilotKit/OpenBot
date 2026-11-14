@@ -1,7 +1,7 @@
 import {
   type ExchangeResponse,
   type RecorderMe,
-  recorderPaths,
+  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import {
   RECORDER_CONNECT_STATUS,
@@ -180,7 +180,7 @@ async function keepAlive(deps: ConnectionDeps): Promise<void> {
   const connection = await currentConnection();
   if (!connection) return;
   try {
-    await openbotJson<RecorderMe>(connection, recorderPaths.me);
+    await openbotJson<RecorderMe>(connection, recorderApiPaths.me);
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
       await deps.connectionLost({
@@ -300,7 +300,7 @@ async function approve(
   try {
     exchanged = await openbotJson<ExchangeResponse>(
       { openbotUrl: pending.origin },
-      recorderPaths.connections,
+      recorderApiPaths.connections,
       {
         body: {
           code: pending.code,
@@ -580,7 +580,7 @@ async function trustedConnect(
   try {
     exchanged = await openbotJson<ExchangeResponse>(
       { openbotUrl: origin },
-      recorderPaths.connections,
+      recorderApiPaths.connections,
       {
         body: {
           code,
@@ -743,7 +743,7 @@ function sameOrigin(raw: string, origin: string): boolean {
 /** Best effort: OpenBot revokes the token (the person can also revoke it in OpenBot). */
 async function revoke(connection: ConnectionRecord): Promise<void> {
   try {
-    await openbotJson(connection, recorderPaths.currentConnection, {
+    await openbotJson(connection, recorderApiPaths.currentConnection, {
       method: "DELETE",
     });
   } catch {
@@ -831,7 +831,7 @@ async function desktopConnect(
   try {
     exchanged = await openbotJson<ExchangeResponse>(
       { openbotUrl: checked.origin },
-      recorderPaths.connections,
+      recorderApiPaths.connections,
       {
         body: {
           code: handoff.code,

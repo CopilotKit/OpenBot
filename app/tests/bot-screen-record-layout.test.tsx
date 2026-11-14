@@ -158,7 +158,9 @@ async function open(window: { width: number; height: number }): Promise<Page> {
     const font = join(inter, path.split("/").pop() ?? "");
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
-    const computer = `/api/computers/${BOT}`;
+    // The Bot's computer in the API. Only these addresses answer, so a call that slipped back to
+    // `/api/computers/...` reaches nothing and Record never shows.
+    const computer = `/api/v2/organizations/default/computers/${BOT}`;
     if (path === `${computer}/screenshot`)
       return route.fulfill({
         json: {
@@ -170,8 +172,8 @@ async function open(window: { width: number; height: number }): Promise<Page> {
           title: "Example Domain",
         },
       });
-    if (path === `${computer}/status`)
-      return route.fulfill({ json: { state: "ready" } });
+    if (path === computer)
+      return route.fulfill({ json: { botId: BOT, state: "ready" } });
     if (path === `${computer}/control`)
       return route.fulfill({
         json: {

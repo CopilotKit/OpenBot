@@ -1,8 +1,22 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
-import { passwordKeys, type SignInRequest } from "./queries";
+import { deleteSavedLogin } from "@/lib/api/generated/saved-logins/saved-logins";
+import {
+  cancelSignIn,
+  createSignInRequest,
+  finishSignIn,
+  getSignInRequest,
+  submitSignIn,
+  submitSignInCode,
+  takeOverSignIn,
+  useSavedLogin,
+} from "@/lib/api/generated/sign-in-requests/sign-in-requests";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
+import { ME, passwordKeys, type SignInRequest } from "./queries";
 
 const FALLBACK = "The sign-in could not be completed";
+/** What the model is told when the server refused a sign-in request without saying why. */
+const NOT_MADE = "The sign-in request could not be made.";
 
 const invalidate = (queryClient: QueryClient) =>
   queryClient.invalidateQueries({ queryKey: passwordKeys.all });
@@ -11,16 +25,9 @@ const invalidate = (queryClient: QueryClient) =>
 const show = (queryClient: QueryClient) => (request: SignInRequest) =>
   queryClient.setQueryData(passwordKeys.signIn(request.id), request);
 
-const path = (id: string, action: string) =>
-  `/api/sign-in-requests/${encodeURIComponent(id)}/${action}`;
-
-async function post(id: string, action: string, body?: unknown) {
-  return (await client(path(id, action), {
-    method: "POST",
-    ...(body === undefined ? {} : { body }),
-    fallback: FALLBACK,
-  }).then((response) => response.json())) as SignInRequest;
-}
+/** What every write carries: a key of its own, and the sentence a person reads if it fails unsaid. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const said = { fallback: FALLBACK };
 
 /**
  * The credential goes in the request body and nowhere else: not state, not the cache, not a log.
@@ -36,8 +43,17 @@ export type SignInSubmission = {
 
 export function submitSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { id: string; input: SignInSubmission }) =>
-      post(variables.id, "submit", variables.input),
+    mutationFn: async (variables: { id: string; input: SignInSubmission }) =>
+      (
+        await submitSignIn(
+          ORGANIZATION_ID,
+          ME,
+          variables.id,
+          variables.input,
+          once(),
+          said,
+        )
+      ).signInRequest,
     onSuccess: show(queryClient),
     onSettled: () => invalidate(queryClient),
   });
@@ -46,8 +62,17 @@ export function submitSignInMutationOptions(queryClient: QueryClient) {
 /** The verification code the site sent, once the request is `code_required`. The code and nothing else. */
 export function submitSignInCodeMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { id: string; code: string }) =>
-      post(variables.id, "code", { code: variables.code }),
+    mutationFn: async (variables: { id: string; code: string }) =>
+      (
+        await submitSignInCode(
+          ORGANIZATION_ID,
+          ME,
+          variables.id,
+          { code: variables.code },
+          once(),
+          said,
+        )
+      ).signInRequest,
     onSuccess: show(queryClient),
     onSettled: () => invalidate(queryClient),
   });
@@ -56,8 +81,17 @@ export function submitSignInCodeMutationOptions(queryClient: QueryClient) {
 /** Choosing a saved login in the form is the owner's confirmation to use it for this sign-in. */
 export function confirmSavedLoginMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { id: string; loginId: string }) =>
-      post(variables.id, "use-saved", { loginId: variables.loginId }),
+    mutationFn: async (variables: { id: string; loginId: string }) =>
+      (
+        await useSavedLogin(
+          ORGANIZATION_ID,
+          ME,
+          variables.id,
+          { savedLoginId: variables.loginId },
+          once(),
+          said,
+        )
+      ).signInRequest,
     onSuccess: show(queryClient),
     onSettled: () => invalidate(queryClient),
   });
@@ -65,21 +99,25 @@ export function confirmSavedLoginMutationOptions(queryClient: QueryClient) {
 
 export function takeOverSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (id: string) => post(id, "take-over"),
+    mutationFn: async (id: string) =>
+      (await takeOverSignIn(ORGANIZATION_ID, ME, id, once(), said))
+        .signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
 }
 
 export function finishSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (id: string) => post(id, "finish"),
+    mutationFn: async (id: string) =>
+      (await finishSignIn(ORGANIZATION_ID, ME, id, once(), said)).signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
 }
 
 export function cancelSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (id: string) => post(id, "cancel"),
+    mutationFn: async (id: string) =>
+      (await cancelSignIn(ORGANIZATION_ID, ME, id, once(), said)).signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
 }
@@ -87,8 +125,7 @@ export function cancelSignInMutationOptions(queryClient: QueryClient) {
 export function deleteSavedLoginMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (loginId: string) => {
-      await client(`/api/passwords/${encodeURIComponent(loginId)}`, {
-        method: "DELETE",
+      await deleteSavedLogin(ORGANIZATION_ID, ME, loginId, once(), {
         fallback: "Could not delete that password",
       });
     },
@@ -106,30 +143,42 @@ export async function requestSignIn(
 ): Promise<
   { ok: true; request: SignInRequest } | { ok: false; reason: string }
 > {
-  const response = await tryClient("/api/sign-in-requests", {
-    method: "POST",
-    body: input,
-    ...(signal ? { signal } : {}),
-  });
-  const body = (await response.json().catch(() => null)) as
-    | (SignInRequest & { error?: string })
-    | null;
-  if (!response.ok || !body)
-    return {
-      ok: false,
-      reason: body?.error ?? "The sign-in request could not be made.",
-    };
-  return { ok: true, request: body };
+  // A refusal is the answer here, in the server's own sentence, which is what the model is told.
+  try {
+    const { signInRequest } = await createSignInRequest(
+      ORGANIZATION_ID,
+      ME,
+      input,
+      once(),
+      {
+        fallback: NOT_MADE,
+        ...(signal ? { signal } : {}),
+      },
+    );
+    return { ok: true, request: signInRequest };
+  } catch (error) {
+    // Only the server's answer is a refusal. A request that never arrived, or one abandoned with the
+    // turn, is the caller's to hear, as it always was.
+    if (error instanceof ClientError)
+      return { ok: false, reason: error.message };
+    if (error instanceof Error && error.message === NOT_MADE)
+      return { ok: false, reason: NOT_MADE };
+    throw error;
+  }
 }
 
 /** The request's current state, for the waiting tool call. Null when it cannot be read. */
-export async function readSignIn(id: string, signal?: AbortSignal) {
-  const response = await tryClient(
-    `/api/sign-in-requests/${encodeURIComponent(id)}`,
-    {
-      ...(signal ? { signal } : {}),
-    },
-  ).catch(() => null);
-  if (!response?.ok) return null;
-  return (await response.json().catch(() => null)) as SignInRequest | null;
+export async function readSignIn(
+  id: string,
+  signal?: AbortSignal,
+): Promise<SignInRequest | null> {
+  try {
+    return (
+      await getSignInRequest(ORGANIZATION_ID, ME, id, {
+        ...(signal ? { signal } : {}),
+      })
+    ).signInRequest;
+  } catch {
+    return null;
+  }
 }

@@ -13,7 +13,7 @@ import {
   RECORDER_AUTHORITY_UNAVAILABLE,
   type RecorderLearningResponse,
   type RecorderMe,
-  recorderPaths,
+  recorderApiPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
 import {
@@ -2047,7 +2047,7 @@ export function installRecording(
     try {
       await openbotJson<RecorderMe>(
         { openbotUrl: current.openbotUrl, token: current.token },
-        recorderPaths.me,
+        recorderApiPaths.me,
       );
     } catch (error) {
       const reason = signedOutReason(error);
@@ -2616,7 +2616,10 @@ export function installRecording(
     )
       return cached.value;
     try {
-      const value = await openbotJson<RecorderMe>(connection, recorderPaths.me);
+      const value = await openbotJson<RecorderMe>(
+        connection,
+        recorderApiPaths.me,
+      );
       await writeSession("me", { value, fetchedAt: deps.now() });
       return value;
     } catch (error) {
@@ -2678,7 +2681,7 @@ export function installRecording(
     try {
       const answer = await openbotJson<RecorderLearningResponse>(
         connection,
-        recorderPaths.learning,
+        recorderApiPaths.learning,
       );
       learningSpace = answer.learning;
       await writeSession("learning", {

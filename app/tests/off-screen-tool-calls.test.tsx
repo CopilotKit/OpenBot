@@ -49,6 +49,9 @@ import { settleReactWork } from "./settle-react-work";
  */
 
 const BOT = "crm-bot";
+/** Where the API answers a person's own sign-in requests. */
+const SIGN_IN_REQUESTS =
+  "/api/v2/organizations/default/people/me/sign-in-requests";
 const OTHER = "other-bot";
 const channel: AgentChannel = {
   id: "crm-channel",
@@ -248,14 +251,14 @@ async function components(path: string, request: Request): Promise<Response> {
 /** A Bot's computer. Only the crm Bot's answers; any other id is a computer that is not there. */
 function computer(path: string): Response {
   computerCalls.push(path);
-  if (path === `/api/computers/${BOT}/navigate`)
+  if (path === `/api/v2/organizations/default/computers/${BOT}/navigate`)
     return NativeResponse.json({
       ok: true,
       url: "https://crm.example/accounts/northwind",
       title: "Northwind Traders",
       text: "Northwind Traders. Renewal due.",
     });
-  if (path === `/api/computers/${BOT}/status`)
+  if (path === `/api/v2/organizations/default/computers/${BOT}`)
     return NativeResponse.json({ botId: BOT, state: "ready" });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }
@@ -279,21 +282,36 @@ async function signIn(path: string, request: Request): Promise<Response> {
     passwordManager: false,
     savedLogins: [],
   };
-  if (path === "/api/sign-in-requests" && request.method === "POST") {
+  if (path === SIGN_IN_REQUESTS && request.method === "POST") {
     const body = (await request.json()) as { botId?: string };
     signIns.push(body);
     if (body.botId !== BOT)
       return NativeResponse.json(
-        { error: "There is no such Bot." },
-        { status: 404 },
+        {
+          type: "https://open.bot/errors/bot-not-found",
+          title: "Bot not found.",
+          status: 404,
+          detail: "There is no such Bot.",
+          code: "BOT_NOT_FOUND",
+          category: "not_found",
+          retryable: false,
+          requestId: "req_test",
+          traceId: "trace_test",
+        },
+        {
+          status: 404,
+          headers: { "content-type": "application/problem+json" },
+        },
       );
-    return NativeResponse.json(opened, { status: 201 });
+    return NativeResponse.json({ signInRequest: opened }, { status: 201 });
   }
-  if (path === "/api/sign-in-requests")
-    return NativeResponse.json({ requests: [] });
-  if (path === "/api/sign-in-requests/sign-in-1")
-    return NativeResponse.json({ ...opened, status: "signed_in" });
-  return NativeResponse.json({ error: "Not found" }, { status: 404 });
+  if (path === SIGN_IN_REQUESTS)
+    return NativeResponse.json({ signInRequests: [], nextCursor: null });
+  if (path === `${SIGN_IN_REQUESTS}/sign-in-1`)
+    return NativeResponse.json({
+      signInRequest: { ...opened, status: "signed_in" },
+    });
+  return NativeResponse.json({ detail: "Not found" }, { status: 404 });
 }
 
 beforeAll(() => {
@@ -315,11 +333,11 @@ beforeAll(() => {
         "http://localhost",
       );
       const request = input instanceof Request ? input : new Request(url, init);
-      if (url.pathname.startsWith("/api/computers/"))
+      if (url.pathname.startsWith("/api/v2/organizations/default/computers/"))
         return computer(url.pathname);
       if (url.pathname.startsWith("/api/components/"))
         return components(url.pathname, request);
-      if (url.pathname.startsWith("/api/sign-in-requests"))
+      if (url.pathname.startsWith(SIGN_IN_REQUESTS))
         return signIn(url.pathname, request);
       // The two Bots as the server describes them: the crm Bot is this person's, the other one is
       // a Team Bot they are a teammate on, whose computer they may not drive.
@@ -607,9 +625,14 @@ test("a page the Bot opens after its person has left is opened on that Bot's com
   };
   await leaveBeforeTheCall("elsewhere");
 
-  expect(computerCalls).toContain(`/api/computers/${BOT}/navigate`);
+  expect(computerCalls).toContain(
+    `/api/v2/organizations/default/computers/${BOT}/navigate`,
+  );
   expect(
-    computerCalls.filter((path) => !path.startsWith(`/api/computers/${BOT}/`)),
+    computerCalls.filter(
+      (path) =>
+        !path.startsWith(`/api/v2/organizations/default/computers/${BOT}`),
+    ),
   ).toEqual([]);
   expect(JSON.parse(result())).toMatchObject({
     ok: true,
