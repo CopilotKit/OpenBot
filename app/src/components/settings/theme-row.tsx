@@ -52,7 +52,8 @@ export function ThemeRow() {
           <SelectTrigger aria-label="Theme">
             <SelectValue>{THEME_NAMES[theme]}</SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          {/* Under the trigger and inside the row's right edge, as the Skin menu is. */}
+          <SelectContent align="end" alignItemWithTrigger={false}>
             {THEME_PREFERENCES.map((choice) => (
               <SelectItem key={choice} value={choice}>
                 {THEME_NAMES[choice]}
