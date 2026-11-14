@@ -51,6 +51,32 @@ describe("a delegated task's brief", () => {
     expect(framed).toContain("never say where a component sits");
   });
 
+  test("asks for a report that is the result, standing on its own, without the working", () => {
+    // Live: "I checked the full message thread", "I resolved the channel and selected Alex Clarke
+    // because", 229 words for three facts; and "the substantive changes are clear", never stated.
+    const framed = frameBrief("Find Dana's latest email and say what changed.");
+    expect(framed).toContain("Your last message is your report");
+    expect(framed).toContain("the report must stand on its own");
+    expect(framed).toContain(
+      "the facts, figures, dates and quotes they asked for",
+    );
+    expect(framed).toContain("Size it to the question");
+    expect(framed).toContain("Leave out how you got there");
+    expect(framed).toContain("stays in this thread");
+    // The words that had a model write its summary and then the card's call as text beside it.
+    expect(framed).not.toContain("your words first");
+    expect(framed).toContain("call the component in a step of its own");
+    expect(framed).toContain("never a component's data as text");
+    // "`<@U0E2EALEX0> Test message`", quoted back as Slack stores it.
+    expect(framed).toContain("never by an app's id or its markup for one");
+  });
+
+  test("a thread opened before the report was asked to be the result alone still reads as the Bot's brief", () => {
+    const before =
+      "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are, your words first; what you say while you work stays in this thread. Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'.\nThe task:\n\nFind Dana's latest email.";
+    expect(readBrief(before)).toBe("Find Dana's latest email.");
+  });
+
   test("a thread opened before the answer was told not to name the brief still reads as the Bot's brief", () => {
     const before =
       "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are; what you say while you work stays in this thread.\nThe task:\n\nOrder the marigold seeds.";
@@ -94,6 +120,32 @@ describe("how a Bot that holds delegate is told to work", () => {
     expect(DELEGATING_GUIDANCE).toContain(
       "First write one short line saying what you will do",
     );
+  });
+
+  test("hands off only work the person asked for: a question about whether it can gets an answer", () => {
+    // Live, 2 runs of 3: "are you able to build a sequence in Smartlead?" was answered yes, and a
+    // task then read the person's campaigns.
+    expect(DELEGATING_GUIDANCE).not.toContain("Hand everything else");
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Hand the other work the person asked for to a task",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "A question about whether you can do something is a short ask",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "start no task and read none of their data",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "never start a task for work nobody asked for",
+    );
+  });
+
+  test("a routine, a follow-up or a goal asked for in the conversation is set up in it, not by a task", () => {
+    // Live: the routine a task made posted into the task's thread, and its follow-up was refused.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "a routine, a follow-up or a reminder, or a goal is set up here with the tool for it",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("never a task's");
   });
 
   test("a reaction is the whole answer, with no words, not even the emoji", () => {
