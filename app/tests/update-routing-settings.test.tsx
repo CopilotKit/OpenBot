@@ -8,6 +8,11 @@ import {
 } from "@/components/settings/update-routing";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  NOTIFICATION_SETTINGS_PATH,
+  notificationsResponse,
+  TRANSPORTS_PATH,
+} from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -54,14 +59,10 @@ function serving() {
       return Response.json({ ok: true });
     }
     // Every channel set up unless a case says otherwise, so each switch reflects the person's preference.
-    if (String(input).endsWith("/api/delivery")) {
-      return Response.json({
-        bindings: [],
-        devices: [],
-        deliveries: [],
+    if (String(input).startsWith(TRANSPORTS_PATH))
+      return notificationsResponse("GET", String(input), {
         available,
-      });
-    }
+      }) as Response;
     return Response.json({ routing });
   }) as unknown as typeof fetch;
 }
@@ -79,8 +80,8 @@ test("switching a transport on for one kind of update saves that kind's transpor
   fireEvent.click(await view.findByRole("switch", { name: "Progress by SMS" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
-    request: "PUT /api/bots/routing/progress",
-    body: { transports: ["push", "sms"] },
+    request: `PATCH ${NOTIFICATION_SETTINGS_PATH}`,
+    body: { routing: { progress: ["push", "sms"] } },
   });
 });
 
@@ -106,8 +107,8 @@ test("pings get their own row, Something needs you", async () => {
   fireEvent.click(sms);
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
-    request: "PUT /api/bots/routing/attention",
-    body: { transports: ["push", "slack", "sms"] },
+    request: `PATCH ${NOTIFICATION_SETTINGS_PATH}`,
+    body: { routing: { attention: ["push", "slack", "sms"] } },
   });
 });
 
@@ -143,8 +144,8 @@ test("only channels that are set up get a switch, and a save keeps the others as
   await waitFor(() => expect(writes).toHaveLength(1));
   // SMS is not set up and has no switch, but the person's choice for it is still saved as it was.
   expect(writes[0]).toEqual({
-    request: "PUT /api/bots/routing/progress",
-    body: { transports: ["push", "slack", "sms"] },
+    request: `PATCH ${NOTIFICATION_SETTINGS_PATH}`,
+    body: { routing: { progress: ["push", "slack", "sms"] } },
   });
 });
 
