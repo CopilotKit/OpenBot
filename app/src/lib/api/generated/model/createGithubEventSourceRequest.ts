@@ -5,9 +5,8 @@
 export interface CreateGithubEventSourceRequest {
   /**
    * The repository, as owner/name.
-   * @minLength 1
    * @maxLength 256
-   * @pattern \S
+   * @pattern ^[\w.-]+/[\w.-]+$
    */
   repository: string;
   /**

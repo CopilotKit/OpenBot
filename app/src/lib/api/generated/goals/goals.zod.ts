@@ -6259,13 +6259,14 @@ export const CreateGithubEventSourceHeader = zod.object({
 
 export const createGithubEventSourceBodyRepositoryMax = 256;
 
-export const createGithubEventSourceBodyRepositoryRegExp = new RegExp("\\S");
+export const createGithubEventSourceBodyRepositoryRegExp = new RegExp(
+  "^[\\w.-]+/[\\w.-]+$",
+);
 export const createGithubEventSourceBodySecretMax = 4096;
 
 export const CreateGithubEventSourceBody = zod.object({
   repository: zod
     .string()
-    .min(1)
     .max(createGithubEventSourceBodyRepositoryMax)
     .regex(createGithubEventSourceBodyRepositoryRegExp)
     .describe("The repository, as owner/name."),

@@ -3229,9 +3229,8 @@ components:
       properties:
         repository:
           type: string
-          minLength: 1
           maxLength: 256
-          pattern: \S
+          pattern: ^[\w.-]+/[\w.-]+$
           description: The repository, as owner/name.
         secret:
           type: string
