@@ -4896,7 +4896,14 @@ fn stop_for_update<R: tauri::Runtime>(
 }
 
 /// Stop as the button and the menu bar run it.
+///
+/// The person stopped OpenBot, so nothing starts it again on its own in this session. Only here:
+/// an update's stop (`stop_for_update`) is not theirs, and once it had marked the session, OpenBot
+/// stopped under the window after an update never started again by itself.
 fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
+    shell
+        .stopped_in_session
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let root = root_for_stop(shell, fallback_root);
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
@@ -5203,9 +5210,6 @@ where
     I: FnOnce(&Path) -> Result<(), String>,
 {
     let _closing = local_eval::closing_for_stop();
-    shell
-        .stopped_in_session
-        .store(true, std::sync::atomic::Ordering::SeqCst);
     shell
         .start_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
