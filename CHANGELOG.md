@@ -241,6 +241,11 @@ them.
   or `migrate` container an earlier start left. `bash scripts/stop.sh` does the same removal.
   `bun scripts/update.ts local apply` asks each release's Compose file only for the services it defines, so it
   updates to and from a release with either shape.
+- **`bun scripts/update.ts kubernetes`** accepts, for a promotion that changes the database
+  version, a chart whose server applies its own migrations: one that renders no migrations Job and
+  a server Deployment running the target image behind a `wait-for-database` init container. A chart
+  with a migrations Job is still held to the guarded `pre-upgrade` one, and a chart with neither
+  is still refused.
 - **The Routines page no longer warns that routines aren't running.** That warning was for a
   deployment with no worker, which no longer exists as a state. `GET /api/routines` still answers
   with the `sweep` record older apps read.
