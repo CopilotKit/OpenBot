@@ -53,6 +53,10 @@ tags:
   - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
+  - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
+  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
+  - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
+  - { name: Notification settings, description: "How a person hears from their Bots while they're away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -103,6 +107,17 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1link-chat' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1verify-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1confirm-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1{destinationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/deliveries: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1deliveries' }
+  /api/v2/organizations/{organizationId}/people/{personId}/notification-settings: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1notification-settings' }
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
+  /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
 components:
   securitySchemes:
     webSession:
@@ -153,6 +168,13 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            devices:read: Read the phones the signed-in person registered for push notifications.
+            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
+            notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
+            notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
     apiKey:
       type: http
       scheme: bearer
