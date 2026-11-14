@@ -93,6 +93,21 @@ describe("naming a tool call", () => {
     });
   });
 
+  test("an initialism in camelCase is its own word", () => {
+    // The capital that starts the next word ends the initialism, so HTML and Content stay apart.
+    expect(readToolName("mcp__web__getHTMLContent")).toEqual({
+      label: "Get HTML content",
+      detail: "web",
+    });
+    expect(readToolName("mcp__github__getPRDiff")).toEqual({
+      label: "Get pr diff",
+      detail: "github",
+    });
+    expect(readToolName("listMCPServers")).toEqual({
+      label: "List mcp servers",
+    });
+  });
+
   test("a tool name containing the separator keeps all of it", () => {
     // The server is the first segment and everything after it is the tool, however many
     // separators the vendor used.
