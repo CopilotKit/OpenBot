@@ -18,8 +18,8 @@ paths:
         ones from its catalogue, the ones added from the app directory, and
         servers added by their address. Each app comes with the actions it
         offers and the Bots that may use each one. Anybody signed in may read
-        them. Ordered by title, then by id. A missing cursor starts at the
-        first page and nextCursor null ends the list.
+        them. Ordered by title, ignoring case, then by id. A missing cursor
+        starts at the first page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth: [apps:read]
@@ -530,10 +530,10 @@ paths:
       description: >-
         Return one page of what can be added with createApp: the apps in
         OpenBot's own catalogue (source catalogue) in the catalogue's own
-        order, then apps from the wider directory (source directory) by title
-        and then by id. appId names the app an entry was added as, or is null.
-        search narrows
-        the list to entries whose name or description holds it, ignoring case.
+        order, then apps from the wider directory (source directory) by title,
+        ignoring case, and then by id. appId names the app an entry was added
+        as, or is null. search narrows the list to entries whose name or
+        description holds it, ignoring case.
         source narrows it to one kind. Anybody signed in may read the
         catalogue. Only an administrator sees the wider directory, so anybody
         else's list holds catalogue entries only, and asking for
@@ -961,7 +961,7 @@ components:
       properties:
         apps:
           type: array
-          description: By title, then by id.
+          description: By title, ignoring case, then by id.
           items:
             $ref: '#/components/schemas/App'
         nextCursor:
@@ -1298,7 +1298,7 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue in its own order, then the wider directory by title and then by id.
+          description: The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:

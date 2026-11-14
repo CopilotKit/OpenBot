@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the apps this OpenBot has added for its Bots: the ones from its catalogue, the ones added from the app directory, and servers added by their address. Each app comes with the actions it offers and the Bots that may use each one. Anybody signed in may read them. Ordered by title, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the apps this OpenBot has added for its Bots: the ones from its catalogue, the ones added from the app directory, and servers added by their address. Each app comes with the actions it offers and the Bots that may use each one. Anybody signed in may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the apps added here
  */
 
@@ -243,7 +243,7 @@ export const ListAppsResponse = zod.object({
           "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
         ),
     )
-    .describe("By title, then by id."),
+    .describe("By title, ignoring case, then by id."),
   nextCursor: zod
     .string()
     .max(listAppsResponseNextCursorMax)
@@ -1797,7 +1797,7 @@ export const SetAppOAuthClientBody = zod.object({
 export const SetAppOAuthClientResponse = zod.void();
 
 /**
- * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory) by title and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else's list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
+ * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory) by title, ignoring case, and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else's list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
  * @summary List the apps that can be added
  */
 
@@ -1951,7 +1951,7 @@ export const ListAppDirectoryResponse = zod.object({
         .describe("One app that can be added, by where it comes from."),
     )
     .describe(
-      "The catalogue in its own order, then the wider directory by title and then by id.",
+      "The catalogue in its own order, then the wider directory by title, ignoring case, and then by id.",
     ),
   nextCursor: zod
     .string()
