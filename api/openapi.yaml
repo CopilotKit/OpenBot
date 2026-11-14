@@ -42,6 +42,30 @@ tags:
       its policy refused, newest first. Only an administrator can read it. It
       is read-only: events are written by what they record, never through the
       API.
+  - name: People
+    description: >-
+      The people in the organization: who they are, what they may do, and
+      what is theirs alone (their standing instructions, preferences and
+      first-run onboarding). An administrator sees everybody; anybody else
+      sees themselves, as me.
+  - name: Linked accounts
+    description: >-
+      A person's accounts at other services, such as Slack and GitHub, that
+      OpenBot knows are theirs, so a Bot answering there knows who it is
+      talking to.
+  - name: Identity providers
+    description: >-
+      The companies' own identity providers registered for single sign-on,
+      by email domain. Only an administrator manages them.
+  - name: API keys
+    description: >-
+      The keys a person makes for automation. A key acts as them, inside the
+      organization, on the API only, and only a person signed in to OpenBot
+      can make or manage one.
+  - name: Sessions
+    description: >-
+      Where a person is signed in to OpenBot, so they can see each browser and
+      device and sign one out.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -608,6 +632,1107 @@ paths:
           $ref: '#/components/responses/ModelNotConfigured'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [People]
+      operationId: listPeople
+      summary: List people
+      description: >-
+        Return one page of the people in the organization, the most recently
+        signed in first. An administrator sees everybody who has signed in;
+        anybody else sees only themselves. search narrows the list to people
+        whose address or name holds it, ignoring case. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one; limit may change from page to page.
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      parameters:
+        - name: search
+          in: query
+          description: Part of an address or a name, matched without regard to case.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of people.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/PersonPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getPerson
+      summary: Get a person
+      description: >-
+        Return one person: the caller, as me or by their own id, or for an
+        administrator anybody in the organization. Somebody who is not an
+        administrator asking about anybody else is refused, whether or not
+        that person exists. The answer also carries the OpenBot release the
+        server runs, which the apps show under the person's name.
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPersonResponse'
+              examples:
+                me:
+                  $ref: '#/components/examples/MePerson'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags: [People]
+      operationId: updatePerson
+      summary: Change a person
+      description: >-
+        Change what is sent and leave the rest. A person changes their own
+        name, and nobody else's. An administrator changes anybody's role, but
+        not their own away from administrator, and not the role of somebody
+        the deployment's configuration names as an administrator. Asking for
+        the role a person already has changes nothing and records nothing.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePersonRequest'
+            examples:
+              rename:
+                value:
+                  name: Dana Whitfield
+              promote:
+                value:
+                  role: admin
+      responses:
+        '200':
+          description: The person as changed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+              examples:
+                renamed:
+                  $ref: '#/components/examples/ChangedPerson'
+        '400':
+          $ref: '#/components/responses/InvalidPerson'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/revoke-access:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: revokePersonAccess
+      summary: Remove a person's access
+      description: >-
+        Stop a person from using OpenBot: their address can't sign in again,
+        and the sessions, API keys and app sign-ins they hold end at once.
+        They keep their record and their history, and restoring their access
+        lets them sign in again. Their connected credentials are retired too.
+        Only an administrator may do this, never to themselves, and never to
+        somebody the deployment's configuration names as an administrator.
+        Removing somebody already removed retires anything left and records
+        nothing new.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The person, removed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+              examples:
+                removed:
+                  $ref: '#/components/examples/RemovedPerson'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/PersonConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/restore-access:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: restorePersonAccess
+      summary: Give a person their access back
+      description: >-
+        Let a removed person sign in again. What ended when they were removed
+        stays ended: they sign in afresh and make new API keys. Only an
+        administrator may do this. Restoring somebody who was never removed
+        changes nothing and records nothing.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The person, with their access back.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+              examples:
+                restored:
+                  $ref: '#/components/examples/ChangedPerson'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/onboarding/advance:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: advanceOnboarding
+      summary: Move to a step of first-run onboarding
+      description: >-
+        Record the step of first-run onboarding a person is on, so opening it
+        again resumes there. The numbers are the app's own: each step keeps
+        its number whatever order the steps are shown in, and 0 is not
+        started. Only the person themselves may move their onboarding. Read
+        where they are on the person (getPerson's onboarding).
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvanceOnboardingRequest'
+            examples:
+              second:
+                value:
+                  step: 2
+      responses:
+        '200':
+          description: Where the person now is in onboarding.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResponse'
+              examples:
+                moved:
+                  value:
+                    onboarding:
+                      step: 2
+                      completedAt: null
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/onboarding/complete:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: completeOnboarding
+      summary: Finish first-run onboarding
+      description: >-
+        Mark first-run onboarding finished, so the apps stop opening it.
+        Finishing again keeps the first time it was finished. Only the person
+        themselves may finish their onboarding.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Onboarding, finished.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResponse'
+              examples:
+                finished:
+                  value:
+                    onboarding:
+                      step: 3
+                      completedAt: '2026-11-14T09:30:00.000Z'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/instructions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getStandingInstructions
+      summary: Read a person's standing instructions
+      description: >-
+        Return the instructions a person gave every Bot that works for them.
+        Empty means they wrote none. They are the person's alone: nobody
+        else, an administrator included, may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's standing instructions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingInstructions'
+              examples:
+                written:
+                  $ref: '#/components/examples/StandingInstructionsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags: [People]
+      operationId: updateStandingInstructions
+      summary: Change a person's standing instructions
+      description: >-
+        Replace a person's standing instructions with the text sent, trimmed.
+        Empty text clears them. Only the person themselves may change them.
+        The audit trail records that they changed and how long they now are,
+        never what they say.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandingInstructions'
+            examples:
+              written:
+                $ref: '#/components/examples/StandingInstructionsExample'
+      responses:
+        '200':
+          description: The instructions as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingInstructions'
+              examples:
+                written:
+                  $ref: '#/components/examples/StandingInstructionsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/preferences:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getPreferences
+      summary: Read a person's preferences
+      description: >-
+        Return how a person set OpenBot up for themselves, on every device
+        they sign in from, with the default for anything they never chose.
+        Only the person themselves may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's preferences.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preferences'
+              examples:
+                defaults:
+                  $ref: '#/components/examples/PreferencesExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags: [People]
+      operationId: updatePreferences
+      summary: Change a person's preferences
+      description: >-
+        Change the preferences sent and keep the rest, so two devices saving
+        different preferences at once both keep theirs. At least one is
+        required. Only the person themselves may change them.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+            examples:
+              skin:
+                value:
+                  skin: opendots
+      responses:
+        '200':
+          description: Every preference, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preferences'
+              examples:
+                defaults:
+                  $ref: '#/components/examples/PreferencesExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/api-keys:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [API keys]
+      operationId: listApiKeys
+      summary: List a person's API keys
+      description: >-
+        Return one page of the API keys a person made, newest first. Never a
+        key itself: start is its first characters, enough to tell keys apart.
+        Only the person themselves may list them, signed in to OpenBot rather
+        than with a key or an app's sign-in. A missing cursor starts at the
+        first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of API keys.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ApiKeyPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInOwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags: [API keys]
+      operationId: createApiKey
+      summary: Make an API key
+      description: >-
+        Make an API key that acts as the person, inside this organization,
+        on the API only. The key itself is in this answer and never again:
+        OpenBot keeps only a hash of it. Only the person themselves may make
+        one, signed in to OpenBot: a key can never make another key, and
+        neither can an app's sign-in. A key ends when it expires, when it is
+        deleted, or when an administrator removes the person.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKeyRequest'
+            examples:
+              script:
+                value:
+                  name: Nightly report
+                  expiresInDays: 90
+      responses:
+        '201':
+          description: The key, shown this once.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            Location:
+              description: The new key's address.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApiKey'
+              examples:
+                made:
+                  $ref: '#/components/examples/CreatedApiKeyExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInOwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/api-keys/{apiKeyId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ApiKeyId'
+    delete:
+      tags: [API keys]
+      operationId: deleteApiKey
+      summary: Delete an API key
+      description: >-
+        End an API key: from now on every request it signs is refused. Only
+        the person who made it may delete it, signed in to OpenBot. A key
+        already deleted is not found.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The key was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInOwnOnly'
+        '404':
+          $ref: '#/components/responses/ApiKeyNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/sessions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      summary: List where a person is signed in
+      description: >-
+        Return one page of the sessions a person is signed in with, the most
+        recently used first, with the one this request came on marked
+        current. Never a session's token. Only the person themselves may list
+        them, signed in to OpenBot. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of sessions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/SessionPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInOwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SessionId'
+    delete:
+      tags: [Sessions]
+      operationId: deleteSession
+      summary: Sign a person out of one session
+      description: >-
+        End one session, signing that browser or device out. Ending the
+        current one signs this caller out. Only the person themselves may end
+        their sessions, signed in to OpenBot. A session already ended is not
+        found.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The session ended.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInOwnOnly'
+        '404':
+          $ref: '#/components/responses/SessionNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [Linked accounts]
+      operationId: listLinkedAccounts
+      summary: List a person's linked accounts
+      description: >-
+        Return one page of a person's accounts at other services that OpenBot
+        knows are theirs, such as their Slack or GitHub account, so a Bot
+        answering there knows who it is talking to. Only the person themselves
+        may list them; there is no administrator view. A missing cursor
+        starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [linked-accounts:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of linked accounts.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkedAccountPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/LinkedAccountPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LinkedAccountsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts/link:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [Linked accounts]
+      operationId: linkAccount
+      summary: Start linking an account
+      description: >-
+        Start linking one of the person's accounts at another service. Slack
+        answers a one-time code the person sends the OpenBot app in Slack,
+        which links the account they send it from. GitHub answers the address
+        of GitHub's own consent page, which sends the person back to OpenBot
+        once they agree. Either way the link is made when the person proves
+        the account is theirs, never here. Only the person themselves may
+        link their accounts, and only a service this deployment can link
+        (listLinkedAccountProviders).
+      security:
+        - webSession: []
+        - appOAuth: [linked-accounts:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkAccountRequest'
+            examples:
+              slack:
+                value:
+                  provider: slack
+      responses:
+        '200':
+          description: What the person does next to prove the account is theirs.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLinkStart'
+              examples:
+                slack:
+                  $ref: '#/components/examples/SlackLinkCodeExample'
+                github:
+                  $ref: '#/components/examples/GitHubLinkExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/LinkProviderUnavailable'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LinkedAccountsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts/{linkedAccountId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/LinkedAccountId'
+    delete:
+      tags: [Linked accounts]
+      operationId: deleteLinkedAccount
+      summary: Unlink an account
+      description: >-
+        Forget that an account at another service is the person's, and retire
+        the credential the link held. Only the person themselves may unlink
+        their accounts. An account already unlinked is not found, which a
+        client can read as done.
+      security:
+        - webSession: []
+        - appOAuth: [linked-accounts:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The account was unlinked.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/LinkedAccountNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LinkedAccountsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/linked-account-providers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Linked accounts]
+      operationId: listLinkedAccountProviders
+      summary: List the services a person can link
+      description: >-
+        Return the services this deployment can link a person's account at.
+        A service appears only when its way back to OpenBot is set up: Slack
+        needs the OpenBot app installed there, and GitHub needs OpenBot's
+        GitHub App. A missing cursor starts at the first page and nextCursor
+        null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [linked-accounts:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of services.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkedAccountProviderPage'
+              examples:
+                both:
+                  $ref: '#/components/examples/LinkedAccountProviderPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LinkedAccountsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/identity-providers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Identity providers]
+      operationId: listIdentityProviders
+      summary: List identity providers
+      description: >-
+        Return one page of the identity providers registered for single sign-on,
+        by email domain: a company's own SAML or OIDC provider, which signs in
+        everybody at its domain. Every administrator sees every provider,
+        whoever registered it. Never a client secret or a signing
+        certificate. Only an administrator may list them. A missing cursor
+        starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [identity-providers:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of identity providers.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityProviderPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/IdentityProviderPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags: [Identity providers]
+      operationId: createIdentityProvider
+      summary: Register an identity provider
+      description: >-
+        Register a company's identity provider, so everybody it vouches for at
+        its email domain can sign in. SAML takes the metadata the company's
+        identity team supplies; OIDC takes the issuer, which describes itself,
+        and a client. Only an administrator may register one, signed in to
+        OpenBot rather than with a key or an app's sign-in. The audit trail
+        records who registered it.
+      security:
+        - webSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdentityProviderRequest'
+            examples:
+              saml:
+                value:
+                  protocol: saml
+                  id: acme-okta
+                  domain: acme.com
+                  issuer: http://www.okta.com/exk1a2b3c4d5e6f7g8h9
+                  entryPoint: https://acme.okta.com/app/acme_openbot/exk1a2b3c4d5e6f7g8h9/sso/saml
+                  metadata: <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="http://www.okta.com/exk1a2b3c4d5e6f7g8h9"/>
+      responses:
+        '201':
+          description: The provider, registered.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            Location:
+              description: The new provider's address.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityProviderResponse'
+              examples:
+                saml:
+                  $ref: '#/components/examples/IdentityProviderExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SignedInAdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdentityProviderConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/identity-providers/{identityProviderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/IdentityProviderId'
+    delete:
+      tags: [Identity providers]
+      operationId: deleteIdentityProvider
+      summary: Remove an identity provider
+      description: >-
+        Remove an identity provider, whoever registered it, so nobody signs in
+        through it again. Only an administrator may remove one. A provider
+        already removed is not found.
+      security:
+        - webSession: []
+        - appOAuth: [identity-providers:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The provider was removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/IdentityProviderNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -635,6 +1760,12 @@ components:
             bots:write: Create, change and delete the signed-in person's Bots.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
             audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
+            people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
+            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, and for an administrator anybody's role and access.
+            linked-accounts:read: Read the signed-in person's linked accounts, and which services can be linked.
+            linked-accounts:write: Link and unlink the signed-in person's accounts at other services.
+            identity-providers:read: Read the organization's identity providers, when the signed-in person is an administrator.
+            identity-providers:write: Remove the organization's identity providers, when the signed-in person is an administrator.
     apiKey:
       type: http
       scheme: bearer
@@ -654,6 +1785,60 @@ components:
         type: string
         minLength: 1
       example: default
+    PersonId:
+      name: personId
+      in: path
+      required: true
+      description: >-
+        The person: me for the caller, or a person's id. A person's own
+        things (their instructions, preferences, API keys, sessions and
+        linked accounts) answer only the person themselves, by either.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: me
+    ApiKeyId:
+      name: apiKeyId
+      in: path
+      required: true
+      description: The API key's id. Never the key itself.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: The session's id. Never its token.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    LinkedAccountId:
+      name: linkedAccountId
+      in: path
+      required: true
+      description: The linked account's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    IdentityProviderId:
+      name: identityProviderId
+      in: path
+      required: true
+      description: The identity provider's id, as it was registered.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
     BotId:
       name: botId
       in: path
@@ -1407,6 +2592,592 @@ components:
             question. Null when the trail can't answer any of it.
         labels:
           $ref: '#/components/schemas/AuditFilterLabels'
+    PersonRole:
+      type: string
+      enum: [admin, user]
+      description: >-
+        What a person may do in the organization. An administrator governs
+        it: its people, its sign-in and its policy.
+    OnboardingStatus:
+      type: object
+      description: Where a person is in first-run onboarding.
+      required: [step, completedAt]
+      properties:
+        step:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          description: >-
+            The step they were last on, by the app's own number for it. 0 is
+            not started.
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When they finished it. Null until they do, which the apps read as onboarding still to do.
+    Person:
+      type: object
+      description: >-
+        Somebody in the organization. People are here because they signed in,
+        not because they were invited: the identity provider decides who
+        exists, and the organization decides what they may do. role,
+        needsName, revoked and configuredAdmin are the server's verdicts; a
+        client renders them and never recomputes them.
+      required:
+        - id
+        - email
+        - name
+        - image
+        - role
+        - needsName
+        - onboarding
+        - providers
+        - lastSignedInAt
+        - revoked
+        - configuredAdmin
+      properties:
+        id:
+          type: string
+          description: The person's id.
+        email:
+          type: string
+          description: The address they sign in with.
+        name:
+          type: [string, 'null']
+          description: What OpenBot calls them. Null when nothing has named them.
+        image:
+          type: [string, 'null']
+          description: The picture their identity provider gave, when it gave one.
+        role:
+          $ref: '#/components/schemas/PersonRole'
+        needsName:
+          type: boolean
+          description: >-
+            Whether they have still to choose what OpenBot calls them, because
+            their name is missing or is only their address.
+        onboarding:
+          description: >-
+            Where they are in first-run onboarding. Null where the deployment
+            does not track it, which the apps read as nothing to finish.
+          oneOf:
+            - $ref: '#/components/schemas/OnboardingStatus'
+            - type: 'null'
+        providers:
+          type: array
+          description: >-
+            The identity providers they have signed in through. More than one
+            is normal while a company moves between providers.
+          items:
+            type: string
+        lastSignedInAt:
+          type: [string, 'null']
+          format: date-time
+          description: When they last signed in. Null if never.
+        revoked:
+          type: boolean
+          description: >-
+            Whether an administrator removed their access. They keep their
+            record and their history.
+        configuredAdmin:
+          type: boolean
+          description: >-
+            Whether the deployment's configuration names them as an
+            administrator, which nobody can change here: they stay an
+            administrator and keep their access.
+    PersonPage:
+      type: object
+      required: [people, nextCursor]
+      properties:
+        people:
+          type: array
+          description: The most recently signed in first.
+          items:
+            $ref: '#/components/schemas/Person'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    PersonResponse:
+      type: object
+      required: [person]
+      properties:
+        person:
+          $ref: '#/components/schemas/Person'
+    GetPersonResponse:
+      type: object
+      required: [person, openbotVersion]
+      properties:
+        person:
+          $ref: '#/components/schemas/Person'
+        openbotVersion:
+          type: [string, 'null']
+          description: >-
+            The OpenBot release the server runs, such as v1.0.3, which the
+            apps show under the person's name. Null when the server was built
+            without one. Only ever given to somebody signed in.
+    UpdatePersonRequest:
+      type: object
+      description: The changes to make. At least one.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*$
+          description: >-
+            What OpenBot calls the person, 1 to 100 characters once trimmed.
+            Only the person themselves may change it.
+        role:
+          $ref: '#/components/schemas/PersonRole'
+    AdvanceOnboardingRequest:
+      type: object
+      additionalProperties: false
+      required: [step]
+      properties:
+        step:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          description: The step the person is now on, by the app's own number for it.
+    OnboardingResponse:
+      type: object
+      required: [onboarding]
+      properties:
+        onboarding:
+          $ref: '#/components/schemas/OnboardingStatus'
+    StandingInstructions:
+      type: object
+      description: >-
+        What a person tells every Bot that works for them, in their own words.
+        Empty means they wrote none.
+      additionalProperties: false
+      required: [instructions]
+      properties:
+        instructions:
+          type: string
+          maxLength: 4000
+          pattern: ^[^\x00]*$
+          description: At most 4,000 characters, kept trimmed.
+    MessageListEmphasis:
+      type: string
+      enum: [agent, thread]
+      description: What the conversation list leads with, the Bot or the conversation.
+    OnOff:
+      type: string
+      enum: ['on', 'off']
+    SkinId:
+      type: string
+      enum: [openbot, openduet, opendots, openfuse]
+      description: How OpenBot looks. openbot is OpenBot as it is without a skin.
+    Preferences:
+      type: object
+      description: How a person set OpenBot up for themselves, on every device they sign in from.
+      required:
+        - messageListEmphasis
+        - selfHostBannerDismissed
+        - narration
+        - skin
+        - proactive
+      properties:
+        messageListEmphasis:
+          $ref: '#/components/schemas/MessageListEmphasis'
+        selfHostBannerDismissed:
+          type: boolean
+          description: Whether they closed the banner offering help self-hosting OpenBot.
+        narration:
+          description: >-
+            Whether they narrate their recordings in OpenBot's browser, which
+            opens the microphone only when on. Null until they choose, which
+            the browser asks before their first recording.
+          oneOf:
+            - $ref: '#/components/schemas/OnOff'
+            - type: 'null'
+        skin:
+          $ref: '#/components/schemas/SkinId'
+        proactive:
+          $ref: '#/components/schemas/OnOff'
+          description: >-
+            Whether their Bots check in on their behalf at all. off stops
+            every Bot's check-ins, whatever each Bot's own setting says.
+        starterTourChannelId:
+          type: string
+          readOnly: true
+          description: >-
+            The conversation the starter tour is offered in, set by the server
+            when the person starts their first one. Absent until then.
+    UpdatePreferencesRequest:
+      type: object
+      description: The preferences to change. At least one; the rest stay as they are.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        messageListEmphasis:
+          $ref: '#/components/schemas/MessageListEmphasis'
+        selfHostBannerDismissed:
+          type: boolean
+        narration:
+          $ref: '#/components/schemas/OnOff'
+        skin:
+          $ref: '#/components/schemas/SkinId'
+        proactive:
+          $ref: '#/components/schemas/OnOff'
+    ApiKey:
+      type: object
+      description: An API key a person made. Never the key itself.
+      required: [id, name, start, createdAt, expiresAt, lastUsedAt]
+      properties:
+        id:
+          type: string
+          description: The key's id.
+        name:
+          type: [string, 'null']
+          description: What the person called it.
+        start:
+          type: [string, 'null']
+          description: The key's first characters, enough to tell keys apart.
+          example: obk_Xy
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it stops working. Null if it never expires.
+        lastUsedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it last signed a request. Null if never.
+    ApiKeyPage:
+      type: object
+      required: [apiKeys, nextCursor]
+      properties:
+        apiKeys:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/ApiKey'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    CreateApiKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: ^[^\x00]*$
+          description: What the key is for, so the person can tell it apart later.
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Days until the key stops working. Absent, it never expires.
+    CreatedApiKey:
+      type: object
+      required: [apiKey, key]
+      properties:
+        apiKey:
+          $ref: '#/components/schemas/ApiKey'
+        key:
+          type: string
+          description: >-
+            The key itself, to send as Authorization: Bearer. Shown in this
+            answer and never again.
+    Session:
+      type: object
+      description: Somewhere a person is signed in. Never the session's token.
+      required: [id, createdAt, lastActiveAt, expiresAt, ipAddress, userAgent, current]
+      properties:
+        id:
+          type: string
+          description: The session's id.
+        createdAt:
+          type: string
+          format: date-time
+          description: When they signed in.
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: When the session was last renewed.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When it ends unless it is used again.
+        ipAddress:
+          type: [string, 'null']
+          description: The address they signed in from, when it was known.
+        userAgent:
+          type: [string, 'null']
+          description: The browser or app they signed in with, as it named itself.
+        current:
+          type: boolean
+          description: Whether this request came on this session.
+    SessionPage:
+      type: object
+      required: [sessions, nextCursor]
+      properties:
+        sessions:
+          type: array
+          description: The most recently used first.
+          items:
+            $ref: '#/components/schemas/Session'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LinkedAccountProviderId:
+      type: string
+      enum: [slack, github]
+      description: A service a person can link an account at.
+    LinkedAccount:
+      type: object
+      description: >-
+        A person's account at another service, which OpenBot knows is theirs.
+        Never the credential it holds.
+      required: [id, provider, title, handle, status, createdAt]
+      properties:
+        id:
+          type: string
+          description: The link's id.
+        provider:
+          $ref: '#/components/schemas/LinkedAccountProviderId'
+        title:
+          type: string
+          description: The service's name, as a person reads it.
+        handle:
+          type: [string, 'null']
+          description: Who they are there, such as their GitHub login, when the service said.
+        status:
+          type: string
+          enum: [active, needs_reconnect]
+          description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
+        createdAt:
+          type: string
+          format: date-time
+    LinkedAccountPage:
+      type: object
+      required: [linkedAccounts, nextCursor]
+      properties:
+        linkedAccounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkedAccount'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LinkedAccountProvider:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          $ref: '#/components/schemas/LinkedAccountProviderId'
+        title:
+          type: string
+          description: The service's name, as a person reads it.
+    LinkedAccountProviderPage:
+      type: object
+      required: [linkedAccountProviders, nextCursor]
+      properties:
+        linkedAccountProviders:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkedAccountProvider'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LinkAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [provider]
+      properties:
+        provider:
+          $ref: '#/components/schemas/LinkedAccountProviderId'
+    SlackLinkCode:
+      type: object
+      description: A one-time code the person sends the OpenBot app in Slack.
+      required: [provider, code, expiresAt, instruction]
+      properties:
+        provider:
+          type: string
+          const: slack
+        code:
+          type: string
+          description: The code. It works once, and only for the person it was made for.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the code stops working.
+        instruction:
+          type: string
+          description: What to send, and where, as a person reads it.
+    GitHubAuthorization:
+      type: object
+      description: GitHub's consent page, which sends the person back to OpenBot once they agree.
+      required: [provider, authorizationUrl]
+      properties:
+        provider:
+          type: string
+          const: github
+        authorizationUrl:
+          type: string
+          format: uri
+          description: The address to open. Always GitHub's own authorize page, over HTTPS.
+    AccountLinkStart:
+      description: What the person does next, by service.
+      oneOf:
+        - $ref: '#/components/schemas/SlackLinkCode'
+        - $ref: '#/components/schemas/GitHubAuthorization'
+      discriminator:
+        propertyName: provider
+        mapping:
+          slack: '#/components/schemas/SlackLinkCode'
+          github: '#/components/schemas/GitHubAuthorization'
+    IdentityProviderProtocol:
+      type: string
+      enum: [saml, oidc]
+      description: How the provider speaks. SAML is what most companies' identity teams supply.
+    IdentityProvider:
+      type: object
+      description: >-
+        A company's own identity provider, registered for single sign-on at
+        its email domain. Never its client secret or signing certificate.
+      required: [id, issuer, domain, protocol, registeredBy]
+      properties:
+        id:
+          type: string
+          description: The provider's id, as it was registered.
+        issuer:
+          type: string
+          description: Who issues its sign-ins.
+        domain:
+          type: string
+          description: The email domain that sends somebody to it.
+        protocol:
+          $ref: '#/components/schemas/IdentityProviderProtocol'
+        registeredBy:
+          type: [string, 'null']
+          description: >-
+            The id of the person who registered it, while they still have an
+            account here. Null once they are gone; the provider stays.
+    IdentityProviderPage:
+      type: object
+      required: [identityProviders, nextCursor]
+      properties:
+        identityProviders:
+          type: array
+          description: By domain.
+          items:
+            $ref: '#/components/schemas/IdentityProvider'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    IdentityProviderResponse:
+      type: object
+      required: [identityProvider]
+      properties:
+        identityProvider:
+          $ref: '#/components/schemas/IdentityProvider'
+    IdentityProviderText:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      pattern: ^[^\x00]*\S[^\x00]*$
+    IdentityProviderAddress:
+      type: string
+      format: uri
+      minLength: 1
+      maxLength: 2048
+      pattern: ^https?://[^\x00\s]+$
+    SamlIdentityProviderRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol, id, domain, issuer, entryPoint, metadata]
+      properties:
+        protocol:
+          type: string
+          const: saml
+        id:
+          $ref: '#/components/schemas/NewIdentityProviderId'
+        domain:
+          $ref: '#/components/schemas/IdentityProviderDomains'
+        issuer:
+          $ref: '#/components/schemas/IdentityProviderAddress'
+        entryPoint:
+          $ref: '#/components/schemas/IdentityProviderAddress'
+        metadata:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: The provider's SAML metadata XML, as its identity team supplied it.
+    OidcIdentityProviderRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol, id, domain, issuer, clientId, clientSecret]
+      properties:
+        protocol:
+          type: string
+          const: oidc
+        id:
+          $ref: '#/components/schemas/NewIdentityProviderId'
+        domain:
+          $ref: '#/components/schemas/IdentityProviderDomains'
+        issuer:
+          $ref: '#/components/schemas/IdentityProviderAddress'
+        clientId:
+          $ref: '#/components/schemas/IdentityProviderText'
+        clientSecret:
+          $ref: '#/components/schemas/IdentityProviderText'
+    NewIdentityProviderId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*\S[^\x00]*$
+      description: An id for the provider, unique in the organization, such as acme-okta.
+    IdentityProviderDomains:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      pattern: ^[^\x00]*\S[^\x00]*$
+      description: >-
+        The email domain whose people it signs in, such as acme.com. Several
+        are separated by commas.
+    CreateIdentityProviderRequest:
+      description: A SAML or an OIDC provider, by protocol.
+      oneOf:
+        - $ref: '#/components/schemas/SamlIdentityProviderRequest'
+        - $ref: '#/components/schemas/OidcIdentityProviderRequest'
+      discriminator:
+        propertyName: protocol
+        mapping:
+          saml: '#/components/schemas/SamlIdentityProviderRequest'
+          oidc: '#/components/schemas/OidcIdentityProviderRequest'
     Problem:
       type: object
       description: >-
@@ -1749,6 +3520,338 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidPerson:
+      description: >-
+        The change is empty, names something a person doesn't have, or the
+        name is blank or longer than 100 characters once trimmed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            name:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Enter a name between 1 and 100 characters.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    PersonForbidden:
+      description: >-
+        The caller asked about or changed somebody else without being an
+        administrator, changed somebody else's name, or changed a role
+        without being an administrator.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can see someone else's account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            name:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can change their name.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OwnOnly:
+      description: >-
+        The caller asked about somebody else's own things, which only that
+        person may read or change: an administrator can't either.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see their standing instructions.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SignedInOwnOnly:
+      description: >-
+        The caller asked about somebody else's API keys or sessions, or signed
+        the request with an API key or an app's sign-in rather than signing
+        in to OpenBot.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see their API keys.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An API key or an app can't manage API keys or sessions. Sign in to OpenBot to do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SignedInAdminOnly:
+      description: >-
+        The caller is not an administrator, or signed the request with an API
+        key or an app's sign-in rather than signing in to OpenBot.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    PersonNotFound:
+      description: >-
+        Nobody with that id has signed in here, or the organization does not
+        exist. Only an administrator is told so: anybody else is refused
+        first.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/person-not-found
+                title: Person not found.
+                status: 404
+                detail: That person is not here.
+                code: PERSON_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    PersonConflict:
+      description: >-
+        The change would leave the organization without a way back in: an
+        administrator removing their own role or access, or a change to
+        somebody the deployment's configuration names as an administrator.
+        Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            ownRole:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You can't remove your own admin role.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ApiKeyNotFound:
+      description: The person has no such API key, it was deleted, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/api-key-not-found
+                title: API key not found.
+                status: 404
+                detail: Couldn't find that API key.
+                code: API_KEY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SessionNotFound:
+      description: The person has no such session, it ended, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/session-not-found
+                title: Session not found.
+                status: 404
+                detail: Couldn't find that session. It may have ended already.
+                code: SESSION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LinkedAccountNotFound:
+      description: >-
+        The person has no such linked account: it was unlinked already, or
+        never was. Or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/linked-account-not-found
+                title: Linked account not found.
+                status: 404
+                detail: Linked account not found.
+                code: LINKED_ACCOUNT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LinkProviderUnavailable:
+      description: >-
+        This deployment can't link an account at that service, or the
+        organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/link-provider-unavailable
+                title: That account type can't be linked here.
+                status: 404
+                detail: That account type cannot be linked here.
+                code: LINK_PROVIDER_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LinkedAccountsUnavailable:
+      description: >-
+        This deployment keeps no linked accounts at all. The apps read this
+        as nothing to show, unlike any other 503.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/linked-accounts-unavailable
+                title: Linked accounts aren't available here.
+                status: 503
+                detail: Linked accounts are not available.
+                code: LINKED_ACCOUNTS_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    IdentityProviderNotFound:
+      description: No identity provider has that id, it was removed, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/identity-provider-not-found
+                title: Identity provider not found.
+                status: 404
+                detail: There is no such provider.
+                code: IDENTITY_PROVIDER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    IdentityProviderConflict:
+      description: >-
+        A provider with that id is registered already, or the Idempotency-Key
+        was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            taken:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: An identity provider with that name is registered already. Choose another name.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SignInUnavailable:
+      description: >-
+        This deployment signs nobody in, as OpenBot Desktop runs for one
+        person, so it has no API keys and no single sign-on to set up.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            single:
+              value:
+                type: https://open.bot/errors/sign-in-unavailable
+                title: This OpenBot signs nobody in.
+                status: 503
+                detail: This OpenBot signs nobody in, so it has no API keys.
+                code: SIGN_IN_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:
@@ -1969,3 +4072,196 @@ components:
           needsApproval:
             - serverId: composio-gmail
               title: Gmail
+    PersonPageLast:
+      summary: An administrator's list, on one page.
+      value:
+        people:
+          - id: 8kq2m4x7p1rvz3a9c5d0
+            email: dana.whitfield@acme.com
+            name: Dana Whitfield
+            image: null
+            role: admin
+            needsName: false
+            onboarding:
+              step: 3
+              completedAt: '2026-11-02T16:20:11.000Z'
+            providers: [microsoft]
+            lastSignedInAt: '2026-11-14T08:55:02.000Z'
+            revoked: false
+            configuredAdmin: true
+          - id: 2fn8w1c6y4tq7h0mbe3s
+            email: sam.ortiz@acme.com
+            name: Sam Ortiz
+            image: null
+            role: user
+            needsName: false
+            onboarding:
+              step: 3
+              completedAt: '2026-11-05T10:02:47.000Z'
+            providers: [microsoft]
+            lastSignedInAt: '2026-11-13T17:41:30.000Z'
+            revoked: false
+            configuredAdmin: false
+        nextCursor: null
+    MePerson:
+      summary: The caller, asked for as me.
+      value:
+        person:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: user
+          needsName: false
+          onboarding:
+            step: 3
+            completedAt: '2026-11-05T10:02:47.000Z'
+          providers: [microsoft]
+          lastSignedInAt: '2026-11-13T17:41:30.000Z'
+          revoked: false
+          configuredAdmin: false
+        openbotVersion: v1.0.3
+    ChangedPerson:
+      summary: The person as it now stands.
+      value:
+        person:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: user
+          needsName: false
+          onboarding:
+            step: 3
+            completedAt: '2026-11-05T10:02:47.000Z'
+          providers: [microsoft]
+          lastSignedInAt: '2026-11-13T17:41:30.000Z'
+          revoked: false
+          configuredAdmin: false
+    RemovedPerson:
+      summary: Removed, with their record kept.
+      value:
+        person:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: user
+          needsName: false
+          onboarding:
+            step: 3
+            completedAt: '2026-11-05T10:02:47.000Z'
+          providers: [microsoft]
+          lastSignedInAt: '2026-11-13T17:41:30.000Z'
+          revoked: true
+          configuredAdmin: false
+    StandingInstructionsExample:
+      summary: Instructions in the person's own words.
+      value:
+        instructions: Keep answers short. I'm in London, so use British spelling and 24-hour times.
+    PreferencesExample:
+      summary: Everything as it starts.
+      value:
+        messageListEmphasis: thread
+        selfHostBannerDismissed: false
+        narration: null
+        skin: openbot
+        proactive: 'on'
+    ApiKeyPageLast:
+      summary: Every key the person made, on one page.
+      value:
+        apiKeys:
+          - id: 4b2c9e71d0a84f6b
+            name: Nightly report
+            start: obk_Xy
+            createdAt: '2026-11-14T09:00:00.000Z'
+            expiresAt: '2027-02-12T09:00:00.000Z'
+            lastUsedAt: '2026-11-14T09:05:12.000Z'
+        nextCursor: null
+    CreatedApiKeyExample:
+      summary: A key, made.
+      value:
+        apiKey:
+          id: 4b2c9e71d0a84f6b
+          name: Nightly report
+          start: obk_Xy
+          createdAt: '2026-11-14T09:00:00.000Z'
+          expiresAt: '2027-02-12T09:00:00.000Z'
+          lastUsedAt: null
+        key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
+    SessionPageLast:
+      summary: Signed in on a laptop and a phone.
+      value:
+        sessions:
+          - id: s3c9f2a1b7d4e6081
+            createdAt: '2026-11-14T08:55:02.000Z'
+            lastActiveAt: '2026-11-14T08:55:02.000Z'
+            expiresAt: '2026-11-21T08:55:02.000Z'
+            ipAddress: 203.0.113.24
+            userAgent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
+            current: true
+          - id: s7e1d4b9c2a6f3058
+            createdAt: '2026-11-10T19:12:40.000Z'
+            lastActiveAt: '2026-11-12T07:31:18.000Z'
+            expiresAt: '2026-11-19T07:31:18.000Z'
+            ipAddress: 198.51.100.7
+            userAgent: OpenBot/1.0.3 (iPhone; iOS 19.1)
+            current: false
+        nextCursor: null
+    LinkedAccountPageLast:
+      summary: A person's Slack and GitHub accounts.
+      value:
+        linkedAccounts:
+          - id: 9d3f1c2e-6b7a-4e8d-a1c4-2f5e7b9d0a13
+            provider: github
+            title: GitHub
+            handle: sortiz
+            status: active
+            createdAt: '2026-11-06T11:20:00.000Z'
+          - id: 0c8e2a4f-1d3b-4f6a-9e7c-5b2d8f0a6c41
+            provider: slack
+            title: Slack
+            handle: null
+            status: active
+            createdAt: '2026-11-07T14:02:31.000Z'
+        nextCursor: null
+    LinkedAccountProviderPageLast:
+      summary: Both services, on one page.
+      value:
+        linkedAccountProviders:
+          - id: slack
+            title: Slack
+          - id: github
+            title: GitHub
+        nextCursor: null
+    SlackLinkCodeExample:
+      summary: A code to send in Slack.
+      value:
+        provider: slack
+        code: K7Q2-M9XD
+        expiresAt: '2026-11-14T09:15:00.000Z'
+        instruction: 'Send this message to the OpenBot app in a direct message in Slack: link K7Q2-M9XD'
+    GitHubLinkExample:
+      summary: GitHub's consent page.
+      value:
+        provider: github
+        authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
+    IdentityProviderPageLast:
+      summary: One provider, on one page.
+      value:
+        identityProviders:
+          - id: acme-okta
+            issuer: http://www.okta.com/exk1a2b3c4d5e6f7g8h9
+            domain: acme.com
+            protocol: saml
+            registeredBy: 8kq2m4x7p1rvz3a9c5d0
+        nextCursor: null
+    IdentityProviderExample:
+      summary: A SAML provider, registered.
+      value:
+        identityProvider:
+          id: acme-okta
+          issuer: http://www.okta.com/exk1a2b3c4d5e6f7g8h9
+          domain: acme.com
+          protocol: saml
+          registeredBy: 8kq2m4x7p1rvz3a9c5d0
