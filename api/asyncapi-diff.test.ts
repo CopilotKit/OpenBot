@@ -71,7 +71,9 @@ test.skipIf(!installed)(
     const failed = failing(differences(SPEC, head)).map(
       (change) => `${change.action} ${change.path}`,
     );
-    expect(failed).toContain("remove /channels/legacyBotScreen/messages/screenText");
+    expect(failed).toContain(
+      "remove /channels/legacyBotScreen/messages/screenText",
+    );
   },
   slow,
 );
