@@ -159,7 +159,8 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   requests.push({ path, method, body });
-  const computer = `/api/computers/${encodeURIComponent(botId)}`;
+  // The Bot's computer in the API: who is driving it, its screen and its state.
+  const computer = `/api/v2/organizations/default/computers/${encodeURIComponent(botId)}`;
   const mine = answer().mine;
 
   if (path === ME_PATH)
@@ -218,8 +219,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       capturedAt: SINCE,
       url: "https://expenses.example/report",
     });
-  if (path === `${computer}/status`)
-    return Response.json({ botId, state: "ready" });
+  if (path === computer) return Response.json({ botId, state: "ready" });
 
   if (path === botBrowserApiPaths.state(botId) && method === "GET")
     return Response.json(answer());

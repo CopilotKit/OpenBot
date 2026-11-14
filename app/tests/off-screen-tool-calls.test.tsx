@@ -248,14 +248,14 @@ async function components(path: string, request: Request): Promise<Response> {
 /** A Bot's computer. Only the crm Bot's answers; any other id is a computer that is not there. */
 function computer(path: string): Response {
   computerCalls.push(path);
-  if (path === `/api/computers/${BOT}/navigate`)
+  if (path === `/api/v2/organizations/default/computers/${BOT}/navigate`)
     return NativeResponse.json({
       ok: true,
       url: "https://crm.example/accounts/northwind",
       title: "Northwind Traders",
       text: "Northwind Traders. Renewal due.",
     });
-  if (path === `/api/computers/${BOT}/status`)
+  if (path === `/api/v2/organizations/default/computers/${BOT}`)
     return NativeResponse.json({ botId: BOT, state: "ready" });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }
@@ -315,7 +315,7 @@ beforeAll(() => {
         "http://localhost",
       );
       const request = input instanceof Request ? input : new Request(url, init);
-      if (url.pathname.startsWith("/api/computers/"))
+      if (url.pathname.startsWith("/api/v2/organizations/default/computers/"))
         return computer(url.pathname);
       if (url.pathname.startsWith("/api/components/"))
         return components(url.pathname, request);
@@ -607,9 +607,14 @@ test("a page the Bot opens after its person has left is opened on that Bot's com
   };
   await leaveBeforeTheCall("elsewhere");
 
-  expect(computerCalls).toContain(`/api/computers/${BOT}/navigate`);
+  expect(computerCalls).toContain(
+    `/api/v2/organizations/default/computers/${BOT}/navigate`,
+  );
   expect(
-    computerCalls.filter((path) => !path.startsWith(`/api/computers/${BOT}/`)),
+    computerCalls.filter(
+      (path) =>
+        !path.startsWith(`/api/v2/organizations/default/computers/${BOT}`),
+    ),
   ).toEqual([]);
   expect(JSON.parse(result())).toMatchObject({
     ok: true,

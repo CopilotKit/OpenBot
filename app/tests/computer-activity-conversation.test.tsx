@@ -349,8 +349,15 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`)) {
-        const route = url.pathname.replace(`/api/computers/${bot}`, "");
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      ) {
+        const route = url.pathname.replace(
+          `/api/v2/organizations/default/computers/${bot}`,
+          "",
+        );
         direct.push(route);
         // A read goes straight to the computer, which answers as `agent-computer` does.
         if (route === "/files/read")
@@ -360,7 +367,7 @@ beforeAll(() => {
             truncated: false,
             bytes: 9,
           });
-        if (route === "/status")
+        if (route === "")
           return NativeResponse.json({ botId: bot, state: "ready" });
         // Opening a page, as `agent-computer` answers it: where it landed, its title and its text.
         if (route === "/navigate")

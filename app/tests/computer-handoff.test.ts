@@ -76,8 +76,8 @@ test("exact request completion takes a fresh snapshot before returning", async (
     snapshotId: 42,
   });
   expect(requests.map((r) => r.path)).toEqual([
-    "/api/computers/bot-1/control?requestId=request-1",
-    "/api/computers/bot-1/snapshot",
+    "/api/v2/organizations/default/computers/bot-1/control?requestId=request-1",
+    "/api/v2/organizations/default/computers/bot-1/snapshot",
   ]);
 });
 
@@ -171,11 +171,11 @@ test("manual takeover first creates a request and take/release name that ID", as
   await releaseControl("bot-1", "request-1");
   expect(requests.map((r) => [r.path, r.body])).toEqual([
     [
-      "/api/computers/bot-1/control/request",
+      "/api/v2/organizations/default/computers/bot-1/control/request",
       // A person's own take, said so, so its reason is never shown back to them as the Bot's.
       { reason: "I want to take control of the browser.", source: "manual" },
     ],
-    ["/api/computers/bot-1/control/take", { requestId: "request-1" }],
-    ["/api/computers/bot-1/control/release", { requestId: "request-1" }],
+    ["/api/v2/organizations/default/computers/bot-1/control/take", { requestId: "request-1" }],
+    ["/api/v2/organizations/default/computers/bot-1/control/release", { requestId: "request-1" }],
   ]);
 });
