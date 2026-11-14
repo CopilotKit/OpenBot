@@ -1364,10 +1364,16 @@ pub const MINTED: [&str; 7] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 9] = [
+pub const REMOVED_WHEN_UNSET: [&str; 12] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
+    // What earlier Desktops wrote for the two Bots that shipped in their own containers, agent-bot
+    // and agent-langgraph: a host port and an image for the first, an image for the second. Neither
+    // Bot exists now, and nothing reads these.
+    "BOT_PORT",
+    "BOT_IMAGE",
+    "LANGGRAPH_IMAGE",
     // What earlier Desktops wrote for the host-side Chrome they ran beside the server: its port, its
     // address (the host's and the server container's), and why there was none. Desktop runs no such
     // browser now, and a server still pointed at one shows the person a separate window, or a port
@@ -2266,6 +2272,51 @@ HTTPS_PROXY=http://proxy:8080
         write(&path, &settings, &purge).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("OPENBOT_ORGANIZATION_AUTH_URL"), "{text}");
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An installation updated from a release that shipped agent-bot and agent-langgraph still has
+    /// their settings in `.env`: a port and an image for the first, an image for the second. A Start
+    /// takes them out, keeps the ports it still chooses and leaves a person's own lines alone.
+    #[test]
+    fn a_start_takes_out_the_settings_of_the_two_retired_bots() {
+        let dir = temp_root("env-retired-bots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "BOT_PORT=4200\n\
+             LANGGRAPH_PORT=4201\n\
+             BOT_IMAGE=ghcr.io/copilotkit/openbot-agent-bot@sha256:00\n\
+             LANGGRAPH_IMAGE=ghcr.io/copilotkit/openbot-agent-langgraph@sha256:00\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        let ports = Ports::read(&dir).unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for gone in ["BOT_PORT=", "BOT_IMAGE=", "LANGGRAPH_IMAGE="] {
+            assert!(
+                !text.lines().any(|line| line.starts_with(gone)),
+                "{gone} survived: {text}"
+            );
+        }
+        assert!(text.contains("LANGGRAPH_PORT=4201"), "{text}");
         assert!(text.contains("MY_OWN=kept"), "{text}");
         std::fs::remove_dir_all(dir).unwrap();
     }
