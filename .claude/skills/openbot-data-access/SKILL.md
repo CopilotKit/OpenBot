@@ -174,8 +174,10 @@ factories already hold.
    unwraps the key so the caller receives the payload rather than the wrapper:
 
    ```ts
-   queryFn: (): Promise<PluginStatus[]> =>
-     client("/api/plugins", "plugins", { fallback: "Could not load apps" }),
+   queryFn: (): Promise<LearningSettings> =>
+     client("/api/admin/learning/settings", "settings", {
+       fallback: "Learning settings could not be loaded.",
+     }),
    ```
 
    Where the whole body is the payload, omit the key and read it: `(await client(path, { fallback
@@ -208,8 +210,12 @@ factories already hold.
    error extraction, and one of the four had quietly dropped the extraction. `client` owns it now:
 
    ```ts
-   mutationFn: (input: CustomServerInput): Promise<PluginStatus> =>
-     client("/api/plugins/servers/custom", "plugin", { method: "POST", body: input, fallback: FALLBACK }),
+   mutationFn: (settings: LearningSettings): Promise<LearningSettings> =>
+     client("/api/admin/learning/settings", "settings", {
+       method: "PUT",
+       body: settings,
+       fallback: FALLBACK,
+     }),
    ```
 
    Where the write returns nothing a caller needs, omit the key and `await client(path, { ... })`.
@@ -368,7 +374,7 @@ factories already hold.
   The one place a 401 is expected is `currentUserQueryOptions`, which uses `tryClient` because not
   being signed in is an answer there rather than a failure.
 - **The server returns no `error` field**: `client` falls back to the `fallback` option. Name the
-  entity in it ("Could not load apps"). Do not print a status code to a person.
+  entity in it ("Learning settings could not be loaded."). Do not print a status code to a person.
 - **A refusal arrives as a thrown `Error` instead of a value**: the call site used `client` where it
   needed `tryClient`. The gateway declining is the product working, not a fault.
 - **The server rejects a body it should accept, or reads it as a string**: something stringified

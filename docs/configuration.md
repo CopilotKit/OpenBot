@@ -570,8 +570,9 @@ the real person with only their access, never a shared service account. An admin
 server by URL and marks it with the system's Entra scope:
 
 ```http
-POST /api/plugins/servers/custom
-{ "id": "hr", "title": "HR", "url": "https://hr.example.com/mcp", "entraScope": "api://hr-api/.default" }
+PUT /api/v2/organizations/{organizationId}/apps/hr
+Idempotency-Key: <a key of your own>
+{ "title": "HR", "url": "https://hr.example.com/mcp", "entraScope": "api://hr-api/.default" }
 ```
 
 Each call then goes out with a token Entra issues for the person asking, through Microsoft's

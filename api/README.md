@@ -21,6 +21,9 @@ not touch the same lines:
 | `notifications.yaml` | Devices, destinations, deliveries and notification settings |
 | `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
 | `skills.yaml` | Skills |
+| `apps.yaml` | The apps added to OpenBot, the app directory, app setup and each app's account mode and OAuth client |
+| `connections.yaml` | A person's connections to apps and their accounts, and an app's shared connection |
+| `bot-grants.yaml` | What a Bot was given: its grants and apps, giving and taking back an app, and app access requests |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
 | `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |
