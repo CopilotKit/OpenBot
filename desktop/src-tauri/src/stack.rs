@@ -9532,8 +9532,13 @@ fn main() {
         }
         let current = include_str!("../../../docker-compose.yml");
         assert_eq!(compose_services_behind(current, OLDER_APPS_PROFILE), kept);
-        // In 1.0.2's file both are services it runs, and they keep their ports there.
-        assert!(compose_services_behind(RELEASED_COMPOSE_1_0_2, OLDER_APPS_PROFILE).is_empty());
+        // In 1.0.2's file and 1.0.3's both are services it runs, and they keep their ports there.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(
+                compose_services_behind(compose, OLDER_APPS_PROFILE).is_empty(),
+                "{release}"
+            );
+        }
         assert!(compose_services_behind(current, "openbot").contains(&"server".to_owned()));
 
         let root = temp_root("compose-kept-for-older-apps");
@@ -9545,7 +9550,7 @@ fn main() {
         for service in kept {
             assert!(!SERVICES.contains(&service), "{service} is started");
             assert!(
-                !selected_services(true).contains(&service),
+                !selected_services(&root, true).contains(&service),
                 "{service} is started"
             );
             for overlay in [&ports, &harness] {
@@ -10065,8 +10070,12 @@ fn main() {
             .collect();
         assert!(compose.len() >= 5, "{log}");
         for command in &compose {
+            // Nor either service kept behind the profile for older apps.
             for word in command.split(' ') {
-                assert!(word != "migrate" && word != "worker", "{command}");
+                assert!(
+                    !["migrate", "worker", "agent-bot", "agent-langgraph"].contains(&word),
+                    "{command}"
+                );
             }
         }
         assert_eq!(

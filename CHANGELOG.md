@@ -38,7 +38,10 @@ every deployment:
   over one, they stopped with "container-images.json for … names no agent-bot image". For one
   release, `container-images.json` names `agent-bot` and `agent-langgraph` again, both as the
   server image, and `docker-compose.yml` defines two services of those names that nothing starts.
-  Nothing more is downloaded or run. Both are dropped in the release after.
+  Nothing more is downloaded or run. Everything kept for those apps for this one release is
+  dropped together in the release after: those two `container-images.json` entries and the two
+  services of their names, the `worker` and `migrate` services `docker-compose.yml` still defines
+  (below), the two commands they run in the server image, and the `routine_sweeps` table.
 - **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
   menu, it could seem to do nothing for a few seconds and then close the app, after saving the
   file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
@@ -233,7 +236,8 @@ has to stop.
 
 `docker-compose.yml` still defines both services, for this one release, doing nothing: an OpenBot
 Desktop app from the release before reads a Compose file as current only when it defines `worker`,
-and asks for `migrate`'s image by name. Both go in the next release. What tells this file from an
+and asks for `migrate`'s image by name. Both go in the release after, with the rest of what is
+kept for those apps (under OpenBot Desktop, above). What tells this file from an
 earlier release's is one top-level line in it, `x-openbot-scheduled-work: server`.
 
 - **OpenBot Desktop** reads that line in the installed Compose file. An installation still on the
