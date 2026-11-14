@@ -49,11 +49,18 @@ const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
+/** What the window told the log as each `run_local_eval` answer reached it. */
+const answerNotes: unknown[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     // Asked every second while a CLI call runs: not a step of the sequence.
     if (command === "local_eval_steps") return Promise.resolve(localSteps);
+    // What the window tells the log when an answer reaches it: not a step either.
+    if (command === "local_eval_answer_landed") {
+      answerNotes.push(args);
+      return Promise.resolve(null);
+    }
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
