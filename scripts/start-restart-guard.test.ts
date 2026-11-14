@@ -813,7 +813,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain("/.openbot; showing it the folder");
     expect(result.stdout).toContain("server ready");
     expect(result.dockerLog).toMatch(
-      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot-server:sha-pinned-for-the-test /,
+      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot:sha-pinned-for-the-test /,
     );
     expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(2);
   });

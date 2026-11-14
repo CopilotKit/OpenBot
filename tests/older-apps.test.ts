@@ -16,8 +16,15 @@ import { parse } from "yaml";
  * The 1.0.2 and 1.0.3 apps, put back over an installation a newer app updated, must start it as it
  * is, for one release. Both stopped with "container-images.json for <release> names no agent-bot
  * image", and on a Mac with Podman they would then have met Compose's refusal of their port
- * overlay. So this release's manifest still names `agent-bot` and `agent-langgraph`, as the server
- * image, and its Compose file still defines both services, started by nothing.
+ * overlay. So this release's manifest still names `agent-bot` and `agent-langgraph`, as the image
+ * the server runs from, and its Compose file still defines both services, started by nothing.
+ *
+ * That image is the OpenBot image, which runs the server and every Bot's computer, each started
+ * with its own command. Those apps ask for a `server` image and an `agent-computer` image, so the
+ * manifest names the one image under both, and under the two names kept for them: one image behind
+ * all five names they read but the supervisor's. They start `server`, `agent-computer`, `worker`
+ * and `migrate` by name, with no command of their own, so this release's Compose file gives each
+ * the executable and the command for its part.
  *
  * What those apps require is read from fixtures taken byte for byte from their tags, and checked
  * against the manifest and the Compose file this repository writes.
@@ -26,6 +33,8 @@ const root = join(import.meta.dir, "..");
 const fixtures = join(root, "desktop/src-tauri/test-fixtures/older-apps");
 const TAGS = ["v1.0.2", "v1.0.3"] as const;
 const KEPT = ["agent-bot", "agent-langgraph"];
+/** The names an app reads the server's image and the computer's under: both the OpenBot image. */
+const ONE_IMAGE = ["server", "agent-computer"];
 
 const work = mkdtempSync(join(tmpdir(), "openbot-older-apps-"));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
@@ -79,12 +88,12 @@ function olderAppPin(tag: string, manifest: Manifest): Record<string, string> {
 const digest = (name: string) =>
   `sha256:${new Bun.CryptoHasher("sha256").update(name).digest("hex")}`;
 
-/** The four images a release pins and the ones it builds, as the jobs before `manifest` record them. */
+/** The two images a release pins and the ones it builds, as the jobs before `manifest` record them. */
 function componentManifests(directory: string) {
   const built = JSON.parse(
     readFileSync(join(root, ".github/published-images.json"), "utf8"),
   ) as string[];
-  const pinned = ["openbot", "server", "agent-computer", "supervisor"];
+  const pinned = ["openbot", "supervisor"];
   mkdirSync(join(directory, "manifests"), { recursive: true });
   for (const name of [...pinned, ...built]) {
     const image = name === "openbot" ? "openbot" : `openbot-${name}`;
@@ -160,22 +169,28 @@ test.skipIf(!jq)(
   "the manifest a release writes is one the 1.0.2 and 1.0.3 apps accept",
   () => {
     const manifest = releaseManifest();
-    const server = manifest.images.server;
-    expect(server?.reference).toBe(
-      `ghcr.io/copilotkit/openbot-server@${digest("server")}`,
+    const openbot = manifest.images.openbot;
+    expect(openbot?.reference).toBe(
+      `ghcr.io/copilotkit/openbot@${digest("openbot")}`,
     );
     for (const tag of TAGS) {
       const pinned = olderAppPin(tag, manifest);
-      expect(pinned.BOT_IMAGE).toBe(server.reference);
-      expect(pinned.LANGGRAPH_IMAGE).toBe(server.reference);
-      expect(pinned.SERVER_IMAGE).toBe(server.reference);
+      // The one image behind every name those apps read, but the supervisor's.
+      expect(pinned.SERVER_IMAGE).toBe(openbot.reference);
+      expect(pinned.COMPUTER_IMAGE).toBe(openbot.reference);
+      expect(pinned.BOT_IMAGE).toBe(openbot.reference);
+      expect(pinned.LANGGRAPH_IMAGE).toBe(openbot.reference);
+      expect(pinned.SUPERVISOR_IMAGE).toBe(
+        `ghcr.io/copilotkit/openbot-supervisor@${digest("supervisor")}`,
+      );
     }
-    // The server image under two more names: the same repository, digest and reference.
-    for (const name of KEPT) expect(manifest.images[name]).toEqual(server);
+    // The OpenBot image under four more names: the same repository, digest and reference.
+    for (const name of [...ONE_IMAGE, ...KEPT])
+      expect(manifest.images[name]).toEqual(openbot);
     // And no image more than the ones that were built or pinned, so nothing more to copy or pull.
     const { built, pinned } = componentManifests(join(work, "counted"));
     expect(Object.keys(manifest.images).sort()).toEqual(
-      [...built, ...pinned, ...KEPT].sort(),
+      [...built, ...pinned, ...ONE_IMAGE, ...KEPT].sort(),
     );
     expect(
       new Set(Object.values(manifest.images).map((image) => image.reference))
@@ -250,6 +265,8 @@ test.skipIf(!jq)(
   },
 );
 
+const OPENBOT_IMAGE = `ghcr.io/copilotkit/openbot@${digest("openbot")}`;
+
 /**
  * `docker compose config` over this release's file and the overlay an older app writes beside it
  * on a Mac with Podman, with that app's profile. It reads files only: no engine, no containers.
@@ -261,15 +278,22 @@ function config(tag: string, composeFile: string, ...args: string[]) {
     join(fixtures, `macos-podman-ports-${tag}.yml`),
     join(directory, ".openbot-macos-podman.yml"),
   );
-  const image = (name: string) =>
-    `ghcr.io/copilotkit/openbot-${name}@${digest(name)}`;
+  // As a release's manifest has them: one image for the server and the computer, and the
+  // supervisor's own.
   const manifest = {
     version: "v9.9.9",
     commit: "0".repeat(40),
     images: Object.fromEntries(
-      ["server", "supervisor", "agent-computer"].map((name) => [
+      [
+        ["server", OPENBOT_IMAGE],
+        ["agent-computer", OPENBOT_IMAGE],
+        [
+          "supervisor",
+          `ghcr.io/copilotkit/openbot-supervisor@${digest("supervisor")}`,
+        ],
+      ].map(([name, reference]) => [
         name,
-        { repository: "", digest: "", reference: image(name) },
+        { repository: "", digest: "", reference },
       ]),
     ),
   };
@@ -332,7 +356,16 @@ test.skipIf(!compose)(
       expect({ tag, said: started.stderr }).toEqual({ tag, said: "" });
       const services = (
         JSON.parse(started.stdout) as {
-          services: Record<string, { image: string; ports?: unknown[] }>;
+          services: Record<
+            string,
+            {
+              image: string;
+              ports?: unknown[];
+              entrypoint?: string[] | null;
+              command?: string[] | null;
+              working_dir?: string;
+            }
+          >;
         }
       ).services;
       expect(Object.keys(services).sort()).toEqual([
@@ -342,9 +375,35 @@ test.skipIf(!compose)(
         "server",
         "worker",
       ]);
-      expect(services.server?.image).toBe(
-        `ghcr.io/copilotkit/openbot-server@${digest("server")}`,
+      // One image for all four, and each started as its own part of it. The app names the
+      // service and no command, so the executable and the command are this file's to give: with
+      // neither, the image would start the whole of OpenBot in each of the four containers.
+      const startedAs = Object.fromEntries(
+        ["server", "agent-computer", "worker", "migrate"].map((name) => [
+          name,
+          {
+            image: services[name]?.image,
+            runs: [
+              ...(services[name]?.entrypoint ?? []),
+              ...(services[name]?.command ?? []),
+            ],
+          },
+        ]),
       );
+      expect(startedAs).toEqual({
+        server: { image: OPENBOT_IMAGE, runs: ["/app/bin/openbot", "server"] },
+        "agent-computer": {
+          image: OPENBOT_IMAGE,
+          runs: ["/app/bin/openbot-computer"],
+        },
+        worker: { image: OPENBOT_IMAGE, runs: ["/app/bin/openbot", "worker"] },
+        migrate: {
+          image: OPENBOT_IMAGE,
+          runs: ["/app/bin/openbot", "migrate"],
+        },
+      });
+      for (const name of ["server", "worker", "migrate"])
+        expect(services[name]?.working_dir).toBe("/app/server");
       // The overlay did its work: IPv4 loopback alone, as Podman on a Mac needs.
       expect(JSON.stringify(services.server?.ports)).not.toContain("::1");
     }
@@ -371,7 +430,7 @@ test.skipIf(!compose)(
   30_000,
 );
 
-test("both services are kept behind a profile nothing turns on, on the server image", () => {
+test("both services are kept behind a profile nothing turns on, on the image the server runs from", () => {
   const services = (
     parse(composeFile()) as {
       services: Record<

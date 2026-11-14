@@ -4818,6 +4818,30 @@ mod tests {
 
     use crate::test_support::temp_root;
 
+    /// A release whose server and computer are one image: its image list names the same reference
+    /// for both, and Compose answers `config --images` with a line for every service, so that
+    /// reference comes back once for each service on it. Install is handed it once, which is what
+    /// it then sizes, pulls and looks for on the computer.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_two_services_run_is_one_image_to_install() {
+        let root = temp_root("stack-one-image-two-services");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "x-openbot-scheduled-work: server\nservices:\n  postgres: {}\n  agent-computer: {}\n  server: {}\n",
+        )
+        .unwrap();
+        let one = "ghcr.io/copilotkit/openbot@sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        // Compose, as far as this asks of it: the lines it prints for these three services.
+        let script = format!("printf '%s\\n' pgvector/pgvector:pg17 {one} {one}");
+        let mut compose = Command::new("sh");
+        compose.args(["-c", script.as_str(), "compose"]);
+        let images = installation_images_by(compose, &root, &root, false).unwrap();
+        assert_eq!(images, [one, "pgvector/pgvector:pg17"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
         let secrets = Secrets::from([

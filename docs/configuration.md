@@ -959,7 +959,8 @@ Kubernetes put it in `computers.extraEnv`. Of `egress.env`, the supervisor forwa
 The supervisor also reads:
 
 - `PORT` (`4300`)
-- `COMPUTER_IMAGE` (`openbot-agent-computer:latest`)
+- `COMPUTER_IMAGE` (`openbot:latest`): the OpenBot image, which it starts as a computer
+  (`/app/bin/openbot-computer`)
 - `COMPUTER_NAMESPACE`
 - `COMPUTER_NETWORK`
 - `COMPUTER_MEMORY_BYTES`: a memory limit for each computer it creates, as a whole number of bytes.
@@ -1105,10 +1106,10 @@ stack without a toolchain and without waiting for Chromium to build.
 
 | Service           | Setting             | Published image                            |
 | ----------------- | ------------------- | ------------------------------------------ |
-| `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot-agent-computer` |
+| `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot`, the same image as the server |
 | `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
 | `agent-langgraph-agui` | `LANGGRAPH_IMAGE` | `ghcr.io/copilotkit/openbot-agent-langgraph-agui` |
-| `server`, `worker`, `migrate` | `SERVER_IMAGE` | `ghcr.io/copilotkit/openbot-server` |
+| `server`, `worker`, `migrate` | `SERVER_IMAGE` | `ghcr.io/copilotkit/openbot` |
 
 Unset, each names a local tag and Compose builds it, which is what a checkout of this repository
 does. Set to a published reference, pinned by digest, together with `IMAGE_PULL_POLICY=missing`,
