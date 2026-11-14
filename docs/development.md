@@ -102,19 +102,12 @@ Use `bun run dev` only when you want the app on its own, against a server that i
 
 `start.sh` hands every selected Docker service, the API server included, to `docker compose up -d` on every run, so one whose configuration or image changed is recreated and an unchanged one is left as it is. It recreates the server when it generated a secret, leaves an app that already answers as OpenBot alone, and reports when a port is held by another process.
 
-**Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
-message is sent, and the only thing that reclaims the ones never sent is the server image's
-`openbot cull-staged-attachments`, which the Helm chart runs hourly and which neither
-`docker-compose.yml` nor `start.sh` starts. Run it with
-`docker compose --env-file backend-images.env --env-file .env run --rm --no-deps server openbot cull-staged-attachments`.
-It needs only `DATABASE_URL`, and takes a retention window in hours as its one optional argument,
-defaulting to 24. On a laptop that is
-usually nothing, because the rows are small and the database is yours. It stops being nothing at
-thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
-the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
-long-lived local deployment can reach a state where attaching anything is refused. Removing a file
-in the composer deletes it outright, so it takes abandoned drafts rather than ordinary use.
-[deployment.md](deployment.md) says the same for a real deployment.
+**The server sweeps staged attachments itself.** A file dropped into the composer is stored before
+the message is sent, and the server deletes the ones never sent once they are older than 24 hours,
+inside its own process; neither `docker-compose.yml` nor `start.sh` starts anything for it. One
+person may hold thirty-two unsent files across every channel at once, and the refusal on the next
+one promises they are cleared within a day, which that sweep keeps true. Removing a file in the
+composer deletes it outright. [deployment.md](deployment.md) says the same for a real deployment.
 
 ## Migrations
 

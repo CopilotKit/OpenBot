@@ -269,6 +269,13 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   stopped first. The personal edition's own browser now shows in the page, as in OpenBot Desktop.
 - **The Helm chart is the one published with each release**, installed from its URL; there is no
   chart in the checkout to build from.
+- **Two checkouts on one machine no longer share the managed Bot's image.** The image built from a
+  checkout is tagged `<project>-agent-langgraph-agui:latest`, with the stack's Compose project
+  name, where every stack used `openbot-agent-langgraph-agui:latest` and the last one started moved
+  it. A checkout in a folder named `openbot` keeps the tag it had. Any other builds under its new
+  tag at the next start and recreates the Bot's container on it; the old tag stays on disk until
+  you remove it (`docker image rm openbot-agent-langgraph-agui:latest`). `LANGGRAPH_IMAGE` still
+  names the image outright.
 
 ### OpenBot runs on CopilotKit 1.88.0
 
