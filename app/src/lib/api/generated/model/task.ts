@@ -3,6 +3,7 @@
  */
 import type { TaskOrigin } from "./taskOrigin";
 import type { TaskStatus } from "./taskStatus";
+import type { TaskSteer } from "./taskSteer";
 
 /**
  * A piece of work a Bot does for a person in a conversation of its own.
@@ -69,6 +70,8 @@ export interface Task {
    * @nullable
    */
   resolvedAt: string | null;
+  /** The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not. */
+  steer?: TaskSteer | null;
   /** When it was started. */
   createdAt: string;
   /** When it last changed. */

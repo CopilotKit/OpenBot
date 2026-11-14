@@ -3,6 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
+import { taskKeys } from "@/lib/tasks/queries";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -391,6 +392,14 @@ export function useChannelEvents() {
               applyChannelWork(channel, activity),
           );
         }
+
+        /*
+         * What a conversation waits on moved with no turn starting or ending: a task it started
+         * reported back, or the person told one something in its thread. Its task cards read
+         * their tasks again, so a card open here says so at once, not on its next slow read.
+         */
+        if (activity.work !== undefined && activity.busy === undefined)
+          void queryClient.invalidateQueries({ queryKey: taskKeys.all });
 
         /*
          * A tab looking at the channel somebody just deleted in another tab.

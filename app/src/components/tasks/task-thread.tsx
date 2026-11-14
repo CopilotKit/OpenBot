@@ -1,6 +1,6 @@
 import type {
+  DrawnTaskReportKind,
   LinkedThread,
-  TaskReportKind,
 } from "@openbot/shared/orchestration";
 import {
   IconAlertTriangle,
@@ -236,7 +236,7 @@ export function TaskReport({
   children,
 }: {
   taskId: string;
-  kind: TaskReportKind;
+  kind: DrawnTaskReportKind;
   /** What the report said, as text, to tell a request still waiting from one answered since. */
   words?: string;
   children: ReactNode;
