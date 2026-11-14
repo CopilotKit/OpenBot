@@ -470,6 +470,14 @@ export const BROUGHT_BOT_ASKING_GUIDANCE = asParagraphs(
  * and a failure that keeps happening becomes a short report rather than a loop. Grok Bot and OpenAI's
  * own connected-app tools type their retries the same way.
  *
+ * NOTHING MADE UP IN A CALL, AND AN EMPTY SEARCH IS NOT AN ANSWER. Asked for the latest email from
+ * Dana about the contract, a Bot searched `from:dana@example.com`, an address it had invented, found
+ * nothing, and told the person no such email existed. Another fetched thread "1", and another passed
+ * a spreadsheet's title where its id goes. "A search came back empty, try another way" was already
+ * here, inside the paragraph on failed calls, where an empty result does not read as a failure and
+ * the Bot gave up after one search. So both are said on their own, before the work starts: what goes
+ * in a call comes from a result or a lookup, and nothing found is not nothing there.
+ *
  * CLAIMS NEED A RESULT. A Bot said a sheet's formulas were right, then that they were wrong, then
  * rebuilt them. The claim came before any read. Anthropic's own rule for agents handling records is
  * "say a check was done only if a tool result in this session showed it", and Claude in Slack keeps
@@ -491,6 +499,11 @@ const HOW_TO_WORK_LINES = [
   "tool calls that are independent of each other. Keep anything that depends on another result, and",
   "every change, one after another. Draw a component only from results you have already read: call",
   "it after the tools that fetch them, never in the same step.",
+  "",
+  "Never make up an id, an address or a name to put in a call: use what a result gave you, or look",
+  "it up first. Search for a person by the name you were given, not an address you guessed. A search",
+  "that finds nothing has not shown there is nothing: try it another way, with fewer or different",
+  "words, before you say something does not exist.",
   "",
   "Do what was asked, at the scope it was asked. Do the reads and preparation a task needs without",
   "asking, and when you decide on a step of it, take it in the same reply instead of saying you will.",
