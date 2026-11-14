@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { Route as WhatIfRoute } from "@/routes/_authed/admin/what-if";
+import { AUDIT_PATH, auditPageBody } from "./audit-api";
 import { settleReactWork } from "./settle-react-work";
 import answers from "./what-if.fixture.json";
 
@@ -211,7 +212,7 @@ test("a question becomes chips, and Check shows every control in order with the 
 
 test("an Audit row a control decided carries Why?, which explains it from the row with today's settings", async () => {
   const asked = serve({
-    "/api/admin/audit-events": { events: [answers.event] },
+    [AUDIT_PATH]: auditPageBody([answers.event]),
     [`/api/admin/what-if/explain/${answers.event.id}`]: answers.explained,
   });
   const router = createRouter({
@@ -253,17 +254,15 @@ test("an Audit row a control decided carries Why?, which explains it from the ro
 
 test("a row no control decides has no Why?", async () => {
   serve({
-    "/api/admin/audit-events": {
-      events: [
-        {
-          ...answers.event,
-          id: "00000000-0000-4000-8000-0000000000aa",
-          eventType: "configuration.changed",
-          targetType: "mcp_tool",
-          payload: { change: "plugin_granted", ref: "whatif-gmail/send_email" },
-        },
-      ],
-    },
+    [AUDIT_PATH]: auditPageBody([
+      {
+        ...answers.event,
+        id: "00000000-0000-4000-8000-0000000000aa",
+        eventType: "configuration.changed",
+        targetType: "mcp_tool",
+        payload: { change: "plugin_granted", ref: "whatif-gmail/send_email" },
+      },
+    ]),
   });
   const router = createRouter({
     routeTree: createRootRoute({ component: () => <AuditPage ask /> }),

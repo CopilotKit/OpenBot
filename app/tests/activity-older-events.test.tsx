@@ -13,6 +13,7 @@ import { agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
+import { AUDIT_PATH, auditPage } from "./audit-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -33,7 +34,7 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-/** A row as `GET /api/admin/audit-events` answers it: the stored columns, `createdAt` as ISO. */
+/** A row as `listAuditEvents` answers it: the stored columns, `createdAt` as ISO. */
 function storedRow(n: number) {
   return {
     id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
@@ -60,16 +61,15 @@ const CURSOR = Buffer.from(
   JSON.stringify({ createdAt: storedRow(50).createdAt, id: storedRow(50).id }),
 ).toString("base64url");
 
-/** The server's two pages: 50 rows and where the next starts, then the last 10 with no cursor. */
+/** The server's two pages: 50 rows and where the next starts, then the last 10, which end the list. */
 function serve(url: URL) {
   if (!url.searchParams.has("cursor")) {
-    return {
-      events: Array.from({ length: 50 }, (_, i) => storedRow(i + 1)),
-      nextCursor: CURSOR,
-    };
+    return auditPage(
+      Array.from({ length: 50 }, (_, i) => storedRow(i + 1)),
+      CURSOR,
+    );
   }
-  // `nextCursor` is undefined on the last page, which `context.json` leaves out of the body.
-  return { events: Array.from({ length: 10 }, (_, i) => storedRow(i + 51)) };
+  return auditPage(Array.from({ length: 10 }, (_, i) => storedRow(i + 51)));
 }
 
 test("Activity names what it shows as the newest events, and Show older events reaches the rest", async () => {
@@ -77,9 +77,9 @@ test("Activity names what it shows as the newest events, and Show older events r
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://127.0.0.1");
-      if (url.pathname === "/api/admin/audit-events") {
+      if (url.pathname === AUDIT_PATH) {
         asked.push(url);
-        return Response.json(serve(url));
+        return serve(url);
       }
       return Response.json({ error: "not served" }, { status: 404 });
     },

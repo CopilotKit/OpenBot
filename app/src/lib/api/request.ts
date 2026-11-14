@@ -19,7 +19,19 @@ export type ApiRequestOptions = RequestInit & {
    * `client`'s fallback does.
    */
   fallback?: string;
+  /**
+   * The response a success arrived in, before its body is read: for an operation whose answer says
+   * something in a header the generated function does not return, such as how much of the audit
+   * trail an export holds.
+   */
+  onResponse?: (response: Response) => void;
 };
+
+/**
+ * The answers the spec declares that are not JSON, read as text: the audit trail's CSV export. Any
+ * other success that is not JSON is still a failed request.
+ */
+const TEXT_ANSWERS = ["text/csv"];
 
 /**
  * The organization every request is in.
@@ -48,10 +60,15 @@ export async function apiRequest<T>(
   url: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const { fallback, ...init } = options;
+  const { fallback, onResponse, ...init } = options;
   const today = servedToday(url, init.method);
   const response = await clientRequest(today?.path ?? url, init, fallback);
+  onResponse?.(response);
   if (response.status === 204) return undefined as T;
+  const type = response.headers.get("content-type") ?? "";
+  if (TEXT_ANSWERS.some((answer) => type.startsWith(answer))) {
+    return (await response.text()) as T;
+  }
   // A success that is not JSON is a failed request, as `client` treats it.
   const body = (await response.json().catch(() => null)) as unknown;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
