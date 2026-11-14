@@ -163,17 +163,16 @@ Each sweep still records that it happened, in `routine_sweeps`. The window that 
 `MINIMUM_INTERVAL_MS`: fifteen minutes, the floor a routine's own schedule already has, so a gap
 longer than that is one no routine could have wanted.
 
-Two settings belong to the separate worker, and matter only to a deployment that still runs one
-beside the server:
+The server has no `/internal/routines/run` now and reads neither of the two settings that worker
+took: `WORKER_SHARED_SECRET`, the credential it presented there, and `SERVER_INTERNAL_URL`, where it
+reached the server. Neither is in `.env.example`, and a line for either left in an existing `.env`
+does nothing.
 
-- **`WORKER_SHARED_SECRET`**: the credential a worker presents to `/internal/routines/run`. The API
-  server refuses every handoff without it configured on both sides.
-- **`SERVER_INTERNAL_URL`**: where a worker reaches this deployment's own API server.
-
-That includes an OpenBot Desktop installation whose Compose file is a release's up to 1.0.3, which
-runs the sweep in its `worker` service: Desktop reads the installed file, so it still starts,
-restarts and stops that worker with the server, and removes its container once an update puts in
-place a Compose file that says its server does the work (see [Desktop updates](desktop-updates.md)).
+The one place a worker still runs is an OpenBot Desktop installation whose Compose file is a
+release's up to 1.0.3, which runs the sweep in its `worker` service: Desktop reads the installed
+file, so it still starts, restarts and stops that worker with the server, and removes its container
+once an update puts in place a Compose file that says its server does the work (see
+[Desktop updates](desktop-updates.md)). Desktop supplies both settings for it.
 
 ## Who a routine runs as
 
@@ -203,4 +202,3 @@ limit; and a tenant package cannot yet ship routines the way it ships agents, ch
 - [Architecture](architecture.md) — where the routines sweep sits beside the computer culler on the
   shared work queue.
 - [Coworkers](coworkers.md) — durable Bot profiles and channels, which a routine posts into.
-- [Configuration](configuration.md): `WORKER_SHARED_SECRET`, `SERVER_INTERNAL_URL`, for a deployment that still runs a separate worker.

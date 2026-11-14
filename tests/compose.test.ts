@@ -789,6 +789,21 @@ test("still defines migrate and worker for one release, with nothing that waits 
 });
 
 /**
+ * The server reads no `WORKER_SHARED_SECRET`, so the example files do not offer one to fill in.
+ * `scripts/server-env.ts` hands the server's container every setting they list, so a line here
+ * would also hand it a setting nothing reads.
+ */
+test("the example files list no secret for a worker", () => {
+  for (const example of [".env.example", ".env.personal.example"]) {
+    const text = readFileSync(join(import.meta.dir, "..", example), "utf8");
+    expect({
+      example,
+      listsIt: text.includes("WORKER_SHARED_SECRET"),
+    }).toEqual({ example, listsIt: false });
+  }
+});
+
+/**
  * What tells this file from an earlier release's, in which `worker` and `migrate` are in use: one
  * top-level line. OpenBot Desktop, scripts/start.sh and the updater read it as text, so it is at
  * column 0, once, and Compose (which ignores a top-level `x-` field) still reads the file.
