@@ -67,6 +67,11 @@ export type ApprovalInboxData = {
     decidedAt?: string | null;
     /** What the person answered; null while it waits. */
     decision?: ApprovalDecision | null;
+    /**
+     * Set when the conversation could not be carried on after this was decided: whether the action
+     * was done, the sentence that says so, and the answer the Bot never received.
+     */
+    left?: { done: boolean; message: string; answer: string };
     action: {
       botId: string;
       toolRef: string;
@@ -121,6 +126,21 @@ export type ApprovalInboxData = {
     createdAt: string;
   }[];
 };
+/**
+ * The answers the Bot never received, by the call each belongs to: actions decided whose
+ * conversation could not be carried on (`left`). Sent with the next message in place of "no result
+ * came back", so the Bot knows a post it asked for went out and does not make it again.
+ */
+export function leftAnswers(
+  inbox: ApprovalInboxData | undefined,
+): ReadonlyMap<string, string> {
+  const answers = new Map<string, string>();
+  for (const request of inbox?.requests ?? [])
+    if (request.left && request.action.toolCallId)
+      answers.set(request.action.toolCallId, request.left.answer);
+  return answers;
+}
+
 export const approvalInboxOptions = () =>
   queryOptions({
     queryKey: ["approvals"],
