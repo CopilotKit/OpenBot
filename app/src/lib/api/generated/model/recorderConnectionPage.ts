@@ -4,7 +4,7 @@
 import type { ListedRecorderConnection } from "./listedRecorderConnection";
 
 export interface RecorderConnectionPage {
-  /** The newest connection first, then by id. */
+  /** The oldest connection first, then by id. */
   recorderConnections: ListedRecorderConnection[];
   /** The Recorder extension ids this OpenBot trusts. */
   extensionIds: string[];

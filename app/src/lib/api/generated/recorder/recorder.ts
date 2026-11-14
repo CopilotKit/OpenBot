@@ -273,7 +273,7 @@ export const getListRecorderConnectionsUrl = (
 };
 
 /**
- * Return one page of the browsers whose Recorder is connected as this person, newest first, each with whether it is recording now by its own latest report, and the Recorder extension ids this OpenBot trusts. Never a connection's token. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the browsers whose Recorder is connected as this person, oldest first, each with whether it is recording now by its own latest report, and the Recorder extension ids this OpenBot trusts. Never a connection's token. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's connected browsers
  */
 export const listRecorderConnections = async (
@@ -694,7 +694,7 @@ export const getListRecordingsUrl = (
 };
 
 /**
- * Return one page of the recordings a person made with the Recorder, newest first, each with how it ended. Only the person themselves may list them. A page that could not be read in full says so in unavailable and keeps its cursor, so asking again retries it. A missing cursor starts at the first page and nextCursor null ends the list. Today's server decides the size of a page itself, at most 50.
+ * Return one page of the recordings a person made with the Recorder, newest first, each with how it ended. Only the person themselves may list them. A page that could not be read in full says so in unavailable and keeps its cursor, so asking again retries it. A missing cursor starts at the first page and nextCursor null ends the list. A page holds at most 50 recordings, whatever limit asks for.
  * @summary List a person's recordings
  */
 export const listRecordings = async (
