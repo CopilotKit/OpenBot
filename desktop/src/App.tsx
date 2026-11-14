@@ -167,6 +167,8 @@ function Setup() {
   const savedLaunch = useRef<string | null>(null);
   // An interrupted run needs an explicit Start.
   const interruptedAtLaunch = useRef(false);
+  // What stopped the last run, shown until Start runs.
+  const launchNotice = useRef<Problem | null>(null);
   const [refreshIntelligence, setRefreshIntelligence] = useState(false);
   const [preparation, setPreparation] = useState<{
     key: string;
@@ -276,6 +278,17 @@ function Setup() {
     // And OpenBot's own software is installed again before it sets up (`installAfresh`).
     installAgain: () => installAfresh(),
   });
+  /*
+   * What stopped the last run (`last_failure` at launch, such as "OpenBot had trouble shutting down
+   * last time.") is about that run. Once Start runs, it goes: a Start that then stops says why in
+   * its own row. Kept, it read as the reason this run stopped, through Start and every Retry.
+   */
+  useEffect(() => {
+    const notice = launchNotice.current;
+    if (!local.running || !notice) return;
+    launchNotice.current = null;
+    setRecoveryFailure((current) => (current === notice ? null : current));
+  }, [local.running]);
   // The engine's wake found that only a Windows restart fixes OpenBot's machine: the restart
   // screen, not a Retry that can't work.
   useEffect(() => {
@@ -364,6 +377,7 @@ function Setup() {
       .then((found) => {
         if (found) {
           interruptedAtLaunch.current = true;
+          launchNotice.current = found;
           setRecoveryFailure(found);
         }
         return found;

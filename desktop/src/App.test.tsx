@@ -4351,6 +4351,48 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
 });
 
+test("the last shutdown's notice goes once Start runs, and a Start that stops says only why", async () => {
+  // EC2 Mac: OpenBot quit while its engine machine was stopped. The next launch said "That didn't
+  // finish: OpenBot had trouble shutting down last time." over the stopped card, and the card
+  // stayed through Start, which stopped at "Getting OpenBot ready" with the engine down, and
+  // through Retry: a notice about the last run read as the reason this one stopped.
+  const { notice } = useInterruptedShutdownSetup();
+  const engine = { running: false };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") return null;
+    if (command === "run_local_eval" && !engine.running) {
+      return {
+        ...localStatus("unknown", "unknown"),
+        outcome: "blocked",
+        stack: null,
+        reason: "docker-unavailable",
+      };
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(view.getByRole("alert").textContent).toContain(notice);
+
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const row = await view.findByRole("listitem", {
+    name: "Getting OpenBot ready",
+  });
+  await waitFor(() =>
+    expect(row.textContent).toContain(
+      "The software OpenBot runs on isn't running. Retry to start it.",
+    ),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+
+  engine.running = true;
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+});
+
 /*
  * The report: somebody on 1.0.0 could not find which AI they had signed in with, or change it.
  * Settings' AI model row has a Change, which stops OpenBot and brings this window back. It opens at
