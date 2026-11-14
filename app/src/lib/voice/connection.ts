@@ -1,3 +1,5 @@
+import { getVoiceConfiguration } from "@/lib/api/generated/voice/voice";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import type { ConnectVoice } from "./types";
 import { connectWebRtc } from "./webrtc";
 import { connectWebSocket } from "./websocket";
@@ -14,15 +16,16 @@ export const connectVoice: ConnectVoice = async (options) => {
     throw new Error(
       "Voice calls need a supported browser and HTTPS or localhost.",
     );
-  const response = await fetch("/api/voice/config", {
-    credentials: "include",
+  const config: unknown = await getVoiceConfiguration(ORGANIZATION_ID, {
     signal: options.signal,
-  });
-  if (!response.ok)
+  }).catch((error: unknown) => {
+    // A call that was hung up while this was asked is not a fault to report.
+    if (error instanceof DOMException && error.name === "AbortError")
+      throw error;
     throw new Error(
       "Voice calls are unavailable. Check OpenBot's voice configuration.",
     );
-  const config: unknown = await response.json();
+  });
   if (config && typeof config === "object" && "transport" in config) {
     if (config.transport === "webrtc") return connectWebRtc(options);
     if (config.transport === "websocket") return connectWebSocket(options);

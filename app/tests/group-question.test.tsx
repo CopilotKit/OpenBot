@@ -17,6 +17,7 @@ import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { approvalInboxResponse } from "./approvals-api";
 import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import { answerGroupRead, conversationPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -94,22 +95,30 @@ beforeAll(() => {
       ],
     });
     if (bots) return bots;
-    if (url.pathname === `/api/groups/${CHANNEL}`) {
-      if (method === "POST") {
-        groupSends.push(JSON.parse(String(init?.body)));
-        return Response.json({ queued: true }, { status: 202 });
-      }
-      return Response.json({
-        bots: [
-          { id: ERRANDS, name: "Errand Helper" },
-          { id: BUDGET, name: "Budget Buddy" },
-        ],
-        people: [
-          { userId: "me", email: "me@example.test", name: null, creator: true },
-        ],
-        messages,
-      });
+    // A message sent to the group is taken (202) to be answered there.
+    if (
+      url.pathname === conversationPath(CHANNEL, "/messages") &&
+      method === "POST"
+    ) {
+      const sentMessage = JSON.parse(String(init?.body)) as { id: string };
+      groupSends.push(sentMessage);
+      return Response.json(
+        { id: sentMessage.id, queued: true },
+        { status: 202 },
+      );
     }
+    // The two reads the group is drawn from: its members and its lines.
+    const read = answerGroupRead(url, init, CHANNEL, {
+      bots: [
+        { id: ERRANDS, name: "Errand Helper" },
+        { id: BUDGET, name: "Budget Buddy" },
+      ],
+      people: [
+        { userId: "me", email: "me@example.test", name: null, creator: true },
+      ],
+      messages,
+    });
+    if (read) return read;
     {
       const approvals = approvalInboxResponse(url.pathname, {
         enabled: true,

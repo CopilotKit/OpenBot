@@ -37,6 +37,11 @@ import {
 } from "./approvals-api";
 import { answerBotAttention, answerBotsList } from "./bots-api";
 import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  TASKS_PATH,
+} from "./conversations-api";
+import {
   CHECK_IN_ITEMS_PATH,
   GOALS_PATH,
   ROUTINES_PATH,
@@ -116,13 +121,10 @@ function api(role: "admin" | "user") {
       messageListEmphasis: "thread",
       selfHostBannerDismissed: true,
     },
-    "/api/channels": {
-      channels: [
-        channel("c-1", ["b-1"], "Renewal for the studio policy"),
-        channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
-      ],
-      nextCursor: null,
-    },
+    [CONVERSATIONS_PATH]: conversationPage([
+      channel("c-1", ["b-1"], "Renewal for the studio policy"),
+      channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
+    ]),
     [INBOX]: {
       enabled: true,
       rules: [],
@@ -260,7 +262,7 @@ function api(role: "admin" | "user") {
         },
       ],
     },
-    "/api/tasks": { tasks: [] },
+    [TASKS_PATH]: { tasks: [], nextCursor: null },
   };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";

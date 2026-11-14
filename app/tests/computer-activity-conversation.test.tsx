@@ -376,9 +376,17 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === `/api/plugins/for/${bot}`)
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
       if (url.pathname === "/api/components/catalogue")

@@ -27,6 +27,7 @@ import {
   attentionOf,
   BOT_ATTENTION_PATH,
 } from "./bots-api";
+import { CONVERSATIONS_PATH, TASKS_PATH } from "./conversations-api";
 import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -98,9 +99,10 @@ function serving(
     if (waiting) return waiting;
     if (pathOf(url) === CHECK_IN_ITEMS_PATH)
       return Response.json({ checkInItems: [], nextCursor: null });
-    if (url === "/api/tasks") return Response.json({ tasks: [] });
-    if (url.startsWith("/api/channels"))
-      return Response.json({ channels: [], nextCursor: null });
+    if (url.split("?")[0] === TASKS_PATH)
+      return Response.json({ tasks: [], nextCursor: null });
+    if (url.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json({ conversations: [], nextCursor: null });
     return (
       answerBotsList(input, init, { visible, hidden }) ??
       // Nothing waits on the person: the inbox is read, and is empty.

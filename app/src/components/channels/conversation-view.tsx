@@ -1,3 +1,5 @@
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
@@ -630,8 +632,7 @@ function releaseStagedAttachment(attachment: Attachment): void {
   if (typeof metadata?.attachmentId !== "string") {
     return;
   }
-  void fetch(attachmentUrl(metadata.attachmentId), {
-    method: "DELETE",
-    credentials: "include",
+  void deleteAttachment(ORGANIZATION_ID, metadata.attachmentId, {
+    "Idempotency-Key": idempotencyKey(),
   }).catch(() => undefined);
 }
