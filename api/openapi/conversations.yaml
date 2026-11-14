@@ -1,0 +1,255 @@
+# Conversations: reactions Bots leave on messages, and joining a conversation's live channel.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/reactions:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Reactions]
+      operationId: listReactions
+      summary: List reactions in a conversation
+      description: >-
+        Return one page of the reactions Bots left on the caller's messages in
+        one of their conversations, named by its thread. Another person's
+        thread answers with an empty list. A missing cursor starts at the
+        first page and nextCursor null ends the list. Today's server returns
+        every reaction on the first page.
+      security:
+        - webSession: []
+        - appOAuth: [reactions:read]
+        - apiKey: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          description: The conversation's thread, as its messages name it.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of reactions.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ReactionPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/join-tokens:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/ConversationId'
+    post:
+      tags: [Conversations]
+      operationId: createConversationJoinToken
+      summary: Get a token to watch a conversation live
+      description: >-
+        Make a join token for the conversation's thread, and say where to use
+        it. The token opens the threadStream channel of api/asyncapi.yaml: a
+        WebSocket that replays the Bot's runs in the conversation, a run in
+        progress from its start, and then carries on live. The token works
+        once and for about half a minute, so ask for a new one for every
+        connection, and again to reconnect. Only a person in the conversation
+        may have one, and it opens the thread they see there and no other. A
+        conversation no Bot has run in yet has nothing to join.
+      security:
+        - webSession: []
+        - appOAuth: [conversations:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: A join token, and where to use it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationJoinToken'
+              examples:
+                running:
+                  $ref: '#/components/examples/ConversationJoinTokenExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/ConversationNotJoinable'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LiveChannelsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  schemas:
+    Reaction:
+      type: object
+      required: [messageId, agentId, emoji, createdAt]
+      properties:
+        messageId:
+          type: string
+          description: The person's message the reaction is on, by the id its conversation gives it.
+        agentId:
+          type: string
+          description: The Bot that reacted.
+        emoji:
+          type: string
+          description: The reaction itself.
+          example: 👍
+        createdAt:
+          type: string
+          format: date-time
+    ReactionPage:
+      type: object
+      required: [reactions, nextCursor]
+      properties:
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reaction'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    ConversationJoinToken:
+      type: object
+      description: >-
+        What a client needs to watch a conversation live: a token, and the
+        socket and topic to use it on (the threadStream channel of
+        api/asyncapi.yaml).
+      required:
+        - joinToken
+        - expiresAt
+        - threadId
+        - runId
+        - realtime
+      properties:
+        joinToken:
+          type: string
+          minLength: 1
+          description: >-
+            Sent as the join_token query parameter when opening the socket. It
+            works once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            After this the token no longer opens a socket. A socket it already
+            opened stays open.
+        threadId:
+          type: string
+          minLength: 1
+          description: The conversation's thread, as the caller sees it.
+        runId:
+          type:
+            - string
+            - 'null'
+          description: The run in progress in the thread, or null when the Bot is not working.
+        realtime:
+          type: object
+          description: Where to use the token.
+          required:
+            - clientUrl
+            - topic
+          properties:
+            clientUrl:
+              type: string
+              minLength: 1
+              description: >-
+                The socket's address, without the /websocket it ends in or its
+                query. A ws or wss address, or a path on this server.
+            topic:
+              type: string
+              pattern: ^thread:.+$
+              description: The topic to join on the socket, thread:{threadId}.
+  responses:
+    ConversationNotJoinable:
+      description: >-
+        The conversation has nothing to join: no Bot has run in it yet, or it
+        is a group conversation, which has no single thread. Or the
+        Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notStarted:
+              value:
+                type: https://open.bot/errors/conversation-not-started
+                title: Nothing to join yet.
+                status: 409
+                detail: No Bot has run in this conversation yet.
+                code: CONVERSATION_NOT_STARTED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LiveChannelsUnavailable:
+      description: The service that carries live runs did not answer. Try again.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/live-channels-unavailable
+                title: Live updates are unavailable.
+                status: 502
+                detail: Couldn't reach live updates. Try again.
+                code: LIVE_CHANNELS_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    ReactionPageLast:
+      summary: Every reaction in a conversation, on one page.
+      value:
+        reactions:
+          - messageId: msg_2f0c1e7a
+            agentId: general-assistant
+            emoji: 👍
+            createdAt: '2026-11-12T22:41:07.000Z'
+        nextCursor: null
+    ConversationJoinTokenExample:
+      summary: A conversation whose Bot is working
+      value:
+        joinToken: jt_example
+        expiresAt: '2026-11-14T12:00:30.000Z'
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+        runId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        realtime:
+          clientUrl: wss://realtime.example.com/client
+          topic: thread:6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
