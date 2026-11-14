@@ -57,6 +57,10 @@ tags:
   - { name: Connections, description: "A person's connections to apps: the accounts they signed in with so their Bots can act there for them, and an app's one shared account when an administrator connects it for everybody." }
   - { name: Bot grants, description: "What each Bot may use: the app actions, skills and other Bots it was given, and each app as it stands for the person asking." }
   - { name: App access requests, description: "A person asking an administrator to turn an app on, give it to a Bot, or connect its shared account." }
+  - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
+  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
+  - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
+  - { name: Notification settings, description: "How a person hears from their Bots while they're away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -149,6 +153,17 @@ paths:
   /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}' }
   /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1approve' }
   /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1dismiss' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1link-chat' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1verify-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1confirm-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1{destinationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/deliveries: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1deliveries' }
+  /api/v2/organizations/{organizationId}/people/{personId}/notification-settings: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1notification-settings' }
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
+  /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
 components:
   securitySchemes:
     webSession:
@@ -207,6 +222,13 @@ components:
             bot-grants:write: Give and take back what the signed-in person's Bots may use.
             app-access-requests:read: Read requests for apps, the signed-in person's own or, for an administrator, everybody's.
             app-access-requests:write: Ask for an app, withdraw a request, and for an administrator approve or dismiss one.
+            devices:read: Read the phones the signed-in person registered for push notifications.
+            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
+            notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
+            notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
     apiKey:
       type: http
       scheme: bearer
