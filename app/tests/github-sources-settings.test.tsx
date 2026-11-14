@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GithubSources } from "@/components/settings/github-sources";
+import { GITHUB_EVENT_SOURCES_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Settings → Connected accounts: the repositories whose events can start a responsibility. */
@@ -31,7 +32,7 @@ function serving() {
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       });
       return Response.json({
-        binding: {
+        githubEventSource: {
           id: "g2",
           source: "github",
           repository: "acme/web",
@@ -39,8 +40,12 @@ function serving() {
         },
       });
     }
+    // Anywhere but the API's GitHub event sources, nothing is connected.
+    if (pathOf(input) !== GITHUB_EVENT_SOURCES_PATH)
+      return Response.json({ error: "not served" }, { status: 404 });
     return Response.json({
-      bindings: [
+      nextCursor: null,
+      githubEventSources: [
         {
           id: "g1",
           source: "github",
@@ -84,7 +89,7 @@ test("connecting a repository sends it with its secret", async () => {
   fireEvent.click(view.getByRole("button", { name: "Connect events" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/responsibilities/sources/github",
+      request: `POST ${GITHUB_EVENT_SOURCES_PATH}`,
       body: { repository: "acme/web", secret: "s3cret" },
     }),
   );

@@ -9,7 +9,7 @@ import { ThemeProvider, useTheme } from "@/components/theme-provider";
 function Choices() {
   const { theme, setTheme } = useTheme();
   return (
-    <div data-theme-choice={theme}>
+    <div data-setting-shows={theme}>
       {(["system", "light", "dark"] as const).map((choice) => (
         <button key={choice} onClick={() => setTheme(choice)} type="button">
           {choice}

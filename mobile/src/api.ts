@@ -1,4 +1,6 @@
+import * as Crypto from "expo-crypto";
 import { authClient, serverUrl } from "./auth";
+
 /** A refusal from the server, with its status and the API's problem code when it gave one. */
 export class ApiError extends Error {
   constructor(
@@ -10,6 +12,36 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+/**
+ * The organization's address in the API. Until a person can belong to several, an install has one,
+ * addressed as `default`.
+ */
+export const ORGANIZATION = "/api/v2/organizations/default";
+
+/** Whether this request is a write to the API, which takes an Idempotency-Key. */
+const apiWrite = (path: string, method: string | undefined) =>
+  path.startsWith("/api/v2/") && !!method && method.toUpperCase() !== "GET";
+
+/**
+ * Every item of one of the API's lists, page by page. The API pages every list (`cursor`, `limit`,
+ * `nextCursor`), and the screens here show the whole list. A cursor handed back twice ends it too.
+ */
+export async function everyPage<T>(path: string, key: string): Promise<T[]> {
+  const all: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await api<Record<string, unknown>>(
+      `${path}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    all.push(...((page[key] as T[] | undefined) ?? []));
+    if (cursor) seen.add(cursor);
+    cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
+  } while (cursor && !seen.has(cursor));
+  return all;
+}
+
 export async function api<T>(
   path: string,
   input?: {
@@ -25,6 +57,10 @@ export async function api<T>(
     method: input?.method,
     credentials: "omit",
     headers: {
+      // A new key for each write asked for, unless the caller sends its own to retry with.
+      ...(apiWrite(path, input?.method)
+        ? { "Idempotency-Key": Crypto.randomUUID() }
+        : {}),
       ...input?.headers,
       ...(cookie ? { Cookie: cookie } : {}),
       ...(input?.body !== undefined
@@ -113,20 +149,20 @@ export type Bot = {
 };
 export type BotLifecycle = { paused: boolean; pausedAt: string | null };
 /**
- * Something a Bot's check-in found that needs the person, as `GET /api/proactive/suggestions` lists
+ * Something a Bot's check-in found that needs the person, as the API's check-in items list
  * it (open ones only). `detail` says why it was raised; `sourceApp` is the app it was read in.
  */
 export type CheckInItem = {
   id: string;
-  agentId: string;
+  botId: string;
   title: string;
   detail: string;
   sourceApp: string | null;
   sourceLink: string | null;
   createdAt: string;
 };
-/** What `POST /api/proactive/suggestions/:id/start` made of an item: a task in its own conversation. */
-export type StartedItem = { task: { id: string; channelId: string } };
+/** What starting an item made of it: a task in its own conversation. */
+export type StartedItem = { task: { id: string; conversationId: string } };
 export type TaskStatus =
   | "needs_input"
   | "working"
@@ -154,12 +190,12 @@ export type RoutineStatus =
   | "waiting";
 export type Routine = {
   id: string;
-  agentId: string;
+  botId: string;
   /** Display text from the server; never parsed here. */
   schedule: string;
   timezone: string;
   instruction: string;
-  channel: { id: string; name: string | null; gone: boolean };
+  conversation: { id: string; name: string | null; gone: boolean };
   enabled: boolean;
   nextRunAt: string;
   lastRun: { status: RoutineStatus | null; at: string | null } | null;

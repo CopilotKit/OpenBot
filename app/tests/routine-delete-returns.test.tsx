@@ -14,6 +14,7 @@ import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { answerBotsList } from "./bots-api";
+import { pathOf, ROUTINES_PATH, routineRunsPath } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -40,12 +41,12 @@ afterEach(() => {
 
 const ROUTINE: RoutineRecord = {
   id: "routine-1",
-  agentId: "lead-desk",
+  botId: "lead-desk",
   schedule: "Weekdays at 09:00",
   timezone: "Europe/Madrid",
   instruction: "Send me a summary of yesterday's new leads",
   title: "Morning leads",
-  channel: {
+  conversation: {
     id: "conversation-1",
     name: "Lead Desk",
     title: "Leads",
@@ -54,26 +55,28 @@ const ROUTINE: RoutineRecord = {
   enabled: true,
   nextRunAt: "2099-01-01T08:00:00.000Z",
   lastRun: null,
+  goalId: null,
+  createdAt: "2026-11-01T09:00:00.000Z",
 };
 
 /** The server: the routine until it is deleted, and a 404 for its runs after, as the real one. */
 function serving() {
   let deleted = false;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
+    const path = pathOf(input);
     const method = init?.method ?? "GET";
-    if (path === `/api/routines/${ROUTINE.id}` && method === "DELETE") {
+    if (path === `${ROUTINES_PATH}/${ROUTINE.id}` && method === "DELETE") {
       deleted = true;
-      return Response.json({ ok: true });
+      return new Response(null, { status: 204 });
     }
-    if (path === `/api/routines/${ROUTINE.id}/runs`)
+    if (path === routineRunsPath(ROUTINE.id))
       return deleted
-        ? Response.json({ error: "Routine not found." }, { status: 404 })
-        : Response.json({ runs: [] });
-    if (path === "/api/routines")
+        ? Response.json({ detail: "Routine not found." }, { status: 404 })
+        : Response.json({ runs: [], nextCursor: null });
+    if (path === ROUTINES_PATH)
       return Response.json({
         routines: deleted ? [] : [ROUTINE],
-        sweep: { lastSweptAt: new Date().toISOString(), working: true },
+        nextCursor: null,
       });
     const bots = answerBotsList(path, init, {
       visible: [

@@ -51,6 +51,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setRootColorScheme: (scheme) => {
         document.documentElement.style.colorScheme = scheme;
       },
+      setRootChoice: (preference) => {
+        document.documentElement.dataset.themeChoice = preference;
+      },
     });
   }, [theme, systemDark]);
 

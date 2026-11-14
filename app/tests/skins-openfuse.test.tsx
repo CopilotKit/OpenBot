@@ -59,6 +59,12 @@ import {
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
+import {
+  CHECK_IN_ITEMS_PATH,
+  CHECK_INS_PATH,
+  GOALS_PATH,
+  ROUTINES_PATH,
+} from "./schedules-api";
 
 /*
  * The OpenFuse frame against OpenBot's own API shapes. Every payload below is what the server's
@@ -261,39 +267,52 @@ const activity: BotActivity = {
 const settings: ProactiveSetting[] = [
   {
     id: "p-fuse",
-    agentId: fuse.id,
-    channelId: "c-fuse",
+    botId: fuse.id,
+    conversationId: "c-fuse",
     focus: "",
+    subject: "",
+    sourceLink: null,
     enabled: true,
     intervalMinutes: 240,
     nextRunAt: now,
     lastRunAt: earlier,
     lastStatus: "succeeded",
     lastError: null,
+    lastRun: null,
+    createdAt: earlier,
+    updatedAt: earlier,
   },
 ];
 
 const suggestions: ProactiveSuggestion[] = [
   {
     id: "s-fuse",
-    agentId: fuse.id,
+    botId: fuse.id,
     title: "Book a table for Friday dinner",
     detail: "Jamie asked about Friday.\nThe thread is in your inbox.",
     sourceApp: "Gmail",
     sourceRef: "gmail/thread",
     sourceLink: "https://mail.example.com/thread/1",
     pingId: "ping-1",
+    checkInId: "p-fuse",
+    status: "open",
+    deliveredAt: null,
+    resolvedAt: null,
     createdAt: now,
   },
   {
     id: "s-scout",
-    agentId: scout.id,
+    botId: scout.id,
     title: "Compare pricing pages",
     detail: "A competitor changed theirs.",
     sourceApp: null,
     sourceRef: null,
     sourceLink: null,
     pingId: null,
+    checkInId: "p-scout",
+    status: "open",
+    deliveredAt: null,
+    resolvedAt: null,
     createdAt: now,
   },
 ];
@@ -301,12 +320,12 @@ const suggestions: ProactiveSuggestion[] = [
 const routines: RoutineRecord[] = [
   {
     id: "rt-1",
-    agentId: fuse.id,
+    botId: fuse.id,
     schedule: "Every weekday at 9:00",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
     title: null,
-    channel: {
+    conversation: {
       id: "c-fuse",
       name: "Fuse",
       title: "Morning headlines",
@@ -315,14 +334,16 @@ const routines: RoutineRecord[] = [
     enabled: true,
     nextRunAt: now,
     lastRun: null,
+    goalId: null,
+    createdAt: earlier,
   },
 ];
 
 const responsibilities: ResponsibilityRecord[] = [
   {
     id: "g-1",
-    agentId: fuse.id,
-    channelId: "c-fuse",
+    botId: fuse.id,
+    conversationId: "c-fuse",
     threadId: "thread-c-fuse",
     title: "Keep my inbox at zero",
     instruction: "Triage new mail each morning",
@@ -333,12 +354,14 @@ const responsibilities: ResponsibilityRecord[] = [
     subscriptions: [],
     recurring: false,
     endsWhenMet: false,
+    createdAt: now,
     updatedAt: now,
+    completedAt: null,
   },
   {
     id: "g-scout",
-    agentId: scout.id,
-    channelId: "c-scout",
+    botId: scout.id,
+    conversationId: "c-scout",
     threadId: "thread-c-scout",
     title: "Watch the competition",
     instruction: "",
@@ -349,7 +372,9 @@ const responsibilities: ResponsibilityRecord[] = [
     subscriptions: [],
     recurring: false,
     endsWhenMet: false,
+    createdAt: now,
     updatedAt: now,
+    completedAt: null,
   },
 ];
 
@@ -423,13 +448,17 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     [`/api/bots/${scout.id}/activity`]: {
       activity: { inProgress: [], scheduled: [], completed: [] },
     },
-    "/api/proactive/settings": { settings, allowed: true },
-    "/api/proactive/suggestions": { suggestions },
-    "/api/routines": {
-      routines,
-      sweep: { lastSweptAt: now, working: true },
+    [`${CHECK_INS_PATH}?limit=100`]: {
+      checkIns: settings,
+      allowed: true,
+      nextCursor: null,
     },
-    "/api/responsibilities": { responsibilities },
+    [`${CHECK_IN_ITEMS_PATH}?limit=100`]: {
+      checkInItems: suggestions,
+      nextCursor: null,
+    },
+    [`${ROUTINES_PATH}?limit=100`]: { routines, nextCursor: null },
+    [`${GOALS_PATH}?limit=100`]: { goals: responsibilities, nextCursor: null },
     "/api/memory": { memories },
     "/api/plugins": plugins,
     "/api/plugins/connections": {
@@ -937,7 +966,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
         calls.some(
           (call) =>
             call.method === "POST" &&
-            call.path === "/api/proactive/suggestions/s-fuse/start",
+            call.path === `${CHECK_IN_ITEMS_PATH}/s-fuse/start`,
         ),
       ).toBe(true),
     );
@@ -967,9 +996,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     );
     await waitFor(() =>
       expect(calls).toContainEqual({
-        method: "PUT",
-        path: "/api/routines/rt-1/enabled",
-        body: { enabled: false },
+        method: "POST",
+        path: `${ROUTINES_PATH}/rt-1/pause`,
+        body: undefined,
       }),
     );
   });

@@ -99,7 +99,7 @@ function sameCheckIn(
   const subject = title.trim().toLowerCase();
   return (settings ?? []).some(
     (setting) =>
-      setting.agentId === agentId &&
+      setting.botId === agentId &&
       !setting.sourceLink &&
       (setting.subject ?? "").toLowerCase() === subject,
   );
@@ -239,10 +239,10 @@ export function NewRoutinePage({
   const plan = createFromPlan.variables;
   const savedFor = plan
     ? plan.kind === "goal"
-      ? plan.goal.agentId
+      ? plan.goal.botId
       : plan.kind === "routine"
-        ? plan.routine.agentId
-        : plan.checkIn.agentId
+        ? plan.routine.botId
+        : plan.checkIn.botId
     : "";
 
   const defaultValues: RoutineFormValues = {

@@ -52,6 +52,8 @@ tags:
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
   - { name: Network policies, description: "Where Bot computers may connect, for the organization and for a directory group." }
   - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
+  - { name: Tasks, description: "The work a Bot does for a person in a conversation of its own: started from something a check-in found, or handed to the Bot by another. Where a task stands is read from its conversation, never stored." }
+  - { name: Voice, description: "Voice calls with a conversation's Bot: how a call connects, and the calls a person saved in a conversation with their transcripts." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
   - { name: Apps, description: "The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here." }
@@ -73,6 +75,11 @@ tags:
   - { name: What-if, description: "What OpenBot's controls would decide about one action a Bot might take, and what they say now about one already on the audit trail. Nothing is carried out. Only an administrator can ask." }
   - { name: Shared use, description: "A Bot's use of a shared app's one account: the audience an administrator approved it for, and the requests a Bot's owner files when the Bot reaches further than that." }
   - { name: Host access, description: "The folders on a person's own computer that they gave their Bots through OpenBot Desktop. Each person sees and ends only their own." }
+  - { name: Computers, description: "The computer a Bot works on for a person: its state, its screen, who is driving it, the actions a Bot takes on it through the app, and for an administrator the organization's computers. The live screen and terminal stream over WebSockets, described in api/asyncapi.yaml." }
+  - { name: Browsers, description: "The browsers people work in: the one on a Bot's computer, which a person drives and records in while they hold control of it, and the one OpenBot runs for each person, with the OpenBot Recorder in it already connected." }
+  - { name: Sign-in requests, description: "A Bot asking the person it works for to sign it in to a website, and the person's answer on a private form. What they type goes to the Bot's browser and nowhere else; the Bot is told only whether the sign-in worked." }
+  - { name: Saved logins, description: "The logins a person saved for their Bots to sign in with, by site. A password goes in and is never read back out." }
+  - { name: Recorder, description: "The OpenBot Recorder, the browser extension a person records what they do with: the browsers connected as a person, their recordings, and the Recorder's own operations, which it signs with its connection token." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -118,6 +125,28 @@ paths:
   /api/v2/organizations/{organizationId}/setup-checklist: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist' }
   /api/v2/organizations/{organizationId}/setup-checklist/check: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist~1check' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/join-tokens: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1join-tokens' }
+  /api/v2/organizations/{organizationId}/conversations: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations' }
+  /api/v2/organizations/{organizationId}/conversations/route: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1route' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/mark-read: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1mark-read' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/activity: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1activity' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/signal-busy: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1signal-busy' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members~1{memberId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1messages' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1attachments' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-calls' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-sessions' }
+  /api/v2/organizations/{organizationId}/voice-configuration: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1voice-configuration' }
+  /api/v2/organizations/{organizationId}/attachments/{attachmentId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1attachments~1{attachmentId}' }
+  /api/v2/organizations/{organizationId}/conversation-threads: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversation-threads' }
+  /api/v2/organizations/{organizationId}/conversation-threads/{threadId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversation-threads~1{threadId}' }
+  /api/v2/organizations/{organizationId}/tasks: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1resolve' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/reopen: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1reopen' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/retry: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1retry' }
+  /api/v2/organizations/{organizationId}/transcriptions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1transcriptions' }
   /api/v2/organizations/{organizationId}/credentials: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials' }
   /api/v2/organizations/{organizationId}/credentials/{credentialId}/revoke: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials~1{credentialId}~1revoke' }
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
@@ -263,6 +292,65 @@ paths:
   /api/v2/organizations/{organizationId}/team-bots/{botId}/group-assignments/{group}: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1team-bots~1{botId}~1group-assignments~1{group}' }
   /api/v2/organizations/{organizationId}/team-bots/{botId}/answer-consent: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1team-bots~1{botId}~1answer-consent' }
   /api/v2/organizations/{organizationId}/people/{personId}/clear-team-bot-consents: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1clear-team-bot-consents' }
+  /api/v2/organizations/{organizationId}/computers: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers' }
+  /api/v2/organizations/{organizationId}/computers/stop: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1stop' }
+  /api/v2/organizations/{organizationId}/computers/reset: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1reset' }
+  /api/v2/organizations/{organizationId}/computers/update: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1update' }
+  /api/v2/organizations/{organizationId}/computers/{botId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/wake: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1wake' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/screenshot: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1screenshot' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/page-frames/{toolCallId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page-frames~1{toolCallId}' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/page: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control/request: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control~1request' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control/take: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control~1take' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control/release: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control~1release' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control/cancel: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control~1cancel' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/control/secret: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1control~1secret' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/human-input/secret: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1human-input~1secret' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/human-input/{kind}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1human-input~1{kind}' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/snapshot: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1snapshot' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/navigate: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1navigate' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/click: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1click' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/type: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1type' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/key: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1key' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/scroll: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1scroll' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/exec: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1exec' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/files/list: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1files~1list' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/files/read: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1files~1read' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/files/write: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1files~1write' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/tabs: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser~1tabs' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/navigate: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser~1navigate' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/recording: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser~1recording' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/narration: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser~1narration' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/clear: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1browser~1clear' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/open: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1open' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/tabs: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1tabs' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/navigate: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1navigate' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/recording: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1recording' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/narration: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1narration' }
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/clear: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1clear' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/submit: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1submit' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/code: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1code' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/use-saved: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1use-saved' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/take-over: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1take-over' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/finish: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1finish' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/cancel: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1cancel' }
+  /api/v2/organizations/{organizationId}/people/{personId}/saved-logins: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins' }
+  /api/v2/organizations/{organizationId}/people/{personId}/saved-logins/{savedLoginId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1saved-logins~1{savedLoginId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/recorder-connect-codes: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connect-codes' }
+  /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/recorder-connections/{recorderConnectionId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recorder-connections~1{recorderConnectionId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/recordings: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recordings' }
+  /api/v2/organizations/{organizationId}/recorder-connections: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder-connections' }
+  /api/v2/organizations/{organizationId}/recorder-connections/current: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder-connections~1current' }
+  /api/v2/organizations/{organizationId}/recorder/me: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1me' }
+  /api/v2/organizations/{organizationId}/recorder/learning: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1learning' }
+  /api/v2/organizations/{organizationId}/recorder/activity: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1activity' }
 components:
   securitySchemes:
     webSession:
@@ -287,12 +375,15 @@ components:
           refreshUrl: /api/auth/oauth2/token
           scopes:
             conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
-            computers:read: Watch the signed-in person's Bots' screens and terminals.
-            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
+            conversations:write: Start, rename, pin and delete the signed-in person's conversations, and send messages and files in them.
+            tasks:read: Read the signed-in person's tasks.
+            tasks:write: Mark the signed-in person's tasks done, reopen them and try them again.
             bots:read: Read the Bots the signed-in person can see, and what each is doing for them.
             bots:write: Create, change and delete the signed-in person's Bots, and pause, reset, hide and pin any Bot they can see, for themselves.
             team-bots:read: Read the Team Bots the signed-in person may use or manages.
             team-bots:write: Publish the signed-in person's Bots to the team, answer Team Bots' requests to use their accounts, and for an administrator assign Team Bots to groups.
+            computers:read: Watch the signed-in person's Bots' screens and terminals, read their computers and browsers, and for an administrator list the organization's computers.
+            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers and browsers, act on them as a Bot, and for an administrator stop, reset and update the organization's computers.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
             audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
             people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
@@ -346,6 +437,12 @@ components:
             shared-use:write: Ask that a Bot may use a shared app account, when the signed-in person owns the Bot, and approve or decline a request, when they are an administrator.
             host-access:read: Read the folders on the signed-in person's own computer that they gave their Bots.
             host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
+            sign-in-requests:read: Read the sign-in requests the signed-in person's Bots are waiting on, never a credential.
+            sign-in-requests:write: Open, answer and decline sign-in requests for the signed-in person.
+            saved-logins:read: Read which logins the signed-in person saved, never a password.
+            saved-logins:write: Delete the signed-in person's saved logins.
+            recorder:read: Read the signed-in person's connected browsers and their recordings.
+            recorder:write: Connect and disconnect the signed-in person's browsers.
     apiKey:
       type: http
       scheme: bearer
@@ -353,6 +450,18 @@ components:
       description: >-
         Automation. An API key acts as the person who created it, inside one
         organization. The server does not accept it yet.
+    recorderConnection:
+      type: http
+      scheme: bearer
+      bearerFormat: OpenBot Recorder connection token
+      description: >-
+        The OpenBot Recorder. A connection token, made when a browser's
+        Recorder exchanges a connect code (exchangeRecorderConnectCode),
+        acts as the person who connected it, and only on the Recorder's own
+        operations: the server accepts it nowhere else. It ends when the
+        person disconnects the browser, when their sign-in ends, or when it
+        expires.
+    # ---- computers sub-area C (sign-in requests, saved logins, the Recorder): security scheme end ----
   parameters:
     OrganizationId:
       name: organizationId

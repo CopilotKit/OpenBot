@@ -7,6 +7,8 @@ import {
   type BotLifecycle,
   type CheckInItem,
   type Conversation,
+  everyPage,
+  ORGANIZATION,
   type Routine,
 } from "../src/api";
 import { authClient } from "../src/auth";
@@ -51,22 +53,19 @@ export default function BotScreen() {
   );
   const lifecycle = useLoad(loadLifecycle, Boolean(session && botId));
   const loadRoutines = useCallback(
-    () => api<{ routines: Routine[] }>("/api/routines"),
+    () => everyPage<Routine>(`${ORGANIZATION}/routines`, "routines"),
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
   const loadItems = useCallback(
-    () => api<{ suggestions: CheckInItem[] }>("/api/proactive/suggestions"),
+    () =>
+      everyPage<CheckInItem>(`${ORGANIZATION}/check-in-items`, "checkInItems"),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
-  const mine = routines.data?.routines.filter(
-    (routine) => routine.agentId === botId,
-  );
-  const found = items.data?.suggestions.filter(
-    (item) => item.agentId === botId,
-  );
+  const mine = routines.data?.filter((routine) => routine.botId === botId);
+  const found = items.data?.filter((item) => item.botId === botId);
   const paused = lifecycle.data?.lifecycle.paused;
   const name = bot.data?.agent.name ?? "This Bot";
 
@@ -81,10 +80,10 @@ export default function BotScreen() {
   }
   async function setActive(routine: Routine, enabled: boolean) {
     await action.run(routine.id, async () => {
-      await api(`/api/routines/${encodeURIComponent(routine.id)}/enabled`, {
-        method: "PUT",
-        body: { enabled },
-      });
+      await api(
+        `${ORGANIZATION}/routines/${encodeURIComponent(routine.id)}/${enabled ? "resume" : "pause"}`,
+        { method: "POST" },
+      );
       await routines.refresh();
     });
   }

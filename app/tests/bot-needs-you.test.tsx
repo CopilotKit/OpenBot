@@ -19,6 +19,7 @@ import type { ReactNode } from "react";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import { answerBotsList } from "./bots-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -64,7 +65,11 @@ const request = (
 
 const suggestion = (id: string, agentId: string, title: string) => ({
   id,
-  agentId,
+  botId: agentId,
+  checkInId: "p1",
+  status: "open" as const,
+  deliveredAt: null,
+  resolvedAt: null,
   title,
   detail: "",
   sourceApp: null,
@@ -99,8 +104,8 @@ function serving() {
       return Response.json({ ok: true });
     }
     if (url === "/api/approvals") return Response.json(inbox);
-    if (url === "/api/proactive/suggestions")
-      return Response.json({ suggestions: found });
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: found, nextCursor: null });
     if (url === "/api/tasks") return Response.json({ tasks: [] });
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });

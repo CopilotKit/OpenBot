@@ -16,6 +16,11 @@ import {
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
+import {
+  CHECK_IN_ITEMS_PATH,
+  ORGANIZATION_PATH,
+  pathOf,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -156,9 +161,13 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
   const view = glance(data, BotActivitySections);
   const fetchActivity = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).endsWith("/follow-ups/cancel")) {
-      cancelled.push(String(init?.body));
-      return Response.json({ ok: true });
+    // The API's cancelFollowUp: the follow-up is named in the address, and nothing is sent.
+    const followUp = new RegExp(
+      `^${ORGANIZATION_PATH}/bots/[^/]+/follow-ups/([^/]+)/cancel$`,
+    ).exec(pathOf(input));
+    if (followUp && init?.method === "POST") {
+      cancelled.push(decodeURIComponent(followUp[1] ?? ""));
+      return Response.json({ cancelled: true });
     }
     return fetchActivity(input, init);
   }) as typeof fetch;
@@ -179,16 +188,17 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
   const cancel = followUpRow.querySelector("button") as HTMLButtonElement;
   expect(cancel.textContent).toBe("Cancel");
   fireEvent.click(cancel);
-  await waitFor(() => expect(cancelled).toEqual(['{"id":"wake-up:42"}']));
+  await waitFor(() => expect(cancelled).toEqual(["wake-up:42"]));
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {
   global.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input) === "/api/proactive/suggestions")
+    if (pathOf(input) === CHECK_IN_ITEMS_PATH)
       return Response.json({
-        suggestions: Array.from({ length: 5 }, (_, index) => ({
+        nextCursor: null,
+        checkInItems: Array.from({ length: 5 }, (_, index) => ({
           id: `s${index}`,
-          agentId: "scout",
+          botId: "scout",
           title: `Suggestion ${index + 1}`,
           detail: "",
           sourceApp: null,

@@ -347,7 +347,7 @@ export function GoalPage({
           <Item
             render={
               <Link
-                params={{ channelId: goal.channelId }}
+                params={{ channelId: goal.conversationId }}
                 to="/channel/$channelId"
               />
             }
@@ -536,7 +536,7 @@ export function GoalPage({
       ) : null}
 
       <Triggers goal={goal} />
-      <Runs channelId={goal.channelId} goalId={goal.id} />
+      <Runs channelId={goal.conversationId} goalId={goal.id} />
 
       <Dialog onOpenChange={setConfirmingDelete} open={confirmingDelete}>
         <DialogContent>

@@ -5,6 +5,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { awayFromOpenBot } from "./desktop-notifications.fixture";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -55,10 +56,10 @@ const attention = (
   ...counts,
 });
 
-/** An open item as `/api/proactive/suggestions` lists it, carried by `pingId`. */
+/** An open item as the API's check-in items list it, carried by `pingId`. */
 const item = (id: string, agentId: string, title: string, pingId: string) => ({
   id,
-  agentId,
+  botId: agentId,
   title,
   detail: "Why it was raised.",
   sourceApp: "Gmail",
@@ -74,8 +75,8 @@ let items: ReturnType<typeof item>[] = [];
 function serving(bots: ReturnType<typeof attention>[]) {
   served = bots;
   global.fetch = (async (input: RequestInfo | URL) =>
-    String(input) === "/api/proactive/suggestions"
-      ? Response.json({ suggestions: items })
+    pathOf(input) === CHECK_IN_ITEMS_PATH
+      ? Response.json({ checkInItems: items, nextCursor: null })
       : Response.json({
           bots: served,
           lastPingId,

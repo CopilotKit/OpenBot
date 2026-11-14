@@ -266,7 +266,7 @@ function Activity({
   onDays: (days: Days) => void;
 }) {
   const [openBot, setOpenBot] = useState<string | undefined>();
-  const bot = metrics.data?.bots.find((row) => row.agentId === openBot);
+  const bot = metrics.data?.bots.find((row) => row.botId === openBot);
 
   return (
     <PageSection
@@ -322,9 +322,9 @@ function Activity({
           ) : (
             <PageRows>
               {metrics.data.bots.map((row, index) => (
-                <Fragment key={row.agentId}>
+                <Fragment key={row.botId}>
                   {index > 0 ? <Separator /> : null}
-                  <BotRow bot={row} onOpen={() => setOpenBot(row.agentId)} />
+                  <BotRow bot={row} onOpen={() => setOpenBot(row.botId)} />
                 </Fragment>
               ))}
             </PageRows>
