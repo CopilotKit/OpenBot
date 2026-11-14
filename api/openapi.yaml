@@ -4567,8 +4567,33 @@ components:
           type: array
           minItems: 1
           maxItems: 100
+          description: >-
+            Changes to check and preview, as a screen holds them while an admin
+            edits what a description wrote. One that names a permission, role or
+            group that isn't one is not refused: the answer's `check` says what is
+            wrong with it.
           items:
-            $ref: '#/components/schemas/CapabilityChange'
+            $ref: '#/components/schemas/CapabilityChangeToCheck'
+    CapabilityChangeToCheck:
+      type: object
+      additionalProperties: false
+      required: [scopeKind, capability, allowed]
+      properties:
+        scopeKind:
+          type: string
+          enum: [organization, role, group]
+        scopeId:
+          type: string
+          maxLength: 200
+          pattern: ^[^\x00]*$
+          description: Empty for the organization; admin or user for a role; the group's name for a group.
+        capability:
+          type: string
+          maxLength: 100
+          pattern: ^[^\x00]*$
+          description: The permission, by its id. One that isn't a permission is named in `check`.
+        allowed:
+          $ref: '#/components/schemas/SwitchValue'
     CapabilityChanges:
       type: object
       additionalProperties: false

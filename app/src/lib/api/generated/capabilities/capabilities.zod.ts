@@ -466,6 +466,10 @@ export const previewCapabilityChangesBodyChangesItemScopeIdMax = 200;
 export const previewCapabilityChangesBodyChangesItemScopeIdRegExp = new RegExp(
   "^[^\\x00]*$",
 );
+export const previewCapabilityChangesBodyChangesItemCapabilityMax = 100;
+
+export const previewCapabilityChangesBodyChangesItemCapabilityRegExp =
+  new RegExp("^[^\\x00]*$");
 export const previewCapabilityChangesBodyChangesMax = 100;
 
 export const PreviewCapabilityChangesBody = zod.object({
@@ -482,21 +486,12 @@ export const PreviewCapabilityChangesBody = zod.object({
             "Empty for the organization; admin or user for a role; the group's name for a group.",
           ),
         capability: zod
-          .enum([
-            "useBots",
-            "cloudBrowser",
-            "cloudNetwork",
-            "cloudComputer",
-            "localComputer",
-            "customRules",
-            "passwordManager",
-            "slackTeams",
-            "teamBots",
-            "ownerApps",
-            "isolatedComputers",
-            "proactive",
-          ])
-          .describe("A permission switch."),
+          .string()
+          .max(previewCapabilityChangesBodyChangesItemCapabilityMax)
+          .regex(previewCapabilityChangesBodyChangesItemCapabilityRegExp)
+          .describe(
+            "The permission, by its id. One that isn't a permission is named in `check`.",
+          ),
         allowed: zod
           .boolean()
           .nullable()
@@ -506,7 +501,10 @@ export const PreviewCapabilityChangesBody = zod.object({
       }),
     )
     .min(1)
-    .max(previewCapabilityChangesBodyChangesMax),
+    .max(previewCapabilityChangesBodyChangesMax)
+    .describe(
+      "Changes to check and preview, as a screen holds them while an admin edits what a description wrote. One that names a permission, role or group that isn't one is not refused: the answer's `check` says what is wrong with it.",
+    ),
 });
 
 export const PreviewCapabilityChangesResponse = zod.object({

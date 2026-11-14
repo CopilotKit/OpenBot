@@ -66,6 +66,8 @@ export * from "./capabilityChange";
 export * from "./capabilityChanges";
 export * from "./capabilityChangeScopeKind";
 export * from "./capabilityChangesToPreview";
+export * from "./capabilityChangeToCheck";
+export * from "./capabilityChangeToCheckScopeKind";
 export * from "./capabilityGroups";
 export * from "./capabilityId";
 export * from "./capabilityNotFoundResponse";
