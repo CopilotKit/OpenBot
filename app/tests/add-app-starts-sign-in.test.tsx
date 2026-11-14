@@ -25,6 +25,11 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
 import type { ComposioApp, PluginServer } from "@/lib/plugins/queries";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  connectionsCall,
+  startResponse,
+} from "./connections-api";
 
 /**
  * ADDING AN APP THAT SIGNS IN IS NOT THE SAME AS BEING SIGNED IN TO IT.
@@ -37,7 +42,7 @@ import { settleReactWork } from "./settle-react-work";
  * beside Connect, in either edition, never "Added" on its own.
  *
  * Every response below is the shape the real route answers: the directory's rows, the `server` the
- * add route returns (201), and the `authorizationUrl` the connect route returns for a sign-in app.
+ * add route returns (201), and the `authorizationUrl` connectApp returns for a sign-in app.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -112,10 +117,11 @@ beforeEach(() => {
           { status: 201 },
         );
       }
-      if (init?.method === "POST" && path.endsWith("/connect")) {
-        const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const call = connectionsCall(path, init);
+      if (call?.operation === "connect") {
+        const id = call.appId ?? "";
         writes.push(`connect ${id}`);
-        return Response.json({
+        return startResponse({
           authorizationUrl: `https://sign-in.example/${id}`,
         });
       }
@@ -130,16 +136,13 @@ beforeEach(() => {
           composioConfigured: true,
           provider,
         });
-      if (path === "/api/plugins/connections")
-        return Response.json({
-          connections: connected.map((serverId) => ({
+      if (call?.operation === "list")
+        return connectionPage(
+          connected.map((serverId) => ({
             serverId,
-            scope: "",
             connectedAt: "2026-11-09T00:00:00.000Z",
-            holder: "person",
           })),
-          redirectUri: null,
-        });
+        );
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

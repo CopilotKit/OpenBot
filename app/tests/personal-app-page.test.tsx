@@ -31,6 +31,14 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  disconnectionResponse,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+  type TodayConnection,
+} from "./connections-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -105,8 +113,8 @@ const exaServer = {
  */
 const writes: string[] = [];
 let servers: PluginServer[] = [];
-/** Your accounts, as `/api/plugins/connections` answers. A disconnect empties it. */
-let connections: unknown[] = [];
+/** Your accounts, as listConnections answers them. A disconnect empties it. */
+let connections: TodayConnection[] = [];
 const originalFetch = global.fetch;
 beforeEach(() => {
   writes.length = 0;
@@ -118,18 +126,19 @@ beforeEach(() => {
         writes.push(`${init.method} ${path}`);
         if (path === "/api/plugins/servers") servers = [notionServer];
         if (path.endsWith("/connect"))
-          return Response.json({ connected: true });
-        if (init.method === "DELETE" && path.endsWith("/connection"))
+          return startResponse({ connected: true });
+        if (path.endsWith("/disconnect")) {
           connections = [];
-        else if (init.method === "DELETE")
+          return disconnectionResponse();
+        }
+        if (init.method === "DELETE")
           servers = servers.filter(
             (server) => path !== `/api/plugins/servers/${server.id}`,
           );
         return Response.json({ ok: true });
       }
       if (path === "/api/plugins") return Response.json(pageWith(servers));
-      if (path === "/api/plugins/connections")
-        return Response.json({ connections });
+      if (path === MY_CONNECTIONS_PATH) return connectionPage(connections);
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -191,7 +200,7 @@ describe("an app's page in the personal edition", () => {
     await waitFor(() =>
       expect(writes).toEqual([
         "POST /api/plugins/servers",
-        "POST /api/plugins/servers/notion/connect",
+        `POST ${myConnectionPath("notion", "connect")}`,
       ]),
     );
   });
@@ -506,8 +515,6 @@ describe("turning an app off from its own page", () => {
     connections = [
       {
         serverId: "composio-exa",
-        holder: "person",
-        scope: "",
         connectedAt: "2026-11-07T00:00:00.000Z",
         verified: true,
         verifiedAt: "2026-11-07T00:00:00.000Z",
@@ -517,8 +524,8 @@ describe("turning an app off from its own page", () => {
     const user = userEvent.setup({ document });
     await user.click(await view.findByRole("button", { name: "Disconnect" }));
     await waitFor(() =>
-      expect(writes.filter((write) => write.startsWith("DELETE"))).toEqual([
-        "DELETE /api/plugins/servers/composio-exa/connection",
+      expect(writes.filter((write) => write.endsWith("/disconnect"))).toEqual([
+        `POST ${myConnectionPath("composio-exa", "disconnect")}`,
       ]),
     );
     expect(await view.findByRole("button", { name: "Connect" })).toBeTruthy();

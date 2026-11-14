@@ -20,6 +20,13 @@ import { cleanup, render } from "@testing-library/react";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminPluginRoute } from "@/routes/_authed/admin/plugins/$key";
 import { answerBotsList } from "./bots-api";
+import {
+  confirmationResponse,
+  connectionPage,
+  MY_CONNECTIONS_PATH,
+  sharedConnectionPath,
+  sharedConnectionResponse,
+} from "./connections-api";
 
 /**
  * The admin app-detail page's brokered row, on each broker (spec D11).
@@ -88,12 +95,16 @@ function server(provider: Provider, shared: boolean): PluginServer {
   };
 }
 
+/** Every request the page made, as `METHOD path`. */
+const asked: string[] = [];
+
 function install(setup: {
   provider: Provider;
   shared: boolean;
   configured: boolean;
   overrides?: Partial<PluginServer>;
 }) {
+  asked.length = 0;
   const page: PluginsPage = {
     catalogue: [],
     servers: [{ ...server(setup.provider, setup.shared), ...setup.overrides }],
@@ -111,9 +122,20 @@ function install(setup: {
     });
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
+    asked.push(`${init?.method ?? "GET"} ${path}`);
     if (path === "/api/plugins") return json(page);
-    if (path.startsWith("/api/plugins/connections"))
-      return json({ connections: [], redirectUri: null });
+    if (path.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
+    // The app's one shared account, connected by an admin, which the team row reads on its own.
+    if (path === sharedConnectionPath(APP))
+      return sharedConnectionResponse({
+        appId: APP,
+        connected: true,
+        connectedBy: "ops@acme.test",
+        displayName: "Acme Workspace",
+        verified: true,
+      });
+    if (path === sharedConnectionPath(APP, "confirm"))
+      return confirmationResponse(true);
     const bots = answerBotsList(path, init, { visible: [] });
     if (bots) return bots;
     return json({ error: "unexpected" }, 404);
@@ -231,4 +253,17 @@ test("an app that can only hold a shared account, once shared, cannot be made pe
   const view = renderScreen();
   await view.findByText(/so it can't be made personal/);
   expect(view.queryByRole("button", { name: "Make personal" })).toBeNull();
+});
+
+test("a Shared app's team row reads the app's shared account, and confirms that account, never the admin's own", async () => {
+  install({ provider: "composio", shared: true, configured: true });
+  const view = renderScreen();
+  await view.findByText(
+    /Connected as Acme Workspace by ops@acme\.test\. Every Bot with these tools acts as this account\./,
+  );
+  expect(asked).toContain(`GET ${sharedConnectionPath(APP)}`);
+  expect(asked).toContain(`POST ${sharedConnectionPath(APP, "confirm")}`);
+  expect(
+    asked.filter((call) => call.includes("/people/me/connections/")),
+  ).toEqual([]);
 });

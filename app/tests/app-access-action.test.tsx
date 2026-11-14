@@ -27,6 +27,11 @@ import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionsCall,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 
 /**
  * The one piece the Bot page and the chat card both draw an app's state with.
@@ -96,9 +101,9 @@ function mounted(
       return Response.json({ bot: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
-    if (url.endsWith("/connect?returnTo=settings")) {
+    if (connectionsCall(url, { method })?.operation === "connect") {
       await options.connectGate;
-      return Response.json({ authorizationUrl: "https://gmail.test/consent" });
+      return startResponse({ authorizationUrl: "https://gmail.test/consent" });
     }
     return Response.json({ request: { id: "req_1" }, created: true });
   }) as unknown as typeof fetch;
@@ -244,7 +249,7 @@ test("not connected offers Connect, which starts the person's own consent in a n
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
   expect(sent.map((call) => `${call.method} ${call.url}`)).toContain(
-    "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
+    `POST ${myConnectionPath("composio-gmail", "connect")}`,
   );
   await view.findByText("Finish in the tab that opened.");
 });
@@ -537,7 +542,7 @@ test.each(["disabled", "not_granted"] as const)(
       sent.filter((call) => call.method === "POST").map((call) => call.url),
     ).toEqual([
       "/api/plugins/for/expenses/apps/composio-gmail/approve",
-      "/api/plugins/servers/composio-gmail/connect?returnTo=settings",
+      myConnectionPath("composio-gmail", "connect"),
     ]);
   },
 );
@@ -555,7 +560,9 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() =>
     expect(
-      sent.some((call) => call.url.endsWith("/connect?returnTo=settings")),
+      sent.some(
+        (call) => call.url === myConnectionPath("composio-gmail", "connect"),
+      ),
     ).toBe(true),
   );
   // The refetch after turning it on: the app is on now, and only this person's sign-in is missing.

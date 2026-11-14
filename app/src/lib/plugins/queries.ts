@@ -1,4 +1,14 @@
 import { queryOptions } from "@tanstack/react-query";
+import { everyPage } from "@/lib/api/every-page";
+import {
+  getConnection,
+  getConnectionDisconnectPreview,
+  getSharedConnection,
+  listConnectedAccounts,
+  listConnections,
+} from "@/lib/api/generated/connections/connections";
+import type { Connection } from "@/lib/api/generated/model";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
 // This import closes a cycle: `./provider-vocabulary` imports `pluginsProvider` from this file.
 // It is safe for one reason, and the reason is the rule. Both live bindings that cross it —
@@ -263,7 +273,7 @@ export type PluginsPage = {
    * Whether this deployment's broker authorizes ONE ACTION AT A TIME.
    *
    * A DECLARED CAPABILITY, read with a presence test and never a vendor name. The server computes
-   * it from the very expression `/servers/:id/authorize` and the `/arcade/verify` return leg gate
+   * it from the very expression authorizeConnectionAction and the `/arcade/verify` return leg gate
    * on, so a screen that draws the per-action grant list and the routes that serve its buttons
    * cannot key on different facts. Gating on `provider === "arcade"` instead left a broker named
    * arcade whose flow is absent drawing a list whose every Authorize press 503s.
@@ -322,6 +332,8 @@ export const pluginKeys = {
   page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
+  sharedConnection: (serverId: string) =>
+    ["plugins", "shared-connection", serverId] as const,
   siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
   accounts: (serverId: string) => ["plugins", "accounts", serverId] as const,
   composioApps: (query: string) =>
@@ -331,8 +343,8 @@ export const pluginKeys = {
 /**
  * One account this person has connected, from their own point of view.
  *
- * DELIBERATELY NON-UNIFORM, because `/api/plugins/connections` concatenates two reads: connections
- * held in this deployment's own vault, and brokered ones Composio keeps on our behalf. The fields a
+ * DELIBERATELY NON-UNIFORM, because listConnections answers two kinds of row: connections held in
+ * this deployment's own vault, and brokered ones Composio keeps on our behalf. The fields a
  * settings row draws from — the server id, the scope, the date — line up across both, which is why
  * one type covers both. The pair below does not, so it is optional rather than required: making it
  * required would be a lie the compiler then enforced on every held row.
@@ -357,17 +369,16 @@ export type PluginConnection = {
   scope: string;
   connectedAt: string;
   /**
-   * Whose account this row is: the signed-in person's own, or the one standing account of a Shared
-   * app (see {@link PluginServer.accountMode}) that every Bot holding a grant acts as regardless of
-   * who is asking. Undefined on a shape written before the distinction existed, which reads as
-   * `"person"` — see {@link personalConnections}, which is what a screen asking "is this mine" reads
-   * through rather than comparing against the literal.
+   * Whose account this row is: the signed-in person's own (every row {@link connectionsQueryOptions}
+   * lists), or the one standing account of a Shared app (see {@link PluginServer.accountMode}), read
+   * with {@link sharedConnectionQueryOptions}, that every Bot holding a grant acts as regardless of
+   * who is asking. Undefined reads as `"person"`: see {@link personalConnections}.
    */
   holder?: "person" | "deployment";
   /**
    * Whether the deployment's one shared account is connected, present only on a DEPLOYMENT row.
    *
-   * A Shared app's row is listed even when nothing is connected to it yet — see
+   * A Shared app's account is read even when nothing is connected to it yet — see
    * {@link PluginServer.sharedVendorConnected} — so a reader cannot take the row's presence for a
    * yes. This is the field that answers.
    *
@@ -459,8 +470,28 @@ export type PluginConnection = {
 
 export type PluginConnections = {
   connections: PluginConnection[];
-  redirectUri: string | null;
 };
+
+/**
+ * One of the person's own connections as listConnections answers it, in the shape the screens
+ * read: a held row carries `revoked`, a row the app keeps carries what its last check found.
+ */
+function personalRow(connection: Connection): PluginConnection {
+  return {
+    serverId: connection.appId,
+    scope: connection.scope ?? "",
+    connectedAt: connection.connectedAt,
+    holder: "person",
+    ...(connection.check === null
+      ? { revoked: connection.revoked }
+      : {
+          verified: connection.check.verified,
+          verifiedAt: connection.check.verifiedAt,
+          probe: connection.check.checkedAction,
+          checkable: connection.check.checkable,
+        }),
+  };
+}
 
 /**
  * The connections that are the signed-in person's own. A Shared app's row is the deployment's, and
@@ -482,10 +513,45 @@ export function connectionsQueryOptions() {
   return queryOptions({
     queryKey: pluginKeys.connections(),
     queryFn: async (): Promise<PluginConnections> => {
-      const response = await client("/api/plugins/connections", {
-        fallback: "Couldn't load your connections.",
+      const connections = await everyPage(async (cursor) => {
+        const page = await listConnections(
+          ORGANIZATION_ID,
+          "me",
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load your connections." },
+        );
+        return { items: page.connections, nextCursor: page.nextCursor };
       });
-      return response.json();
+      return { connections: connections.map(personalRow) };
+    },
+  });
+}
+
+/**
+ * A Shared app's one account, which every Bot using the app acts as: whether it is connected, who
+ * connected it and the app's own name for it, with what its last check found. Read only for an app
+ * in Shared mode; a person's own connections never carry it.
+ */
+export function sharedConnectionQueryOptions(serverId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.sharedConnection(serverId),
+    queryFn: async (): Promise<PluginConnection> => {
+      const shared = await getSharedConnection(ORGANIZATION_ID, serverId, {
+        fallback: "Couldn't load the shared account.",
+      });
+      return {
+        serverId: shared.appId,
+        scope: "",
+        connectedAt: shared.connectedAt ?? "",
+        holder: "deployment",
+        connected: shared.connected,
+        connectedBy: shared.connectedBy,
+        displayName: shared.accountName,
+        verified: shared.check?.verified ?? false,
+        verifiedAt: shared.check?.verifiedAt ?? null,
+        probe: shared.check?.checkedAction ?? null,
+        checkable: shared.check?.checkable ?? false,
+      };
     },
   });
 }
@@ -503,13 +569,16 @@ export function connectionSiblingsQueryOptions(serverId: string) {
   return queryOptions({
     queryKey: pluginKeys.siblings(serverId),
     queryFn: async (): Promise<ConnectionSiblings> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/siblings`,
-        {
-          fallback: "Couldn't read which other apps share this connection.",
-        },
+      const preview = await getConnectionDisconnectPreview(
+        ORGANIZATION_ID,
+        "me",
+        serverId,
+        { fallback: "Couldn't read which other apps share this connection." },
       );
-      const body: Partial<ConnectionSiblings> = await response.json();
+      const body: Partial<ConnectionSiblings> = {
+        siblings: preview.alsoEnds,
+        unanswered: preview.uncheckedCount,
+      };
       /*
        * NARROWED RATHER THAN TRUSTED: an answer that is not this shape is read as "nothing to say",
        * which draws no warning, rather than a throw that takes the whole page down for a sentence.
@@ -577,7 +646,7 @@ export function agentPluginsQueryOptions(agentId: string) {
   });
 }
 
-/** One of the signed-in person's accounts at an app, as `/servers/:id/accounts` answers it. */
+/** One of the signed-in person's accounts at an app, as listConnectedAccounts answers it. */
 export type BrokeredAccountRecord = {
   /** Which account a Disconnect or Make default press is about. Opaque. */
   id: string;
@@ -604,15 +673,22 @@ export function brokeredAccountsQueryOptions(serverId: string) {
   return queryOptions({
     queryKey: pluginKeys.accounts(serverId),
     queryFn: async (): Promise<BrokeredAccounts> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/accounts`,
-        { fallback: "Couldn't list your accounts. Reload the page." },
-      );
-      const body: Partial<BrokeredAccounts> = await response.json();
-      return {
-        accounts: Array.isArray(body.accounts) ? body.accounts : [],
-        canAddAnother: body.canAddAnother === true,
-      };
+      const fallback = "Couldn't list your accounts. Reload the page.";
+      // Whether another account can be added is the connection's, read beside its accounts.
+      const [accounts, connection] = await Promise.all([
+        everyPage(async (cursor) => {
+          const page = await listConnectedAccounts(
+            ORGANIZATION_ID,
+            "me",
+            serverId,
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            { fallback },
+          );
+          return { items: page.accounts, nextCursor: page.nextCursor };
+        }),
+        getConnection(ORGANIZATION_ID, "me", serverId, { fallback }),
+      ]);
+      return { accounts, canAddAnother: connection.canAddAccount };
     },
   });
 }

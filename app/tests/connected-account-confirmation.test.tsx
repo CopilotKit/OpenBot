@@ -27,6 +27,13 @@ import {
   Route as ConnectedAccountRoute,
   landedActionFrom,
 } from "@/routes/_authed/_app/connections.$key";
+import {
+  confirmationResponse,
+  connectionPage,
+  connectionsProblem,
+  disconnectPreviewResponse,
+  MY_CONNECTIONS_PATH,
+} from "./connections-api";
 
 /**
  * The page a person reads before deciding to grant or end access to a mailbox, on each broker.
@@ -138,13 +145,12 @@ function install(setup: Setup) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input).split("?")[0] ?? "";
     if (path === "/api/plugins") return json(page);
-    if (path.startsWith("/api/plugins/connections")) {
-      return json({
-        connections: setup.connected
+    if (path === MY_CONNECTIONS_PATH) {
+      return connectionPage(
+        setup.connected
           ? [
               {
                 serverId: APP,
-                scope: "",
                 connectedAt: "2026-09-10T00:00:00.000Z",
                 verified: true,
                 verifiedAt: null,
@@ -152,16 +158,17 @@ function install(setup: Setup) {
               },
             ]
           : [],
-        redirectUri: null,
-      });
+      );
     }
-    if (path.endsWith("/connection/siblings")) {
+    if (path.endsWith("/disconnect-preview")) {
       siblingReads.push(path);
-      if (setup.siblingsFail) return json({ error: "no" }, 500);
-      return json(setup.siblings ?? { siblings: [], unanswered: 0 });
+      if (setup.siblingsFail) return connectionsProblem(500, "no");
+      return disconnectPreviewResponse(
+        setup.siblings ?? { siblings: [], unanswered: 0 },
+      );
     }
-    if (path.endsWith("/connection/confirm"))
-      return json({ connected: setup.connected });
+    if (path.endsWith("/confirm"))
+      return confirmationResponse(setup.connected === true);
     return json({ error: "unexpected" }, 404);
   }) as typeof fetch;
 }

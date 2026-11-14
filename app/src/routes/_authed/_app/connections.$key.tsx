@@ -287,7 +287,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   /*
    * THE GRANT LIST IS DRAWN WHERE THE BROKER AUTHORIZES PER ACTION, read off the declared
    * capability and never off the vendor's name. The server computes `authorizesPerAction` from the
-   * same expression `/servers/:id/authorize` behind the Authorize button gates on, so the list this
+   * same expression authorizeConnectionAction behind the Authorize button gates on, so the list this
    * screen draws and the route its buttons call cannot key on different facts. `provider ===
    * "arcade"` keyed on a different one: the day a broker named arcade is reached with that flow
    * absent, this drew the list and every press 503'd. False on Composio — whose auth config fixes
@@ -315,6 +315,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     report: setNotice,
     returnTo: "settings",
     serverId: key,
+    shared: sharedHere,
     /*
      * Off the same row `recorded` is read from, and absent where you have never connected this app:
      * with no row there is nothing that could have been checked, which is what the server's own
@@ -361,7 +362,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * AND A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, WHICH IS WHAT THIS PAGE DID
    * WITH IT.
    *
-   * Nothing read `connections.error`, so a 500 from `/api/plugins/connections` left `connection`
+   * Nothing read `connections.error`, so a 500 from listConnections left `connection`
    * undefined and the row was handed `recorded: false, verified: false, probe: undefined,
    * checkable: false` — a connection nobody has made. For a brokered key app whose last check did
    * not come back clean, that is the exact state this whole feature exists to keep visible: the page
@@ -468,6 +469,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
             landedAction={landedAction}
             returnTo="settings"
             serverId={key}
+            shared
           />
         ) : null}
       </PageShell>
