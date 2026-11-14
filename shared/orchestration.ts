@@ -205,6 +205,10 @@ export function readTaskReport(
  * conversation, not the task's thread, so the facts, figures and quotes they asked for are in the
  * report itself.
  *
+ * THE WORDS STILL SAY IT WHEN A CARD SHOWS IT. With "say in words what it shows" gone from the
+ * brief, a task drew a record card holding both contract changes and reported one line, "Source: I
+ * checked Gmail". A component goes with the answer's words, as it does in a direct answer.
+ *
  * A COMPONENT IS A STEP OF ITS OWN, BEFORE THE WORDS. "Your words first" had a model write its
  * summary and then the record card's call in the same message, as text: the card's JSON, after a
  * few stray characters, in the person's conversation. Called on its own before the answer, it is a
@@ -216,7 +220,7 @@ export function readTaskReport(
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
   "When the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, as you always do: call the component in a step of its own, once the results it shows have come back and before you write your answer. Never write out what a component already shows: no Markdown table or list of the same rows beside it, and never a component's data as text.",
-  "Your last message is your report. It alone is posted back in that conversation, with the components you drew; everything you say before it stays in this thread, where the person can open it. The person reads that conversation, not this thread, so the report must stand on its own: give the answer itself, with the facts, figures, dates and quotes they asked for, never only that you found them. Size it to the question: what you found, or what you did and its link, in a sentence or two when the ask was simple, then anything you could not confirm, a sentence each. Leave out how you got there: no account of what you searched, read, checked, resolved or chose, no list of steps, and no offer of more work.",
+  "Your last message is your report. It alone is posted back in that conversation, with the components you drew; everything you say before it stays in this thread, where the person can open it. The person reads that conversation, not this thread, so the report must stand on its own: give the answer itself in words, with the facts, figures, dates and quotes they asked for, never only that you found them. A component goes with those words, never in place of them: when you drew one, say in a sentence or two what it shows and what stands out. Size it to the question: what you found, or what you did and its link, in a sentence or two when the ask was simple, then anything you could not confirm, a sentence each. Leave out how you got there: no account of what you searched, read, checked, resolved or chose, no list of steps, and no offer of more work.",
   "Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'. Name people and channels the way the person would, never by an app's id or its markup for one.",
   "The task:",
 ];

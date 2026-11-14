@@ -60,6 +60,12 @@ describe("a delegated task's brief", () => {
     expect(framed).toContain(
       "the facts, figures, dates and quotes they asked for",
     );
+    // A task drew a card holding both changes and reported one line: "Source: I checked Gmail".
+    expect(framed).toContain("give the answer itself in words");
+    expect(framed).toContain(
+      "A component goes with those words, never in place of them",
+    );
+    expect(framed).toContain("what it shows and what stands out");
     expect(framed).toContain("Size it to the question");
     expect(framed).toContain("Leave out how you got there");
     expect(framed).toContain("stays in this thread");
