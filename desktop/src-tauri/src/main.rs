@@ -5571,12 +5571,8 @@ fn answering_before_stop(address: &engine::Address) {
 }
 
 /// What Stop says, first, when the software OpenBot runs on did not answer and its machine did not
-/// say it was stopped.
+/// say it was stopped. The next launch says it of a Quit that found the same, as its headline.
 const ENGINE_UNREACHABLE_AT_STOP: &str = "OpenBot couldn't reach the software it runs on, so some of OpenBot may still be running. Stop OpenBot again to retry.";
-
-/// What the next launch says of a Quit that found the same.
-const ENGINE_UNREACHABLE_AT_QUIT: &str =
-    "OpenBot couldn't reach the software it runs on, so some of OpenBot may still be running.";
 
 /**
 What Stop and Quit find of the engine before they stop anything.
@@ -5964,7 +5960,8 @@ struct QuitCleanupNotice {
     version: u8,
     failures: Vec<QuitCleanupFailure>,
     /**
-    The Quit could not reach the software OpenBot runs on (`ENGINE_UNREACHABLE_AT_QUIT`).
+    The Quit could not reach the software OpenBot runs on (`ENGINE_UNREACHABLE_AT_STOP`), said as the
+    notice's headline when it is read.
 
     A field of its own, never a failure of its own: an app rolled back to an earlier release reads
     this file too, and its reader knows only `failures` and the two kinds in it. It skips a field it
@@ -6138,24 +6135,21 @@ fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
         )
     })?;
     let detail = notice
-        .engine_unreachable
-        .then_some(ENGINE_UNREACHABLE_AT_QUIT)
-        .into_iter()
-        .chain(
-            notice
-                .failures
-                .iter()
-                .map(|failure| quit_cleanup_failure_summary(*failure)),
-        )
+        .failures
+        .iter()
+        .map(|failure| quit_cleanup_failure_summary(*failure))
         .collect::<Vec<_>>()
         .join("\n");
     if detail.is_empty() {
         return Ok(None);
     }
-    Ok(Some(Problem::with(
-        "OpenBot had trouble shutting down last time.",
-        detail,
-    )))
+    // The sentence a person reads first: why, when it was the engine that did not answer.
+    let said = if notice.engine_unreachable {
+        ENGINE_UNREACHABLE_AT_STOP
+    } else {
+        "OpenBot had trouble shutting down last time."
+    };
+    Ok(Some(Problem::with(said, detail)))
 }
 
 fn recovery_required_or_pending_quit_notice(shell: &Shell, root: &Path) -> bool {
@@ -17657,14 +17651,11 @@ mod tests {
             assert!(recovery_required(&shell, &root), "quit: {quit}");
             if quit {
                 record_quit(&root, stopped);
+                // The headline the next launch shows, in full.
                 let notice = read_quit_cleanup_notice(&root).unwrap().unwrap();
-                assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
+                assert_eq!(notice.said, ENGINE_UNREACHABLE_AT_STOP);
                 assert!(
-                    notice
-                        .detail
-                        .as_deref()
-                        .unwrap()
-                        .contains(ENGINE_UNREACHABLE_AT_QUIT),
+                    !notice.detail.as_deref().unwrap().contains("couldn't reach"),
                     "{notice:?}"
                 );
             }
@@ -23152,13 +23143,10 @@ mod release_1_0_3_quit_notice {
 
         super::write_quit_cleanup_notice(&root, &lines).unwrap();
         let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
-        assert_eq!(now.said, "OpenBot had trouble shutting down last time.");
+        assert_eq!(now.said, ENGINE_UNREACHABLE_AT_STOP);
         assert_eq!(
             now.detail.as_deref(),
-            Some(
-                format!("{ENGINE_UNREACHABLE_AT_QUIT}\nOpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
-                    .as_str()
-            )
+            Some("OpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -23181,12 +23169,10 @@ mod release_1_0_3_quit_notice {
 
         super::write_quit_cleanup_notice(&root, &lines).unwrap();
         let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(now.said, ENGINE_UNREACHABLE_AT_STOP);
         assert_eq!(
             now.detail.as_deref(),
-            Some(
-                format!("{ENGINE_UNREACHABLE_AT_QUIT}\nOpenBot could not confirm all containers stopped.")
-                    .as_str()
-            )
+            Some("OpenBot could not confirm all containers stopped.")
         );
         let _ = std::fs::remove_dir_all(root);
     }
