@@ -16,7 +16,8 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    `## Unreleased` heading to `## X.Y.Z`, moves the desktop Cargo package/lockfile to the same
    version, and pins `backend-images.env` to `vX.Y.Z`, so a checkout of the release runs the
    OpenBot server, computer and supervisor images of that release. Those images must be published
-   at `vX.Y.Z` before it merges. Tauri reads its version directly from the root `package.json`.
+   at `vX.Y.Z` before it merges, with their release files (`ghcr.io/copilotkit/openbot:charts-vX.Y.Z`),
+   which carry the two Helm charts and the name of the last migration. Tauri reads its version directly from the root `package.json`.
 5. Merge it. That is the publish. After a stable release, the publish workflow opens a PR that puts
    `main` back in `backend-images.env`, so main runs the images built from main again; merge it
    once its checks pass.
@@ -792,7 +793,7 @@ Then, in order:
   every one of those
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
-  archive and the release manifest as assets. A candidate or beta is marked as a
+  archive, the `openbot` and `openbot-bundle` chart packages and the release manifest as assets. A candidate or beta is marked as a
   prerelease and never Latest. A stable release is published not Latest, with no installers yet
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag straight
   away. It waits for a `macos-signing` reviewer, then builds both Macs and attaches the signed `.dmg`
