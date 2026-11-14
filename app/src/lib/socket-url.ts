@@ -14,6 +14,8 @@
  * the port each announces on `window.__OPENBOT_WS_PORT__`. Nothing announces it in the built bundle
  * the server hands out, so a production page has no port to override with and stays same-origin.
  */
+import { ORGANIZATION_ID } from "@/lib/api/request";
+
 declare global {
   interface Window {
     __OPENBOT_WS_PORT__?: string;
@@ -35,6 +37,15 @@ function validPort(port: string): string {
   const n = Number(port.trim());
   if (!Number.isInteger(n) || n < 1 || n > 65535) return "";
   return String(n);
+}
+
+/**
+ * The path of one of the API's sockets, under the organization's address as every REST resource is:
+ * `/conversation-events`, `/computers/{botId}/screen`, `/computers/{botId}/terminal`. They are
+ * described in api/asyncapi.yaml, as the REST operations are in api/openapi.yaml.
+ */
+export function apiSocketPath(rest: string): string {
+  return `/api/v2/organizations/${ORGANIZATION_ID}${rest}`;
 }
 
 export function socketUrl(

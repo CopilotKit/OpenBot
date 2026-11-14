@@ -190,12 +190,31 @@ beforeAll(() => {
           intelligence: { wsUrl: `ws://127.0.0.1:${gateway.port}/client` },
           telemetryDisabled: true,
         });
+      // Whether the conversation still has a run going is asked with the API's join token.
+      const joinTokenAsked = /\/conversations\/[^/]+\/join-tokens$/.test(
+        url.pathname,
+      );
       if (
         frozen &&
         (url.pathname.endsWith("/agent/join-bot/connect") ||
+          joinTokenAsked ||
           /\/threads\/[^/]+\/messages$/.test(url.pathname))
       )
         return neverAnswered(init);
+      if (joinTokenAsked)
+        return NativeResponse.json(
+          {
+            joinToken: "join-token",
+            expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            threadId: channel.threadId,
+            runId: null,
+            realtime: {
+              clientUrl: `ws://127.0.0.1:${gateway.port}/client`,
+              topic: TOPIC,
+            },
+          },
+          { status: 201 },
+        );
       if (url.pathname.endsWith("/agent/join-bot/connect"))
         return NativeResponse.json({
           threadId: channel.threadId,

@@ -1,5 +1,6 @@
-import { type ClientOptions, tryClient } from "@/lib/client";
-import { newId } from "../new-id";
+import { createConversationJoinToken } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /**
  * A run that has gone quiet, and whether it is still a run.
@@ -11,19 +12,19 @@ import { newId } from "../new-id";
  * looks exactly like one that is thinking.
  *
  * SILENCE IS NOT THE SIGNAL. A Bot can think, or wait on an app, for minutes. After
- * {@link QUIET_RUN_MS} with nothing arriving, the runtime is ASKED whether the conversation still
+ * {@link QUIET_RUN_MS} with nothing arriving, the server is ASKED whether the conversation still
  * has a run going, and asked again every {@link QUIET_RUN_MS} while it says yes. Only its answer
  * ends the turn: no run going, or no answer at all.
  */
 
-/** How long nothing may arrive from a run before the runtime is asked about it. */
+/** How long nothing may arrive from a run before the server is asked about it. */
 export const QUIET_RUN_MS = 45_000;
 
-/** How long the runtime is given to answer. Past this it has not answered. */
+/** How long the server is given to answer. Past this it has not answered. */
 export const LIVENESS_ANSWER_MS = 15_000;
 
 /**
- * What the runtime said: the conversation has a run going, it has none, or it could not say (it
+ * What the server said: the conversation has a run going, it has none, or it could not say (it
  * refused, failed, or did not answer in time).
  */
 export type RunLiveness = "live" | "over" | "unreachable";
@@ -39,37 +40,38 @@ export const RUN_ENDED_UNHEARD =
 export const RUN_UNREACHABLE =
   "OpenBot lost touch with the Bot before it finished. Try again in a moment, or reload to see what was saved.";
 
+/** What a join token says about the conversation it is for: the run in progress, or none. */
+type Joined = { runId: string | null };
+
 /**
- * Ask the runtime whether this conversation has a run going, by the call a conversation is joined
- * with: it answers the live run's id when there is one, and none when there is not.
+ * Ask whether this conversation has a run going, by asking for a join token for it (the API's
+ * createConversationJoinToken): its answer names the run in progress, or none. The token itself is
+ * not used. A conversation no Bot has run in yet has no run going either.
  */
 export async function askRunLiveness(
-  agentId: string,
-  threadId: string,
+  conversationId: string,
   options: {
-    request?: (path: string, options: ClientOptions) => Promise<Response>;
+    /** The API's join-token operation; a test gives its own. */
+    join?: (conversationId: string, signal: AbortSignal) => Promise<Joined>;
     answerMs?: number;
   } = {},
 ): Promise<RunLiveness> {
-  const request = options.request ?? tryClient;
+  const join =
+    options.join ??
+    ((id: string, signal: AbortSignal) =>
+      createConversationJoinToken(
+        ORGANIZATION_ID,
+        id,
+        // Each ask is its own: the answer is about now.
+        { "Idempotency-Key": idempotencyKey() },
+        { signal },
+      ));
   const answerMs = options.answerMs ?? LIVENESS_ANSWER_MS;
   const giveUp = new AbortController();
   const timer = setTimeout(() => giveUp.abort(), answerMs);
   try {
-    const response = await Promise.race([
-      request(`/api/copilotkit/agent/${encodeURIComponent(agentId)}/connect`, {
-        method: "POST",
-        body: {
-          threadId,
-          runId: newId(),
-          messages: [],
-          tools: [],
-          context: [],
-          state: {},
-          forwardedProps: {},
-        },
-        signal: giveUp.signal,
-      }),
+    const joined = await Promise.race([
+      join(conversationId, giveUp.signal),
       // A request that ignores its signal has still not answered.
       new Promise<null>((resolve) => {
         giveUp.signal.addEventListener("abort", () => resolve(null), {
@@ -77,16 +79,13 @@ export async function askRunLiveness(
         });
       }),
     ]);
-    if (response === null) return "unreachable";
-    if (response.status === 204) return "over";
-    if (!response.ok) return "unreachable";
-    const body: unknown = await response.json().catch(() => null);
-    if (body === null || typeof body !== "object") return "unreachable";
-    return typeof (body as { runId?: unknown }).runId === "string"
-      ? "live"
-      : "over";
-  } catch {
-    return "unreachable";
+    if (joined === null) return "unreachable";
+    return typeof joined.runId === "string" ? "live" : "over";
+  } catch (error) {
+    return error instanceof ClientError &&
+      error.code === "CONVERSATION_NOT_STARTED"
+      ? "over"
+      : "unreachable";
   } finally {
     clearTimeout(timer);
   }
@@ -115,7 +114,7 @@ export function watchQuietRun(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let asking = false;
-  // Whether anything arrived while the runtime was being asked: its answer is then out of date.
+  // Whether anything arrived while the server was being asked: its answer is then out of date.
   let heardSince = false;
   let settle: (outcome: Exclude<RunLiveness, "live">) => void = () => {};
   const over = new Promise<Exclude<RunLiveness, "live">>((resolve) => {
