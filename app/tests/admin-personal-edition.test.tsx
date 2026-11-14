@@ -26,6 +26,7 @@ import {
   MODEL_USAGE_PATH,
 } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
+import { MODEL_CATALOGUE_PATH } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -90,7 +91,7 @@ function servePersonal() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://localhost/").pathname;
     asked.push(path);
-    if (path === "/api/models/available")
+    if (path === MODEL_CATALOGUE_PATH)
       return Response.json({
         provider: "openai",
         source: "openai",

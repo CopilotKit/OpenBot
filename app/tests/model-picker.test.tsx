@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import type { ConversationModel, ModelCatalogue } from "@/lib/models/queries";
 import { useConversationModel, useDraftModel } from "@/lib/models/run-model";
 import { queryClient } from "@/query-client";
+import { modelChoiceConversation, problemResponse } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -27,10 +28,11 @@ const { ModelPicker } = await import(
  * The composer's model and thinking effort picker, and the pick a conversation keeps on the server.
  *
  * THE HARNESS IS THIS REPOSITORY'S: `GlobalRegistrator` in `beforeAll`/`afterAll` and `cleanup` in
- * `afterEach`, as `composer-collapse.test.tsx` explains. `fetch` is a fake of
- * `GET`/`PUT /api/channels/:id/model` holding one `{ model, effort }` per conversation, and it
- * refuses what the server refuses: a model the catalogue does not offer, and an effort the model
- * does not accept. So a pick the picker should never send fails here as it would there.
+ * `afterEach`, as `composer-collapse.test.tsx` explains. `fetch` is a fake of the API's
+ * `GET`/`PUT .../people/me/model-choices/{conversationId}` holding one `{ model, effort }` per
+ * conversation, and it refuses what the server refuses: a model the catalogue does not offer, and an
+ * effort the model does not accept. So a pick the picker should never send fails here as it would
+ * there.
  */
 
 const catalogue: ModelCatalogue = {
@@ -76,10 +78,9 @@ beforeAll(() => {
   globalThis.fetch = Object.assign(
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost/");
-      const match = /^\/api\/channels\/([^/]+)\/model$/.exec(url.pathname);
-      if (!match?.[1])
+      const channelId = modelChoiceConversation(url.pathname);
+      if (!channelId)
         return Response.json({ error: "not served" }, { status: 404 });
-      const channelId = decodeURIComponent(match[1]);
       if (init?.method === "PUT") {
         const { model, effort } = JSON.parse(
           String(init.body),
@@ -89,14 +90,16 @@ beforeAll(() => {
           (option) => option.id === (model ?? catalogue.default),
         );
         if (!runs)
-          return Response.json(
-            { error: "That model isn't available. Pick another one." },
-            { status: 400 },
+          return problemResponse(
+            400,
+            "VALIDATION_ERROR",
+            "That model isn't available. Pick another one.",
           );
         if (effort !== null && !runs.efforts?.includes(effort))
-          return Response.json(
-            { error: `${runs.label} doesn't take that thinking effort.` },
-            { status: 400 },
+          return problemResponse(
+            400,
+            "VALIDATION_ERROR",
+            `${runs.label} doesn't take that thinking effort.`,
           );
         await pendingWrite;
         saved[channelId] = { model, effort };

@@ -108,10 +108,16 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
           ? {
               kind: "model",
               provider: value.provider,
-              plaintext: value.plaintext,
+              secret: value.plaintext,
               metadata: {},
             }
-          : { ...value, metadata: {} },
+          : {
+              kind: "connector",
+              provider: value.provider,
+              keyId: value.keyId,
+              secret: value.plaintext,
+              metadata: {},
+            },
       );
       await navigate(paths.credentials());
     },

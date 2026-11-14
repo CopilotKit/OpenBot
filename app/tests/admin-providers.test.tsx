@@ -26,13 +26,14 @@ import {
   overviewResponse,
   SETTINGS_PATH,
 } from "./admin-settings-api";
+import { MODEL_CATALOGUE_PATH } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 /*
  * Admin, Providers and Permissions: the pages Enterprise controls was split into. The server is
  * faked at the fetch boundary with the API's answers for the settings, the switches and model
- * usage, and `GET /api/models/available`'s; the writes are the API's own. Marks resolve as the app
+ * usage, and the model catalogue's view of every model listed; the writes are the API's own. Marks resolve as the app
  * resolves them, from the files vendored in `shared/marks`.
  */
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
@@ -113,7 +114,7 @@ function serving() {
       actionRecordRetentionDays: 90,
     });
     if (overview) return overview;
-    if (path === "/api/models/available")
+    if (path === `${MODEL_CATALOGUE_PATH}?view=all`)
       return Response.json({
         provider: "openai",
         source,

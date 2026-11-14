@@ -696,12 +696,12 @@ export function ChannelChat({
           answering: () => lastRun.running() || rosterSaysWorking(channel.id),
           /*
            * A turn the replay has carried is being heard. One only the roster knows of is checked
-           * with the runtime, which is asked the way a quiet run is: when it cannot answer, nothing
+           * with the server, which is asked the way a quiet run is: when it cannot answer, nothing
            * is coming down this join, and keeping it kept the conversation shut for good.
            */
           reachable: async () =>
             lastRun.running() ||
-            (await askRunLiveness(runtimeAgentId, channel.threadId, {
+            (await askRunLiveness(channel.id, {
               answerMs: JOIN_LIVENESS_MS,
             })) !== "unreachable",
           onAnswering: () => {
@@ -1338,7 +1338,7 @@ export function ChannelChat({
          * watch covers one run at a time.
          */
         const quiet = watchQuietRun({
-          ask: () => askRunLiveness(runtimeAgentId, channel.threadId),
+          ask: () => askRunLiveness(channel.id),
         });
         const hearing = target.subscribe({
           onEvent: ({ event }) => {
