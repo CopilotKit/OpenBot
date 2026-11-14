@@ -51,6 +51,14 @@ tags:
     description: What Bots sent a person outside OpenBot, and where each one got to.
   - name: Notification settings
     description: 'How a person hears from their Bots while they''re away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all.'
+  - name: Routines
+    description: 'A person''s routines: what a Bot does for them on a schedule, in a conversation they share. A routine belongs to the person who made it and answers only them.'
+  - name: Check-ins
+    description: 'A Bot''s check-ins: quiet looks through what a person connected, the items a check-in raised for them, and an administrator''s numbers for how check-ins are going.'
+  - name: Goals
+    description: 'A person''s goals: an outcome a Bot works toward, run on request, on a routine''s schedule or when an outside event arrives through one of the goal''s triggers.'
+  - name: Follow-ups
+    description: Work a Bot scheduled for itself to come back to later in a conversation.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -2911,6 +2919,19 @@ paths:
         - webSession: []
         - appOAuth:
             - devices:read
+  /api/v2/organizations/{organizationId}/routines:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Routines
+      operationId: listRoutines
+      summary: List routines
+      description: Return one page of the caller's own routines, newest first. A routine that runs a goal names it in goalId. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -2918,6 +2939,7 @@ paths:
       responses:
         '200':
           description: One page of devices.
+          description: One page of routines.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -3535,6 +3557,10 @@ paths:
               examples:
                 pushAndSlack:
                   $ref: '#/components/examples/NotificationTransportPageLast'
+                $ref: '#/components/schemas/RoutinePage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutinePageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3543,6 +3569,1564 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Routines
+      operationId: createRoutine
+      summary: Create a routine
+      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoutineRequest'
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+                  title: Morning brief
+                  instruction: Summarize my unread mail and today's calendar.
+                  cron: 0 9 * * 1-5
+                  timezone: America/New_York
+      responses:
+        '201':
+          description: The routine was created.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineExample'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/{routineId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RoutineId'
+    delete:
+      tags:
+        - Routines
+      operationId: deleteRoutine
+      summary: Delete a routine
+      description: Delete one of the caller's routines. It never runs again; what its runs already said stays in its conversation. One that does not exist, or is somebody else's, is not found.
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The routine was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/{routineId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RoutineId'
+    post:
+      tags:
+        - Routines
+      operationId: pauseRoutine
+      summary: Pause a routine
+      description: Switch one of the caller's routines off. A paused routine keeps its schedule and never runs, by the schedule or by Run now, until it is resumed. Pausing one that is paused already changes nothing.
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The routine, paused.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineSwitch'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/{routineId}/resume:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RoutineId'
+    post:
+      tags:
+        - Routines
+      operationId: resumeRoutine
+      summary: Resume a routine
+      description: Switch one of the caller's routines back on, from its next scheduled time. Refused when its goal is complete, when its time zone is one OpenBot does not know, or when the caller already has 20 routines switched on.
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The routine, switched on.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineSwitch'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/{routineId}/run:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RoutineId'
+    post:
+      tags:
+        - Routines
+      operationId: runRoutine
+      summary: Run a routine now
+      description: 'Start one run of the routine now. It does real work: the Bot carries out the instruction in the routine''s conversation exactly as a scheduled run would. Accepted, not finished: the run appears in the routine''s runs, and what the Bot says appears in the conversation. A paused routine is refused, and so is a second run while one is still open. Recorded on the audit trail.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: The run was accepted.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineRunAccepted'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines/{routineId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RoutineId'
+    get:
+      tags:
+        - Routines
+      operationId: listRoutineRuns
+      summary: List a routine's runs
+      description: 'Return one page of the routine''s newest runs, newest first: how each ended and what started it. What a run said is not kept here: it is in the routine''s conversation, where the Bot posted it. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of runs.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineRunPage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-ins:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Check-ins
+      operationId: listCheckIns
+      summary: List check-ins
+      description: Return one page of the caller's own check-ins, newest first, each with how its last check-in ended, and whether an administrator allows the caller's Bots to check in at all. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of check-ins.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Check-ins
+      operationId: createCheckIn
+      summary: Turn on a check-in
+      description: Have a Bot check in for the caller on one thing, in a conversation they share. A check-in on a thing the Bot already watches (the same link, or the same subject) is turned back on with what was sent, which is what accepting a Bot's offer means. With refuseExisting=true that one is refused instead, for a screen that asked for a new one. A repeated request with the same Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - name: refuseExisting
+          in: query
+          description: Refuse, with 409, a check-in on a thing the Bot already watches, instead of turning that one back on.
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCheckInRequest'
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+                  subject: Vendor contract renewal
+                  focus: Tell me when the vendor replies about the renewal.
+                  intervalMinutes: 1440
+      responses:
+        '201':
+          description: The check-in, on.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInExample'
+        '400':
+          $ref: '#/components/responses/InvalidCheckIn'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/CheckInConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-ins/{checkInId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CheckInId'
+    patch:
+      tags:
+        - Check-ins
+      operationId: updateCheckIn
+      summary: Change a check-in
+      description: 'Change one of the caller''s check-ins: pause or resume it with enabled, how often it runs, or what it looks for. Only the fields sent change.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCheckInRequest'
+            examples:
+              request:
+                value:
+                  enabled: false
+      responses:
+        '200':
+          description: The check-in, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInExample'
+        '400':
+          $ref: '#/components/responses/InvalidCheckIn'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CheckInNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Check-ins
+      operationId: deleteCheckIn
+      summary: Remove a check-in
+      description: Remove one of the caller's check-ins. The Bot stops looking; items it already raised stay until they are started or hidden.
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The check-in was removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CheckInNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-ins/{checkInId}/run:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CheckInId'
+    post:
+      tags:
+        - Check-ins
+      operationId: runCheckIn
+      summary: Run a check-in now
+      description: Have the Bot check in now. The answer says whether it was queued, or skipped at once for the reason a scheduled check-in would have been skipped anyway. Refused when one is running already, or one ran in the last ten minutes.
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Queued, or skipped and why.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInRunAnswer'
+        '400':
+          $ref: '#/components/responses/InvalidCheckIn'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CheckInNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-in-items:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Check-ins
+      operationId: listCheckInItems
+      summary: List what check-ins found
+      description: 'Return one page of the open items the caller''s Bots raised in their check-ins, newest first: what each is, why it was raised and where the Bot read it. Starting or hiding an item takes it off this list. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of open items.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInItemPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInItemPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/start:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CheckInItemId'
+    post:
+      tags:
+        - Check-ins
+      operationId: startCheckInItem
+      summary: Start an item as a task
+      description: 'Start an item: its Bot takes it on as a task in a conversation of its own, as the caller''s own turn, so anything it sends or changes still asks first. Starting an item that was started already answers the task the first start opened. One that is no longer open, or is somebody else''s, is refused.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The item, started, and the task it opened.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartedCheckInItem'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CheckInItemNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/dismiss:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CheckInItemId'
+    post:
+      tags:
+        - Check-ins
+      operationId: dismissCheckInItem
+      summary: Hide an item
+      description: Hide an item. It leaves the list, and later check-ins do not raise the same thing again for 30 days. One that is no longer open, or is somebody else's, is refused.
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The item, hidden.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInItemResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CheckInItemNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/check-in-usage:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Check-ins
+      operationId: getCheckInUsage
+      summary: Read how check-ins are going
+      description: 'Return, per Bot, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the daily limit in force. Counts only: no item''s title, source or person. Only an administrator may read it.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:read
+        - apiKey: []
+      parameters:
+        - name: days
+          in: query
+          description: 'How many days back: 7 or 30.'
+          schema:
+            type: integer
+            enum:
+              - 7
+              - 30
+            default: 7
+      responses:
+        '200':
+          description: How check-ins are going.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInUsage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Goals
+      operationId: listGoals
+      summary: List goals
+      description: Return one page of the caller's own goals, newest first. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of goals.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Goals
+      operationId: createGoal
+      summary: Create a goal
+      description: Create a goal owned by the caller, for a Bot to work toward in a conversation they share. A goal cannot both repeat and end when it is met, and one that ends when met needs success criteria. When the goal makes a shared app reachable in a new way, the answer says which apps an administrator approved or still has to. A repeated request with the same Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGoalRequest'
+            examples:
+              request:
+                value:
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+                  conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+                  title: Keep the release notes current
+                  instruction: After each merged pull request, add a line to the draft release notes.
+                  successCriteria: ''
+                  subscriptions: []
+                  recurring: true
+      responses:
+        '201':
+          description: The goal was created.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalExample'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    patch:
+      tags:
+        - Goals
+      operationId: updateGoal
+      summary: Change a goal
+      description: Change one of the caller's goals. Only the fields sent change, and at least one must be sent.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGoalRequest'
+            examples:
+              request:
+                value:
+                  title: Keep the release notes current
+      responses:
+        '200':
+          description: The goal, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalExample'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Goals
+      operationId: deleteGoal
+      summary: Delete a goal
+      description: Delete one of the caller's goals, with its triggers and the routines that run it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The goal was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    post:
+      tags:
+        - Goals
+      operationId: pauseGoal
+      summary: Pause a goal
+      description: Pause one of the caller's goals. A paused goal never runs, whatever asks it to, until it is resumed.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The goal, paused.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalExample'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/resume:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    post:
+      tags:
+        - Goals
+      operationId: resumeGoal
+      summary: Resume a goal
+      description: Make one of the caller's goals active again.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The goal, active.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalExample'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    post:
+      tags:
+        - Goals
+      operationId: completeGoal
+      summary: Complete a goal
+      description: Mark one of the caller's goals complete. A completed goal never runs again, and the routines that run it are switched off.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The goal, completed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalExample'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/run:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    post:
+      tags:
+        - Goals
+      operationId: runGoal
+      summary: Run a goal now
+      description: 'Start one run of the goal now. It does real work. Accepted, not finished: the run appears in the goal''s runs with what the Bot said. A paused or completed goal is refused.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: The run was accepted.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalRunAccepted'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    get:
+      tags:
+        - Goals
+      operationId: listGoalRuns
+      summary: List a goal's runs
+      description: Return one page of the goal's newest runs, newest first, each with how it ended and what the Bot said. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of runs.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalRunPage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+    get:
+      tags:
+        - Goals
+      operationId: listGoalTriggers
+      summary: List a goal's triggers
+      description: 'Return one page of the goal''s triggers, oldest first: the registered ways an outside event starts a run of it. Never a trigger''s secret. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of triggers.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerPage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Goals
+      operationId: createGoalTrigger
+      summary: Add a trigger to a goal
+      description: 'Register a way for an outside event to start a run of the goal: a webhook, a GitHub, Linear, Sentry or PagerDuty delivery, an email, or a Slack message. For a webhook or GitHub trigger OpenBot makes the secret and answers it once, here; for the other providers the secret is the one pasted from the provider. When the trigger makes a shared app reachable in a new way, the answer says which apps an administrator approved or still has to.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGoalTriggerRequest'
+            examples:
+              request:
+                value:
+                  config:
+                    kind: webhook
+                    filter:
+                      eventTypes: []
+      responses:
+        '201':
+          description: The trigger, and its secret when OpenBot made one.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerWithSecret'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+      - $ref: '#/components/parameters/GoalTriggerId'
+    patch:
+      tags:
+        - Goals
+      operationId: updateGoalTrigger
+      summary: Change a trigger
+      description: 'Replace a trigger''s configuration: which events fire it. Its kind cannot change. When the change makes a shared app reachable in a new way, the answer says which apps an administrator approved or still has to.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGoalTriggerRequest'
+            examples:
+              request:
+                value:
+                  config:
+                    kind: webhook
+                    filter:
+                      eventTypes:
+                        - deploy
+      responses:
+        '200':
+          description: The trigger, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerResponse'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Goals
+      operationId: deleteGoalTrigger
+      summary: Remove a trigger
+      description: Remove a trigger. Deliveries to its address are refused from then on.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The trigger was removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/enable:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+      - $ref: '#/components/parameters/GoalTriggerId'
+    post:
+      tags:
+        - Goals
+      operationId: enableGoalTrigger
+      summary: Switch a trigger on
+      description: Switch a trigger on, so its deliveries start runs again.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The trigger, on.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+      - $ref: '#/components/parameters/GoalTriggerId'
+    post:
+      tags:
+        - Goals
+      operationId: disableGoalTrigger
+      summary: Switch a trigger off
+      description: Switch a trigger off. It still acknowledges deliveries and never starts a run.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The trigger, off.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/secret:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+      - $ref: '#/components/parameters/GoalTriggerId'
+    get:
+      tags:
+        - Goals
+      operationId: getGoalTriggerSecret
+      summary: Read a trigger's secret
+      description: Return the secret a trigger's sender signs with, for its owner to copy into the sending service. Null for a kind that has none. Read on request and never cached.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      responses:
+        '200':
+          description: The secret.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerSecret'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/replace-secret:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GoalId'
+      - $ref: '#/components/parameters/GoalTriggerId'
+    post:
+      tags:
+        - Goals
+      operationId: replaceGoalTriggerSecret
+      summary: Replace a trigger's secret
+      description: Replace a trigger's secret. With no secret sent, OpenBot makes a new one for a webhook or GitHub trigger and answers it once; with one, it stores the secret pasted from the provider. The old secret stops working at once.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceGoalTriggerSecretRequest'
+            examples:
+              request:
+                value: {}
+      responses:
+        '200':
+          description: The trigger, and its new secret when OpenBot made one.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalTriggerWithSecret'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GoalTriggerNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/github-event-sources:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Goals
+      operationId: listGithubEventSources
+      summary: List GitHub event sources
+      description: Return one page of the GitHub repositories whose events reach the caller's goals, oldest first. Never a webhook secret. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of GitHub event sources.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubEventSourcePage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Goals
+      operationId: createGithubEventSource
+      summary: Connect a GitHub repository's events
+      description: 'Connect a GitHub repository''s webhook to the caller''s goals. The secret is the one set on the repository''s webhook: it is stored encrypted and never returned. The answer names the address to give GitHub.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGithubEventSourceRequest'
+            examples:
+              request:
+                value:
+                  repository: acme/storefront
+                  secret: example-secret
+      responses:
+        '201':
+          description: The GitHub event source.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubEventSourceResponse'
+        '400':
+          $ref: '#/components/responses/InvalidGoal'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/github-event-sources/{githubEventSourceId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/GithubEventSourceId'
+    delete:
+      tags:
+        - Goals
+      operationId: deleteGithubEventSource
+      summary: Disconnect a GitHub repository's events
+      description: Disconnect a GitHub repository's events and revoke its stored webhook secret.
+      security:
+        - webSession: []
+        - appOAuth:
+            - goals:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The source was disconnected.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/GithubEventSourceNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/FollowUpId'
+    post:
+      tags:
+        - Follow-ups
+      operationId: cancelFollowUp
+      summary: Cancel a follow-up
+      description: Cancel a follow-up a Bot scheduled for the caller, so the Bot does not come back to it. One that already ran, or was cancelled already, is not found.
+      security:
+        - webSession: []
+        - appOAuth:
+            - bots:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The follow-up was cancelled.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowUpCancelled'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FollowUpNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -3597,6 +5181,12 @@ components:
             deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
             notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
             notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
+            routines:read: Read the signed-in person's routines and their runs.
+            routines:write: Create, pause, resume, run and delete the signed-in person's routines.
+            check-ins:read: Read the signed-in person's check-ins and the items they raised, and for an administrator how check-ins are going.
+            check-ins:write: Turn the signed-in person's check-ins on and off, change and run them, and start or hide the items they raised.
+            goals:read: Read the signed-in person's goals, their runs, their triggers and their GitHub event sources. Reading a trigger's secret needs goals:write.
+            goals:write: Create, change, pause, resume, complete, run and delete the signed-in person's goals, their triggers and their GitHub event sources.
     apiKey:
       type: http
       scheme: bearer
@@ -3852,6 +5442,71 @@ components:
       in: path
       required: true
       description: The destination's id.
+    RoutineId:
+      name: routineId
+      in: path
+      required: true
+      description: The routine's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    CheckInId:
+      name: checkInId
+      in: path
+      required: true
+      description: The check-in's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    CheckInItemId:
+      name: checkInItemId
+      in: path
+      required: true
+      description: The item's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    GoalId:
+      name: goalId
+      in: path
+      required: true
+      description: The goal's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    GoalTriggerId:
+      name: goalTriggerId
+      in: path
+      required: true
+      description: The trigger's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    GithubEventSourceId:
+      name: githubEventSourceId
+      in: path
+      required: true
+      description: The GitHub event source's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+    FollowUpId:
+      name: followUpId
+      in: path
+      required: true
+      description: The follow-up's id.
       schema:
         type: string
         minLength: 1
@@ -6597,6 +8252,69 @@ components:
       required:
         - id
         - platform
+    RoutineConversation:
+      type: object
+      description: Where a routine posts.
+      required:
+        - id
+        - name
+        - title
+        - gone
+      properties:
+        id:
+          type: string
+          description: The conversation's id.
+        name:
+          type:
+            - string
+            - 'null'
+          description: The names of the Bots in it, or null when the conversation is gone entirely.
+        title:
+          type:
+            - string
+            - 'null'
+          description: The conversation as the sidebar titles it, which is what a person knows it by. Null when it is gone entirely.
+        gone:
+          type: boolean
+          description: Whether the conversation was deleted. Such a routine is shown, not hidden.
+    RoutineLastRun:
+      type: object
+      required:
+        - status
+        - at
+      properties:
+        status:
+          type:
+            - string
+            - 'null'
+          enum:
+            - succeeded
+            - failed
+            - skipped
+            - waiting
+            - null
+          description: How it ended, or null while it is still open. Only failed is a failure.
+        at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it finished, or null while it is still open.
+    Routine:
+      type: object
+      description: 'One of a person''s routines. schedule is display text and never a value to parse: words for the schedules OpenBot can describe, the five cron fields for anything stranger. nextRunAt is the one time to rely on.'
+      required:
+        - id
+        - botId
+        - schedule
+        - timezone
+        - instruction
+        - title
+        - conversation
+        - enabled
+        - nextRunAt
+        - lastRun
+        - goalId
         - createdAt
       properties:
         id:
@@ -6620,6 +8338,58 @@ components:
           description: The first registered first, then by id.
           items:
             $ref: '#/components/schemas/Device'
+          description: The routine's id.
+        botId:
+          type: string
+          description: The Bot that carries it out.
+        schedule:
+          type: string
+          description: When it runs, as text to show.
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in.
+        instruction:
+          type: string
+          description: What the Bot does on each run.
+        title:
+          type:
+            - string
+            - 'null'
+          description: What the person called it, or null when they named it nothing.
+        conversation:
+          $ref: '#/components/schemas/RoutineConversation'
+        enabled:
+          type: boolean
+          description: False while it is paused. A paused routine never runs.
+        nextRunAt:
+          type: string
+          format: date-time
+          description: When it runs next, if it is on.
+        lastRun:
+          oneOf:
+            - $ref: '#/components/schemas/RoutineLastRun'
+            - type: 'null'
+          description: Its newest run, or null when it has never run.
+        goalId:
+          type:
+            - string
+            - 'null'
+          description: The goal it runs, or null when it runs none.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was made.
+    RoutinePage:
+      type: object
+      required:
+        - routines
+        - nextCursor
+      properties:
+        routines:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/Routine'
         nextCursor:
           type:
             - string
@@ -6871,6 +8641,111 @@ components:
           $ref: '#/components/schemas/DeliveryKind'
         state:
           $ref: '#/components/schemas/DeliveryState'
+    CreateRoutineRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - instruction
+        - cron
+        - conversationId
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The Bot that carries it out.
+        conversationId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: A conversation the caller and the Bot share, where it posts.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run. At most 2,000 characters.
+        title:
+          type: string
+          description: What to call it. At most 100 characters.
+          maxLength: 100
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: 'The schedule, as five cron fields: minute, hour, day of month, month, day of week. At most once an hour.'
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in. UTC when absent.
+          maxLength: 100
+        goalId:
+          type: string
+          description: The goal this routine runs, when it runs one.
+          maxLength: 200
+    RoutineResponse:
+      type: object
+      required:
+        - routine
+      properties:
+        routine:
+          $ref: '#/components/schemas/Routine'
+    RoutineSwitch:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the routine is on now.
+    RoutineRunAccepted:
+      type: object
+      required:
+        - accepted
+        - runId
+      properties:
+        accepted:
+          type: boolean
+          const: true
+        runId:
+          type: string
+          description: The run that was started.
+    RoutineRun:
+      type: object
+      description: One run of a routine. What the Bot said is in the routine's conversation and is not kept here.
+      required:
+        - id
+        - status
+        - startedAt
+        - finishedAt
+        - error
+        - source
+      properties:
+        id:
+          type: string
+          description: The run's id.
+        status:
+          type: string
+          enum:
+            - running
+            - succeeded
+            - failed
+            - skipped
+            - waiting
+          description: running until it ends; waiting while it waits on the person, for an approval or an answer.
+        startedAt:
+          type: string
+          format: date-time
+          description: When it started.
+        finishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it ended, or null while it runs.
         error:
           type:
             - string
@@ -6897,6 +8772,25 @@ components:
           description: The newest first, then by id.
           items:
             $ref: '#/components/schemas/Delivery'
+          description: Why it failed or was skipped, or null.
+        source:
+          type: string
+          enum:
+            - schedule
+            - run_now
+            - trigger
+          description: 'What started it: the schedule, a person''s Run now, or an event.'
+    RoutineRunPage:
+      type: object
+      required:
+        - runs
+        - nextCursor
+      properties:
+        runs:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/RoutineRun'
         nextCursor:
           type:
             - string
@@ -6972,6 +8866,389 @@ components:
       required:
         - botId
         - notify
+    CheckInSkipReason:
+      type: string
+      enum:
+        - off_admin
+        - off_person
+        - paused
+        - capped
+        - unreachable
+        - no_sources
+        - busy
+      description: 'Why a check-in was skipped before the Bot looked: an administrator or the person turned check-ins off, the Bot is paused, it used its check-ins for the day, the Bot or its conversation is no longer reachable, there is nothing connected for it to read, or another check-in was still running.'
+    LastCheckIn:
+      type: object
+      description: 'A check-in''s newest run: how it ended and, for one that was skipped or could not finish, why, in one sentence written for the person.'
+      required:
+        - outcome
+        - trigger
+        - skipReason
+        - why
+        - itemsRaised
+        - startedAt
+        - finishedAt
+      properties:
+        outcome:
+          type: string
+          enum:
+            - running
+            - quiet
+            - raised
+            - failed
+            - skipped
+          description: quiet found nothing; raised opened at least one item; skipped never looked.
+        trigger:
+          type: string
+          enum:
+            - schedule
+            - run_now
+          description: What started it.
+        skipReason:
+          oneOf:
+            - $ref: '#/components/schemas/CheckInSkipReason'
+            - type: 'null'
+        why:
+          type:
+            - string
+            - 'null'
+          description: One sentence on why it was skipped or could not finish, or null.
+        itemsRaised:
+          type: integer
+          minimum: 0
+          description: How many items it raised.
+        startedAt:
+          type: string
+          format: date-time
+          description: When it started.
+        finishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it ended, or null while it runs.
+    CheckIn:
+      type: object
+      description: One thing a Bot checks in on for a person, and how often.
+      required:
+        - id
+        - botId
+        - conversationId
+        - focus
+        - subject
+        - sourceLink
+        - enabled
+        - intervalMinutes
+        - nextRunAt
+        - lastRunAt
+        - lastStatus
+        - lastError
+        - lastRun
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: The check-in's id.
+        botId:
+          type: string
+          description: The Bot that checks in.
+        conversationId:
+          type: string
+          description: The conversation the check-in belongs to.
+        focus:
+          type: string
+          description: What to look for, in the person's words. May be empty.
+        subject:
+          type: string
+          description: What it watches, in the person's words. Empty for one that watches everything the Bot reads.
+        sourceLink:
+          type:
+            - string
+            - 'null'
+          description: The link it watches, or null.
+        enabled:
+          type: boolean
+          description: False while it is paused.
+        intervalMinutes:
+          type: integer
+          minimum: 60
+          maximum: 1440
+          description: How often it runs, in minutes.
+        nextRunAt:
+          type: string
+          format: date-time
+          description: When it runs next, if it is on.
+        lastRunAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it last ran, or null.
+        lastStatus:
+          type: string
+          enum:
+            - idle
+            - running
+            - succeeded
+            - error
+        lastError:
+          type:
+            - string
+            - 'null'
+          description: What stopped its last run, or null.
+        lastRun:
+          oneOf:
+            - $ref: '#/components/schemas/LastCheckIn'
+            - type: 'null'
+          description: Its newest check-in, or null before the first.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was turned on first.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+    CheckInPage:
+      type: object
+      required:
+        - checkIns
+        - nextCursor
+        - allowed
+      properties:
+        checkIns:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/CheckIn'
+        allowed:
+          type: boolean
+          description: False when an administrator turned check-ins off for the caller, so the caller's own switches can say who turned them off.
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateCheckInRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - conversationId
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+          description: The Bot that checks in.
+        conversationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+          description: A conversation the caller and the Bot share.
+        focus:
+          type: string
+          description: What to look for.
+          maxLength: 1000
+          default: ''
+        subject:
+          type: string
+          description: What it watches, in a few words.
+          maxLength: 120
+          default: ''
+        sourceLink:
+          type:
+            - string
+            - 'null'
+          format: uri
+          maxLength: 2000
+          pattern: ^https?://
+          description: A web link it watches.
+        intervalMinutes:
+          type: integer
+          minimum: 60
+          maximum: 1440
+          default: 1440
+          description: 'How often it runs, in minutes: hourly at most, daily at least.'
+        enabled:
+          type: boolean
+          default: true
+    CheckInResponse:
+      type: object
+      required:
+        - checkIn
+      properties:
+        checkIn:
+          $ref: '#/components/schemas/CheckIn'
+    UpdateCheckInRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        focus:
+          type: string
+          description: What to look for.
+          maxLength: 1000
+        intervalMinutes:
+          type: integer
+          minimum: 60
+          maximum: 1440
+          description: How often it runs, in minutes.
+        enabled:
+          type: boolean
+          description: False pauses it; true resumes it.
+    CheckInRunAnswer:
+      type: object
+      description: 'What Run now did: queued, or skipped at once with the reason and its sentence.'
+      required:
+        - queued
+      properties:
+        queued:
+          type: boolean
+          description: Whether a check-in was queued.
+        skipped:
+          $ref: '#/components/schemas/CheckInSkipReason'
+        why:
+          type: string
+          description: Why it was skipped, in one sentence. Present when skipped.
+    CheckInItem:
+      type: object
+      description: 'Something a Bot''s check-in found that needs the person: what it is, why, and where the Bot read it.'
+      required:
+        - id
+        - botId
+        - checkInId
+        - title
+        - detail
+        - sourceApp
+        - sourceRef
+        - sourceLink
+        - status
+        - pingId
+        - deliveredAt
+        - resolvedAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The item's id.
+        botId:
+          type: string
+          description: The Bot that raised it.
+        checkInId:
+          type: string
+          description: The check-in that found it.
+        title:
+          type: string
+          description: What to do, in plain words.
+        detail:
+          type: string
+          description: Why it was raised and what the Bot found.
+        sourceApp:
+          type:
+            - string
+            - 'null'
+          description: The app the Bot read it in, or null.
+        sourceRef:
+          type:
+            - string
+            - 'null'
+          description: What the Bot read it with, or null.
+        sourceLink:
+          type:
+            - string
+            - 'null'
+          description: Where it can be opened, or null.
+        status:
+          type: string
+          enum:
+            - open
+            - dismissed
+            - started
+            - superseded
+          description: 'open until the person starts or hides it. superseded is the Bot''s own: a later check-in cleared it as no longer needed.'
+        pingId:
+          type:
+            - string
+            - 'null'
+          description: The notice that told the person about it, or null while it waits for their next one.
+        deliveredAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When that notice went out, or null.
+        resolvedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was started, hidden or cleared.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was raised.
+    CheckInItemPage:
+      type: object
+      required:
+        - checkInItems
+        - nextCursor
+      properties:
+        checkInItems:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/CheckInItem'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    StartedCheckInItem:
+      type: object
+      required:
+        - checkInItem
+        - task
+      properties:
+        checkInItem:
+          $ref: '#/components/schemas/CheckInItem'
+        task:
+          type: object
+          description: The task the item became.
+          required:
+            - id
+            - conversationId
+          properties:
+            id:
+              type: string
+              description: The task's id.
+            conversationId:
+              type: string
+              description: The task's own conversation.
+    CheckInItemResponse:
+      type: object
+      required:
+        - checkInItem
+      properties:
+        checkInItem:
+          $ref: '#/components/schemas/CheckInItem'
+    BotCheckInUsage:
+      type: object
+      required:
+        - botId
+        - name
+        - avatarSeed
+        - peopleOn
+        - runs
+        - items
+        - acceptance
+        - pinged
       properties:
         botId:
           type: string
@@ -7008,6 +9285,253 @@ components:
           description: Push, then Slack, Microsoft Teams and text messages, as set up.
           items:
             $ref: '#/components/schemas/NotificationTransportOption'
+        name:
+          type: string
+          description: What the Bot is called.
+        avatarSeed:
+          type: string
+          description: What the Bot's picture is drawn from.
+        peopleOn:
+          type: integer
+          minimum: 0
+          description: People with check-ins on for this Bot.
+        runs:
+          type: object
+          required:
+            - quiet
+            - raised
+            - failed
+            - skipped
+          properties:
+            quiet:
+              type: integer
+              minimum: 0
+            raised:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+            skipped:
+              type: object
+              description: Skipped check-ins, by reason.
+              required:
+                - off_admin
+                - off_person
+                - paused
+                - capped
+                - unreachable
+                - no_sources
+                - busy
+              properties:
+                off_admin:
+                  type: integer
+                  minimum: 0
+                off_person:
+                  type: integer
+                  minimum: 0
+                paused:
+                  type: integer
+                  minimum: 0
+                capped:
+                  type: integer
+                  minimum: 0
+                unreachable:
+                  type: integer
+                  minimum: 0
+                no_sources:
+                  type: integer
+                  minimum: 0
+                busy:
+                  type: integer
+                  minimum: 0
+        items:
+          type: object
+          description: The items it raised in the window, by where each stands now. raised is the sum of the other four.
+          required:
+            - raised
+            - started
+            - hidden
+            - cleared
+            - open
+          properties:
+            raised:
+              type: integer
+              minimum: 0
+            started:
+              type: integer
+              minimum: 0
+            hidden:
+              type: integer
+              minimum: 0
+            cleared:
+              type: integer
+              minimum: 0
+            open:
+              type: integer
+              minimum: 0
+        acceptance:
+          type:
+            - number
+            - 'null'
+          description: 'Of the items people decided on, the share they started: started divided by started plus hidden. Null until somebody decided one.'
+        pinged:
+          type: integer
+          minimum: 0
+          description: This Bot's items that a notice carried.
+    CheckInUsage:
+      type: object
+      description: How check-ins are going, per Bot. Counts only.
+      required:
+        - days
+        - dailyRuns
+        - bots
+        - pings
+      properties:
+        days:
+          type: integer
+          enum:
+            - 7
+            - 30
+        dailyRuns:
+          type: integer
+          description: How many check-ins a Bot may run for one person in a day.
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotCheckInUsage'
+        pings:
+          type: object
+          description: Notices sent. One notice folds every Bot's items for a person, so they are counted once for everybody.
+          required:
+            - sent
+            - itemsPerPing
+          properties:
+            sent:
+              type: integer
+              minimum: 0
+            itemsPerPing:
+              type:
+                - number
+                - 'null'
+              description: Items per notice, or null when none was sent.
+    GoalSubscription:
+      type: object
+      additionalProperties: false
+      description: A kind of event that wakes the goal.
+      required:
+        - source
+        - eventType
+      properties:
+        source:
+          type: string
+          enum:
+            - manual
+            - slack
+            - github
+            - schedule
+            - connector
+            - webhook
+            - linear
+            - sentry
+            - pagerduty
+            - email
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+    Goal:
+      type: object
+      description: An outcome a Bot works toward for a person.
+      required:
+        - id
+        - botId
+        - conversationId
+        - threadId
+        - title
+        - instruction
+        - successCriteria
+        - status
+        - progress
+        - lastResult
+        - subscriptions
+        - recurring
+        - endsWhenMet
+        - createdAt
+        - updatedAt
+        - completedAt
+      properties:
+        id:
+          type: string
+          description: The goal's id.
+        botId:
+          type: string
+          description: The Bot that works on it.
+        conversationId:
+          type: string
+          description: The conversation it belongs to.
+        threadId:
+          type: string
+          description: The thread its runs are kept in.
+        title:
+          type: string
+          description: What the goal is called.
+        instruction:
+          type: string
+          description: What the Bot is to do.
+        successCriteria:
+          type: string
+          description: When it is done. May be empty.
+        status:
+          type: string
+          enum:
+            - active
+            - paused
+            - completed
+        progress:
+          type: string
+          description: Where it stands, as the Bot last recorded it.
+        lastResult:
+          type:
+            - string
+            - 'null'
+          description: What its newest run said, or null.
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoalSubscription'
+        recurring:
+          type: boolean
+          description: Done again and again, and never finished by one run.
+        endsWhenMet:
+          type: boolean
+          description: A run that meets the success criteria completes it.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was made.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+        completedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was completed, or null.
+    GoalPage:
+      type: object
+      required:
+        - goals
+        - nextCursor
+      properties:
+        goals:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/Goal'
         nextCursor:
           type:
             - string
@@ -7015,6 +9539,603 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateGoalRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - botId
+        - conversationId
+        - title
+        - instruction
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+          description: The Bot that works on it.
+        conversationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+          description: A conversation the caller and the Bot share.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: \S
+          description: What the goal is called.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 6000
+          pattern: \S
+          description: What the Bot is to do.
+        successCriteria:
+          type: string
+          description: When it is done.
+          maxLength: 3000
+          default: ''
+        subscriptions:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            $ref: '#/components/schemas/GoalSubscription'
+        recurring:
+          type: boolean
+          default: false
+        endsWhenMet:
+          type: boolean
+          default: false
+    GoalResponse:
+      type: object
+      required:
+        - goal
+      properties:
+        goal:
+          $ref: '#/components/schemas/Goal'
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    UpdateGoalRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: \S
+          description: What the goal is called.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 6000
+          pattern: \S
+          description: What the Bot is to do.
+        successCriteria:
+          type: string
+          description: When it is done.
+          maxLength: 3000
+        subscriptions:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/GoalSubscription'
+        recurring:
+          type: boolean
+        endsWhenMet:
+          type: boolean
+    GoalRunAccepted:
+      type: object
+      required:
+        - eventId
+        - duplicate
+        - runIds
+      properties:
+        eventId:
+          type: string
+          description: The request, as the goal's event log keeps it.
+        duplicate:
+          type: boolean
+          description: Whether this request had been taken already.
+        runIds:
+          type: array
+          description: The runs it started.
+          items:
+            type: string
+    GoalRun:
+      type: object
+      description: One run of a goal, with what the Bot said.
+      required:
+        - id
+        - status
+        - replyText
+        - error
+        - waiting
+        - startedAt
+        - finishedAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The run's id.
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - waiting
+            - succeeded
+            - failed
+            - skipped
+        replyText:
+          type:
+            - string
+            - 'null'
+          description: What the Bot said, or null.
+        error:
+          type:
+            - string
+            - 'null'
+          description: Why it failed or was skipped, or null.
+        waiting:
+          oneOf:
+            - type: object
+              description: What the run waits on the person for.
+              required:
+                - kind
+              properties:
+                kind:
+                  type: string
+                  description: What kind of answer it waits for.
+                requestId:
+                  type: string
+                  description: The approval or question it waits on.
+              additionalProperties: true
+            - type: 'null'
+        startedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it started, or null while queued.
+        finishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it ended, or null.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was asked for.
+    GoalRunPage:
+      type: object
+      required:
+        - runs
+        - nextCursor
+      properties:
+        runs:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/GoalRun'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    GoalTriggerFilter:
+      type: object
+      additionalProperties: false
+      description: Which of the events this kind delivers fire the trigger.
+      properties:
+        eventTypes:
+          type: array
+          maxItems: 20
+          default: []
+          description: 'Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.'
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: \S
+        field:
+          type: object
+          additionalProperties: false
+          required:
+            - path
+            - equals
+          description: One field of the event that must equal a value.
+          properties:
+            path:
+              type: string
+              pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){0,7}$
+              description: A dotted path into the event, such as data.team.key.
+            equals:
+              type: string
+              minLength: 1
+              maxLength: 256
+              pattern: \S
+    WebhookTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: Any service that can send a signed webhook.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: webhook
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    GithubTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: A GitHub webhook.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: github
+        repository:
+          type: string
+          maxLength: 256
+          pattern: ^[\w.-]+/[\w.-]+$
+          description: The repository, as owner/name. Deliveries for any other are refused.
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    LinearTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: A Linear webhook.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: linear
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    SentryTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: A Sentry webhook.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: sentry
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    PagerdutyTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: A PagerDuty webhook.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: pagerduty
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    EmailTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: An email to the trigger's own address.
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          const: email
+        allowedSenders:
+          type: array
+          maxItems: 20
+          default: []
+          description: Addresses or domains allowed to send. Empty admits any sender.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 254
+            pattern: \S
+        filter:
+          $ref: '#/components/schemas/GoalTriggerFilter'
+    SlackTriggerConfig:
+      type: object
+      additionalProperties: false
+      description: A Slack message in a workspace where the goal's owner linked their own Slack account.
+      required:
+        - kind
+        - teamId
+        - mode
+      properties:
+        kind:
+          type: string
+          const: slack
+        teamId:
+          type: string
+          pattern: ^[A-Z0-9]{2,32}$
+          description: The Slack workspace's id, such as T0123ABCD.
+        mode:
+          type: string
+          enum:
+            - mention
+            - phrase
+            - reaction
+            - message
+        phrases:
+          type: array
+          maxItems: 20
+          default: []
+          description: 'For phrase: any one of these, in any case, fires it.'
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+        reactions:
+          type: array
+          maxItems: 20
+          default: []
+          description: 'For reaction: emoji names without colons. Empty means any reaction.'
+          items:
+            type: string
+            pattern: ^[a-z0-9_+'-]{1,100}$
+        channels:
+          type: array
+          maxItems: 50
+          default: []
+          description: Slack channel ids. Empty means every channel the Bot is in.
+          items:
+            type: string
+            pattern: ^[CDG][A-Z0-9]{2,32}$
+    GoalTriggerConfig:
+      description: What a trigger listens for, by its kind.
+      oneOf:
+        - $ref: '#/components/schemas/WebhookTriggerConfig'
+        - $ref: '#/components/schemas/GithubTriggerConfig'
+        - $ref: '#/components/schemas/LinearTriggerConfig'
+        - $ref: '#/components/schemas/SentryTriggerConfig'
+        - $ref: '#/components/schemas/PagerdutyTriggerConfig'
+        - $ref: '#/components/schemas/EmailTriggerConfig'
+        - $ref: '#/components/schemas/SlackTriggerConfig'
+      discriminator:
+        propertyName: kind
+        mapping:
+          webhook: '#/components/schemas/WebhookTriggerConfig'
+          github: '#/components/schemas/GithubTriggerConfig'
+          linear: '#/components/schemas/LinearTriggerConfig'
+          sentry: '#/components/schemas/SentryTriggerConfig'
+          pagerduty: '#/components/schemas/PagerdutyTriggerConfig'
+          email: '#/components/schemas/EmailTriggerConfig'
+          slack: '#/components/schemas/SlackTriggerConfig'
+    GoalTrigger:
+      type: object
+      description: 'A registered way for an outside event to start a run of a goal. Never its secret: hasSecret says whether one is set.'
+      required:
+        - id
+        - goalId
+        - kind
+        - config
+        - hasSecret
+        - enabled
+        - path
+        - address
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: The trigger's id.
+        goalId:
+          type: string
+          description: The goal it starts.
+        kind:
+          type: string
+          enum:
+            - webhook
+            - github
+            - linear
+            - sentry
+            - pagerduty
+            - email
+            - slack
+        config:
+          $ref: '#/components/schemas/GoalTriggerConfig'
+        hasSecret:
+          type: boolean
+        enabled:
+          type: boolean
+          description: 'False while it is off: it acknowledges deliveries and never starts a run.'
+        path:
+          type:
+            - string
+            - 'null'
+          description: The path on this server the sending service posts to, for webhook and provider kinds. Null for email and Slack.
+        address:
+          type:
+            - string
+            - 'null'
+          description: The address to send mail to, for an email trigger where inbound email is set up. Null otherwise.
+        emailConfigured:
+          type: boolean
+          description: For an email trigger, whether this OpenBot can receive email at all.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was added.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+    GoalTriggerPage:
+      type: object
+      required:
+        - triggers
+        - nextCursor
+      properties:
+        triggers:
+          type: array
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/GoalTrigger'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateGoalTriggerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - config
+      properties:
+        config:
+          $ref: '#/components/schemas/GoalTriggerConfig'
+        secret:
+          type: string
+          writeOnly: true
+          maxLength: 4096
+          description: The signing secret pasted from the provider, for kinds whose secret the provider makes. Stored encrypted.
+    GoalTriggerWithSecret:
+      type: object
+      required:
+        - trigger
+        - secret
+      properties:
+        trigger:
+          $ref: '#/components/schemas/GoalTrigger'
+        secret:
+          type:
+            - string
+            - 'null'
+          description: The secret OpenBot made, shown this once. Null when the secret was pasted, or the kind has none.
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    UpdateGoalTriggerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - config
+      properties:
+        config:
+          $ref: '#/components/schemas/GoalTriggerConfig'
+    GoalTriggerResponse:
+      type: object
+      required:
+        - trigger
+      properties:
+        trigger:
+          $ref: '#/components/schemas/GoalTrigger'
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    GoalTriggerSecret:
+      type: object
+      required:
+        - secret
+      properties:
+        secret:
+          type:
+            - string
+            - 'null'
+          description: The secret, or null for a kind that has none.
+    ReplaceGoalTriggerSecretRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        secret:
+          type: string
+          writeOnly: true
+          maxLength: 4096
+          description: The provider's new signing secret. Absent has OpenBot make one, for a webhook or GitHub trigger.
+    GithubEventSource:
+      type: object
+      description: A GitHub repository whose webhook reaches the person's goals. Never its secret.
+      required:
+        - id
+        - source
+        - repository
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The source's id.
+        source:
+          type: string
+          const: github
+        repository:
+          type: string
+          description: The repository, as owner/name.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was connected.
+        webhookPath:
+          type: string
+          description: The path on this server to give the repository's webhook. Answered when the source is made.
+    GithubEventSourcePage:
+      type: object
+      required:
+        - githubEventSources
+        - nextCursor
+      properties:
+        githubEventSources:
+          type: array
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/GithubEventSource'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateGithubEventSourceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repository
+        - secret
+      properties:
+        repository:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+          description: The repository, as owner/name.
+        secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 4096
+          description: The secret set on the repository's webhook.
+    GithubEventSourceResponse:
+      type: object
+      required:
+        - githubEventSource
+      properties:
+        githubEventSource:
+          $ref: '#/components/schemas/GithubEventSource'
+    FollowUpCancelled:
+      type: object
+      required:
+        - cancelled
+      properties:
+        cancelled:
+          type: boolean
+          const: true
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -7917,6 +11038,8 @@ components:
                 traceId: trace_example
     TransportUnavailable:
       description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
+    InvalidRoutine:
+      description: A field is missing or out of bounds, the schedule is not five cron fields or runs more often than hourly, the Bot is not in that conversation, the routine is paused or already running, or the caller has 20 routines switched on.
       content:
         application/problem+json:
           schema:
@@ -7929,23 +11052,70 @@ components:
                 status: 404
                 detail: SMS is not configured on this deployment.
                 code: TRANSPORT_UNAVAILABLE
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose when it runs.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    RoutineNotFound:
+      description: The routine does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/routine-not-found
+                title: Routine not found.
+                status: 404
+                detail: That routine does not exist.
+                code: ROUTINE_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     DeviceConflict:
       description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
+    InvalidCheckIn:
+      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, or a check-in is running already or ran in the last ten minutes.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
             anotherAccount:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Invalid settings.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInConflict:
+      description: The Bot already checks in on this and refuseExisting was asked for, or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sameCheckIn:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
                 detail: This device is already registered to another account. Sign out of OpenBot on it first.
+                detail: This Bot already checks in on this. Give this one a different name, or change that one on its row.
                 code: CONFLICT
                 category: conflict
                 retryable: false
@@ -7964,6 +11134,8 @@ components:
                 traceId: trace_example
     DeviceNotFound:
       description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
+    CheckInNotFound:
+      description: The check-in does not exist or is somebody else's, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -7976,6 +11148,11 @@ components:
                 status: 404
                 detail: Device not found.
                 code: DEVICE_NOT_FOUND
+                type: https://open.bot/errors/check-in-not-found
+                title: Check-in not found.
+                status: 404
+                detail: This could not be found.
+                code: CHECK_IN_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -8059,6 +11236,8 @@ components:
                 traceId: trace_example
     DestinationNotFound:
       description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
+    CheckInItemNotFound:
+      description: The item does not exist, is somebody else's or is no longer open, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -8071,6 +11250,101 @@ components:
                 status: 404
                 detail: Connection not found.
                 code: DESTINATION_NOT_FOUND
+                type: https://open.bot/errors/check-in-item-not-found
+                title: Item not found.
+                status: 404
+                detail: This could not be found.
+                code: CHECK_IN_ITEM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidGoal:
+      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, the goal both repeats and ends when met, the goal is paused or completed, or a trigger's configuration or secret is not one its kind takes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A goal can't both repeat and end when it's met. Turn one of them off.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GoalNotFound:
+      description: The goal does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/goal-not-found
+                title: Goal not found.
+                status: 404
+                detail: This goal could not be found.
+                code: GOAL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GoalTriggerNotFound:
+      description: The trigger does not exist, is not this goal's or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/goal-trigger-not-found
+                title: Trigger not found.
+                status: 404
+                detail: This goal could not be found.
+                code: GOAL_TRIGGER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GithubEventSourceNotFound:
+      description: The source does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/github-event-source-not-found
+                title: GitHub event source not found.
+                status: 404
+                detail: This goal could not be found.
+                code: GITHUB_EVENT_SOURCE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    FollowUpNotFound:
+      description: The follow-up already ran, was cancelled or is somebody else's, the Bot is not one the caller can see, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/follow-up-not-found
+                title: Follow-up not found.
+                status: 404
+                detail: That follow-up has already run or was cancelled.
+                code: FOLLOW_UP_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -8932,3 +12206,161 @@ components:
           - id: teams
             title: Microsoft Teams
         nextCursor: null
+    RoutinePageExample:
+      summary: A person's routines, on one page.
+      value:
+        routines:
+          - id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            schedule: Weekdays at 09:00
+            timezone: America/New_York
+            instruction: Summarize my unread mail and today's calendar.
+            title: Morning brief
+            conversation:
+              id: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+              name: General Assistant
+              title: Morning brief
+              gone: false
+            enabled: true
+            nextRunAt: '2026-11-16T14:00:00.000Z'
+            lastRun:
+              status: succeeded
+              at: '2026-11-13T14:00:41.000Z'
+            goalId: null
+            createdAt: '2026-11-02T16:21:09.000Z'
+        nextCursor: null
+    RoutineExample:
+      summary: A routine.
+      value:
+        routine:
+          id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          schedule: Weekdays at 09:00
+          timezone: America/New_York
+          instruction: Summarize my unread mail and today's calendar.
+          title: Morning brief
+          conversation:
+            id: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+            name: General Assistant
+            title: Morning brief
+            gone: false
+          enabled: true
+          nextRunAt: '2026-11-16T14:00:00.000Z'
+          lastRun:
+            status: succeeded
+            at: '2026-11-13T14:00:41.000Z'
+          goalId: null
+          createdAt: '2026-11-02T16:21:09.000Z'
+    CheckInPageExample:
+      summary: A person's check-ins, on one page.
+      value:
+        checkIns:
+          - id: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+            focus: Tell me when the vendor replies about the renewal.
+            subject: Vendor contract renewal
+            sourceLink: null
+            enabled: true
+            intervalMinutes: 1440
+            nextRunAt: '2026-11-15T09:00:00.000Z'
+            lastRunAt: '2026-11-14T09:00:00.000Z'
+            lastStatus: succeeded
+            lastError: null
+            lastRun:
+              outcome: quiet
+              trigger: schedule
+              skipReason: null
+              why: null
+              itemsRaised: 0
+              startedAt: '2026-11-14T09:00:00.000Z'
+              finishedAt: '2026-11-14T09:00:38.000Z'
+            createdAt: '2026-11-10T12:00:00.000Z'
+            updatedAt: '2026-11-14T09:00:38.000Z'
+        allowed: true
+        nextCursor: null
+    CheckInExample:
+      summary: A check-in.
+      value:
+        checkIn:
+          id: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+          focus: Tell me when the vendor replies about the renewal.
+          subject: Vendor contract renewal
+          sourceLink: null
+          enabled: true
+          intervalMinutes: 1440
+          nextRunAt: '2026-11-15T09:00:00.000Z'
+          lastRunAt: '2026-11-14T09:00:00.000Z'
+          lastStatus: succeeded
+          lastError: null
+          lastRun:
+            outcome: quiet
+            trigger: schedule
+            skipReason: null
+            why: null
+            itemsRaised: 0
+            startedAt: '2026-11-14T09:00:00.000Z'
+            finishedAt: '2026-11-14T09:00:38.000Z'
+          createdAt: '2026-11-10T12:00:00.000Z'
+          updatedAt: '2026-11-14T09:00:38.000Z'
+    CheckInItemPageExample:
+      summary: What a person's Bots found, on one page.
+      value:
+        checkInItems:
+          - id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+            title: Reply to the vendor about the renewal
+            detail: The vendor answered yesterday and asked for a decision by Friday.
+            sourceApp: Gmail
+            sourceRef: null
+            sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+            status: open
+            pingId: null
+            deliveredAt: null
+            resolvedAt: null
+            createdAt: '2026-11-14T09:00:36.000Z'
+        nextCursor: null
+    GoalPageExample:
+      summary: A person's goals, on one page.
+      value:
+        goals:
+          - id: 7d2c9b1a-0e4f-4b6a-8c3d-5e6f7a8b9c0d
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+            threadId: thread_5f0c2a52
+            title: Keep the release notes current
+            instruction: After each merged pull request, add a line to the draft release notes.
+            successCriteria: ''
+            status: active
+            progress: ''
+            lastResult: null
+            subscriptions: []
+            recurring: true
+            endsWhenMet: false
+            createdAt: '2026-11-12T10:15:00.000Z'
+            updatedAt: '2026-11-12T10:15:00.000Z'
+            completedAt: null
+        nextCursor: null
+    GoalExample:
+      summary: A goal.
+      value:
+        goal:
+          id: 7d2c9b1a-0e4f-4b6a-8c3d-5e6f7a8b9c0d
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          conversationId: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+          threadId: thread_5f0c2a52
+          title: Keep the release notes current
+          instruction: After each merged pull request, add a line to the draft release notes.
+          successCriteria: ''
+          status: active
+          progress: ''
+          lastResult: null
+          subscriptions: []
+          recurring: true
+          endsWhenMet: false
+          createdAt: '2026-11-12T10:15:00.000Z'
+          updatedAt: '2026-11-12T10:15:00.000Z'
+          completedAt: null
