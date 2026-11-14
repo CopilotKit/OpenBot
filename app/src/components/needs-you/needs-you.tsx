@@ -35,7 +35,7 @@ export function useBotName() {
   const attention = useQuery(botAttentionQueryOptions());
   return (agentId: string) =>
     bots.data?.find((bot) => bot.id === agentId)?.name ??
-    attention.data?.find((bot) => bot.agentId === agentId)?.name ??
+    attention.data?.find((bot) => bot.botId === agentId)?.name ??
     "Your Bot";
 }
 

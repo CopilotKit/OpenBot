@@ -22,6 +22,7 @@ import { SetupSections } from "@/components/bot-profile/setup";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { computerKeys } from "@/lib/computers/queries";
 import { Route as NewRuleRoute } from "@/routes/_authed/admin/boundaries_.new";
+import { DEPLOYMENT_PATH, deploymentResponse } from "./admin-settings-api";
 import { BOTS_PATH, botPath } from "./bots-api";
 
 /**
@@ -91,8 +92,8 @@ beforeEach(() => {
       if (path === "/api/computers/policy") {
         return json({ policy: method === "PUT" ? body : POLICY });
       }
-      if (path === "/api/agents/capabilities") {
-        return json({ capabilities: { builtInAvailable: true } });
+      if (path === DEPLOYMENT_PATH) {
+        return deploymentResponse({ builtInBots: true });
       }
       if (path === botPath(PROFILE.id)) {
         return json({ bot: PROFILE });

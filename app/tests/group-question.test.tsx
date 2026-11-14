@@ -15,7 +15,7 @@ import { GroupChat } from "@/components/channels/group-chat";
 import type { GroupMessage } from "@/lib/groups";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
-import { answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -131,24 +131,15 @@ beforeAll(() => {
             ]
           : [],
       });
-    if (url.pathname === "/api/bots/attention")
-      return Response.json({
-        lastPingId: null,
-        bots: [
-          {
-            agentId: ERRANDS,
-            name: "Errand Helper",
-            questions: open ? 1 : 0,
-            approvals: 0,
-            handoffs: 0,
-            unread: 0,
-            paused: false,
-            notify: "none",
-            items: 0,
-            tasks: { needsInput: 0, ready: 0, failed: 0 },
-          },
-        ],
-      });
+    const waiting = answerBotAttention(url, init, {
+      bots: [
+        attentionOf(ERRANDS, "Errand Helper", {
+          questions: open ? 1 : 0,
+          notify: "none",
+        }),
+      ],
+    });
+    if (waiting) return waiting;
     // As the server answers a group question: closed, the answer posted to the group, and the Bot
     // that asked queued to answer it there.
     if (url.pathname === "/api/approvals/questions/q-1/respond") {

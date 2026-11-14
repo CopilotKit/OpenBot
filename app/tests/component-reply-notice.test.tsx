@@ -36,7 +36,14 @@ import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
-import { answerBotsList, botPath } from "./bots-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  botOperationPath,
+  botPath,
+  lifecycleOf,
+  lifecycleResponse,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -376,12 +383,10 @@ async function serve(url: URL, request: Request): Promise<Response> {
     return new NativeResponse(null, { status: 204 });
   }
   // The Bot's own notification setting, and nothing of it waiting on the person.
-  if (path === "/api/bots/attention")
-    return NativeResponse.json({ bots: [], lastPingId: null });
-  if (path === `/api/bots/${BOT}/lifecycle`)
-    return NativeResponse.json({
-      lifecycle: { agentId: BOT, paused: false, pausedAt: null, notify },
-    });
+  const waiting = answerBotAttention(url, request, { bots: [] });
+  if (waiting) return waiting;
+  if (path === botOperationPath(BOT, "lifecycle"))
+    return lifecycleResponse(lifecycleOf(BOT, { notify }));
   const bots = answerBotsList(url, request, {
     visible: [{ id: BOT, name: "Trip Planner" }],
   });

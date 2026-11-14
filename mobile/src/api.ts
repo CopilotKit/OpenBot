@@ -138,7 +138,7 @@ export type ApprovalInbox = {
     channelId?: string;
   }[];
 };
-/** A Bot as `GET /api/agents` returns it. */
+/** A Bot as the API's `listBots` and `getBot` return it, in the fields this app reads. */
 export type Bot = {
   id: string;
   name: string;
@@ -147,7 +147,22 @@ export type Bot = {
   mine: boolean;
   canManage: boolean;
 };
-export type BotLifecycle = { paused: boolean; pausedAt: string | null };
+/** The person's own state with a Bot, as the API's `getBotLifecycle` returns it. */
+export type BotLifecycle = {
+  botId: string;
+  paused: boolean;
+  pausedAt: string | null;
+};
+
+/** Every Bot this person can reach, read page by page to the end. */
+export function everyBot(): Promise<Bot[]> {
+  return everyPage<Bot>(`${ORGANIZATION}/bots`, "bots");
+}
+
+/** One Bot's address in the API. */
+export function botPath(botId: string): string {
+  return `${ORGANIZATION}/bots/${encodeURIComponent(botId)}`;
+}
 /**
  * Something a Bot's check-in found that needs the person, as the API's check-in items list
  * it (open ones only). `detail` says why it was raised; `sourceApp` is the app it was read in.

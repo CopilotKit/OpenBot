@@ -29,7 +29,7 @@ import {
   TASKS_VIEW_STORAGE_KEY,
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
-import { answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList } from "./bots-api";
 import {
   answerScheduleLists,
   CHECK_IN_ITEMS_PATH,
@@ -227,8 +227,8 @@ function serving() {
         requests: [],
         questions,
       });
-    if (path === "/api/bots/attention")
-      return Response.json({ bots: [], lastPingId: null });
+    const waiting = answerBotAttention(input, init, { bots: [] });
+    if (waiting) return waiting;
     const schedules = answerScheduleLists(input, init);
     if (schedules) return schedules;
     const bots = answerBotsList(input, init, {

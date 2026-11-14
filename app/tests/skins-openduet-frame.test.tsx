@@ -30,7 +30,7 @@ import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList } from "./bots-api";
 import {
   CHECK_IN_ITEMS_PATH,
   GOALS_PATH,
@@ -115,7 +115,6 @@ function api(role: "admin" | "user") {
       ],
       nextCursor: null,
     },
-    "/api/bots/attention": { bots: [], lastPingId: null },
     "/api/approvals": {
       enabled: true,
       rules: [],
@@ -271,6 +270,8 @@ function api(role: "admin" | "user") {
       ],
     });
     if (bots) return bots;
+    const waiting = answerBotAttention(input, init, { bots: [] });
+    if (waiting) return waiting;
     if (path in bodies) return Response.json(bodies[path]);
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;

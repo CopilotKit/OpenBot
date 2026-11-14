@@ -11,8 +11,18 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SharingSections } from "@/components/bot-profile/sharing";
 import type { AgentProfile } from "@/lib/agents/queries";
-import type { TeamBot, TeamBotsData } from "@/lib/team-bots";
+import type { TeamBot } from "@/lib/team-bots";
 import { meResponse } from "./accounts-api";
+import {
+  answerTeamBots,
+  noContent,
+  publishedTeamBotResponse,
+  type SentRequest,
+  sentRequest,
+  teamBotAssignmentPath,
+  teamBotOf,
+  teamBotPath,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -56,36 +66,27 @@ const BOT: AgentProfile = {
   mine: true,
 };
 
-const PUBLISHED: TeamBot = {
-  id: "expenses",
-  name: "Expenses",
+const PUBLISHED: TeamBot = teamBotOf("expenses", "Expenses", {
   title: "Finance",
   roleDescription: "Receipts.",
-  mine: true,
-  audience: "team",
-  publishedAt: "2026-10-01T00:00:00Z",
-  assigned: false,
-  visibleToTeam: true,
-  people: [],
-  groups: [],
-  assignments: [],
-};
+});
 
-const writes: { url: string; method: string; body: unknown }[] = [];
+const writes: SentRequest[] = [];
 
-function serving(data: TeamBotsData, role: "admin" | "user") {
+/** The Team Bots list and the person asking. Every write is answered as the API answers it. */
+function serving(teamBots: TeamBot[], role: "admin" | "user") {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (init?.method && init.method !== "GET") {
-      writes.push({
-        url,
-        method: init.method,
-        body: init.body ? JSON.parse(String(init.body)) : undefined,
-      });
-      return Response.json({});
+    const sent = sentRequest(input, init);
+    if (sent.method !== "GET") {
+      writes.push(sent);
+      return sent.method === "DELETE"
+        ? noContent()
+        : publishedTeamBotResponse(PUBLISHED);
     }
-    if (url.includes("/api/team-bots")) return Response.json(data);
+    const listed = answerTeamBots(input, init, teamBots);
+    if (listed) return listed;
     if (url.includes("/shared-use/bot/")) return Response.json({ apps: [] });
     if (url.includes("/shared-use")) return Response.json({ requests: [] });
     return meResponse({
@@ -112,13 +113,7 @@ function draw(agent: AgentProfile) {
 }
 
 test("an unpublished Bot of yours offers to publish it", async () => {
-  serving(
-    {
-      teamBots: [],
-      publishable: [{ id: "expenses", name: "Expenses", title: "Finance" }],
-    },
-    "user",
-  );
+  serving([], "user");
   const view = draw(BOT);
   const user = userEvent.setup({ document });
   await user.click(await view.findByRole("button", { name: /Audience/ }));
@@ -129,13 +124,7 @@ test("an unpublished Bot of yours offers to publish it", async () => {
 });
 
 test("publishing to specific people sends them and their groups", async () => {
-  serving(
-    {
-      teamBots: [],
-      publishable: [{ id: "expenses", name: "Expenses", title: "Finance" }],
-    },
-    "user",
-  );
+  serving([], "user");
   const view = draw(BOT);
   const user = userEvent.setup({ document });
   await user.click(await view.findByRole("button", { name: /Audience/ }));
@@ -153,20 +142,23 @@ test("publishing to specific people sends them and their groups", async () => {
       .form as HTMLFormElement,
   );
   await waitFor(() =>
-    expect(writes).toContainEqual({
-      url: expect.stringContaining("/publication"),
-      method: "PUT",
-      body: {
-        audience: "people",
-        emails: ["a@example.test", "b@example.test"],
-        groups: ["finance"],
+    expect(writes).toEqual([
+      {
+        path: teamBotPath("expenses"),
+        method: "PUT",
+        key: expect.stringMatching(/^[0-9a-f]{32}$/),
+        body: {
+          audience: "people",
+          emails: ["a@example.test", "b@example.test"],
+          groups: ["finance"],
+        },
       },
-    }),
+    ]),
   );
 });
 
 test("a published Bot of yours can be updated, unpublished and its link copied", async () => {
-  serving({ teamBots: [PUBLISHED], publishable: [] }, "user");
+  serving([PUBLISHED], "user");
   const view = draw(BOT);
   expect(await view.findByRole("button", { name: "Unpublish" })).toBeTruthy();
   expect(view.getByRole("button", { name: "Copy link" })).toBeTruthy();
@@ -177,11 +169,40 @@ test("a published Bot of yours can be updated, unpublished and its link copied",
   expect(await view.findByRole("button", { name: "Update" })).toBeTruthy();
 });
 
-test("an administrator can assign a published Bot to groups but not publish someone else's", async () => {
-  serving(
-    { teamBots: [{ ...PUBLISHED, mine: false }], publishable: [] },
-    "admin",
+test("unpublishing a Bot of yours is a delete at its Team Bot address", async () => {
+  serving([PUBLISHED], "user");
+  const view = draw(BOT);
+  const user = userEvent.setup({ document });
+  await user.click(await view.findByRole("button", { name: "Unpublish" }));
+  await waitFor(() =>
+    expect(writes).toEqual([
+      {
+        path: teamBotPath("expenses"),
+        method: "DELETE",
+        key: expect.stringMatching(/^[0-9a-f]{32}$/),
+        body: undefined,
+      },
+    ]),
   );
+});
+
+test("Publish is offered for a Bot of yours missing from the Team Bots list, and never for someone else's", async () => {
+  // Another of your Bots is published; this one isn't, so it is yours to publish.
+  serving([teamBotOf("receipts", "Receipts")], "user");
+  const view = draw(BOT);
+  expect(await view.findByRole("heading", { name: "Publish" })).toBeTruthy();
+  expect(view.getByText("Only you can use it.")).toBeTruthy();
+  cleanup();
+
+  serving([], "user");
+  const theirs = draw({ ...BOT, mine: false, canManage: false });
+  expect(await theirs.findByText("Not published")).toBeTruthy();
+  expect(theirs.queryByRole("heading", { name: "Publish" })).toBeNull();
+  expect(theirs.queryByRole("button", { name: /Audience/ })).toBeNull();
+});
+
+test("an administrator can assign a published Bot to groups but not publish someone else's", async () => {
+  serving([{ ...PUBLISHED, mine: false }], "admin");
   const view = draw({ ...BOT, mine: false });
   expect(await view.findByText("Not assigned to any group")).toBeTruthy();
   expect(view.queryByRole("button", { name: /Audience/ })).toBeNull();
@@ -195,18 +216,20 @@ test("an administrator can assign a published Bot to groups but not publish some
       .form as HTMLFormElement,
   );
   await waitFor(() =>
-    expect(writes).toContainEqual(
-      expect.objectContaining({ method: "POST", body: { group: "finance" } }),
-    ),
+    expect(writes).toEqual([
+      {
+        path: teamBotAssignmentPath("expenses", "finance"),
+        method: "PUT",
+        key: expect.stringMatching(/^[0-9a-f]{32}$/),
+        body: undefined,
+      },
+    ]),
   );
 });
 
 test("an administrator removes a group a Bot is assigned to", async () => {
   serving(
-    {
-      teamBots: [{ ...PUBLISHED, mine: false, assignments: ["*", "finance"] }],
-      publishable: [],
-    },
+    [{ ...PUBLISHED, mine: false, assignedGroups: ["*", "finance"] }],
     "admin",
   );
   const view = draw({ ...BOT, mine: false });
@@ -214,21 +237,19 @@ test("an administrator removes a group a Bot is assigned to", async () => {
   const user = userEvent.setup({ document });
   await user.click(view.getByRole("button", { name: "Remove finance" }));
   await waitFor(() =>
-    expect(writes).toContainEqual(
-      expect.objectContaining({ method: "DELETE", body: undefined }),
-    ),
+    expect(writes).toEqual([
+      {
+        path: teamBotAssignmentPath("expenses", "finance"),
+        method: "DELETE",
+        key: expect.stringMatching(/^[0-9a-f]{32}$/),
+        body: undefined,
+      },
+    ]),
   );
-  expect(writes.at(-1)?.url).toContain("finance");
 });
 
 test("a public Bot that is not published says everyone can already use it", async () => {
-  serving(
-    {
-      teamBots: [],
-      publishable: [{ id: "expenses", name: "Expenses", title: "Finance" }],
-    },
-    "user",
-  );
+  serving([], "user");
   const view = draw({ ...BOT, visibility: "public" });
   expect(
     await view.findByText(/everyone on OpenBot can already use it/),
@@ -237,7 +258,7 @@ test("a public Bot that is not published says everyone can already use it", asyn
 });
 
 test("someone else's unpublished private Bot is not described as yours alone", async () => {
-  serving({ teamBots: [], publishable: [] }, "admin");
+  serving([], "admin");
   const view = draw({ ...BOT, mine: false });
   expect(await view.findByText("Not published")).toBeTruthy();
   expect(view.queryByText(/Only you can use it/)).toBeNull();
