@@ -27,7 +27,7 @@ export const getListCapabilitiesResponseMock = (): CapabilityPage => ({
         "People may save logins and hand sign-ins to a Bot's browser.",
       default: true,
       organization: null,
-      roles: { user: false },
+      roles: { member: false },
       groups: { Finance: true },
     },
   ],
@@ -40,7 +40,7 @@ export const getUpdateCapabilityResponseMock = (): Capability => ({
   description: "People may save logins and hand sign-ins to a Bot's browser.",
   default: true,
   organization: null,
-  roles: { user: false },
+  roles: { member: false },
   groups: {},
 });
 
@@ -49,7 +49,7 @@ export const getBatchUpdateCapabilitiesResponseMock =
     saved: [
       {
         scopeKind: "role",
-        scopeId: "user",
+        scopeId: "member",
         capability: "passwordManager",
         allowed: false,
       },
@@ -86,14 +86,14 @@ export const getPreviewCapabilityChangesResponseMock =
         id: "2fn8w1c6y4tq7h0mbe3s",
         email: "sam.ortiz@acme.com",
         name: "Sam Ortiz",
-        role: "user",
+        role: "member",
         groups: [],
         capabilities: [
           {
             capability: "passwordManager",
             title: "Password manager",
             before: { allowed: true, decidedBy: "default", scopeId: "" },
-            after: { allowed: false, decidedBy: "role", scopeId: "user" },
+            after: { allowed: false, decidedBy: "role", scopeId: "member" },
           },
         ],
       },

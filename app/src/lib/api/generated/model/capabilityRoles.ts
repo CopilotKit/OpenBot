@@ -3,9 +3,10 @@
  */
 
 /**
- * What each role is set to, by role. A role absent sets nothing.
+ * What each member role is set to, by role. A role absent sets nothing.
  */
 export type CapabilityRoles = {
+  owner?: boolean;
   admin?: boolean;
-  user?: boolean;
+  member?: boolean;
 };

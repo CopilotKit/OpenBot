@@ -11,6 +11,7 @@ export * from "./apiKey";
 export * from "./apiKeyNotFoundResponse";
 export * from "./apiKeyPage";
 export * from "./askAuditEventsHeaders";
+export * from "./assignableRole";
 export * from "./auditActorParameter";
 export * from "./auditAnswer";
 export * from "./auditAnswerAnswerable";

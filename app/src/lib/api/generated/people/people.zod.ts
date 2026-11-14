@@ -80,9 +80,9 @@ export const ListPeopleResponse = zod.object({
               "The picture their identity provider gave, when it gave one.",
             ),
           role: zod
-            .enum(["admin", "user"])
+            .enum(["owner", "admin", "member"])
             .describe(
-              "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
+              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
             ),
           needsName: zod
             .boolean()
@@ -193,9 +193,9 @@ export const GetPersonResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["admin", "user"])
+        .enum(["owner", "admin", "member"])
         .describe(
-          "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
         ),
       needsName: zod
         .boolean()
@@ -311,11 +311,9 @@ export const UpdatePersonBody = zod
         "What OpenBot calls the person, 1 to 100 characters once trimmed. Only the person themselves may change it.",
       ),
     role: zod
-      .enum(["admin", "user"])
+      .enum(["admin", "member"])
       .optional()
-      .describe(
-        "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
-      ),
+      .describe("A role an admin can give a person."),
   })
   .describe("The changes to make. At least one.");
 
@@ -338,9 +336,9 @@ export const UpdatePersonResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["admin", "user"])
+        .enum(["owner", "admin", "member"])
         .describe(
-          "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
         ),
       needsName: zod
         .boolean()
@@ -453,9 +451,9 @@ export const RevokePersonAccessResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["admin", "user"])
+        .enum(["owner", "admin", "member"])
         .describe(
-          "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
         ),
       needsName: zod
         .boolean()
@@ -568,9 +566,9 @@ export const RestorePersonAccessResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["admin", "user"])
+        .enum(["owner", "admin", "member"])
         .describe(
-          "What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
         ),
       needsName: zod
         .boolean()

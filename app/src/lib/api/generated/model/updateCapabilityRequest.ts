@@ -11,6 +11,6 @@ import type { UpdateCapabilityRequestRoles } from "./updateCapabilityRequestRole
 export interface UpdateCapabilityRequest {
   organization?: SwitchValue | null;
   roles?: UpdateCapabilityRequestRoles;
-  /** By directory group name, 1 to 200 characters. */
+  /** By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive. */
   groups?: UpdateCapabilityRequestGroups;
 }

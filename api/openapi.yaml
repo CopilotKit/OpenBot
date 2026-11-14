@@ -2011,7 +2011,7 @@ paths:
               members:
                 value:
                   roles:
-                    user: false
+                    member: false
       responses:
         '200':
           description: The switch as it now stands.
@@ -3610,10 +3610,16 @@ components:
           $ref: '#/components/schemas/AuditFilterLabels'
     PersonRole:
       type: string
-      enum: [admin, user]
+      enum: [owner, admin, member]
       description: >-
-        What a person may do in the organization. An administrator governs
-        it: its people, its sign-in and its policy.
+        The person's role as a member of the organization. An owner or an
+        admin governs it: its people, its sign-in and its policy. A member
+        uses it. Nobody is an owner yet; the role is listed so that a client
+        reads it when it arrives.
+    AssignableRole:
+      type: string
+      enum: [admin, member]
+      description: A role an admin can give a person.
     OnboardingStatus:
       type: object
       description: Where a person is in first-run onboarding.
@@ -3748,7 +3754,7 @@ components:
             What OpenBot calls the person, 1 to 100 characters once trimmed.
             Only the person themselves may change it.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/AssignableRole'
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -4469,15 +4475,19 @@ components:
           type: [boolean, 'null']
         roles:
           type: object
-          description: What each role is set to, by role. A role absent sets nothing.
+          description: What each member role is set to, by role. A role absent sets nothing.
           properties:
+            owner:
+              type: boolean
             admin:
               type: boolean
-            user:
+            member:
               type: boolean
         groups:
           type: object
-          description: What each directory group is set to, by name. A group absent sets nothing.
+          description: >-
+            What each directory group is set to, by the group's name. A group
+            absent sets nothing. Team scopes will be added when teams arrive.
           additionalProperties:
             type: boolean
     CapabilityPage:
@@ -4514,13 +4524,14 @@ components:
           properties:
             admin:
               $ref: '#/components/schemas/SwitchValue'
-            user:
+            member:
               $ref: '#/components/schemas/SwitchValue'
         groups:
           type: object
           minProperties: 1
           maxProperties: 100
-          description: By directory group name, 1 to 200 characters.
+          description: >-
+            By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.
           propertyNames:
             minLength: 1
             maxLength: 200
@@ -4535,11 +4546,14 @@ components:
         scopeKind:
           type: string
           enum: [organization, role, group]
+          description: >-
+            Whose switch: the organization's, a member role's, or a directory
+            group's. Team scopes will be added when teams arrive.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or user for a role; the group's name for a group.
+          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
         capability:
           $ref: '#/components/schemas/CapabilityId'
         allowed:
@@ -4582,11 +4596,14 @@ components:
         scopeKind:
           type: string
           enum: [organization, role, group]
+          description: >-
+            Whose switch: the organization's, a member role's, or a directory
+            group's. Team scopes will be added when teams arrive.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or user for a role; the group's name for a group.
+          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
         capability:
           type: string
           maxLength: 100
@@ -4666,8 +4683,12 @@ components:
         scopeKind:
           type: string
           enum: [organization, role, group]
+          description: >-
+            Whose switch: the organization's, a member role's, or a directory
+            group's. Team scopes will be added when teams arrive.
         scopeId:
           type: string
+          description: Empty for the organization; admin or member for a role; a directory group's name for a group.
         capability:
           type: string
         allowed:
@@ -4821,13 +4842,17 @@ components:
       properties:
         id:
           type: string
-          description: organization, or group:<name> for a directory group.
+          description: >-
+            organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.
         scopeKind:
           type: string
           enum: [organization, group]
+          description: >-
+            Whose policy: the organization's, or a directory group's.
+            Team scopes will be added when teams arrive.
         scopeId:
           type: string
-          description: The group's name. Empty for the organization.
+          description: The directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -4883,11 +4908,14 @@ components:
         scopeKind:
           type: string
           enum: [organization, group]
+          description: >-
+            Whose policy: the organization's, or a directory group's.
+            Team scopes will be added when teams arrive.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: The group's name. Empty for the organization.
+          description: The directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -6147,7 +6175,7 @@ components:
             email: sam.ortiz@acme.com
             name: Sam Ortiz
             image: null
-            role: user
+            role: member
             needsName: false
             onboarding:
               step: 3
@@ -6165,7 +6193,7 @@ components:
           email: sam.ortiz@acme.com
           name: Sam Ortiz
           image: null
-          role: user
+          role: member
           needsName: false
           onboarding:
             step: 3
@@ -6183,7 +6211,7 @@ components:
           email: sam.ortiz@acme.com
           name: Sam Ortiz
           image: null
-          role: user
+          role: member
           needsName: false
           onboarding:
             step: 3
@@ -6200,7 +6228,7 @@ components:
           email: sam.ortiz@acme.com
           name: Sam Ortiz
           image: null
-          role: user
+          role: member
           needsName: false
           onboarding:
             step: 3
@@ -6373,7 +6401,7 @@ components:
             default: true
             organization: null
             roles:
-              user: false
+              member: false
             groups:
               Finance: true
         nextCursor: null
@@ -6382,7 +6410,7 @@ components:
       value:
         changes:
           - scopeKind: role
-            scopeId: user
+            scopeId: member
             capability: passwordManager
             allowed: false
           - scopeKind: group
@@ -6416,14 +6444,14 @@ components:
         default: true
         organization: null
         roles:
-          user: false
+          member: false
         groups: {}
     SavedCapabilityChangesExample:
       summary: Both changes, saved.
       value:
         saved:
           - scopeKind: role
-            scopeId: user
+            scopeId: member
             capability: passwordManager
             allowed: false
           - scopeKind: group
@@ -6452,7 +6480,7 @@ components:
           - id: 2fn8w1c6y4tq7h0mbe3s
             email: sam.ortiz@acme.com
             name: Sam Ortiz
-            role: user
+            role: member
             groups: []
             capabilities:
               - capability: passwordManager
@@ -6464,7 +6492,7 @@ components:
                 after:
                   allowed: false
                   decidedBy: role
-                  scopeId: user
+                  scopeId: member
         counts:
           people: 1
           losing: 1

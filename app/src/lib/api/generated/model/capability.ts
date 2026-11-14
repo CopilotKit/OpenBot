@@ -16,8 +16,8 @@ export interface Capability {
   default: boolean;
   /** @nullable */
   organization: boolean | null;
-  /** What each role is set to, by role. A role absent sets nothing. */
+  /** What each member role is set to, by role. A role absent sets nothing. */
   roles: CapabilityRoles;
-  /** What each directory group is set to, by name. A group absent sets nothing. */
+  /** What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive. */
   groups: CapabilityGroups;
 }

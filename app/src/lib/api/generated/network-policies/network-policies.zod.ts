@@ -60,11 +60,17 @@ export const ListNetworkPoliciesResponse = zod.object({
       zod.object({
         id: zod
           .string()
-          .describe("organization, or group:<name> for a directory group."),
-        scopeKind: zod.enum(["organization", "group"]),
+          .describe(
+            "organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.",
+          ),
+        scopeKind: zod
+          .enum(["organization", "group"])
+          .describe(
+            "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+          ),
         scopeId: zod
           .string()
-          .describe("The group's name. Empty for the organization."),
+          .describe("The directory group's name. Empty for the organization."),
         mode: zod
           .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
           .describe(
@@ -214,11 +220,17 @@ export const replaceNetworkPolicyResponseRulesItemPortsMax = 100;
 export const ReplaceNetworkPolicyResponse = zod.object({
   id: zod
     .string()
-    .describe("organization, or group:<name> for a directory group."),
-  scopeKind: zod.enum(["organization", "group"]),
+    .describe(
+      "organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.",
+    ),
+  scopeKind: zod
+    .enum(["organization", "group"])
+    .describe(
+      "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+    ),
   scopeId: zod
     .string()
-    .describe("The group's name. Empty for the organization."),
+    .describe("The directory group's name. Empty for the organization."),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(
@@ -406,13 +418,17 @@ export const replayNetworkPolicyBodyLockedDefault = false;
 export const replayNetworkPolicyBodyLimitMax = 2000;
 
 export const ReplayNetworkPolicyBody = zod.object({
-  scopeKind: zod.enum(["organization", "group"]),
+  scopeKind: zod
+    .enum(["organization", "group"])
+    .describe(
+      "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+    ),
   scopeId: zod
     .string()
     .max(replayNetworkPolicyBodyScopeIdMax)
     .regex(replayNetworkPolicyBodyScopeIdRegExp)
     .optional()
-    .describe("The group's name. Empty for the organization."),
+    .describe("The directory group's name. Empty for the organization."),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(

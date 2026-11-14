@@ -21,7 +21,8 @@ export type AuthenticatedUser = {
   name?: string | null;
   needsName?: boolean;
   image?: string | null;
-  role: "admin" | "user";
+  /** Their role as a member of the organization. Nobody is an owner yet. */
+  role: "owner" | "admin" | "member";
   /** Null means this deployment does not track onboarding, which reads as nothing to finish. */
   onboarding: OnboardingStatus | null;
   /**

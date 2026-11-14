@@ -33,7 +33,8 @@ export type TodayUser = {
   name?: string | null;
   needsName?: boolean;
   image?: string | null;
-  role?: "admin" | "user";
+  /** Today's `user` is the API's `member`. */
+  role?: "owner" | "admin" | "member" | "user";
   onboarding?: { step: number; completedAt: string | null } | null;
 };
 
@@ -44,7 +45,7 @@ export function personBody(user: TodayUser) {
     email: user.email ?? `${user.id}@example.com`,
     name: user.name ?? null,
     image: user.image ?? null,
-    role: user.role ?? "user",
+    role: !user.role || user.role === "user" ? "member" : user.role,
     needsName: user.needsName ?? false,
     onboarding: user.onboarding ?? null,
     providers: [],
