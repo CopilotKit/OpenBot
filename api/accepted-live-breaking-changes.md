@@ -8,3 +8,5 @@ backticks as the check prints it, and the reason.
 
 Once the change is on the base branch, the check no longer reports it and its line matches nothing.
 
+- 2026-11-14 `remove /components/schemas/ThreadAgUiEventFrame/items/4/required/1`: `thread_id` is no longer required on an AG-UI event. A hosted gateway sends events without it (and without `run_id` and `organization_id`), which the file wrongly called impossible; the topic an event arrives on is its thread, and no client read the member.
+- 2026-11-14 `remove /components/schemas/AgUiEvent/required/1`: the same change, where the event is defined.
