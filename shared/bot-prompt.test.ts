@@ -205,6 +205,15 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       expect(said).toContain("a wrong guess would be hard to undo");
       expect(said).toContain("lead to materially different work");
       expect(said).toContain("only they know the answer");
+      // Two people called Alex: a Bot picked one and posted on most runs. Which one is asked.
+      expect(said).toContain("which one they mean is theirs to say");
+      expect(said).toContain(
+        "more than one fits and their words do not tell them apart, ask which one before you act on any of them",
+      );
+      expect(said).toContain(
+        "giving the ones that fit as the choices: do not pick",
+      );
+      expect(said).toContain("when exactly one fits, carry on without asking");
       // The else-branch carries on with what was asked, and no further.
       expect(said).toContain(
         "say what you assumed, and carry on with what was asked",
