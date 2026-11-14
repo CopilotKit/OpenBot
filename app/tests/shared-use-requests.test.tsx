@@ -22,6 +22,8 @@ afterAll(() => GlobalRegistrator.unregister());
 const originalFetch = global.fetch;
 let role: "user" | "admin" = "admin";
 let alreadyDecided = false;
+/** The requests waiting for an admin, at the API's address. */
+const SHARED_USE_REQUESTS = "/api/v2/organizations/default/shared-use-requests";
 const posted: string[] = [];
 const request = {
   id: "r1",
@@ -47,16 +49,32 @@ beforeEach(() => {
         return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
-      if (url === "/api/approvals/shared-use")
-        return Response.json({ requests: [request] });
+      if (url === `${SHARED_USE_REQUESTS}?limit=100`)
+        return Response.json({
+          sharedUseRequests: [request],
+          nextCursor: null,
+        });
       if (init?.method === "POST") {
         posted.push(url);
         if (alreadyDecided)
           return Response.json(
-            { error: "That request has already been decided." },
-            { status: 409 },
+            {
+              type: "https://open.bot/errors/shared-use-request-decided",
+              title: "That request has already been decided.",
+              status: 409,
+              detail: "That request has already been decided.",
+              code: "SHARED_USE_REQUEST_DECIDED",
+              category: "conflict",
+              retryable: false,
+              requestId: "req_test",
+              traceId: "trace_test",
+            },
+            {
+              status: 409,
+              headers: { "content-type": "application/problem+json" },
+            },
           );
-        return Response.json({ request: { ...request, status: "approved" } });
+        return Response.json({ ...request, status: "approved" });
       }
       return new Response(null, { status: 404 });
     },
@@ -98,7 +116,7 @@ describe("Shared account requests", () => {
     role = "admin";
     const view = draw();
     await userEvent.click(await view.findByRole("button", { name: "Approve" }));
-    expect(posted).toEqual(["/api/approvals/shared-use/r1/approve"]);
+    expect(posted).toEqual([`${SHARED_USE_REQUESTS}/r1/approve`]);
   });
 
   test("a request another admin already answered says so", async () => {

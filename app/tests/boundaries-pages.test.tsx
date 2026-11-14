@@ -71,13 +71,11 @@ const saved: ActionPolicy[] = [];
 /** Every candidate the screens asked the server to replay. */
 const replayed: ActionPolicy[] = [];
 const NOTHING_REPLAYED = Response.json({
-  report: {
-    scanned: 0,
-    wouldRefuse: 0,
-    wouldAllow: 0,
-    unchanged: 0,
-    changes: [],
-  },
+  scanned: 0,
+  wouldRefuse: 0,
+  wouldAllow: 0,
+  unchanged: 0,
+  changes: [],
 });
 let replay: (candidate: ActionPolicy) => Response = () =>
   NOTHING_REPLAYED.clone();
@@ -88,16 +86,19 @@ function serving(policy: ActionPolicy) {
   replay = () => NOTHING_REPLAYED.clone();
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path.endsWith("/api/computers/policy") && init?.method === "PUT") {
+    if (
+      path.endsWith("/api/v2/organizations/default/boundaries") &&
+      init?.method === "PUT"
+    ) {
       stored = JSON.parse(String(init.body)) as ActionPolicy;
       saved.push(stored);
-      return Response.json({ policy: stored });
+      return Response.json(stored);
     }
-    if (path.endsWith("/api/computers/policy"))
-      return Response.json({ policy: stored });
-    if (path.endsWith("/api/computers/policy-dry-run")) {
-      const { policy: candidate } = JSON.parse(String(init?.body)) as {
-        policy: ActionPolicy;
+    if (path.endsWith("/api/v2/organizations/default/boundaries"))
+      return Response.json(stored);
+    if (path.endsWith("/api/v2/organizations/default/boundaries/replay")) {
+      const { boundaries: candidate } = JSON.parse(String(init?.body)) as {
+        boundaries: ActionPolicy;
       };
       replayed.push(candidate);
       return replay(candidate);
@@ -241,26 +242,24 @@ test("a rule about an app is tested as it is written, and lists the app calls it
   serving({ mode: "enforce", deny: [custom], allow: ["true"] });
   replay = () =>
     Response.json({
-      report: {
-        scanned: 9,
-        wouldRefuse: 2,
-        wouldAllow: 0,
-        unchanged: 7,
-        changes: [
-          changed({
-            id: "a",
-            kind: "app",
-            action: "salesforce/update_record",
-            initiator: { kind: "routine", id: "weekly-review" },
-          }),
-          changed({
-            id: "c",
-            kind: "computer",
-            action: "computer_run_command",
-            command: "sf data update record",
-          }),
-        ],
-      },
+      scanned: 9,
+      wouldRefuse: 2,
+      wouldAllow: 0,
+      unchanged: 7,
+      changes: [
+        changed({
+          id: "a",
+          kind: "app",
+          action: "salesforce/update_record",
+          initiator: { kind: "routine", id: "weekly-review" },
+        }),
+        changed({
+          id: "c",
+          kind: "computer",
+          action: "computer_run_command",
+          command: "sf data update record",
+        }),
+      ],
     });
   const { view } = open("/admin/boundaries/new");
 
@@ -299,7 +298,17 @@ test("a rule that doesn't compile says why under it, and isn't replayed as one t
   const why =
     'A rule can\'t check "elemnt". It can check tool, intent, bot, actor, initiator, page, element, key, file, command and mcp.';
   replay = (candidate) =>
-    Response.json({ error: why, rule: candidate.deny.at(-1) }, { status: 400 });
+    Response.json(
+      {
+        type: "about:blank",
+        title: "Request validation failed.",
+        status: 400,
+        detail: why,
+        code: "VALIDATION_ERROR",
+        problems: [{ rule: candidate.deny.at(-1), error: why }],
+      },
+      { status: 400, headers: { "content-type": "application/problem+json" } },
+    );
   const { view } = open("/admin/boundaries/new");
 
   fireEvent.click(await view.findByText("Write your own"));
@@ -322,21 +331,19 @@ test("a rule's page lists the app calls it stopped", async () => {
   });
   replay = () =>
     Response.json({
-      report: {
-        scanned: 4,
-        wouldRefuse: 0,
-        wouldAllow: 1,
-        unchanged: 3,
-        changes: [
-          changed({
-            id: "s",
-            kind: "app",
-            action: "salesforce/delete_record",
-            was: "refused",
-            would: "allowed",
-          }),
-        ],
-      },
+      scanned: 4,
+      wouldRefuse: 0,
+      wouldAllow: 1,
+      unchanged: 3,
+      changes: [
+        changed({
+          id: "s",
+          kind: "app",
+          action: "salesforce/delete_record",
+          was: "refused",
+          would: "allowed",
+        }),
+      ],
     });
   const { view } = open("/admin/boundaries/0");
 

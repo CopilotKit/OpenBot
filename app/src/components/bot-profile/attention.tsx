@@ -137,7 +137,7 @@ export function pingNotice(
 export function noticePath(bot: BotAttention): string {
   return bot.waitingIn
     ? `/channel/${encodeURIComponent(bot.waitingIn)}`
-    : `/bots/${encodeURIComponent(bot.agentId)}`;
+    : `/bots/${encodeURIComponent(bot.botId)}`;
 }
 
 /**
@@ -158,12 +158,12 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
   useEffect(() => {
     if (!bots) return;
     const previous = seen.current;
-    seen.current = new Map(bots.map((bot) => [bot.agentId, asksOf(bot)]));
+    seen.current = new Map(bots.map((bot) => [bot.botId, asksOf(bot)]));
     // The first answer is the state on arrival, not news.
     if (!previous) return;
     const rose = bots.filter(
       (bot) =>
-        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.agentId) ?? 0),
+        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.botId) ?? 0),
     );
     if (rose.length === 0) return;
     void notificationsAllowed().then((allowed) => {
@@ -176,7 +176,7 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
           // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
           tag: bot.waitingIn
             ? conversationTag(bot.waitingIn)
-            : `openbot-attention-${bot.agentId}`,
+            : `openbot-attention-${bot.botId}`,
           path: noticePath(bot),
         });
     });
@@ -216,8 +216,7 @@ function usePingNotifications(
       const { data } = await refetch();
       const notice = pingNotice(
         (data ?? []).filter((item) => item.pingId === lastPingId),
-        (agentId) =>
-          names.current?.find((bot) => bot.agentId === agentId)?.name,
+        (agentId) => names.current?.find((bot) => bot.botId === agentId)?.name,
       );
       // Bots lists what the ping carried first, under Needs you.
       showNotice({

@@ -16,6 +16,7 @@ import {
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
+import { activityResponse, botOperationPath } from "./bots-api";
 import {
   CHECK_IN_ITEMS_PATH,
   ORGANIZATION_PATH,
@@ -226,12 +227,12 @@ test("the newest three suggestions show, and the rest open in place", async () =
 });
 
 function glance(
-  data: BotActivity,
+  data: Partial<BotActivity>,
   Component: typeof BotActivityGlance = BotActivityGlance,
 ) {
   global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).endsWith("/activity")
-      ? Response.json({ activity: data })
+    String(input) === botOperationPath("scout", "activity")
+      ? activityResponse(data)
       : Response.json(
           { error: "unexpected" },
           { status: 404 },

@@ -98,17 +98,70 @@ export async function api<T>(
   }
   return body as T;
 }
+/** The person asking, as the API addresses them. */
+const ME = `${ORGANIZATION}/people/me`;
+/** Where one of the person's approvals is decided. */
+export const approvalDecisionPath = (id: string) =>
+  `${ME}/approvals/${encodeURIComponent(id)}/decide`;
+/** Where one of the questions a Bot asked the person is answered. */
+export const questionResponsePath = (id: string) =>
+  `${ME}/questions/${encodeURIComponent(id)}/respond`;
+export const APPROVAL_PREFERENCES_PATH = `${ME}/approval-preferences`;
+export const APPROVAL_RULES_PATH = `${ME}/approval-rules`;
+export const approvalRulePath = (id: string) =>
+  `${APPROVAL_RULES_PATH}/${encodeURIComponent(id)}`;
+/** What waits on the person: the actions their Bots asked about, and the questions they asked. */
+export async function loadApprovalInbox(): Promise<ApprovalInbox> {
+  const [requests, questions] = await Promise.all([
+    everyPage<ApprovalInbox["requests"][number]>(
+      `${ME}/approvals`,
+      "approvals",
+    ),
+    everyPage<NonNullable<ApprovalInbox["questions"]>[number]>(
+      `${ME}/questions`,
+      "questions",
+    ),
+  ]);
+  return { requests, questions };
+}
+/** The person's own approval preferences and rules, with what the organization set for everybody. */
+export async function loadApprovalSettings(): Promise<ApprovalSettings> {
+  const [preferences, rules, team, teamRules] = await Promise.all([
+    api<{ enabled: boolean; autoReview: boolean }>(APPROVAL_PREFERENCES_PATH),
+    everyPage<ApprovalRule>(APPROVAL_RULES_PATH, "approvalRules"),
+    api<{ enforceAutoReview: boolean; customRulesEnabled: boolean }>(
+      `${ORGANIZATION}/approval-settings`,
+    ),
+    everyPage<ApprovalRule>(`${ORGANIZATION}/approval-rules`, "approvalRules"),
+  ]);
+  return {
+    enabled: preferences.enabled,
+    rules,
+    teamRules,
+    preferences: {
+      enabled: preferences.enabled,
+      autoReview: preferences.autoReview,
+    },
+    team: {
+      enforceAutoReview: team.enforceAutoReview,
+      customRulesEnabled: team.customRulesEnabled,
+    },
+  };
+}
+/** A conversation, as the API lists it. */
 export type Conversation = {
   id: string;
   name: string;
-  agentIds: string[];
+  botIds: string[];
   active: boolean;
 };
+/** One thing said in a conversation, as the API lists it. */
 export type TranscriptMessage = {
   id: string;
-  role: string;
-  content?: string | unknown[];
-  toolCalls?: unknown[];
+  role: "person" | "bot" | "tool" | "system";
+  text: string;
+  /** How many tools the Bot called in this message, when it called any. */
+  toolCalls?: number;
 };
 export type ApprovalInbox = {
   requests: {
@@ -138,7 +191,7 @@ export type ApprovalInbox = {
     channelId?: string;
   }[];
 };
-/** A Bot as `GET /api/agents` returns it. */
+/** A Bot as the API's `listBots` and `getBot` return it, in the fields this app reads. */
 export type Bot = {
   id: string;
   name: string;
@@ -147,7 +200,22 @@ export type Bot = {
   mine: boolean;
   canManage: boolean;
 };
-export type BotLifecycle = { paused: boolean; pausedAt: string | null };
+/** The person's own state with a Bot, as the API's `getBotLifecycle` returns it. */
+export type BotLifecycle = {
+  botId: string;
+  paused: boolean;
+  pausedAt: string | null;
+};
+
+/** Every Bot this person can reach, read page by page to the end. */
+export function everyBot(): Promise<Bot[]> {
+  return everyPage<Bot>(`${ORGANIZATION}/bots`, "bots");
+}
+
+/** One Bot's address in the API. */
+export function botPath(botId: string): string {
+  return `${ORGANIZATION}/bots/${encodeURIComponent(botId)}`;
+}
 /**
  * Something a Bot's check-in found that needs the person, as the API's check-in items list
  * it (open ones only). `detail` says why it was raised; `sourceApp` is the app it was read in.
@@ -169,11 +237,11 @@ export type TaskStatus =
   | "resolved"
   | "failed"
   | "ready_for_review";
-/** A task started from an item, as `GET /api/tasks` lists it. */
+/** A task started from an item, as the API lists it. */
 export type BotTask = {
   id: string;
-  agentId: string;
-  channelId: string;
+  botId: string;
+  conversationId: string;
   title: string;
   status: TaskStatus;
   /** Why its turn couldn't finish, while failed. */

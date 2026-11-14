@@ -80,8 +80,9 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
       </p>
     );
   }
-  const published = data.data.teamBots.find((bot) => bot.id === agent.id);
-  const publishable = data.data.publishable.some((bot) => bot.id === agent.id);
+  const published = data.data.find((bot) => bot.botId === agent.id);
+  // A Bot is its owner's to publish, and one missing from the Team Bots list isn't published yet.
+  const publishable = agent.mine && published === undefined;
 
   return (
     <>
@@ -364,7 +365,7 @@ function PublishDialog({
 function Assignments({ bot }: { bot: TeamBot }) {
   const remove = useMutation(assignTeamBotMutationOptions(queryClient));
   const [assigning, setAssigning] = useState(false);
-  const assigned = bot.assignments ?? [];
+  const assigned = bot.assignedGroups ?? [];
   return (
     <>
       {remove.error ? (
@@ -390,7 +391,11 @@ function Assignments({ bot }: { bot: TeamBot }) {
                   aria-label={`Remove ${name}`}
                   disabled={remove.isPending}
                   onClick={() =>
-                    remove.mutate({ botId: bot.id, group: name, remove: true })
+                    remove.mutate({
+                      botId: bot.botId,
+                      group: name,
+                      remove: true,
+                    })
                   }
                   size="sm"
                   variant="outline"
@@ -443,7 +448,10 @@ function AssignDialog({ bot, onClose }: { bot: TeamBot; onClose: () => void }) {
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              assign.mutate({ botId: bot.id, group }, { onSuccess: onClose });
+              assign.mutate(
+                { botId: bot.botId, group },
+                { onSuccess: onClose },
+              );
             }}
           >
             <Field>

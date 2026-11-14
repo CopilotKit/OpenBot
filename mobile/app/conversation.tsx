@@ -9,7 +9,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { api, type Conversation, type TranscriptMessage } from "../src/api";
+import {
+  api,
+  type Conversation,
+  ORGANIZATION,
+  type TranscriptMessage,
+} from "../src/api";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
 export default function ConversationScreen() {
@@ -31,33 +36,32 @@ export default function ConversationScreen() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
   const loadChannels = useCallback(
     () =>
-      api<{ channel: Conversation }>(
-        `/api/channels/${encodeURIComponent(channelId ?? "")}`,
+      api<{ conversation: Conversation }>(
+        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId ?? "")}`,
       ),
     [channelId, session?.user.id],
   );
   const channels = useLoad(loadChannels, Boolean(session));
-  const conversation = channels.data?.channel;
+  const conversation = channels.data?.conversation;
   useEffect(() => {
     if (conversation && !agentId)
       setAgentId(
-        requestedAgentId && conversation.agentIds.includes(requestedAgentId)
+        requestedAgentId && conversation.botIds.includes(requestedAgentId)
           ? requestedAgentId
-          : (conversation.agentIds[0] ?? ""),
+          : (conversation.botIds[0] ?? ""),
       );
   }, [conversation, agentId, requestedAgentId]);
   const loadHistory = useCallback(
     () =>
-      api<{ history: TranscriptMessage[] | { messages: TranscriptMessage[] } }>(
-        `/api/delivery/conversations/${encodeURIComponent(channelId ?? "")}/history?agentId=${encodeURIComponent(agentId)}`,
+      api<{ messages: TranscriptMessage[] }>(
+        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId ?? "")}/messages?botId=${encodeURIComponent(agentId)}&limit=200`,
       ),
     [channelId, agentId],
   );
   const history = useLoad(loadHistory, Boolean(session && agentId));
   if (!session && !isPending) return <Redirect href="/" />;
-  const messages = Array.isArray(history.data?.history)
-    ? history.data.history
-    : history.data?.history.messages;
+  // The API answers newest first. The conversation reads oldest first.
+  const messages = history.data?.messages.slice().reverse();
   async function send() {
     if (!text.trim() || !agentId || sending) return;
     setSending(true);
@@ -66,8 +70,11 @@ export default function ConversationScreen() {
     const externalId = Crypto.randomUUID();
     try {
       await api(
-        `/api/delivery/conversations/${encodeURIComponent(channelId)}/messages`,
-        { method: "POST", body: { agentId, text: pendingText, externalId } },
+        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId)}/messages`,
+        {
+          method: "POST",
+          body: { id: externalId, text: pendingText, botId: agentId },
+        },
       );
       setText("");
       await history.refresh();
@@ -87,7 +94,7 @@ export default function ConversationScreen() {
         {conversation?.name ?? "Conversation"}
       </Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {conversation?.agentIds.map((id) => (
+        {conversation?.botIds.map((id) => (
           <Button
             key={id}
             title={id === agentId ? `${id} ✓` : id}
@@ -117,19 +124,17 @@ export default function ConversationScreen() {
             key={message.id}
             style={{
               padding: 12,
-              backgroundColor: message.role === "user" ? "#eff6ff" : "#f3f4f6",
+              backgroundColor:
+                message.role === "person" ? "#eff6ff" : "#f3f4f6",
               borderRadius: 8,
             }}
           >
             <Text style={{ fontWeight: "600" }}>
-              {message.role === "user" ? "You" : agentId}
+              {message.role === "person" ? "You" : agentId}
             </Text>
             <Text>
-              {typeof message.content === "string"
-                ? message.content
-                : message.toolCalls?.length
-                  ? "The Bot is using a tool."
-                  : ""}
+              {message.text ||
+                (message.toolCalls ? "The Bot is using a tool." : "")}
             </Text>
           </View>
         ))}
