@@ -539,6 +539,53 @@ mod stop_ipc {
         );
     }
 
+    /// EC2 Mac: OpenBot updated its installation at Start, and later its engine machine stopped
+    /// under the open window. Setup came back but never started OpenBot again: the update's own
+    /// stop had marked the session as stopped by the person, which only their Stop may do.
+    #[test]
+    fn an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let configured = || {
+            already_configured(
+                fixture.app.handle().clone(),
+                fixture.root.to_string_lossy().into_owned(),
+            )
+        };
+        assert!(configured().auto_start);
+
+        // The update's stop, as `upgrade` and an app update run it.
+        let compose = fixture.compose_barrier();
+        let handle = fixture.app.handle().clone();
+        let root = fixture.root.clone();
+        let update = std::thread::spawn(move || stop_for_update(&handle, &root));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        update.join().unwrap().unwrap();
+        assert!(
+            configured().auto_start,
+            "an update's stop is not the person stopping OpenBot"
+        );
+
+        // The person's Stop, on what the update started again.
+        *fixture.app.state::<Shell>().containers.lock().unwrap() = Some(ContainerDeployment {
+            root: fixture.root.clone(),
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        let setup = "tauri://localhost/update-then-stop";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !configured().auto_start,
+            "the person's Stop still holds OpenBot stopped"
+        );
+    }
+
     /// Settings' Change on the AI model row: OpenBot stops, the window goes to setup, and setup
     /// is told once to open at its AI screen. A Stop that failed tells it nothing: OpenBot may
     /// still be running, and setup shows the failure with Start, as after any failed Stop.
