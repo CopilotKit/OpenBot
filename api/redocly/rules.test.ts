@@ -86,6 +86,30 @@ test("each convention is enforced", () => {
   }
 });
 
+test("only the caller's own organizations sit outside an organization", () => {
+  const ORGANIZATIONS = "/api/v2/people/me/organizations";
+  // The one address a person can ask before they can name an organization: allowed as committed.
+  expect(Object.keys(spec().paths)).toContain(ORGANIZATIONS);
+  const broken = spec();
+  // Nothing beside it is: not another of the person's own resources, and not the address under it.
+  broken.paths["/api/v2/people/me/bots"] = broken.paths[BOTS];
+  broken.paths[`${ORGANIZATIONS}/{organizationId}`] = broken.paths[BOTS];
+  const outside = lint(broken)
+    .filter((problem) => problem.ruleId === "openbot/organization-scoped")
+    .map((problem) => problem.message);
+  expect(outside).toHaveLength(2);
+  expect(
+    outside.some((text) =>
+      text.startsWith("/api/v2/people/me/bots is not under"),
+    ),
+  ).toBe(true);
+  expect(
+    outside.some((text) =>
+      text.startsWith(`${ORGANIZATIONS}/{organizationId} is not under`),
+    ),
+  ).toBe(true);
+});
+
 test("a collision names what Intelligence owns", () => {
   const broken = spec();
   broken.paths["/api/v2/organizations/{organizationId}/memory-sources"] =

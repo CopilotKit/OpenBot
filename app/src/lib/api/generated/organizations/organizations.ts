@@ -81,8 +81,8 @@ export const getListOrganizationsUrl = (params?: ListOrganizationsParams) => {
   const stringifiedParams = normalizedParams.toString();
 
   return stringifiedParams.length > 0
-    ? `/api/v2/organizations?${stringifiedParams}`
-    : `/api/v2/organizations`;
+    ? `/api/v2/people/me/organizations?${stringifiedParams}`
+    : `/api/v2/people/me/organizations`;
 };
 
 /**
@@ -102,7 +102,10 @@ export const listOrganizations = async (
 export const getListOrganizationsQueryKey = (
   params?: ListOrganizationsParams,
 ) => {
-  return [`/api/v2/organizations`, ...(params ? [params] : [])] as const;
+  return [
+    `/api/v2/people/me/organizations`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getListOrganizationsQueryOptions = <
@@ -279,7 +282,7 @@ export function useListOrganizations<
 }
 
 export const getCreateOrganizationUrl = () => {
-  return `/api/v2/organizations`;
+  return `/api/v2/people/me/organizations`;
 };
 
 /**
@@ -424,215 +427,6 @@ export const useCreateOrganization = <
     queryClient,
   );
 };
-export const getGetOrganizationUrl = (organizationId: string) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}`;
-};
-
-/**
- * Return one organization the caller is a member of, with the caller's role in it.
- * @summary Read one organization
- */
-export const getOrganization = async (
-  organizationId: string,
-  options?: Parameters<typeof apiRequest>[1],
-): Promise<OrganizationResponse> => {
-  return apiRequest<OrganizationResponse>(
-    getGetOrganizationUrl(organizationId),
-    {
-      ...options,
-      method: "GET",
-    },
-  );
-};
-
-export const getGetOrganizationQueryKey = (organizationId: string) => {
-  return [`/api/v2/organizations/${organizationId}`] as const;
-};
-
-export const getGetOrganizationQueryOptions = <
-  TData = Awaited<ReturnType<typeof getOrganization>>,
-  TError =
-    | InvalidRequestResponse
-    | UnauthenticatedResponse
-    | ForbiddenResponse
-    | OrganizationNotFoundResponse
-    | ServerErrorResponse
-    | UnexpectedErrorResponse,
->(
-  organizationId: string,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getOrganization>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof apiRequest>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getGetOrganizationQueryKey(organizationId);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrganization>>> = ({
-    signal,
-  }) => getOrganization(organizationId, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled: organizationId !== null && organizationId !== undefined,
-    ...queryOptions,
-  } as UseQueryOptions<
-    Awaited<ReturnType<typeof getOrganization>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetOrganizationQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getOrganization>>
->;
-export type GetOrganizationQueryError =
-  | InvalidRequestResponse
-  | UnauthenticatedResponse
-  | ForbiddenResponse
-  | OrganizationNotFoundResponse
-  | ServerErrorResponse
-  | UnexpectedErrorResponse;
-
-export function useGetOrganization<
-  TData = Awaited<ReturnType<typeof getOrganization>>,
-  TError =
-    | InvalidRequestResponse
-    | UnauthenticatedResponse
-    | ForbiddenResponse
-    | OrganizationNotFoundResponse
-    | ServerErrorResponse
-    | UnexpectedErrorResponse,
->(
-  organizationId: string,
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getOrganization>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getOrganization>>,
-          TError,
-          Awaited<ReturnType<typeof getOrganization>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof apiRequest>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetOrganization<
-  TData = Awaited<ReturnType<typeof getOrganization>>,
-  TError =
-    | InvalidRequestResponse
-    | UnauthenticatedResponse
-    | ForbiddenResponse
-    | OrganizationNotFoundResponse
-    | ServerErrorResponse
-    | UnexpectedErrorResponse,
->(
-  organizationId: string,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getOrganization>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getOrganization>>,
-          TError,
-          Awaited<ReturnType<typeof getOrganization>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof apiRequest>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetOrganization<
-  TData = Awaited<ReturnType<typeof getOrganization>>,
-  TError =
-    | InvalidRequestResponse
-    | UnauthenticatedResponse
-    | ForbiddenResponse
-    | OrganizationNotFoundResponse
-    | ServerErrorResponse
-    | UnexpectedErrorResponse,
->(
-  organizationId: string,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getOrganization>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof apiRequest>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @summary Read one organization
- */
-
-export function useGetOrganization<
-  TData = Awaited<ReturnType<typeof getOrganization>>,
-  TError =
-    | InvalidRequestResponse
-    | UnauthenticatedResponse
-    | ForbiddenResponse
-    | OrganizationNotFoundResponse
-    | ServerErrorResponse
-    | UnexpectedErrorResponse,
->(
-  organizationId: string,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getOrganization>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof apiRequest>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getGetOrganizationQueryOptions(organizationId, options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
 export const getListOrganizationMembersUrl = (
   organizationId: string,
   params?: ListOrganizationMembersParams,

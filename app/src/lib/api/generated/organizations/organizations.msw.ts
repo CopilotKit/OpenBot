@@ -47,16 +47,6 @@ export const getCreateOrganizationResponseMock = (): OrganizationResponse => ({
   },
 });
 
-export const getGetOrganizationResponseMock = (): OrganizationResponse => ({
-  organization: {
-    id: "default",
-    slug: "default",
-    name: "Acme",
-    role: "admin",
-    active: true,
-  },
-});
-
 export const getListOrganizationMembersResponseMock =
   (): OrganizationMemberPage => ({
     members: [
@@ -101,7 +91,7 @@ export const getListOrganizationsMockHandler = (
   options?: RequestHandlerOptions,
 ) => {
   return http.get(
-    "*/api/v2/organizations",
+    "*/api/v2/people/me/organizations",
     async (info: Parameters<HttpResponseResolver>[0]) => {
       return HttpResponse.json(
         overrideResponse !== undefined
@@ -127,7 +117,7 @@ export const getCreateOrganizationMockHandler = (
   options?: RequestHandlerOptions,
 ) => {
   return http.post<PathParams, CreateOrganizationRequest>(
-    "*/api/v2/organizations",
+    "*/api/v2/people/me/organizations",
     async (
       info: Parameters<
         HttpResponseResolver<PathParams, CreateOrganizationRequest>
@@ -140,32 +130,6 @@ export const getCreateOrganizationMockHandler = (
             : overrideResponse
           : getCreateOrganizationResponseMock(),
         { status: 201 },
-      );
-    },
-    options,
-  );
-};
-
-export const getGetOrganizationMockHandler = (
-  overrideResponse?:
-    | OrganizationResponse
-    | ((
-        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
-      ) => Promise<OrganizationResponse> | OrganizationResponse),
-  options?: RequestHandlerOptions,
-) => {
-  return http.get<{ organizationId: string }>(
-    "*/api/v2/organizations/:organizationId",
-    async (
-      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
-    ) => {
-      return HttpResponse.json(
-        overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
-            ? await overrideResponse(info)
-            : overrideResponse
-          : getGetOrganizationResponseMock(),
-        { status: 200 },
       );
     },
     options,
@@ -236,7 +200,6 @@ export const getAddOrganizationMemberMockHandler = (
 export const getOrganizationsMock = () => [
   getListOrganizationsMockHandler(),
   getCreateOrganizationMockHandler(),
-  getGetOrganizationMockHandler(),
   getListOrganizationMembersMockHandler(),
   getAddOrganizationMemberMockHandler(),
 ];

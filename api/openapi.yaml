@@ -86,7 +86,7 @@ tags:
       Where Bot computers may connect, for the organization and for a
       directory group.
 paths:
-  /api/v2/organizations:
+  /api/v2/people/me/organizations:
     get:
       tags: [Organizations]
       operationId: listOrganizations
@@ -164,11 +164,6 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
-            Location:
-              description: The new organization's address.
-              schema:
-                type: string
-              example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe
           content:
             application/json:
               schema:
@@ -188,45 +183,6 @@ paths:
           $ref: '#/components/responses/ServerError'
         '503':
           $ref: '#/components/responses/OrganizationNotCreated'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags: [Organizations]
-      operationId: getOrganization
-      summary: Read one organization
-      description: >-
-        Return one organization the caller is a member of, with the caller's
-        role in it.
-      security:
-        - webSession: []
-        - appOAuth: [organizations:read]
-        - apiKey: []
-      responses:
-        '200':
-          description: The organization.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationResponse'
-              examples:
-                default:
-                  $ref: '#/components/examples/DefaultOrganization'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
-        '500':
-          $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/members:
@@ -6582,15 +6538,6 @@ components:
             role: owner
             active: false
         nextCursor: null
-    DefaultOrganization:
-      summary: The organization every install has.
-      value:
-        organization:
-          id: default
-          slug: default
-          name: Acme
-          role: admin
-          active: true
     CreatedOrganization:
       summary: A new organization, owned by whoever created it.
       value:

@@ -145,42 +145,6 @@ export const CreateOrganizationResponse = zod.object({
 });
 
 /**
- * Return one organization the caller is a member of, with the caller's role in it.
- * @summary Read one organization
- */
-
-export const GetOrganizationParams = zod.object({
-  organizationId: zod
-    .string()
-    .min(1)
-    .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
-    ),
-});
-
-export const GetOrganizationResponse = zod.object({
-  organization: zod
-    .object({
-      id: zod.string().describe("The organization's id. Opaque."),
-      slug: zod.string().describe("Its short name, which also addresses it."),
-      name: zod.string().describe("What people call it."),
-      role: zod
-        .enum(["owner", "admin", "member"])
-        .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
-        ),
-      active: zod
-        .boolean()
-        .describe(
-          "Whether the caller's session is working in this one. Always false for a request with no session.",
-        ),
-    })
-    .describe(
-      "One organization, as one of its members sees it. role and active are the server's verdicts about the caller.",
-    ),
-});
-
-/**
  * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List an organization's members
  */
