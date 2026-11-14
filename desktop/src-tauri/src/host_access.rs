@@ -83,6 +83,8 @@ struct Inner {
     instance_label: String,
     state: Mutex<State>,
     effect_lock: Mutex<()>,
+    /// Held while a dialog is on screen, so the person is shown one at a time. See `prompt_turn`.
+    prompt_lock: Mutex<()>,
 }
 
 struct State {
@@ -93,7 +95,9 @@ struct State {
     completed: HashSet<String>,
     canceled_operations: HashSet<String>,
     active_by_operation: HashSet<String>,
-    active_by_bot: HashSet<String>,
+    /// Each Bot's one operation in progress, by its id. A Bot's slot is freed when its operation
+    /// ends, or when the server cancels it while a dialog for it is still on screen.
+    active_by_bot: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +154,27 @@ pub trait HostApprovalUi: Send + Sync + 'static {
     fn choose_folder(&self, request: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder>;
     fn confirm_write(&self, request: &WritePrompt) -> HostAccessResult<()>;
     fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()>;
+    /// The person allowed an action after OpenBot had stopped waiting for the answer, so it did
+    /// not run. Told so they do not believe it did. Nothing by default.
+    ///
+    /// FOUND ON A MAC: a native dialog cannot be closed from outside, so "Allow this command?" stayed
+    /// on screen after the server gave up on it, still offering Allow once, and Allow did nothing
+    /// anyone could see.
+    fn approval_lapsed(&self, _notice: &LapsedApproval) {}
+}
+
+/// An action the person allowed too late. See `HostApprovalUi::approval_lapsed`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LapsedApproval {
+    pub bot_id: String,
+    pub bot_name: Option<String>,
+    pub action: LapsedAction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LapsedAction {
+    Command,
+    FileChange,
 }
 
 pub struct DenyAllApprovalUi;
@@ -463,6 +488,7 @@ impl HostAccess {
             approval,
             instance_label: fresh_id("host-instance"),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -471,7 +497,7 @@ impl HostAccess {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         });
         let thread_inner = inner.clone();
@@ -626,15 +652,25 @@ impl Inner {
             }
             if state.stopped || state.canceled_operations.contains(&operation.operation_id) {
                 Err("Host access is stopped.".to_string())
-            } else if state.active_by_operation.len() >= MAX_ACTIVE_OPERATIONS {
+            } else if state
+                .active_by_operation
+                .iter()
+                .filter(|id| !state.canceled_operations.contains(*id))
+                .count()
+                >= MAX_ACTIVE_OPERATIONS
+            {
+                // One the server cancelled is waiting only on a dialog nobody answered; it does not
+                // count, or four walked-away dialogs would refuse every Bot.
                 Err("Too many host operations are already waiting.".to_string())
-            } else if state.active_by_bot.contains(&operation.bot_id) {
+            } else if state.active_by_bot.contains_key(&operation.bot_id) {
                 Err("That Bot already has a host operation in progress.".to_string())
             } else {
                 state
                     .active_by_operation
                     .insert(operation.operation_id.clone());
-                state.active_by_bot.insert(operation.bot_id.clone());
+                state
+                    .active_by_bot
+                    .insert(operation.bot_id.clone(), operation.operation_id.clone());
                 Ok(())
             }
         };
@@ -654,12 +690,18 @@ impl Inner {
                 inner.handle_and_post(&worker_client, operation);
                 let mut state = inner.state.lock().expect("host state poisoned");
                 state.active_by_operation.remove(&worker_operation_id);
-                state.active_by_bot.remove(&worker_bot_id);
+                // The slot may already be another operation's: this one's was freed when the
+                // server cancelled it.
+                if state.active_by_bot.get(&worker_bot_id) == Some(&worker_operation_id) {
+                    state.active_by_bot.remove(&worker_bot_id);
+                }
             })
         {
             let mut state = self.state.lock().expect("host state poisoned");
             state.active_by_operation.remove(&operation_id);
-            state.active_by_bot.remove(&bot_id);
+            if state.active_by_bot.get(&bot_id) == Some(&operation_id) {
+                state.active_by_bot.remove(&bot_id);
+            }
             drop(state);
             self.post_error(
                 &client,
@@ -802,13 +844,22 @@ impl Inner {
     }
 
     fn choose_folder(&self, operation: &DesktopOperation) -> HostAccessResult<OperationSuccess> {
-        let approved = self.approval.choose_folder(&ChooseFolderPrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            actor_id: operation.actor_id.clone(),
-            bot_name: operation.bot_name.clone(),
-            writable_requested: operation.writable == Some(true),
-        })?;
+        let approved = {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_fresh(operation)?;
+            if self.operation_was_canceled(&operation.operation_id) {
+                return Err(HostAccessError::Denied(
+                    "Host operation was canceled before the folder was granted.".into(),
+                ));
+            }
+            self.approval.choose_folder(&ChooseFolderPrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                actor_id: operation.actor_id.clone(),
+                bot_name: operation.bot_name.clone(),
+                writable_requested: operation.writable == Some(true),
+            })?
+        };
         let root = validate_grant_root(&approved.root, &self.config.forbidden_paths)?;
         self.ensure_operation_fresh(operation)?;
         if self.operation_was_canceled(&operation.operation_id) {
@@ -816,21 +867,34 @@ impl Inner {
                 "Host operation was canceled before the folder was granted.".into(),
             ));
         }
-        let grant_id = fresh_id("host-grant");
         let display_name = display_name_for(&root);
-        let grant = LocalGrant {
-            id: grant_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            actor_id: operation.actor_id.clone(),
-            bot_name: operation.bot_name.clone(),
-            root,
-            revoked: false,
-        };
-        self.state
-            .lock()
-            .expect("host state poisoned")
+        let mut state = self.state.lock().expect("host state poisoned");
+        // FOUND ON A MAC: choosing a folder the Bot already had made a second grant beside the
+        // first, so Settings listed it twice and the Bot was handed two grants with one name. One
+        // grant per Bot, person and folder: choosing it again makes that grant live again, under the
+        // id the Bot already knows.
+        let existing = state
             .grants
-            .insert(grant_id.clone(), grant);
+            .values()
+            .find(|grant| {
+                grant.bot_id == operation.bot_id
+                    && grant.actor_id == operation.actor_id
+                    && grant.root == root
+            })
+            .map(|grant| grant.id.clone());
+        let grant_id = existing.unwrap_or_else(|| fresh_id("host-grant"));
+        state.grants.insert(
+            grant_id.clone(),
+            LocalGrant {
+                id: grant_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                actor_id: operation.actor_id.clone(),
+                bot_name: operation.bot_name.clone(),
+                root,
+                revoked: false,
+            },
+        );
+        drop(state);
         Ok(OperationSuccess {
             output: None,
             grant: Some(OperationGrant {
@@ -891,16 +955,20 @@ impl Inner {
             .clone()
             .ok_or_else(|| HostAccessError::Denied("Host write missing content.".into()))?;
         let target = resolve_relative_for_write(&grant.root, relative_path)?;
-        self.approval.confirm_write(&WritePrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            bot_name: grant.bot_name.clone(),
-            root: grant.root.clone(),
-            relative_path: relative_path.into(),
-            content: content.clone(),
-            writable: true,
-        })?;
-        self.ensure_operation_still_allowed(operation, &grant)?;
+        {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_still_allowed(operation, &grant)?;
+            self.approval.confirm_write(&WritePrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                bot_name: grant.bot_name.clone(),
+                root: grant.root.clone(),
+                relative_path: relative_path.into(),
+                content: content.clone(),
+                writable: true,
+            })?;
+            self.ensure_approved_in_time(operation, &grant, LapsedAction::FileChange)?;
+        }
         let relative = host_relative_for_write(&grant.root, &target)?;
         let target_path = container_path(&relative);
         let backup_name = backup_name_for(&relative);
@@ -945,17 +1013,21 @@ impl Inner {
                 "Commands on this computer are set to never run.".into(),
             ));
         }
-        self.approval.confirm_command(&CommandPrompt {
-            operation_id: operation.operation_id.clone(),
-            bot_id: operation.bot_id.clone(),
-            bot_name: grant.bot_name.clone(),
-            root: grant.root.clone(),
-            working_directory: working_directory.clone(),
-            command: command.into(),
-            writable,
-            command_policy,
-        })?;
-        self.ensure_operation_still_allowed(operation, &grant)?;
+        {
+            let _turn = self.prompt_turn();
+            self.ensure_operation_still_allowed(operation, &grant)?;
+            self.approval.confirm_command(&CommandPrompt {
+                operation_id: operation.operation_id.clone(),
+                bot_id: operation.bot_id.clone(),
+                bot_name: grant.bot_name.clone(),
+                root: grant.root.clone(),
+                working_directory: working_directory.clone(),
+                command: command.into(),
+                writable,
+                command_policy,
+            })?;
+            self.ensure_approved_in_time(operation, &grant, LapsedAction::Command)?;
+        }
         let command_directory = if let Some(directory) = working_directory {
             let relative = host_relative(&grant.root, &directory)?;
             container_path(&relative)
@@ -986,6 +1058,13 @@ impl Inner {
             state
                 .canceled_operations
                 .insert(target_operation_id.clone());
+            // FOUND ON A MAC: the server gave up on a command whose "Allow this command?" was still
+            // on screen, and every folder action that Bot asked for after it failed with "That Bot
+            // already has a host operation in progress." until someone dismissed the dialog. The
+            // cancelled one can no longer run (`ensure_approved_in_time`), so its Bot is free.
+            state
+                .active_by_bot
+                .retain(|_, operation_id| *operation_id != target_operation_id);
             if let Some(grant_id) = operation.grant_id.as_deref() {
                 if let Some(grant) = state.grants.get_mut(grant_id) {
                     if grant.actor_id == operation.actor_id || operation.actor_id == "*" {
@@ -1041,6 +1120,57 @@ impl Inner {
         }
         Ok(grant.clone())
     }
+    /// The person's turn to be shown a dialog. A native dialog cannot be closed from outside, so one
+    /// OpenBot stopped waiting for stays up until the person answers it; a second one shown beside it
+    /// sat exactly on top of it, two identical dialogs nobody could tell apart. Each dialog waits
+    /// for the one before it, the "didn't run" notice included, and an action that is no longer
+    /// wanted by the time its turn comes is never shown (`ensure_operation_still_allowed`).
+    fn prompt_turn(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.prompt_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// After the person allowed an action: whether it may still run. When the server stopped
+    /// waiting for the answer first (it expired, or the server cancelled it alone), the person is
+    /// told it did not run, and the server is answered that it expired.
+    fn ensure_approved_in_time(
+        &self,
+        operation: &DesktopOperation,
+        grant: &LocalGrant,
+        action: LapsedAction,
+    ) -> HostAccessResult<()> {
+        let Err(refused) = self.ensure_operation_still_allowed(operation, grant) else {
+            return Ok(());
+        };
+        let lapsed = {
+            let state = self.state.lock().expect("host state poisoned");
+            let grant_still_held = state
+                .grants
+                .get(&grant.id)
+                .is_some_and(|current| !current.revoked);
+            !state.stopped
+                && grant_still_held
+                && (state.canceled_operations.contains(&operation.operation_id)
+                    || self.operation_expired(operation))
+        };
+        if !lapsed {
+            return Err(refused);
+        }
+        log::info!(
+            "[host access] operation {} was allowed after the server stopped waiting; nothing ran",
+            operation.operation_id
+        );
+        self.approval.approval_lapsed(&LapsedApproval {
+            bot_id: operation.bot_id.clone(),
+            bot_name: grant.bot_name.clone(),
+            action,
+        });
+        Err(HostAccessError::Denied(
+            "Host operation approval expired.".into(),
+        ))
+    }
+
     fn ensure_operation_still_allowed(
         &self,
         operation: &DesktopOperation,
@@ -2659,6 +2789,7 @@ mod tests {
             approval: approval.clone(),
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -2667,7 +2798,7 @@ mod tests {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         });
         fn redelivered_operation() -> DesktopOperation {
@@ -2710,6 +2841,420 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// The person's first "Allow this command?" is left open; every later one is denied.
+    struct LateCommandApprovalUi {
+        asked: AtomicUsize,
+        asked_tx: Mutex<mpsc::Sender<()>>,
+        release_rx: Mutex<mpsc::Receiver<()>>,
+        lapsed: Mutex<Vec<LapsedApproval>>,
+    }
+
+    impl HostApprovalUi for LateCommandApprovalUi {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            unreachable!("the grant is made by the test")
+        }
+
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            unreachable!("only commands are asked about here")
+        }
+
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            let first = self.asked.fetch_add(1, Ordering::SeqCst) == 0;
+            self.asked_tx.lock().unwrap().send(()).unwrap();
+            if first {
+                self.release_rx.lock().unwrap().recv().unwrap();
+                return Ok(());
+            }
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+
+        fn approval_lapsed(&self, notice: &LapsedApproval) {
+            self.lapsed.lock().unwrap().push(notice.clone());
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: an "Allow this command?" left past the server's two minutes ended the folder
+     * for good, and the dialog stayed up offering an Allow that did nothing. The server now
+     * cancels an operation that ran out its time without naming its grant; this is what the
+     * desktop does with that cancel and with the Allow pressed after it.
+     */
+    #[test]
+    fn a_command_allowed_after_the_server_stopped_waiting_does_not_run_and_the_folder_still_asks() {
+        let (asked_tx, asked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let approval = Arc::new(LateCommandApprovalUi {
+            asked: AtomicUsize::new(0),
+            asked_tx: Mutex::new(asked_tx),
+            release_rx: Mutex::new(release_rx),
+            lapsed: Mutex::new(Vec::new()),
+        });
+        let config = HostAccessConfig::new(
+            "http://127.0.0.1:9",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let inner = Arc::new(Inner {
+            config,
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([(
+                    "grant".into(),
+                    LocalGrant {
+                        id: "grant".into(),
+                        bot_id: "bot-a".into(),
+                        actor_id: "actor".into(),
+                        bot_name: Some("Research Bot".into()),
+                        root: temp_root("host-access-late-allow"),
+                        revoked: false,
+                    },
+                )]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        });
+        let operation =
+            |id: &str, kind: HostOperationKind, target: Option<&str>| DesktopOperation {
+                operation_id: id.into(),
+                kind,
+                bot_id: "bot-a".into(),
+                actor_id: "actor".into(),
+                bot_name: None,
+                grant_id: matches!(kind, HostOperationKind::RunCommand).then(|| "grant".into()),
+                target_operation_id: target.map(str::to_string),
+                relative_path: None,
+                content: None,
+                command: matches!(kind, HostOperationKind::RunCommand).then(|| "ls -la".into()),
+                writable: Some(false),
+                command_policy: None,
+                expires_at: None,
+                received_at_ms: now_millis(),
+            };
+
+        let worker = inner.clone();
+        let first = operation("op-late", HostOperationKind::RunCommand, None);
+        let answered = thread::spawn(move || worker.handle_operation(&first).map(|_| ()));
+        asked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        // The server stops waiting and cancels that one operation, naming no grant.
+        inner
+            .handle_operation(&operation(
+                "op-cancel",
+                HostOperationKind::Cancel,
+                Some("op-late"),
+            ))
+            .unwrap();
+        // Then the person presses Allow once on the dialog still on screen.
+        release_tx.send(()).unwrap();
+        let error = answered.join().unwrap().unwrap_err();
+        assert_eq!(
+            public_error_message(&error, &inner.config),
+            "Host operation approval expired."
+        );
+        assert_eq!(
+            *approval.lapsed.lock().unwrap(),
+            vec![LapsedApproval {
+                bot_id: "bot-a".into(),
+                bot_name: Some("Research Bot".into()),
+                action: LapsedAction::Command,
+            }]
+        );
+
+        // The next command on the same folder asks again.
+        let next = inner
+            .handle_operation(&operation("op-next", HostOperationKind::RunCommand, None))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(approval.asked.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            public_error_message(&next, &inner.config),
+            "Declined in OpenBot Desktop."
+        );
+        assert!(!inner.state.lock().unwrap().grants["grant"].revoked);
+    }
+
+    /*
+     * FOUND ON A MAC: with an "Allow this command?" the server had given up on still on screen,
+     * every folder action that Bot asked for next failed with "That Bot already has a host
+     * operation in progress." until someone dismissed the stale dialog. Freed of that, the next
+     * dialog then sat exactly on top of the stale one, two identical dialogs nobody could tell
+     * apart. The next action is taken, and its dialog waits its turn: shown once the stale one is
+     * answered and its "didn't run" notice closed, and never shown at all if it is no longer wanted
+     * by then.
+     */
+    #[test]
+    fn a_dialog_left_on_screen_holds_up_no_bot_and_the_next_dialog_waits_its_turn() {
+        let collector = ResultCollector::start();
+        let (asked_tx, asked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let approval = Arc::new(LateCommandApprovalUi {
+            asked: AtomicUsize::new(0),
+            asked_tx: Mutex::new(asked_tx),
+            release_rx: Mutex::new(release_rx),
+            lapsed: Mutex::new(Vec::new()),
+        });
+        let config = HostAccessConfig::new(
+            collector.base_url.clone(),
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let grant = |bot: &str| LocalGrant {
+            id: format!("grant-{bot}"),
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: Some("Research Bot".into()),
+            root: temp_root("host-access-stale-dialog"),
+            revoked: false,
+        };
+        let inner = Arc::new(Inner {
+            config,
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([
+                    ("grant-bot-a".into(), grant("bot-a")),
+                    ("grant-bot-b".into(), grant("bot-b")),
+                ]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        });
+        let command = |id: &str, bot: &str| DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::RunCommand,
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: None,
+            grant_id: Some(format!("grant-{bot}")),
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: Some("ls -la".into()),
+            writable: Some(false),
+            command_policy: None,
+            expires_at: None,
+            received_at_ms: now_millis(),
+        };
+        let cancel = |id: &str, target: &str, bot: &str| DesktopOperation {
+            kind: HostOperationKind::Cancel,
+            grant_id: None,
+            command: None,
+            target_operation_id: Some(target.into()),
+            ..command(id, bot)
+        };
+        let posted = |id: &str| {
+            collector
+                .bodies()
+                .iter()
+                .map(|body| serde_json::from_str::<serde_json::Value>(body).unwrap())
+                .find(|body| body["operationId"] == id)
+        };
+        let client = Client::new();
+
+        inner.spawn_operation(client.clone(), command("op-stale", "bot-a"));
+        asked_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        inner.spawn_operation(client.clone(), cancel("op-c1", "op-stale", "bot-a"));
+
+        // The person is away. The Bot asks again, and another Bot asks for something that is then
+        // given up on too, while the stale dialog is still open.
+        inner.spawn_operation(client.clone(), command("op-next", "bot-a"));
+        inner.spawn_operation(client.clone(), command("op-gone", "bot-b"));
+        thread::sleep(Duration::from_millis(150));
+        inner.spawn_operation(client.clone(), cancel("op-c2", "op-gone", "bot-b"));
+        thread::sleep(Duration::from_millis(150));
+        assert!(
+            posted("op-next").is_none(),
+            "the Bot's next action was turned away: {:?}",
+            posted("op-next")
+        );
+        assert_eq!(
+            approval.asked.load(Ordering::SeqCst),
+            1,
+            "a second dialog was shown on top of the stale one"
+        );
+
+        // The person comes back and presses Allow on the stale dialog: nothing runs, they are told
+        // so, and only then is the next dialog shown. The one given up on meanwhile never is.
+        release_tx.send(()).unwrap();
+        asked_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the waiting dialog was not shown after the stale one was answered");
+        collector.wait_for_posts(5);
+        assert_eq!(approval.lapsed.lock().unwrap().len(), 1);
+        assert_eq!(approval.asked.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            posted("op-stale").unwrap()["error"],
+            "Host operation approval expired."
+        );
+        assert_eq!(
+            posted("op-next").unwrap()["error"],
+            "Declined in OpenBot Desktop."
+        );
+        assert_eq!(posted("op-gone").unwrap()["ok"], false);
+        thread::sleep(Duration::from_millis(50));
+        let state = inner.state.lock().unwrap();
+        assert!(state.active_by_bot.is_empty());
+        assert!(!state.grants["grant-bot-a"].revoked);
+    }
+
+    struct SameFolderApprovalUi {
+        root: PathBuf,
+        asked_to_change: AtomicUsize,
+    }
+
+    impl HostApprovalUi for SameFolderApprovalUi {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            Ok(ApprovedFolder {
+                root: self.root.clone(),
+            })
+        }
+
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+
+        fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()> {
+            assert!(
+                request.writable,
+                "only commands that change files are asked here"
+            );
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: choosing a folder the Bot already had made a second grant beside the first,
+     * so Settings → Computer read "2 read-only folders" and the Bot was handed two grants with one
+     * name.
+     */
+    #[test]
+    fn choosing_a_folder_the_bot_already_has_keeps_one_grant_and_makes_it_live_again() {
+        let root = fs::canonicalize(temp_root("host-access-same-folder")).unwrap();
+        fs::write(root.join("notes.txt"), "hello").unwrap();
+        let approval = Arc::new(SameFolderApprovalUi {
+            root: root.clone(),
+            asked_to_change: AtomicUsize::new(0),
+        });
+        let inner = Inner {
+            config: HostAccessConfig::new(
+                "http://127.0.0.1:9",
+                "token",
+                Address::new(Engine::Docker, None),
+                DEFAULT_IMAGE,
+                vec![],
+            ),
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::new(),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        };
+        let choose = |id: &str, bot: &str| DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::ChooseFolder,
+            bot_id: bot.into(),
+            actor_id: "actor".into(),
+            bot_name: Some("Research Bot".into()),
+            grant_id: None,
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: None,
+            writable: Some(false),
+            command_policy: None,
+            expires_at: None,
+            received_at_ms: now_millis(),
+        };
+        let granted = |id: &str, bot: &str| {
+            inner
+                .handle_operation(&choose(id, bot))
+                .unwrap()
+                .grant
+                .unwrap()
+                .grant_id
+        };
+
+        let first = granted("op-1", "bot-a");
+        inner
+            .state
+            .lock()
+            .unwrap()
+            .grants
+            .get_mut(&first)
+            .unwrap()
+            .revoked = true;
+        let again = granted("op-2", "bot-a");
+        assert_eq!(again, first);
+        {
+            let state = inner.state.lock().unwrap();
+            assert_eq!(state.grants.len(), 1);
+            assert!(!state.grants[&first].revoked);
+        }
+        // A grant is read-only whichever time it was chosen: the grant it comes back as carries
+        // nothing over, and every change to the folder still asks the person, each time.
+        let change = |id: &str, kind: HostOperationKind| DesktopOperation {
+            kind,
+            grant_id: Some(first.clone()),
+            relative_path: matches!(kind, HostOperationKind::WriteFile).then(|| "notes.txt".into()),
+            content: matches!(kind, HostOperationKind::WriteFile).then(|| "changed".into()),
+            command: matches!(kind, HostOperationKind::RunCommand).then(|| "rm notes.txt".into()),
+            writable: Some(matches!(kind, HostOperationKind::RunCommand)),
+            command_policy: Some("allow".into()),
+            ..choose(id, "bot-a")
+        };
+        for (id, kind) in [
+            ("op-write", HostOperationKind::WriteFile),
+            ("op-edit", HostOperationKind::RunCommand),
+        ] {
+            let refused = inner.handle_operation(&change(id, kind)).map(|_| ());
+            assert_eq!(
+                public_error_message(&refused.unwrap_err(), &inner.config),
+                "Declined in OpenBot Desktop."
+            );
+        }
+        assert_eq!(approval.asked_to_change.load(Ordering::SeqCst), 2);
+        // Another Bot given the same folder has its own grant.
+        assert_ne!(granted("op-3", "bot-b"), first);
+        assert_eq!(inner.state.lock().unwrap().grants.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn grant_binding_refuses_wrong_bot_or_actor() {
         let config = HostAccessConfig::new(
@@ -2724,6 +3269,7 @@ mod tests {
             approval: Arc::new(DenyAllApprovalUi),
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -2742,7 +3288,7 @@ mod tests {
                 completed: HashSet::new(),
                 canceled_operations: HashSet::new(),
                 active_by_operation: HashSet::new(),
-                active_by_bot: HashSet::new(),
+                active_by_bot: HashMap::new(),
             }),
         };
         let operation = DesktopOperation {
@@ -2910,6 +3456,7 @@ mod live {
                 approval: Arc::new(AllowAll),
                 instance_label: fresh_id("host-live"),
                 effect_lock: Mutex::new(()),
+                prompt_lock: Mutex::new(()),
                 state: Mutex::new(State {
                     stopped: false,
                     thread: None,
@@ -2918,7 +3465,7 @@ mod live {
                     completed: HashSet::new(),
                     canceled_operations: HashSet::new(),
                     active_by_operation: HashSet::new(),
-                    active_by_bot: HashSet::new(),
+                    active_by_bot: HashMap::new(),
                 }),
             };
             Self { inner, root }
