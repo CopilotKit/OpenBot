@@ -4,7 +4,7 @@
 import type { AppDirectoryEntry } from "./appDirectoryEntry";
 
 export interface AppDirectoryPage {
-  /** The catalogue, then the wider directory, each by title and then by id. */
+  /** The catalogue in its own order, then the wider directory by title, ignoring case, and then by id. */
   entries: AppDirectoryEntry[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
