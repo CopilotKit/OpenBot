@@ -789,6 +789,61 @@ test("still defines migrate and worker for one release, with nothing that waits 
 });
 
 /**
+ * The managed Bot is built from the checkout, and a built image's tag is one name on the whole
+ * machine. With a single fixed tag, starting one stack moved the tag another stack's Bot was made
+ * from. So the tag carries the stack's Compose project name, however the project got it: `-p`,
+ * `COMPOSE_PROJECT_NAME`, or the directory the file is in. `LANGGRAPH_IMAGE` still names the image
+ * outright, which is how a published one is pinned.
+ */
+test("tags the managed Bot's built image by the stack's project, unless LANGGRAPH_IMAGE names one", () => {
+  const managedBot = (flags: string[], env: Record<string, string>) => {
+    const config = JSON.parse(
+      execFileSync(
+        "docker",
+        [
+          "compose",
+          ...flags,
+          "--env-file",
+          "/dev/null",
+          "config",
+          "--format",
+          "json",
+        ],
+        {
+          cwd: join(import.meta.dir, ".."),
+          env: { PATH: process.env.PATH ?? "", ...env },
+          encoding: "utf8",
+        },
+      ),
+    ) as { name: string; services: Record<string, { image: string }> };
+    return {
+      project: config.name,
+      image: config.services["agent-langgraph-agui"].image,
+    };
+  };
+
+  expect(managedBot(["-p", "one"], {})).toEqual({
+    project: "one",
+    image: "one-agent-langgraph-agui:latest",
+  });
+  expect(managedBot([], { COMPOSE_PROJECT_NAME: "two" })).toEqual({
+    project: "two",
+    image: "two-agent-langgraph-agui:latest",
+  });
+  // Neither set: the project is named after the directory, and so is the tag.
+  const byDirectory = managedBot([], {});
+  expect(byDirectory.project).not.toBe("");
+  expect(byDirectory.image).toBe(
+    `${byDirectory.project}-agent-langgraph-agui:latest`,
+  );
+
+  const published = "ghcr.io/copilotkit/openbot-agent-langgraph-agui:v9.9.9";
+  expect(managedBot(["-p", "one"], { LANGGRAPH_IMAGE: published }).image).toBe(
+    published,
+  );
+});
+
+/**
  * The server reads no `WORKER_SHARED_SECRET`, so the example files do not offer one to fill in.
  * `scripts/server-env.ts` hands the server's container every setting they list, so a line here
  * would also hand it a setting nothing reads.

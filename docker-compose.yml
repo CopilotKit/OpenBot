@@ -491,7 +491,11 @@ services:
       dockerfile: agent-langgraph-agui/Dockerfile
     # Built from this checkout. A release publishes it too, and IMAGE_PULL_POLICY=missing pulls that
     # instead, as OpenBot Desktop does.
-    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph-agui:latest}
+    #
+    # The built image's tag carries the stack's project name, as the tag Compose gives a built
+    # service with no `image:` does. A tag is one name on the whole machine, so with one fixed tag a
+    # second stack's start moved it and the first stack's Bot was no longer the image it was built as.
+    image: ${LANGGRAPH_IMAGE:-${COMPOSE_PROJECT_NAME:-openbot}-agent-langgraph-agui:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
