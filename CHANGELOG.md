@@ -460,6 +460,12 @@ Desktop installation:
 
 ### Conversations
 
+- **A Claude Agent SDK Bot stops working when you leave it mid-answer.** Pressing Stop, reloading,
+  or opening another screen while the Personal Assistant was answering left its Claude Code
+  process running in the harness, with nobody listening, until the harness restarted. Each one
+  held a couple of hundred megabytes and kept a CPU busy, so after a few hours of use OpenBot
+  Desktop's machine could run short of memory and slow everything down. Leaving an answer now
+  stops the Bot's run, as Stop always meant to.
 - **An answer that reaches the screen with pieces missing is put right, and the Bot carries on.**
   Sometimes a run's live stream reached the conversation out of shape while the run itself went
   fine: the answer drew with words missing mid-sentence until a reload, or a step that asked for
