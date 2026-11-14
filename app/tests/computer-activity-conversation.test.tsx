@@ -32,6 +32,7 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -354,8 +355,7 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${bot}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(bot)) return botGrantsResponse();
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))

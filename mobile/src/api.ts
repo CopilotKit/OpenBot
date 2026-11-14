@@ -1,10 +1,28 @@
+import * as Crypto from "expo-crypto";
 import { authClient, serverUrl } from "./auth";
+
+/** A refusal from the server, with its status and, from the API, the problem's stable `code`. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export async function api<T>(
   path: string,
   input?: { method?: string; body?: unknown; signal?: AbortSignal },
 ): Promise<T> {
   if (!path.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const cookie = await authClient.getCookie();
+  // Every write to the API carries a key of its own, so a retry of it is recognised as the same write.
+  const write =
+    path.startsWith("/api/v2/") &&
+    (input?.method ?? "GET").toUpperCase() !== "GET";
   const response = await fetch(`${serverUrl}${path}`, {
     method: input?.method,
     credentials: "omit",
@@ -13,6 +31,7 @@ export async function api<T>(
       ...(input?.body !== undefined
         ? { "content-type": "application/json" }
         : {}),
+      ...(write ? { "Idempotency-Key": Crypto.randomUUID() } : {}),
     },
     ...(input?.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
     signal: input?.signal,
@@ -30,7 +49,18 @@ export async function api<T>(
             ? body.error
             : undefined))
         : undefined;
-    throw new Error(said ?? `Request failed (${response.status}).`);
+    const code =
+      body &&
+      typeof body === "object" &&
+      "code" in body &&
+      typeof body.code === "string"
+        ? body.code
+        : undefined;
+    throw new ApiError(
+      said ?? `Request failed (${response.status}).`,
+      response.status,
+      code,
+    );
   }
   return body as T;
 }
@@ -174,10 +204,16 @@ export type ApprovalSettings = {
   preferences?: { enabled: boolean; autoReview: boolean };
   team?: { enforceAutoReview: boolean; customRulesEnabled: boolean };
 };
-export type GrantedPlugins = {
-  tools: { ref: string; description: string }[];
-  skills: { slug: string; title: string; summary: string }[];
+/** One thing a Bot was given, as `GET .../bots/{botId}/grants` lists it. */
+export type BotGrant = {
+  id: string;
+  kind: "action" | "skill" | "bot";
+  ref: string;
+  action: { description: string } | null;
+  skill: { slug: string; title: string; summary: string } | null;
 };
+/** One page of a Bot's grants. */
+export type BotGrantPage = { grants: BotGrant[]; nextCursor: string | null };
 export type SkillSummary = { slug: string; title: string; summary: string };
 /** Who drives a Bot's computer, as `GET /api/computers/:botId/control` answers. */
 export type ControlState = {

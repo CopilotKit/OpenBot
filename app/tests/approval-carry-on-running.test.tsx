@@ -13,6 +13,7 @@ import {
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -170,8 +171,8 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/maps-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("maps-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("maps-bot"))
         return NativeResponse.json({
           bot: { id: "maps-bot", visibility: "public", canManage: true },

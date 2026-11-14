@@ -39,16 +39,13 @@ describe("grantPlugin", () => {
       approval: { audience: "owner", outsideInput: false, members: [] },
     });
     expect(sent[0]?.body).toEqual({
-      kind: "mcp",
-      ref: "gh/X",
-      agentId: "b",
       approval: { audience: "owner", outsideInput: false, members: [] },
     });
   });
 
   test("sends no approval key when there is none", async () => {
     await grantPlugin({ kind: "mcp", ref: "gh/X", agentId: "b" });
-    expect(sent[0]?.body).toEqual({ kind: "mcp", ref: "gh/X", agentId: "b" });
+    expect(sent[0]?.body).toEqual({});
   });
 });
 

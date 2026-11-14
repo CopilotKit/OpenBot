@@ -33,6 +33,10 @@ import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessRequestsResponse,
+} from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -663,6 +667,9 @@ function installDeployment(deployment: Deployment): Server {
     }
     const bots = answerBotsList(path, init, { visible: [] });
     if (bots) return bots;
+    // Nobody has asked an admin for anything here.
+    if (path.startsWith(APP_ACCESS_REQUESTS_PATH))
+      return appAccessRequestsResponse([]);
     if (path.startsWith("/api/plugins")) {
       return json(
         pluginsPage(state.composioConfigured, state.authScheme, state.title),

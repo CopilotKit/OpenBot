@@ -12,6 +12,7 @@ import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { botGrantsResponse } from "./bot-grants-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The "Settings for this Bot" card: each row says its current answer and opens its page. */
@@ -64,8 +65,8 @@ function serving(
         sweep: null,
       });
     }
-    if (url.includes("/api/plugins/for/")) {
-      return Response.json({ tools: [], skills: [] });
+    if (url.includes("/bots/") && url.includes("/grants")) {
+      return botGrantsResponse();
     }
     if (url.includes("/api/team-bots")) {
       return Response.json({ teamBots, publishable: [] });

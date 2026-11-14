@@ -1,4 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
+import { everyPage } from "@/lib/api/every-page";
+import { listBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
+import type { BotGrant } from "@/lib/api/generated/model";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
 // This import closes a cycle: `./provider-vocabulary` imports `pluginsProvider` from this file.
 // It is safe for one reason, and the reason is the rule. Both live bindings that cross it —
@@ -301,21 +305,53 @@ export function pluginsProvider(
   return page?.provider ?? "composio";
 }
 
-/** What one Bot holds, which is all the runtime needs to offer it. */
+/**
+ * What one Bot holds and is offered now: each app action whose app still lists it, as
+ * `<app id>/<action name>`, and each skill. Read from the Bot's grants (listBotGrants), leaving out an
+ * action its app no longer lists and the other Bots it may hand work to.
+ */
 export type GrantedPlugins = {
   tools: {
     ref: string;
-    toolName: string;
     description: string;
-    inputSchema: Record<string, unknown>;
+    destructive: boolean;
+    read: boolean;
   }[];
   skills: {
     slug: string;
     title: string;
     summary: string;
-    instructions: string;
   }[];
 };
+
+/** A Bot's grants as what it holds and is offered now. */
+export function grantedPluginsOf(grants: readonly BotGrant[]): GrantedPlugins {
+  return {
+    tools: grants.flatMap((grant) =>
+      grant.kind === "action" && grant.action
+        ? [
+            {
+              ref: grant.ref,
+              description: grant.action.description,
+              destructive: grant.action.destructive,
+              read: grant.action.read,
+            },
+          ]
+        : [],
+    ),
+    skills: grants.flatMap((grant) =>
+      grant.kind === "skill" && grant.skill
+        ? [
+            {
+              slug: grant.skill.slug,
+              title: grant.skill.title,
+              summary: grant.skill.summary,
+            },
+          ]
+        : [],
+    ),
+  };
+}
 
 export const pluginKeys = {
   all: ["plugins"] as const,
@@ -567,12 +603,19 @@ export function agentPluginsQueryOptions(agentId: string) {
     queryKey: pluginKeys.forAgent(agentId),
     enabled: agentId.length > 0,
     refetchInterval: 15_000,
-    queryFn: async (): Promise<GrantedPlugins> => {
-      const response = await client(
-        `/api/plugins/for/${encodeURIComponent(agentId)}`,
-        { fallback: "Couldn't load this Bot's apps." },
-      );
-      return response.json();
+    queryFn: async ({ signal }): Promise<GrantedPlugins> => {
+      const options = { signal, fallback: "Couldn't load this Bot's apps." };
+      // Every grant the Bot holds, page after page, so a Bot given a whole large app is read whole.
+      const grants = await everyPage(async (cursor) => {
+        const page = await listBotGrants(
+          ORGANIZATION_ID,
+          agentId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          options,
+        );
+        return { items: page.grants, nextCursor: page.nextCursor };
+      });
+      return grantedPluginsOf(grants);
     },
   });
 }

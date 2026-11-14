@@ -140,7 +140,7 @@ const REFUSALS: {
 }[] = [
   {
     name: "granting a plugin to a Bot",
-    route: "POST /api/plugins/grants",
+    route: "PUT .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -153,7 +153,7 @@ const REFUSALS: {
   },
   {
     name: "withholding a plugin from a Bot",
-    route: "DELETE /api/plugins/grants",
+    route: "DELETE .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -481,13 +481,14 @@ const ENCODED_REQUESTS: {
   },
   {
     /*
-     * The one write whose caller text goes in a QUERY rather than a path, and it takes the same
-     * care: an unencoded `&` in a ref adds a parameter the route reads as one of its own. `kind`
-     * beside it is not a caller's text — it is this module's own two-member union — which is why it
-     * is one of the two interpolations the lever below lets through.
+     * The Bot's id and the grant's address are two segments, each encoded whole: the grant's
+     * address is `action:` and the ref with its first `/` as a `:`, and nothing in the rest of the
+     * ref may become a segment, a query or a fragment of its own.
      */
     name: "withholding a plugin from a Bot",
-    url: `/api/plugins/grants?kind=mcp&ref=${ENCODED_ID}&agentId=${ENCODED_ID}`,
+    url: `/api/v2/organizations/default/bots/${ENCODED_ID}/grants/${encodeURIComponent(
+      "action:acme:../gmail?returnTo=admin#x",
+    )}`,
     build: setPluginGrantMutationOptions,
     variables: {
       agentId: HOSTILE_ID,

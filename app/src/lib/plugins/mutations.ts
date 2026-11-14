@@ -1,5 +1,10 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import {
+  deleteBotGrant,
+  replaceBotGrant,
+} from "@/lib/api/generated/bot-grants/bot-grants";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError, client, tryClient } from "@/lib/client";
 import { desktopConsentQuery } from "@/lib/desktop/shell";
 import { type PluginServer, pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
@@ -111,21 +116,56 @@ export function invalidatePlugins(queryClient: QueryClient) {
  * it to nothing.
  */
 export function grantPlugin(variables: {
-  kind: PluginKind;
+  kind: PluginKind | "bot";
   ref: string;
   agentId: string;
   approval?: SharedUseApproval;
 }): Promise<unknown> {
-  return client("/api/plugins/grants", {
-    method: "POST",
-    body: {
-      kind: variables.kind,
-      ref: variables.ref,
-      agentId: variables.agentId,
-      ...(variables.approval ? { approval: variables.approval } : {}),
-    },
-    fallback: "Couldn't change that Bot.",
-  });
+  return replaceBotGrant(
+    ORGANIZATION_ID,
+    variables.agentId,
+    grantIdOf(variables.kind, variables.ref),
+    { "Idempotency-Key": idempotencyKey() },
+    variables.approval ? { approval: variables.approval } : {},
+    { fallback: "Couldn't change that Bot." },
+  );
+}
+
+/**
+ * Take one thing from a Bot. A Bot that doesn't have it is already without it, so that answer is the
+ * write done, as it always was here.
+ */
+export async function revokePlugin(variables: {
+  kind: PluginKind | "bot";
+  ref: string;
+  agentId: string;
+}): Promise<void> {
+  try {
+    await deleteBotGrant(
+      ORGANIZATION_ID,
+      variables.agentId,
+      grantIdOf(variables.kind, variables.ref),
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't change that Bot." },
+    );
+  } catch (error) {
+    if (error instanceof ClientError && error.code === "BOT_GRANT_NOT_FOUND")
+      return;
+    throw error;
+  }
+}
+
+/**
+ * A grant's address in the API: `action:<app id>:<action name>` for an app's action (its ref is
+ * `<app id>/<action name>`), `skill:<slug>`, or `bot:<Bot id>`.
+ */
+export function grantIdOf(kind: PluginKind | "bot", ref: string): string {
+  if (kind === "skill") return `skill:${ref}`;
+  if (kind === "bot") return `bot:${ref}`;
+  const slash = ref.indexOf("/");
+  return slash < 0
+    ? `action:${ref}:`
+    : `action:${ref.slice(0, slash)}:${ref.slice(slash + 1)}`;
 }
 
 /**
@@ -221,8 +261,8 @@ export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
 /**
  * Whether one Bot carries one plugin.
  *
- * Granting posts to the collection; withholding deletes from it, and the delete identifies the row
- * by query string because a grant has no id of its own — it is the three things it joins.
+ * Granting puts the grant at its address under the Bot (replaceBotGrant); withholding deletes it
+ * there (deleteBotGrant). The address is the kind and what it names (see {@link grantIdOf}).
  */
 export function setPluginGrantMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -236,10 +276,7 @@ export function setPluginGrantMutationOptions(queryClient: QueryClient) {
         await grantPlugin(variables);
         return;
       }
-      await client(
-        `/api/plugins/grants?kind=${variables.kind}&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: "Couldn't change that Bot." },
-      );
+      await revokePlugin(variables);
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

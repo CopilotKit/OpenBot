@@ -26,6 +26,12 @@ import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import {
+  appAccessApprovalResponse,
+  appAccessRequest,
+  botAppPath,
+  botAppResponse,
+} from "./bot-grants-api";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -93,15 +99,13 @@ function inTheDesktop() {
 }
 
 /**
- * Gmail as `GET /api/plugins/for/:agentId/apps/:app` answers it on OpenBot Personal before anybody
+ * Gmail as the API answers it on the Bot (getBotApp) on OpenBot Personal before anybody
  * turned it on: no row, so no recorded scheme, and switched off because it is absent.
  */
 const notTurnedOn = (overrides: Partial<AppAccess> = {}): AppAccess =>
   appAccess({
     state: "disabled",
     unavailable: "absent",
-    authScheme: null,
-    accountMode: null,
     granted: false,
     requestKind: "enable",
     ...overrides,
@@ -130,17 +134,16 @@ function serving(before: AppAccess, signIn: Promise<void>) {
       return Response.json({
         bot: { id: "assistant", name: "Personal Assistant" },
       });
-    if (url === "/api/plugins/for/assistant/apps/composio-gmail")
-      return Response.json({ app: live });
-    if (url === "/api/plugins/for/assistant/apps/composio-gmail/approve") {
+    if (url === botAppPath("assistant", "composio-gmail"))
+      return botAppResponse(live);
+    if (url === `${botAppPath("assistant", "composio-gmail")}/approve`) {
       live = turnedOn;
-      return Response.json({
-        request: {
-          id: "req_1",
+      return appAccessApprovalResponse({
+        request: appAccessRequest({
           kind: "enable",
-          appKey: "composio-gmail",
           status: "approved",
-        },
+          agentId: "assistant",
+        }),
         enabled: true,
         granted: ["composio-gmail/GMAIL_FETCH_EMAILS"],
       });
@@ -225,7 +228,7 @@ test.each([
     answer();
     await waitFor(() => expect(browser).toEqual([CONSENT]), { timeout: 3_000 });
     expect(writes).toEqual([
-      "POST /api/plugins/for/assistant/apps/composio-gmail/approve",
+      `POST ${botAppPath("assistant", "composio-gmail")}/approve`,
       "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
     ]);
     // And it says what it is doing while the person signs in.

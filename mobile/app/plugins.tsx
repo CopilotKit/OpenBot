@@ -1,7 +1,13 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Switch, Text, View } from "react-native";
-import { api, type GrantedPlugins, type SkillSummary } from "../src/api";
+import {
+  ApiError,
+  api,
+  type BotGrant,
+  type BotGrantPage,
+  type SkillSummary,
+} from "../src/api";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -14,15 +20,37 @@ import {
 } from "../src/ui";
 import { useLoad } from "../src/use-load";
 
+/** The organization every request is in: an install has one, addressed as `default`. */
+const ORGANIZATION = "/api/v2/organizations/default";
+
 /** What a Bot can use: skills switched on and off here, connected tools listed. */
 export default function PluginsScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const loadGranted = useCallback(
-    () => api<GrantedPlugins>(`/api/plugins/for/${encodeURIComponent(botId)}`),
-    [botId],
-  );
+  const grantsPath = `${ORGANIZATION}/bots/${encodeURIComponent(botId)}/grants`;
+  const loadGranted = useCallback(async () => {
+    // Every page of what the Bot holds.
+    const grants: BotGrant[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: BotGrantPage = await api<BotGrantPage>(
+        `${grantsPath}?limit=100${cursor ? `&cursor=${cursor}` : ""}`,
+      );
+      grants.push(...page.grants);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return {
+      tools: grants.flatMap((grant) =>
+        grant.kind === "action" && grant.action
+          ? [{ ref: grant.ref, description: grant.action.description }]
+          : [],
+      ),
+      skills: grants.flatMap((grant) =>
+        grant.kind === "skill" && grant.skill ? [grant.skill] : [],
+      ),
+    };
+  }, [grantsPath]);
   const granted = useLoad(loadGranted, Boolean(session && botId));
   const loadCatalogue = useCallback(
     () => api<{ skills: SkillSummary[] }>("/api/plugins"),
@@ -34,16 +62,18 @@ export default function PluginsScreen() {
 
   const setSkill = (slug: string, enabled: boolean) =>
     action.run(slug, async () => {
-      if (enabled)
-        await api("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "skill", ref: slug, agentId: botId },
-        });
+      const grant = `${grantsPath}/${encodeURIComponent(`skill:${slug}`)}`;
+      if (enabled) await api(grant, { method: "PUT", body: {} });
       else
-        await api(
-          `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(botId)}`,
-          { method: "DELETE" },
-        );
+        try {
+          await api(grant, { method: "DELETE" });
+        } catch (error) {
+          // A Bot that doesn't have the skill is already without it.
+          if (
+            !(error instanceof ApiError && error.code === "BOT_GRANT_NOT_FOUND")
+          )
+            throw error;
+        }
       await granted.refresh();
     });
 

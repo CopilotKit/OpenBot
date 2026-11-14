@@ -29,6 +29,7 @@ import { NewSkillPage } from "@/components/manage/new-skill-page";
 import { SkillPage } from "@/components/manage/skill-page";
 import { SkillsPage } from "@/components/manage/skills-page";
 import { type PluginSkill, pluginKeys } from "@/lib/plugins/queries";
+import { botGrantPath } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -289,18 +290,16 @@ describe("a skill's page", () => {
     fireEvent.click(grace);
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toEqual({
-      method: "POST",
-      path: "/api/plugins/grants",
-      body: { kind: "skill", ref: "triage", agentId: "bot-grace" },
+      method: "PUT",
+      path: botGrantPath("bot-grace", "skill:triage"),
+      body: {},
     });
     fireEvent.click(
       view.getByRole("switch", { name: "Ada offers Triage the inbox" }),
     );
     await waitFor(() => expect(writes).toHaveLength(2));
     expect(writes[1]?.method).toBe("DELETE");
-    expect(writes[1]?.path).toBe(
-      "/api/plugins/grants?kind=skill&ref=triage&agentId=bot-ada",
-    );
+    expect(writes[1]?.path).toBe(botGrantPath("bot-ada", "skill:triage"));
   });
 
   test("deleting asks first, then goes back to the list", async () => {

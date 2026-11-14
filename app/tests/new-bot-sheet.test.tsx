@@ -34,6 +34,11 @@ import {
 } from "@/lib/agents/isolation";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import {
+  botAppPath,
+  GIVEABLE_APPS_PATH,
+  giveableAppsResponse,
+} from "./bot-grants-api";
 import { BOTS_PATH } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -124,13 +129,18 @@ beforeEach(() => {
         creates.push(body);
         return Response.json({ bot: { id: "agent_new" } }, { status: 201 });
       }
-      if (path === "/api/plugins/giveable")
-        return Response.json({ apps: giveable });
+      if (String(path).startsWith(GIVEABLE_APPS_PATH))
+        return giveableAppsResponse(
+          giveable.map((app) => ({
+            ...app,
+            account: app.account as "personal" | "shared" | "deployment",
+          })),
+        );
       if (path === "/api/plugins")
         return Response.json({ catalogue: [], servers, skills: [] });
       if (String(path).endsWith("/give") && init?.method === "POST") {
         given.push(String(path));
-        return Response.json({ granted: [] });
+        return Response.json({ given: [] });
       }
       return new Response(null, { status: 404 });
     },
@@ -379,9 +389,7 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
   expect(routines.getAttribute("aria-checked")).toBe("false");
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(await view.findByText("Research is ready")).toBeTruthy();
-  expect(given).toEqual([
-    "/api/plugins/for/agent_new/apps/composio-gmail/give",
-  ]);
+  expect(given).toEqual([`${botAppPath("agent_new", "composio-gmail")}/give`]);
 });
 
 test("a person with no apps to give is asked nothing about apps", async () => {

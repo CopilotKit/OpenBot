@@ -25,6 +25,7 @@ import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { CopilotProvider } from "@/lib/copilot/provider";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -341,8 +342,8 @@ beforeAll(() => {
           },
         });
       // Only the other Bot makes coworkers.
-      if (url.pathname === `/api/plugins/for/${OTHER}`)
-        return NativeResponse.json({
+      if (url.pathname === botGrantsPath(OTHER))
+        return botGrantsResponse({
           skills: [
             {
               slug: "bot-creator",
