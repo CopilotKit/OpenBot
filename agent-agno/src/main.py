@@ -13,7 +13,7 @@ from pathlib import Path
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import bot_settings, litellm_model_id
 
 from agno.agent import Agent
 from agno.models.litellm import LiteLLM
@@ -42,7 +42,7 @@ def _model_id() -> str:
     settings = bot_settings("agent-agno")
     provider = settings.provider
     model = settings.model
-    return f"{provider}/{model}"
+    return litellm_model_id(provider, model)
 
 
 # Before the app is built: Agno's AG-UI router would otherwise send the model only the newest line.

@@ -1186,6 +1186,17 @@ deployment:
 - LangChain is called **LangChain**, with LangChain's own mark, where it said "LangChain
   (LangGraph)": in New Bot, a Bot's "Powered by" subtitle and its Runs on row, and OpenBot Desktop's
   note under a ChatGPT plan.
+- A browser action waiting for your approval is named the way its card names it. A Bot's Activity
+  row read "Approve computer_click" with "write" beside it, and now reads "Click the link “Python”
+  on en.wikipedia.org". The Needs you card names the link too and lists what the action would send
+  by label, without the page handles a click carried as raw JSON. An approval in Slack says it the
+  same way ("Research Bot wants to click the link “Python” on en.wikipedia.org"), and a saved rule
+  is titled "Click" or "Send email on Gmail" instead of its tool id. The line under it names the
+  folder and the Bot by name and the kind of action in words ("changes in share for Shop"), where
+  it read "write on host-grant-15407-… for shopper-bot".
+- The CrewAI, Agno, LlamaIndex, ADK, Strands and Langroid Bots now run on Google. Choosing
+  Google sent litellm the provider name `google`, which it does not know, so every message failed
+  with "LLM Provider NOT provided"; it now gets `gemini`. `GOOGLE_API_KEY` is still the key.
 - Settings → Activity and Admin → Audit reach past the newest 50 events. **Show older events** under
   the last row loads the next page, and the count reads "Newest 50 events", growing as more load,
   until nothing older is left. They stopped at the newest 50 and counted them as if that were

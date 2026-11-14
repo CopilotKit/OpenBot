@@ -12,7 +12,7 @@ from pathlib import Path
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import bot_settings, litellm_model_id
 
 import litellm
 from fastapi import FastAPI, Request
@@ -37,7 +37,7 @@ def _model_id() -> str:
     settings = bot_settings("agent-llamaindex")
     provider = settings.provider
     model = settings.model
-    return f"{provider}/{model}"
+    return litellm_model_id(provider, model)
 
 
 def _llm() -> LiteLLM:

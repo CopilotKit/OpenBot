@@ -19,7 +19,7 @@ from typing import Any
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import bot_settings, litellm_model_id
 
 import ag_ui_crewai.endpoint as crewai_endpoint
 from ag_ui.core import Message, Tool
@@ -56,7 +56,7 @@ def _model() -> str:
     settings = bot_settings("agent-crewai")
     provider = settings.provider
     model = settings.model
-    return f"{provider}/{model}"
+    return litellm_model_id(provider, model)
 
 
 _PROVIDER_MESSAGE_FIELDS = {
