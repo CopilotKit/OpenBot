@@ -6,6 +6,7 @@ import { CommandMenu } from "../components/navigation/command-menu";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
+import { learnShortenedToolNames } from "../lib/plugins/tool-names";
 import { SkinAccountSync } from "../skins/account-sync";
 import { useActiveSkin } from "../skins/registry";
 
@@ -25,6 +26,8 @@ export const Route = createFileRoute("/_authed")({
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
       throw redirect({ to: "/onboarding" });
     }
+    // Before any conversation is drawn, so a long-named action's step never shows its cut name.
+    await learnShortenedToolNames(context.queryClient);
   },
   // Mounted INSIDE the authed boundary, not at the root: the runtime endpoint requires a session, so
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
