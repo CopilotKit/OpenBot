@@ -5,4 +5,6 @@ import type { VoiceSession } from "./voiceSession";
 
 export interface VoiceSessionResponse {
   session: VoiceSession;
+  /** Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it. */
+  notice?: string;
 }

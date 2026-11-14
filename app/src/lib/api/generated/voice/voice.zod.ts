@@ -338,6 +338,12 @@ export const SaveVoiceSessionResponse = zod.object({
       summaryStatus: zod.enum(["ready", "failed"]),
     })
     .describe("A saved voice call."),
+  notice: zod
+    .string()
+    .optional()
+    .describe(
+      "Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it.",
+    ),
 });
 
 /**

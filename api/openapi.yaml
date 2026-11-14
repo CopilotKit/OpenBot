@@ -2635,6 +2635,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -2681,6 +2684,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -2727,6 +2733,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutedMessage'
+              examples:
+                example:
+                  $ref: '#/components/examples/RoutedMessageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -2766,6 +2775,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -2807,6 +2819,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UpdatedConversation'
+              examples:
+                example:
+                  $ref: '#/components/examples/UpdatedConversationExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -2999,6 +3014,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationMemberPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationMemberPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3040,6 +3058,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AddedConversationMember'
+              examples:
+                example:
+                  $ref: '#/components/examples/AddedConversationMemberExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3124,6 +3145,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationMessagePage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationMessagePageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3171,6 +3195,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SentConversationMessage'
+              examples:
+                example:
+                  $ref: '#/components/examples/SentConversationMessageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3218,6 +3245,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Attachment'
+              examples:
+                example:
+                  $ref: '#/components/examples/AttachmentExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3271,6 +3301,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VoiceConnection'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceConnectionExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3323,6 +3356,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VoiceSessionPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceSessionPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3366,6 +3402,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VoiceSessionResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceSessionResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3411,6 +3450,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VoiceConfiguration'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceConfigurationExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3453,6 +3495,12 @@ paths:
               schema:
                 type: string
                 format: binary
+              examples:
+                spreadsheet:
+                  summary: A small spreadsheet, as its own bytes.
+                  value: |
+                    name,total
+                    rent,1200
         '304':
           description: The copy the caller holds is current.
         '400':
@@ -3527,6 +3575,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationThread'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationThreadExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3566,6 +3617,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversationThreadStatus'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationThreadStatusExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3607,6 +3661,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3646,6 +3703,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3687,6 +3747,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3730,6 +3793,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3773,6 +3839,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3821,6 +3890,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Transcription'
+              examples:
+                example:
+                  $ref: '#/components/examples/TranscriptionExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -15505,6 +15577,9 @@ components:
       properties:
         session:
           $ref: '#/components/schemas/VoiceSession'
+        notice:
+          type: string
+          description: Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it.
     VoiceConfiguration:
       type: object
       required:
@@ -19712,6 +19787,17 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            ambiguous:
+              value:
+                type: https://open.bot/errors/bot-name-ambiguous
+                title: More than one Bot has that name.
+                status: 409
+                detail: More than one Bot has that name. Research Helper, Research Helper. Choose one with @.
+                code: BOT_NAME_AMBIGUOUS
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             reused:
               value:
                 type: https://open.bot/errors/idempotency-key-conflict
@@ -22742,3 +22828,208 @@ components:
           needsApproval:
             - serverId: composio-gmail
               title: Gmail
+    ConversationPageExample:
+      summary: One page of conversations, and the last.
+      value:
+        conversations:
+          - id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            name: General Assistant
+            botIds:
+              - general-assistant
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            active: true
+            lastMessageAt: '2026-11-14T12:00:00.000Z'
+            summary: Quarterly forecast
+            opening: Can you draft the quarterly forecast?
+            lastMessage: Here is the first draft.
+            lastMessageBotId: general-assistant
+            createdAt: '2026-11-13T09:00:00.000Z'
+            pinned: false
+            lastReadAt: '2026-11-14T12:00:05.000Z'
+            canRename: true
+            task: false
+            work: []
+        nextCursor: null
+    ConversationResponseExample:
+      summary: A conversation with one Bot.
+      value:
+        conversation:
+          id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          name: General Assistant
+          botIds:
+            - general-assistant
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          active: true
+          lastMessageAt: '2026-11-14T12:00:00.000Z'
+          work: []
+    RoutedMessageExample:
+      summary: A message the default Bot takes.
+      value:
+        botId: general-assistant
+        name: General Assistant
+        reason: fallback
+        fallback: true
+        viaMention: false
+        undecided: null
+    UpdatedConversationExample:
+      summary: A conversation renamed and pinned.
+      value:
+        summary: Quarterly forecast
+        pinned: true
+    ConversationMemberPageExample:
+      summary: A group of two Bots and one person.
+      value:
+        members:
+          - kind: bot
+            id: general-assistant
+            name: General Assistant
+          - kind: bot
+            id: research-helper
+            name: Research Helper
+          - kind: person
+            id: usr_9b1c6f0e
+            name: Ada Lovelace
+            email: ada@example.com
+            creator: true
+        nextCursor: null
+    AddedConversationMemberExample:
+      summary: The person who was added.
+      value:
+        personId: usr_2f4a8c1b
+    ConversationMessagePageExample:
+      summary: A person's message and a Bot's reply, newest first.
+      value:
+        messages:
+          - id: m2
+            role: bot
+            personId: usr_9b1c6f0e
+            botId: general-assistant
+            text: Ship the importer first.
+            status: completed
+            createdAt: '2026-11-14T12:00:20.000Z'
+          - id: m1
+            role: person
+            personId: usr_9b1c6f0e
+            botId: null
+            text: What should we ship?
+            status: completed
+            createdAt: '2026-11-14T12:00:00.000Z'
+        nextCursor: null
+    SentConversationMessageExample:
+      summary: A message waiting for its answer.
+      value:
+        id: m1
+        queued: true
+    AttachmentExample:
+      summary: A spreadsheet held for the next message.
+      value:
+        id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        name: budget.csv
+        mimeType: text/csv
+        sizeBytes: 2048
+    VoiceConnectionExample:
+      summary: A call over WebRTC.
+      value:
+        transport: webrtc
+        sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    VoiceSessionPageExample:
+      summary: One saved call.
+      value:
+        sessions:
+          - id: call-1
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            anchorMessageId: null
+            startedAt: '2026-11-14T12:00:00.000Z'
+            endedAt: '2026-11-14T12:00:30.000Z'
+            transcript:
+              - id: '1'
+                role: user
+                text: When do we launch?
+              - id: '2'
+                role: assistant
+                text: On Friday.
+            durationSeconds: 30
+            summary: They agreed to launch on Friday.
+            summaryStatus: ready
+        nextCursor: null
+    VoiceSessionResponseExample:
+      summary: A saved call with its summary.
+      value:
+        session:
+          id: call-1
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          anchorMessageId: null
+          startedAt: '2026-11-14T12:00:00.000Z'
+          endedAt: '2026-11-14T12:00:30.000Z'
+          transcript:
+            - id: '1'
+              role: user
+              text: When do we launch?
+            - id: '2'
+              role: assistant
+              text: On Friday.
+          durationSeconds: 30
+          summary: They agreed to launch on Friday.
+          summaryStatus: ready
+    VoiceConfigurationExample:
+      summary: Calls over WebRTC.
+      value:
+        transport: webrtc
+    ConversationThreadExample:
+      summary: A new thread id.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+    ConversationThreadStatusExample:
+      summary: A thread that is still there.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+        known: true
+    TaskPageExample:
+      summary: One task, ready to read.
+      value:
+        tasks:
+          - id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+            botId: general-assistant
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            title: Reply to Sam about the spec
+            why: Sam asked for the spec by Friday.
+            origin: check_in
+            suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            sourceApp: Gmail
+            sourceLink: null
+            originConversationId: null
+            status: ready_for_review
+            failure: null
+            failedAt: null
+            next: Read the draft and send it.
+            resolvedAt: null
+            createdAt: '2026-11-14T09:00:00.000Z'
+            updatedAt: '2026-11-14T09:05:00.000Z'
+        nextCursor: null
+    TaskResponseExample:
+      summary: A task ready to read.
+      value:
+        task:
+          id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+          botId: general-assistant
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          title: Reply to Sam about the spec
+          why: Sam asked for the spec by Friday.
+          origin: check_in
+          suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          sourceApp: Gmail
+          sourceLink: null
+          originConversationId: null
+          status: ready_for_review
+          failure: null
+          failedAt: null
+          next: Read the draft and send it.
+          resolvedAt: null
+          createdAt: '2026-11-14T09:00:00.000Z'
+          updatedAt: '2026-11-14T09:05:00.000Z'
+    TranscriptionExample:
+      summary: What was said.
+      value:
+        text: Remind me to send the forecast on Friday.
