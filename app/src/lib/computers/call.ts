@@ -194,6 +194,21 @@ export async function callComputer(
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, reason: "Stopped.", stopped: true };
     }
+    /*
+     * ALREADY DONE, AND ITS ANSWER IS NOT KEPT. What a snapshot, a command or a file answered is what
+     * was on the computer, so the API keeps no copy to answer a retry with: when the network sent
+     * this call a second time under the same key, the first one ran and this one is told so. That is
+     * neither a failure nor a refusal, so the Bot is told the step happened and that its result is
+     * gone, and asks again only if it needs it. Nobody is shown an error for it.
+     */
+    if (error instanceof ClientError && error.code === "ANSWER_NOT_KEPT") {
+      return {
+        ok: true,
+        alreadyDone: true,
+        resultUnavailable: true,
+        note: "This was already done. Its result is no longer available: do it again only if you need the result.",
+      };
+    }
     if (error instanceof ClientError) {
       /*
        * A REFUSAL IS AN INTENTION, NOT AN ACTION. 403 is a policy, a capability switch or a network

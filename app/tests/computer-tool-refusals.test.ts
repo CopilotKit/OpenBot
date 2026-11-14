@@ -94,6 +94,40 @@ describe("a computer still starting", () => {
   });
 });
 
+describe("a call the network sent twice", () => {
+  /*
+   * A command's output or a file's text is never kept to answer a retry with, so the second arrival
+   * of the same call is told it was already done. Read as a failure, the Bot apologised for a step
+   * that had worked; shown as an error, a person saw one for nothing they did.
+   */
+  test("is told it was already done and its result is gone, not that it failed", async () => {
+    serverAnswering(409, {
+      code: "ANSWER_NOT_KEPT",
+      detail:
+        "That was already done, and what it answered is never kept. Use a new Idempotency-Key to do it again.",
+    });
+
+    const outcome = await click();
+
+    expect(outcome).toEqual({
+      ok: true,
+      alreadyDone: true,
+      resultUnavailable: true,
+      note: "This was already done. Its result is no longer available: do it again only if you need the result.",
+    });
+  });
+
+  test("another key conflict is still a failure", async () => {
+    serverAnswering(409, {
+      code: "IDEMPOTENCY_KEY_CONFLICT",
+      detail:
+        "That Idempotency-Key was used for a different request. Use a new key for a new write.",
+    });
+
+    expect((await click()).ok).toBe(false);
+  });
+});
+
 describe("a computer call the server refused", () => {
   test("a person holding the wheel is reported as that, not as stale refs", async () => {
     serverAnswering(409, {
