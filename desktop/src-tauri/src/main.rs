@@ -12,6 +12,7 @@ mod desktop_status;
 mod desktop_telemetry;
 mod first_paint;
 mod intelligence_bridge;
+mod key_menu;
 mod notice;
 mod outside_links;
 mod zoom;
@@ -1165,12 +1166,24 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     };
     let _ = window.show();
     let _ = window.unminimize();
+    focus(&window, why);
+}
+
+/**
+Activates `window`, already shown and not minimised, without tao's `set_focus` on Windows: past a
+refusal that presses and releases Alt (`force_window_active`), and a lone Alt puts the window into
+menu mode, where the page and OpenBot stop hearing each other until a click (`key_menu`). On
+Windows it is `SetForegroundWindow`, and when Windows refuses, the taskbar button flashes; `why`
+goes in the log then. Everywhere else, `set_focus`.
+*/
+fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, why: &str) {
     #[cfg(windows)]
     {
         let hwnd = window.hwnd().ok().map(|hwnd| hwnd.0 as isize);
         let why = why.to_owned();
+        let flashing = window.clone();
         // On the window's own thread, as `notice::bring_to_front` is.
-        let _ = app.run_on_main_thread(move || {
+        let _ = window.run_on_main_thread(move || {
             let front = come_forward(
                 || {
                     hwnd.is_some_and(|hwnd| {
@@ -1182,7 +1195,7 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
                     })
                 },
                 || {
-                    let _ = window
+                    let _ = flashing
                         .request_user_attention(Some(tauri::UserAttentionType::Informational));
                 },
             );
@@ -1194,7 +1207,19 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
         });
     }
     #[cfg(not(windows))]
-    let _ = window.set_focus();
+    {
+        let _ = why;
+        let _ = window.set_focus();
+    }
+}
+
+/// Keeps the window `label` (handle `hwnd`) out of menu mode on a lone Alt or F10 (`key_menu`).
+/// On the window's own thread.
+#[cfg(windows)]
+fn ignore_lone_menu_key(label: &str, hwnd: isize) {
+    if !key_menu::ignore_lone_menu_key(hwnd) {
+        log::warn!("[window] {label}: a lone Alt or F10 can still put it into menu mode");
+    }
 }
 
 /// The browser sign-in is open (`sign_in_to_copilotkit`): the person is in their browser.
@@ -5137,7 +5162,7 @@ fn show_shutting_down<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "OpenBot is shutting down");
 }
 
 fn report_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: QuitStep, state: QuitStepState) {
@@ -6823,6 +6848,7 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     #[cfg(target_os = "windows")]
     if let Ok(hwnd) = window.hwnd() {
         first_paint::cover_now(hwnd.0 as isize);
+        ignore_lone_menu_key("main", hwnd.0 as isize);
     }
     drop(watching);
     if let Some(after) = first_paint::shown_after_start() {
@@ -8091,7 +8117,7 @@ fn show_status_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("status") {
         let _ = window.show();
         let _ = window.unminimize();
-        let _ = window.set_focus();
+        focus(&window, "the Status window");
         return;
     }
     let Ok(mut url) = setup_destination(app) else {
@@ -8112,6 +8138,12 @@ fn show_status_window(app: &tauri::AppHandle) {
         // At the level the main window has (`zoom`).
         Ok(window) => {
             let _ = window.set_zoom(saved_zoom(app));
+            #[cfg(windows)]
+            if let Ok(hwnd) = window.hwnd() {
+                let hwnd = hwnd.0 as isize;
+                // On the window's own thread, as `SetWindowSubclass` requires.
+                let _ = window.run_on_main_thread(move || ignore_lone_menu_key("status", hwnd));
+            }
         }
         Err(error) => log::warn!("[status] could not open the Status window: {error}"),
     }
@@ -8154,7 +8186,7 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "this computer's settings");
     true
 }
 
@@ -8506,9 +8538,8 @@ fn show_setup_and_focus<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(
     window
         .unminimize()
         .map_err(|error| format!("could not unminimize setup: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("could not focus setup: {error}"))
+    focus(&window, "setup");
+    Ok(())
 }
 
 /// Is a deployment this app manages already running?
@@ -10808,7 +10839,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "OpenBot is showing");
 }
 
 fn schedule_second_instance_restore<T, F>(
@@ -16898,16 +16929,26 @@ mod tests {
         );
         assert_eq!(front, Front::Came);
         assert_eq!(*done.borrow(), ["set foreground"]);
-        // On Windows, `bring_to_front` never reaches tao's `set_focus` (its Alt press), and
-        // nothing in this file sends key input of its own.
+        // On Windows nothing reaches tao's `set_focus` (its Alt press): every window comes
+        // forward through `focus`, whose only `set_focus` is for the other systems. And nothing in
+        // this file sends key input of its own.
         let main = include_str!("main.rs");
-        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        let body = &main[main.find("fn focus<").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
         let windows = &body[body.find("#[cfg(windows)]").unwrap()..];
         let windows = &windows[..windows.find("#[cfg(not(windows))]").unwrap()];
         assert!(!windows.contains("set_focus"), "{windows}");
-        assert!(body.contains("#[cfg(not(windows))]\n    let _ = window.set_focus();"));
-        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        assert!(body.contains("#[cfg(not(windows))]\n    {\n        let _ = why;\n        let _ = window.set_focus();"));
+        let calls = main[..tests]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//") && line.contains("set_focus()"))
+            .count();
+        assert_eq!(calls, 1, "a `set_focus` call outside `focus`");
+        let host_access = include_str!("desktop_host_access.rs");
+        assert!(!host_access.contains("set_focus"), "desktop_host_access.rs");
+        let bring = &main[main.find("fn bring_to_front<").unwrap()..];
+        assert!(bring[..bring.find("\n}\n").unwrap()].contains("focus(&window, why);"));
         for input in ["SendInput", "keybd_event", "VK_MENU"] {
             assert!(!main[..tests].contains(input), "{input}");
         }
