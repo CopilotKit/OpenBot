@@ -26,11 +26,10 @@ OpenBot's images are signed with OpenBot's own key. The public half is [cosign.p
 [cosign](https://docs.sigstore.dev/cosign/) checks an image against it before you deploy:
 
 ```sh
-cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot-server:main
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot:main
 ```
 
-The same command checks `ghcr.io/copilotkit/openbot`, `openbot-agent-computer` and
-`openbot-supervisor`, at any tag published from now on; images from v1.0.2 and earlier carry no
+The same command checks `ghcr.io/copilotkit/openbot-supervisor`, at any tag published from now on; images from v1.0.2 and earlier carry no
 signature. The signatures are not recorded in a public transparency log, which is what
 `--insecure-ignore-tlog=true` tells cosign to expect. The key is what proves the image is OpenBot's.
 
@@ -255,9 +254,10 @@ which makes them the shortest path from nothing to a running deployment.
 
 ## Known costs
 
-**The browser images carry only the Chromium browser family.** The all-in-one image and the
-`openbot-agent-computer` image both build from Ubuntu and install Playwright's pinned Chromium
-without its separate headless shell, so Firefox and WebKit are never in their layers: every launch
+**The OpenBot image carries only the Chromium browser family, and the server's container carries
+it unused.** One image runs the server and every Bot's computer, so the server's container holds a
+Chromium it never starts. The image builds from Ubuntu and installs Playwright's pinned Chromium
+without its separate headless shell, so Firefox and WebKit are never in its layers: every launch
 names a Chromium channel, and Playwright runs the full browser for a named channel even when
 headless. The images keep the
 baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.

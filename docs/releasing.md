@@ -27,16 +27,16 @@ and on `release/X.Y` for a candidate, beta or final.
 Kept for one release, so that the 1.0.2 and 1.0.3 apps can read and start a newer installation,
 and all dropped together in the release after:
 
-- `container-images.json` names `agent-bot` and `agent-langgraph` (both the server image, written
-  in `.github/workflows/images.yml`).
+- `container-images.json` names `agent-bot` and `agent-langgraph` (both the OpenBot image, which
+  runs the server, written in `.github/workflows/images.yml`).
 - `docker-compose.yml` defines two services of those names that nothing starts, behind the
   `for-older-apps` profile (`tests/older-apps.test.ts`).
 - `docker-compose.yml` defines a `worker` and a `migrate` service that nothing starts, behind the
   `openbot` profile. Those apps read a Compose file as current only when it defines `worker`, and
   ask for `migrate`'s image by name. The server applies its own migrations and does the scheduled
   work itself, which the file says on its `x-openbot-scheduled-work: server` line.
-- The two commands those services run in the server image, `bun ../worker/src/index.ts` and
-  `bun scripts/migrate.ts`, which do nothing there now.
+- The two commands those services run in the OpenBot image, `/app/bin/openbot worker` and
+  `/app/bin/openbot migrate`, which do nothing there now.
 - The `routine_sweeps` table, which the server still writes for the `sweep` record
   `GET /api/routines` answers older apps with.
 
@@ -777,10 +777,10 @@ Then, in order:
 - the commit is checked, as described under [What has to be green](#what-has-to-be-green): the full
   CI suite, or, when the release PR changed only the release files on a commit main's CI passed,
   that run and the checks that read the release files
-- the OpenBot images, `ghcr.io/copilotkit/openbot` and `openbot-server`, `openbot-agent-computer`
-  and `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
-  and pinned by digest in `container-images.json`. The run stops if one is missing or lacks an
-  architecture it needs
+- the OpenBot images, `ghcr.io/copilotkit/openbot` (the server and every Bot's computer) and
+  `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
+  and pinned by digest in `container-images.json`, where `openbot`, `server` and `agent-computer`
+  all name the one image. The run stops if one is missing or lacks an architecture it needs
 - the services `docker-compose.yml` can build are published, one image each, at
   `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
