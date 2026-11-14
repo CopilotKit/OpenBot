@@ -113,6 +113,26 @@ jobs:
           # Twice: once readable in the log, once as annotations on the pull request's diff.
           "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --err-ignore "$accepted" --warn-ignore "$accepted" || true
           "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions --err-ignore "$accepted" --warn-ignore "$accepted"
+      # The live channels (api/asyncapi.yaml). The differences come from the AsyncAPI CLI, pinned in
+      # api/asyncapi-tools with its own lockfile so only this job installs it; what counts as breaking
+      # is decided in api/asyncapi-diff.ts, whose tests run here against real edits to the file.
+      - name: Install the AsyncAPI CLI
+        run: bun install --cwd api/asyncapi-tools --frozen-lockfile
+      - name: The live channels' breaking-change check works
+        run: bun test api/asyncapi-diff.test.ts
+      - name: No breaking change to the live channels against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          if ! git cat-file -e FETCH_HEAD:api/asyncapi.yaml 2>/dev/null; then
+            echo "::notice::$BASE_REF has no api/asyncapi.yaml yet, so this pull request cannot break it."
+            exit 0
+          fi
+          git show FETCH_HEAD:api/asyncapi.yaml > "$RUNNER_TEMP/base-asyncapi.yaml"
+          bun run api:live:diff "$RUNNER_TEMP/base-asyncapi.yaml" api/asyncapi.yaml
 
   mobile:
     name: native types

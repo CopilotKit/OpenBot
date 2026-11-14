@@ -20,6 +20,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "api:lint": "REDOCLY_TELEMETRY=off REDOCLY_SUPPRESS_UPDATE_NOTICE=true redocly lint",
     "api:generate": "orval --config app/orval.config.ts",
+    "api:live:diff": "bun api/asyncapi-diff.ts",
     "test:ci": "bun scripts/test-ci.ts",
     "pretest": "bun run generate:app-config",
     "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke",
