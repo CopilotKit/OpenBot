@@ -20,7 +20,9 @@ const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
 const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
-const KEY = "openbot-theme";
+const KEY = "openbot-theme-choice";
+/** Where every release before the app followed the system saved its light or dark, on every visit. */
+const LEGACY_KEY = "openbot-theme";
 
 let browser: Browser;
 let script: string;
@@ -57,10 +59,11 @@ afterAll(async () => {
   await browser?.close();
 });
 
-/** The app opened on a system set to `system`, with `stored` already saved in this browser. */
+/** The app opened on a system set to `system`, with `stored` already saved in this browser under `key`. */
 async function open(
   system: "light" | "dark",
   stored: string | null = null,
+  key = KEY,
 ): Promise<Page> {
   const context = await browser.newContext({ colorScheme: system });
   const page = await context.newPage();
@@ -82,7 +85,7 @@ async function open(
           localStorage.setItem(key, value);
         }
       },
-      [KEY, stored] as const,
+      [key, stored] as const,
     );
   }
   await page.goto(`${ORIGIN}/`);
@@ -92,21 +95,25 @@ async function open(
 
 /** What the page shows: the theme at first paint, the theme now, and what the setting reads. */
 function shown(page: Page) {
-  return page.evaluate((key) => {
-    const root = document.documentElement;
-    return {
-      firstPaint: (window as unknown as { __darkAtFirstPaint: boolean })
-        .__darkAtFirstPaint
-        ? "dark"
-        : "light",
-      now: root.classList.contains("dark") ? "dark" : "light",
-      colorScheme: root.style.colorScheme,
-      choice: document
-        .querySelector("[data-theme-choice]")
-        ?.getAttribute("data-theme-choice"),
-      stored: localStorage.getItem(key),
-    };
-  }, KEY);
+  return page.evaluate(
+    ([key, legacyKey]) => {
+      const root = document.documentElement;
+      return {
+        firstPaint: (window as unknown as { __darkAtFirstPaint: boolean })
+          .__darkAtFirstPaint
+          ? "dark"
+          : "light",
+        now: root.classList.contains("dark") ? "dark" : "light",
+        colorScheme: root.style.colorScheme,
+        choice: document
+          .querySelector("[data-theme-choice]")
+          ?.getAttribute("data-theme-choice"),
+        stored: localStorage.getItem(key),
+        legacy: localStorage.getItem(legacyKey),
+      };
+    },
+    [KEY, LEGACY_KEY] as const,
+  );
 }
 
 describe.skipIf(!asked)("the app follows the system's light or dark", () => {
@@ -118,6 +125,7 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
       colorScheme: "dark",
       choice: "system",
       stored: null,
+      legacy: null,
     });
     await page.context().close();
   });
@@ -162,12 +170,12 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
     await page.context().close();
   });
 
-  // What every earlier release saved, whether or not the person had touched the setting.
+  // Chosen in the Theme setting, which is the only thing that saves under this key.
   for (const [stored, system] of [
     ["light", "dark"],
     ["dark", "light"],
   ] as const) {
-    test(`a saved "${stored}" stays ${stored} on a ${system} system, and through a system change`, async () => {
+    test(`a chosen "${stored}" stays ${stored} on a ${system} system, and through a system change`, async () => {
       const page = await open(system, stored);
       expect(await shown(page)).toEqual({
         firstPaint: stored,
@@ -175,6 +183,7 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
         colorScheme: stored,
         choice: stored,
         stored,
+        legacy: null,
       });
       await page.emulateMedia({ colorScheme: stored });
       await page.emulateMedia({ colorScheme: system });
@@ -182,6 +191,50 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
       await page.context().close();
     });
   }
+
+  // Earlier releases saved a light or dark on every visit, so that value was never a choice.
+  for (const [saved, system] of [
+    ["light", "dark"],
+    ["dark", "light"],
+  ] as const) {
+    test(`a "${saved}" an earlier release saved is no choice: a ${system} system gives a ${system} app`, async () => {
+      const page = await open(system, saved, LEGACY_KEY);
+      expect(await shown(page)).toEqual({
+        firstPaint: system,
+        now: system,
+        colorScheme: system,
+        choice: "system",
+        stored: null,
+        // Cleared, so it is not read again.
+        legacy: null,
+      });
+      await page.emulateMedia({ colorScheme: saved });
+      await page.waitForFunction(
+        (dark) => document.documentElement.classList.contains("dark") === dark,
+        saved === "dark",
+      );
+      expect(await shown(page)).toMatchObject({ now: saved, choice: "system" });
+      await page.context().close();
+    });
+  }
+
+  test("a choice made in the Theme setting outlasts what an earlier release saved", async () => {
+    const page = await open("dark", "dark", LEGACY_KEY);
+    await page.getByRole("button", { name: "light" }).click();
+    await page.waitForFunction(
+      () => !document.documentElement.classList.contains("dark"),
+    );
+    await page.reload();
+    await page.locator("[data-theme-choice]").waitFor({ timeout: 8000 });
+    expect(await shown(page)).toMatchObject({
+      firstPaint: "light",
+      now: "light",
+      choice: "light",
+      stored: "light",
+      legacy: null,
+    });
+    await page.context().close();
+  });
 
   test("choosing Light or Dark wins over the system and is kept; System follows it again", async () => {
     const page = await open("dark");

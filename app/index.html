@@ -9,9 +9,10 @@
       // localStorage throws in some privacy modes; a theme is not worth taking the app down for.
       // The theme and the skin each in a try of their own, so neither costs the other.
       try {
-        // A saved "light" or "dark" is the person's own choice. Nothing saved follows the system
-        // (lib/theme.ts), and the app's theme provider keeps following it once the app is up.
-        const theme = window.localStorage.getItem("openbot-theme");
+        // A "light" or "dark" saved by the Theme setting is the person's own choice. Nothing saved
+        // follows the system (lib/theme.ts), and the app's theme provider keeps following it once
+        // the app is up. What earlier releases saved under "openbot-theme" was never a choice.
+        const theme = window.localStorage.getItem("openbot-theme-choice");
         const dark =
           theme === "dark" ||
           (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);

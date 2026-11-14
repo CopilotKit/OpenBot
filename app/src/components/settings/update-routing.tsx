@@ -24,7 +24,7 @@ import {
   type UpdateTransport,
   updateRoutingQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
-import { deliveryQueryOptions } from "@/lib/delivery";
+import { transportsQueryOptions } from "@/lib/delivery";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { mayOpenSetup } from "@/lib/setup/queries";
@@ -72,7 +72,7 @@ const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
  */
 export function UpdateRoutingSection() {
   const routing = useQuery(updateRoutingQueryOptions());
-  const reach = useQuery(deliveryQueryOptions());
+  const transports = useQuery(transportsQueryOptions());
   const save = useMutation(setUpdateRoutingMutationOptions(queryClient));
   /*
    * Who can turn a channel on: an admin, or the one person running OpenBot themselves (the same rule as Settings,
@@ -89,7 +89,7 @@ export function UpdateRoutingSection() {
    * as it is rather than every channel claimed unavailable.
    */
   const configured = (transport: UpdateTransport) =>
-    reach.data ? reach.data.available[transport] : true;
+    transports.data ? transports.data[transport] : true;
   /*
    * Only the channels that can carry something get a switch. A channel that is not set up has nothing to choose, and
    * four rows of switches nobody can turn on said less than one sentence does. Its stored preference is kept as it is
@@ -98,7 +98,7 @@ export function UpdateRoutingSection() {
   const shown = TRANSPORTS.filter((transport) => configured(transport.id));
   const choosing =
     !routing.isPending &&
-    !reach.isPending &&
+    !transports.isPending &&
     !routing.error &&
     shown.length > 0;
   /*
@@ -116,7 +116,7 @@ export function UpdateRoutingSection() {
       }
       title="Where updates go"
     >
-      {routing.isPending || reach.isPending ? null : routing.error ? (
+      {routing.isPending || transports.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load where your updates go. Reload the page.
         </p>

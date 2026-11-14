@@ -19,6 +19,7 @@ not touch the same lines:
 | `conversations.yaml` | Reactions and conversation join tokens |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
+| `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual
