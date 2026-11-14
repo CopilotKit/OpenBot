@@ -2971,8 +2971,56 @@ pub fn run(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<Report, Failure> {
-    let (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    let (mut code, mut bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    if action == Action::Start {
+        for wait in START_REFUSED_WAITS {
+            if !engine_refused_start(code, &bytes) {
+                break;
+            }
+            log::warn!(
+                "[local start] the engine refused to start the backend's node (exit 125); asking again in {}s",
+                wait.as_secs()
+            );
+            if !waited_uncancelled(wait, cancel) {
+                return Err(Failure::Cancelled);
+            }
+            (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+        }
+    }
     normalize(action, code, &bytes)
+}
+
+/**
+How long `local start` waits before it is asked again, after the engine refused to start the back
+end's node: twice at most, so a start that keeps being refused fails within about half a minute.
+
+Windows G: OpenBot quit, opened again within seconds, and its `local start` failed in 0.3 s, the
+CLI's `podman start` of the node exiting 125, the engine's own error before anything ran. The window
+said "Setup stopped partway through with an error. Retry.", and Retry started it at once.
+*/
+const START_REFUSED_WAITS: [Duration; 2] = [Duration::from_secs(3), Duration::from_secs(8)];
+
+/// The CLI's `local start` failed because the engine would not start the node: its `start` exited
+/// 125. The CLI keeps the engine's words to itself, so this is the one sign there is.
+fn engine_refused_start(code: i32, stdout: &[u8]) -> bool {
+    code == 1
+        && serde_json::from_slice::<Value>(stdout).is_ok_and(|wire| {
+            wire.pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|said| said.starts_with("Local start failed (exit 125)"))
+        })
+}
+
+/// Waits `wait` unless the call is cancelled first; false when it was.
+fn waited_uncancelled(wait: Duration, cancel: &Cancel) -> bool {
+    let until = Instant::now() + wait;
+    while Instant::now() < until {
+        if cancel.requested() {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !cancel.requested()
 }
 
 /// `local setup` in `installation`, the folder the stack is created for.
@@ -8246,6 +8294,17 @@ fn main() {
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // One answer per call, in turn, the last one again once they run out: `code\nbody`
+        // blocks separated by a line of `---`.
+        "sequence" => {
+            let asked: usize = std::fs::read_to_string(dir.join("calls")).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+            std::fs::write(dir.join("calls"), (asked + 1).to_string()).unwrap();
+            let answers: Vec<&str> = body.split("\n---\n").collect();
+            let (code, said) = answers[asked.min(answers.len() - 1)].split_once('\n').unwrap();
+            print!("{said}");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(code.parse().unwrap());
+        }
         // A valid machine response can precede the CLI's bounded telemetry flush.
         "flush" => {
             print!("{body}");
@@ -8604,6 +8663,13 @@ fn main() {
 
         fn argv(&self) -> Option<String> {
             std::fs::read_to_string(self.root.join("argv")).ok()
+        }
+
+        /// How many times a `sequence` scenario was called.
+        fn calls(&self) -> usize {
+            std::fs::read_to_string(self.root.join("calls"))
+                .map(|n| n.trim().parse().unwrap())
+                .unwrap_or(0)
         }
 
         /// The folder the program ran in, resolved: Windows reports the temporary folder by its
@@ -8985,6 +9051,77 @@ fn main() {
             fixture.grandchild_stops(),
             "grandchild outlived the timeout"
         );
+    }
+
+    /// `local start` as the CLI reports the engine refusing to start the back end's node: its
+    /// `podman start` (or `docker start`) exited 125.
+    fn start_refused_by_engine() -> String {
+        let mut refused: Value = serde_json::from_str(&start_failed()).unwrap();
+        refused["error"]["message"] = json!(
+            "Local start failed (exit 125). Run `copilotkit local status` and retry the failed step."
+        );
+        refused.to_string()
+    }
+
+    /**
+    Windows G: OpenBot quit, and opened again a few seconds later. `local start` failed in 0.3 s,
+    the engine refusing the node's start with exit 125, and the window said "Setup stopped partway
+    through with an error. Retry." Retry, a minute later, started it at once. The start is now asked
+    again, twice at most and within seconds, before its failure is the answer.
+    */
+    #[test]
+    fn a_start_the_engine_refuses_is_asked_again_before_it_fails() {
+        let refused = start_refused_by_engine();
+        let fixture = Fixture::new(
+            "local-eval-start-refused-once",
+            &format!("sequence\n1\n{refused}\n---\n0\n{}", start_completed()),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Completed);
+        assert_eq!(fixture.calls(), 2);
+
+        // Refused every time: the failure, after the third ask, within the ceiling.
+        let fixture = Fixture::new(
+            "local-eval-start-refused-always",
+            &format!("sequence\n1\n{refused}"),
+        );
+        let started = Instant::now();
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        assert_eq!(fixture.calls(), 3);
+        assert!(started.elapsed() < Duration::from_secs(30));
+
+        // Any other failure is the answer at once, as before.
+        let fixture = Fixture::new(
+            "local-eval-start-failed-otherwise",
+            &format!(
+                "sequence\n1\n{}\n---\n0\n{}",
+                start_failed(),
+                start_completed()
+            ),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(fixture.calls(), 1);
     }
 
     #[test]
