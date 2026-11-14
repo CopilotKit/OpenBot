@@ -352,8 +352,8 @@ if ! COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/
 fi
 # No migration step here: the server applies its own migrations when it starts, below.
 #
-# An earlier start ran `migrate` and `worker` as Compose services. docker-compose.yml defines
-# neither now, so Compose leaves a container it made for one running and only warns about it.
+# An earlier start ran `migrate` and `worker` as Compose services. Nothing here starts either
+# now (docker-compose.yml says the server does that work), so a container of one is left over.
 for retired in $(remove_retired_services); do
   info "  $retired: removed the container an earlier start left (the server does that work now)"
 done

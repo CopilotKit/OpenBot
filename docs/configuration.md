@@ -156,7 +156,8 @@ Bot containers on a run that mints one.
 **`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what a separate
 routines worker presents to `/internal/routines/run` to prove a routine's dispatch actually came
 from it. The API server refuses a handoff without one configured. The server fires due routines
-itself, so `docker-compose.yml` and `start.sh` run no worker and neither sets this; see
+itself, so nothing starts the `worker` service `docker-compose.yml` still defines for one
+release, `start.sh` runs no worker, and neither sets this; see
 [routines.md](routines.md).
 
 The endpoint it guards accepts nothing but an unguessable `routine_run_<uuid>` id: the server

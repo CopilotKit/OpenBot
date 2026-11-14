@@ -30,7 +30,16 @@ afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
-function fixture(topology: "host" | "image" = "image") {
+/** An earlier release's docker-compose.yml, as far as the updater reads the file itself. */
+const EARLIER_COMPOSE = "services:\n  postgres:\n    image: postgres:17\n";
+/** A release's whose server applies its own migrations and does the scheduled work itself: it says
+ * so on one top-level line. It still defines `worker` and `migrate`, which the fixture's Compose
+ * answers with, and nothing starts them. */
+const SERVER_DOES_THE_WORK_COMPOSE = `x-openbot-scheduled-work: server\n${EARLIER_COMPOSE}`;
+function fixture(
+  topology: "host" | "image" = "image",
+  compose: { installed?: string; candidate?: string } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "openbot-update-")));
   roots.push(root);
   const git = (...args: string[]) =>
@@ -41,12 +50,16 @@ function fixture(topology: "host" | "image" = "image") {
   writeFileSync(join(root, "runtime.txt"), "old runtime\n");
   writeFileSync(
     join(root, "docker-compose.yml"),
-    "services:\n  postgres:\n    image: postgres:17\n",
+    compose.installed ?? EARLIER_COMPOSE,
   );
   git("add", ".");
   git("commit", "--quiet", "-m", "accepted");
   const old = git("rev-parse", "HEAD");
   writeFileSync(join(root, "runtime.txt"), "new runtime\n");
+  writeFileSync(
+    join(root, "docker-compose.yml"),
+    compose.candidate ?? compose.installed ?? EARLIER_COMPOSE,
+  );
   git("commit", "--quiet", "-am", "candidate");
   const target = git("rev-parse", "HEAD");
   git("checkout", "--quiet", "--detach", old);
@@ -448,18 +461,21 @@ test("host planning allows established unrelated workers and refuses its own or 
 });
 
 /**
- * A run against a release whose server applies its own migrations and does the scheduled work
- * itself, so its Compose file defines no `migrate` and no `worker`. The candidate's file is the one
- * read with `--file` before it is installed and the one in place after the merge. With
- * `installedToo`, the installation is already on such a release. The previous release left one
- * `worker` container behind, which only its labels find once the file no longer defines it.
+ * A fixture whose candidate release's server applies its own migrations and does the scheduled work
+ * itself: its docker-compose.yml says so, still defines `worker` and `migrate` (the fixture's
+ * Compose answers with both, whichever file it is asked about), and nothing starts them. With
+ * `installedToo`, the installation is already on such a release. Otherwise the previous release
+ * left one `worker` container behind, which this project's labels find.
  */
 function serverDoesTheWork(
-  f: ReturnType<typeof fixture>,
+  topology: "host" | "image" = "image",
   { installedToo = false } = {},
-): CommandRunner {
-  let activated = false;
-  return async (command, options) => {
+) {
+  const f = fixture(topology, {
+    installed: installedToo ? SERVER_DOES_THE_WORK_COMPOSE : EARLIER_COMPOSE,
+    candidate: SERVER_DOES_THE_WORK_COMPOSE,
+  });
+  const run: CommandRunner = async (command, options) => {
     if (command[0] === "docker" && command[1] === "ps") {
       f.calls.push(command.join(" "));
       return command.includes("label=com.docker.compose.service=worker") &&
@@ -467,27 +483,14 @@ function serverDoesTheWork(
         ? "previous-worker\n"
         : "";
     }
-    const result = await f.run(command, options);
-    if (command[0] === "git" && command.includes("merge")) activated = true;
-    if (
-      command.includes("config") &&
-      (installedToo || activated || command.includes("--file"))
-    ) {
-      const configuration = JSON.parse(result);
-      delete configuration.services.worker;
-      delete configuration.services.migrate;
-      return JSON.stringify(configuration);
-    }
-    return result;
+    return f.run(command, options);
   };
+  return { ...f, options: { ...f.options, run } };
 }
 
 test("image apply onto a release whose server migrates and sweeps for itself runs no migrate or worker service, and removes the previous worker's container", async () => {
-  const f = fixture();
-  const result = await applyLocalUpdate({
-    ...f.options,
-    run: serverDoesTheWork(f),
-  });
+  const f = serverDoesTheWork();
+  const result = await applyLocalUpdate(f.options);
   expect(result.phase).toBe("accepted");
 
   const compose = f.calls.filter((c) => c.startsWith("docker compose "));
@@ -524,11 +527,8 @@ test("image apply onto a release whose server migrates and sweeps for itself run
 });
 
 test("an installation already on such a release updates without ever naming migrate or worker to Compose", async () => {
-  const f = fixture();
-  const result = await applyLocalUpdate({
-    ...f.options,
-    run: serverDoesTheWork(f, { installedToo: true }),
-  });
+  const f = serverDoesTheWork("image", { installedToo: true });
+  const result = await applyLocalUpdate(f.options);
   expect(result.phase).toBe("accepted");
   for (const call of f.calls.filter((c) => c.startsWith("docker compose ")))
     expect(call).not.toMatch(/\b(migrate|worker)\b/);
@@ -539,11 +539,8 @@ test("an installation already on such a release updates without ever naming migr
 });
 
 test("host apply onto such a release leaves the migrations to the server that start.sh starts", async () => {
-  const f = fixture("host");
-  const result = await applyLocalUpdate({
-    ...f.options,
-    run: serverDoesTheWork(f),
-  });
+  const f = serverDoesTheWork("host");
+  const result = await applyLocalUpdate(f.options);
   expect(result.phase).toBe("accepted");
   expect(f.calls.some((c) => c.includes("scripts/start.sh"))).toBe(true);
   expect(f.calls.some((c) => c.includes("--exit-code-from"))).toBe(false);

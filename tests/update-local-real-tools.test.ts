@@ -75,14 +75,14 @@ function directory(prefix: string) {
 }
 /** A checkout on its accepted commit, with the candidate one commit ahead, both carrying this
  * repository's real docker-compose.yml. */
-function installation(dotenv: string) {
+function installation(dotenv: string, compose = composeFile) {
   const root = directory("openbot-real-update-");
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   git("init", "--quiet");
   git("config", "user.email", "update@example.test");
   git("config", "user.name", "Update fixture");
-  writeFileSync(join(root, "docker-compose.yml"), composeFile);
+  writeFileSync(join(root, "docker-compose.yml"), compose);
   writeFileSync(join(root, "runtime.txt"), "old runtime\n");
   git("add", ".");
   git("commit", "--quiet", "-m", "accepted");
@@ -242,7 +242,8 @@ describe.skipIf(!docker)(
       expect(result.phase).toBe("accepted");
       expect(available(["docker", "image", "inspect", reference])).toBe(true);
       const pull = calls.findIndex((call) =>
-        // The real Compose file defines neither a worker nor a migrate service to pull for.
+        // The real Compose file says its server does the scheduled work, so nothing is pulled
+        // for its worker or migrate service by name.
         call.endsWith(" pull server"),
       );
       const stop = calls.findIndex((call) => call.includes(" stop "));
@@ -444,8 +445,18 @@ describe.skipIf(!docker)("image migration with real Docker Compose", () => {
     "executes the image without building and propagates migration exit %s",
     async (exitCode) => {
       const project = `fix979-migrate-${id}-${exitCode}`;
+      // A release whose Compose file uses a `migrate` service: 1.0.2's own file. The real file
+      // says its server applies its own migrations, and is never asked to run one.
       const f = installation(
         `COMPOSE_PROJECT_NAME=${project}\nCOMPOSE_PROFILES=openbot\n`,
+        readFileSync(
+          join(
+            import.meta.dir,
+            "..",
+            "desktop/src-tauri/test-fixtures/compose/docker-compose-v1.0.2.yml",
+          ),
+          "utf8",
+        ),
       );
       const reference = sh([
         "docker",
@@ -458,11 +469,9 @@ describe.skipIf(!docker)("image migration with real Docker Compose", () => {
       f.candidate.artifacts.images.server = { reference };
       // An executable cached image and no Dockerfile in the checkout: any accidental build fails.
       // SQL/backup/server boundaries remain recorded; the actual migration CLI must reach this process.
-      // The `migrate` service is the override's own, as an earlier release's Compose file defined
-      // it: the real file has none, because its server applies its migrations when it starts.
       writeFileSync(
         join(f.root, "docker-compose.override.yml"),
-        `services:\n  migrate:\n    image: \${SERVER_IMAGE:-registry:2}\n    environment:\n      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot\n    entrypoint: ["/bin/sh"]\n    command: ${JSON.stringify(["-ec", `printf 'compose-migration-executed\\n'; exit ${exitCode}`])}\n`,
+        `services:\n  migrate:\n    entrypoint: ["/bin/sh"]\n    command: ${JSON.stringify(["-ec", `printf 'compose-migration-executed\\n'; exit ${exitCode}`])}\n`,
       );
       cleanup.push(() =>
         sh([

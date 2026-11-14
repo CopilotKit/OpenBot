@@ -225,22 +225,28 @@ every deployment:
 ### The server migrates and does the scheduled work itself
 
 The server applies its own database migrations when it starts, and fires routines, cleans up
-unsent attachments and suspends idle computers inside its own process. `docker-compose.yml` no
-longer defines the `migrate` and `worker` services, nothing waits on `migrate`, and the server is
-no longer handed `WORKER_SHARED_SECRET`. A Compose override that names either service, or a script
-that runs `docker compose run migrate` or reads `docker compose logs worker`, has to stop naming
-them.
+unsent attachments and suspends idle computers inside its own process. Nothing in this release
+starts the `migrate` or `worker` Compose service, nothing waits on `migrate`, and the server is no
+longer handed `WORKER_SHARED_SECRET`. A Compose override that makes something depend on either
+service, or a script that runs `docker compose run migrate` or reads `docker compose logs worker`,
+has to stop.
 
-- **OpenBot Desktop** names only the services the installed Compose file defines. An installation
-  still on 1.0.2's file, which is the state during an update and after one that rolled back, is
-  run as that file requires: its migrations run before its server and its worker starts, restarts
-  and stops with it. Once the update puts this release's file in place, Start removes the `worker`
-  and `migrate` containers 1.0.2 left, found by the installation's own Compose project and those
-  two services. No other container and no volume is touched.
+`docker-compose.yml` still defines both services, for this one release, doing nothing: an OpenBot
+Desktop app from the release before reads a Compose file as current only when it defines `worker`,
+and asks for `migrate`'s image by name. Both go in the next release. What tells this file from an
+earlier release's is one top-level line in it, `x-openbot-scheduled-work: server`.
+
+- **OpenBot Desktop** reads that line in the installed Compose file. An installation still on the
+  file of a release up to 1.0.3, which has no such line and is the state during an update and
+  after one that rolled back, is run as that file requires: its migrations run before its server,
+  and its worker starts, restarts and stops with it. With this release's file Desktop never names
+  either service, and Start removes the `worker` and `migrate` containers the earlier release left,
+  found by the installation's own Compose project and those two services. No other container and
+  no volume is touched.
 - **`bash scripts/start.sh`** runs no migration step and starts no worker, and removes a `worker`
   or `migrate` container an earlier start left. `bash scripts/stop.sh` does the same removal.
-  `bun scripts/update.ts local apply` asks each release's Compose file only for the services it defines, so it
-  updates to and from a release with either shape.
+  `bun scripts/update.ts local apply` asks each release's Compose file only for the services
+  it uses, so it updates to and from a release of either kind.
 - **`bun scripts/update.ts kubernetes`** accepts, for a promotion that changes the database
   version, a chart whose server applies its own migrations: one that renders no migrations Job and
   a server Deployment running the target image behind a `wait-for-database` init container. A chart

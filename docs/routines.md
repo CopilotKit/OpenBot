@@ -147,8 +147,10 @@ carry it out is skipped, not just the one that was in flight.
 
 The server does. It sweeps for due routines itself, inside its own process, alongside the rest of
 its scheduled work (cleaning up unsent attachments, suspending idle computers), so a deployment
-needs nothing beside the server for a routine to fire. `docker-compose.yml` defines no `worker`
-service, `scripts/start.sh` starts none, and OpenBot Desktop runs none.
+needs nothing beside the server for a routine to fire. `scripts/start.sh` starts no worker and
+OpenBot Desktop runs none. (`docker-compose.yml` still defines a `worker` service for one release,
+which nothing starts and which does nothing if started: an OpenBot Desktop app from the release
+before reads a Compose file as current only when it defines one.)
 
 It used to take a second process: a worker that ran the sweep in a loop and handed each due run to
 the server at `/internal/routines/run`. A deployment that never started one stored every routine,
@@ -168,10 +170,10 @@ beside the server:
   server refuses every handoff without it configured on both sides.
 - **`SERVER_INTERNAL_URL`**: where a worker reaches this deployment's own API server.
 
-That includes an OpenBot Desktop installation whose Compose file is a release's up to 1.0.2, which
-defines a `worker` service: Desktop reads the installed file, so it still starts, restarts and stops
-that worker with the server, and removes its container once an update puts a Compose file without
-one in place (see [Desktop updates](desktop-updates.md)).
+That includes an OpenBot Desktop installation whose Compose file is a release's up to 1.0.3, which
+runs the sweep in its `worker` service: Desktop reads the installed file, so it still starts,
+restarts and stops that worker with the server, and removes its container once an update puts in
+place a Compose file that says its server does the work (see [Desktop updates](desktop-updates.md)).
 
 ## Who a routine runs as
 

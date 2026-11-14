@@ -142,21 +142,26 @@ running_here() {
 # Remove the containers an earlier start made for `migrate` and `worker`, and print each name
 # removed.
 #
-# Both were Compose services until the server took the work over: it applies its migrations when it
-# starts and does the scheduled work itself. docker-compose.yml defines neither now, and Compose
-# leaves a container whose service is gone running (it calls it an orphan and only warns), where an
-# old routine worker would go on sweeping beside the server.
+# Both ran as Compose services until the server took the work over: it applies its migrations when
+# it starts and does the scheduled work itself. docker-compose.yml says so on one top-level line,
+# `x-openbot-scheduled-work: server`, and nothing in this checkout starts either service (the file
+# still defines both for one release, for an OpenBot Desktop app from the release before). So a
+# container of either is one an earlier start left, where an old routine worker would go on sweeping
+# beside the server.
 #
 # Only this checkout's Compose project, by the labels Compose itself put on the container, and only
-# these two services, so no other project's container can match. A service this project's files do
-# define, in an override for instance, is left alone. `docker rm` without `-v`: no volume is touched.
+# these two services, so no other project's container can match. A docker-compose.yml without that
+# line is an earlier release's, which uses whichever of the two it defines: those are left alone.
+# `docker rm` without `-v`: no volume is touched.
 remove_retired_services() {
-  local project defined service ids
+  local file project service ids
+  file="${ROOT:-.}/docker-compose.yml"
+  [ -f "$file" ] || return 0
   project="$(docker compose config 2>/dev/null | sed -n 's/^name: *//p' | head -1 | tr -d "\"'\r" || true)"
   [ -n "$project" ] || return 0
-  defined="$(docker compose --profile openbot config --services 2>/dev/null | tr -d '\r' || true)"
   for service in migrate worker; do
-    if printf '%s\n' "$defined" | grep -qx "$service"; then
+    if ! grep -qE '^x-openbot-scheduled-work: server[[:space:]]*(#.*)?$' "$file" \
+       && grep -qE "^  $service:" "$file"; then
       continue
     fi
     ids="$(docker ps -aq \

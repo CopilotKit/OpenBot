@@ -1065,7 +1065,7 @@ mod tests {
 
 /// The upgrade against a real container engine, with the product's own layout (`deployment`), pull
 /// (`pull_metrics`), Start (`stack::up`), Stop (`stack::down`), `pg_dump` and `pg_restore` (`stack`).
-/// Releases are two versions of a fixture with the shape of OpenBot's Compose file up to 1.0.2,
+/// Releases are two versions of a fixture with the shape of OpenBot's Compose file up to 1.0.3,
 /// which Start still raises as that file requires: Postgres, a `migrate` that `server` depends on, a
 /// `worker`, and the other services Start raises, all from a "server"
 /// image the fixture pushes to a local registry, so every pull is a real pull. Each migration

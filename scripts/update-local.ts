@@ -110,6 +110,9 @@ export interface LocalUpdatePlan extends UpgradePlan {
   protectedPaths: string[];
   /** The image each candidate service resolves to under the candidate's own Compose file. */
   candidateImages: Record<string, string>;
+  /** The services the candidate's own Compose file runs from the server image: its server, and
+   * its worker and migrate services where that file still uses them. */
+  candidateServices: string[];
 }
 export interface UpdateJournal {
   operation: string;
@@ -141,6 +144,9 @@ interface ComposeService {
   volumes?: { type?: string; source?: string; target?: string }[];
 }
 interface ComposeConfiguration {
+  /** Whether the Compose file this was resolved from says its server does the scheduled work
+   * (`serverDoesScheduledWork`). Read from the file's own text, not from Compose's answer. */
+  serverDoesScheduledWork: boolean;
   name: string;
   services: Record<string, ComposeService>;
   volumes?: Record<string, { name?: string; external?: boolean }>;
@@ -375,31 +381,65 @@ function compose(command: string[], root: string, project?: string) {
     ...command,
   ];
 }
-function readConfiguration(text: string): ComposeConfiguration {
+/** Whether a `docker-compose.yml` says, on a top-level line of its own, that its server applies
+ * its own migrations and does the scheduled work itself: `x-openbot-scheduled-work: server`.
+ *
+ * A positive statement by the file, read as text. Such a file may still define `worker` and
+ * `migrate` (this release's does, for an OpenBot Desktop app from the release before) and nothing
+ * starts them. A file without the line is an earlier release's, where both are in use. */
+export function serverDoesScheduledWork(composeFile: string) {
+  return composeFile
+    .split("\n")
+    .some(
+      (line) =>
+        (line.split("#")[0] ?? "").trimEnd() ===
+        "x-openbot-scheduled-work: server",
+    );
+}
+/** `docker compose config --format json`, with what the Compose file itself says (`composeFile`,
+ * its text) about who does the scheduled work. */
+function readConfiguration(
+  text: string,
+  composeFile: string,
+): ComposeConfiguration {
   const value: ComposeConfiguration = JSON.parse(text);
   if (!value.name || !value.services?.postgres)
     throw new Error(
       "Unsupported Compose shape: a named project and a postgres service are required",
     );
+  value.serverDoesScheduledWork = serverDoesScheduledWork(composeFile);
   return value;
 }
-/** OpenBot's own long-running services in a Compose file: `server`, and `worker` where the file
- * defines one. A release whose server does the scheduled work itself defines no `worker`; an
- * earlier release's file does, and an installation on that file is still run as it requires. */
-function ownServices(configuration: ComposeConfiguration) {
-  return configuration.services.worker ? ["server", "worker"] : ["server"];
+/** The text of the installation's own docker-compose.yml, or nothing when there is none. */
+function installedComposeFile(root: string) {
+  const path = join(root, "docker-compose.yml");
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
-/** `ownServices`, with `migrate` where the file defines it. Without one, the server applies its
+/** Whether a Compose file runs `service` (`worker` or `migrate`) as a service of its own: it
+ * defines it, and does not say its server does that work. */
+function uses(configuration: ComposeConfiguration, service: string) {
+  return (
+    !configuration.serverDoesScheduledWork &&
+    Boolean(configuration.services[service])
+  );
+}
+/** OpenBot's own long-running services in a Compose file: `server`, and `worker` where the file
+ * uses one. A release whose server does the scheduled work itself starts no `worker`; an earlier
+ * release's file does, and an installation on that file is still run as it requires. */
+function ownServices(configuration: ComposeConfiguration) {
+  return uses(configuration, "worker") ? ["server", "worker"] : ["server"];
+}
+/** `ownServices`, with `migrate` where the file uses it. Otherwise the server applies its
  * migrations when it starts. */
 function serverImageServices(configuration: ComposeConfiguration) {
   return [
     ...ownServices(configuration),
-    ...(configuration.services.migrate ? ["migrate"] : []),
+    ...(uses(configuration, "migrate") ? ["migrate"] : []),
   ];
 }
-/** Removes this project's containers for `migrate` and `worker` once its Compose file defines
- * neither. Compose leaves a container whose service is gone running (an orphan), where a previous
- * release's routine worker would go on sweeping beside a server that now does that work. Found by
+/** Removes this project's containers for `migrate` and `worker` once its Compose file no longer
+ * uses them. Nothing started under that file touches them, so a previous release's routine worker
+ * would go on sweeping beside a server that now does that work. Found by
  * the labels Compose put on them, for this project and these two services only, and removed
  * without `-v`, so no other project and no volume is touched. */
 async function removeRetiredContainers(
@@ -408,7 +448,7 @@ async function removeRetiredContainers(
   run: CommandRunner,
 ) {
   for (const service of ["migrate", "worker"]) {
-    if (configuration.services[service]) continue;
+    if (uses(configuration, service)) continue;
     const ids = (
       await run(
         [
@@ -556,6 +596,7 @@ function candidateConfiguration(
   return withCandidateCompose(root, commit, project, run, env, async (args) =>
     readConfiguration(
       await run([...args, "config", "--format", "json"], { cwd: root, env }),
+      await run(["git", "show", `${commit}:docker-compose.yml`], { cwd: root }),
     ),
   );
 }
@@ -748,6 +789,7 @@ async function inspect(
     targetCommit: candidate.source.commit,
     composeProject: "",
     candidateImages: {},
+    candidateServices: ["server"],
     protectedPaths: protectedPaths(root, env, options.customerPaths ?? []),
   };
   try {
@@ -822,6 +864,7 @@ async function inspect(
         cwd: root,
         env,
       }),
+      installedComposeFile(root),
     );
     const after = await candidateConfiguration(
       root,
@@ -867,6 +910,7 @@ async function inspect(
     plan.composeProject = before.name;
     for (const [name, service] of Object.entries(after.services))
       if (service.image) plan.candidateImages[name] = service.image;
+    plan.candidateServices = serverImageServices(after);
     if (options.topology === "host") await hostStopped(root, env, run);
     else if ((await ownedHostProcesses(root, env, run)).length)
       throw new Error(
@@ -1001,11 +1045,10 @@ export async function applyLocalUpdate(
         compose(["config", "--format", "json"], root, initial.composeProject),
         { cwd: root, env },
       ),
+      installedComposeFile(root),
     );
     // What the candidate's own Compose file runs from the server image, which its plan listed.
-    const candidateServices = ["server", "worker", "migrate"].filter(
-      (service) => service === "server" || verified.candidateImages[service],
-    );
+    const candidateServices = verified.candidateServices;
     mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
     if (lstatSync(backupDirectory).isSymbolicLink())
       throw new Error("Backup directory must not be a symbolic link");
@@ -1150,6 +1193,7 @@ export async function applyLocalUpdate(
         compose(["config", "--format", "json"], root, initial.composeProject),
         { cwd: root, env: candidateEnv },
       ),
+      installedComposeFile(root),
     );
     activatedServices = ownServices(activatedConfiguration);
     if (!preservedState(originalConfiguration, activatedConfiguration))
@@ -1168,9 +1212,9 @@ export async function applyLocalUpdate(
     // (backend-images.env), so its migrations are that image's, run as the image topology runs them.
     if (options.topology === "host" && !candidateEnv.OPENBOT_BACKEND_TAG)
       candidateEnv.OPENBOT_BACKEND_TAG = backendTag(root);
-    // A release whose Compose file has a `migrate` service is migrated by running it. One without
+    // A release whose Compose file uses a `migrate` service is migrated by running it. Any other
     // is migrated by its server, when it starts below.
-    if (activatedConfiguration.services.migrate)
+    if (uses(activatedConfiguration, "migrate"))
       await run(
         compose(
           [

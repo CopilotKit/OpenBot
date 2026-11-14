@@ -741,23 +741,64 @@ test("runs the server, computer and supervisor from the published images", () =>
 
 /**
  * The server applies its own migrations when it starts and does its scheduled work itself (firing
- * routines, cleaning up unsent attachments, suspending idle computers), so the file defines no
- * `migrate` and no `worker` service, nothing waits on either, and nothing is handed the secret the
- * worker used to present.
+ * routines, cleaning up unsent attachments, suspending idle computers). `migrate` and `worker` are
+ * still defined, for this one release, so an OpenBot Desktop app from the release before reads the
+ * file as current: that app requires a `worker` service and asks for `migrate`'s image by name.
+ * Nothing in this release starts either, so nothing waits on one, both sit behind the profile, and
+ * neither is handed the secret the worker used to present.
  */
-test("defines no migrate and no worker service, and nothing that waits on one", () => {
+test("still defines migrate and worker for one release, with nothing that waits on either", () => {
   const services = composeServices();
 
-  expect(Object.keys(services)).not.toContain("migrate");
-  expect(Object.keys(services)).not.toContain("worker");
   for (const [name, service] of Object.entries(services)) {
     const waitsOn = Object.keys(service.depends_on ?? {});
-    expect(`${name}: ${waitsOn}`).not.toMatch(/migrate|worker/);
+    expect({ name, waitsOn }).toEqual({
+      name,
+      waitsOn: waitsOn.filter(
+        (other) => other !== "migrate" && other !== "worker",
+      ),
+    });
     expect(Object.keys(service.environment ?? {})).not.toContain(
       "WORKER_SHARED_SECRET",
     );
   }
   expect(composeFile()).not.toContain("WORKER_SHARED_SECRET");
+
+  expect(services.worker).toEqual({
+    profiles: ["openbot"],
+    image: services.server.image,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    pull_policy: "${IMAGE_PULL_POLICY:-missing}",
+    command: ["bun", "../worker/src/index.ts"],
+    restart: "unless-stopped",
+    networks: ["data"],
+  });
+  expect(services.migrate).toEqual({
+    profiles: ["openbot"],
+    image: services.server.image,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    pull_policy: "${IMAGE_PULL_POLICY:-missing}",
+    command: ["bun", "scripts/migrate.ts"],
+    environment: {
+      DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
+    },
+    depends_on: { postgres: { condition: "service_healthy" } },
+    restart: "no",
+    networks: ["data"],
+  });
+});
+
+/**
+ * What tells this file from an earlier release's, in which `worker` and `migrate` are in use: one
+ * top-level line. OpenBot Desktop, scripts/start.sh and the updater read it as text, so it is at
+ * column 0, once, and Compose (which ignores a top-level `x-` field) still reads the file.
+ */
+test("says on one top-level line that the server does the scheduled work", () => {
+  const marked = composeFile()
+    .split("\n")
+    .filter((line) => line.startsWith("x-openbot-scheduled-work"));
+  expect(marked).toEqual(["x-openbot-scheduled-work: server"]);
+  expect(Object.keys(runComposeConfig({}).services)).toContain("server");
 });
 
 test("starts the server once PostgreSQL is healthy, because it migrates as it starts", () => {
@@ -943,14 +984,20 @@ test("gives the server the supervisor unless the deployment empties it", () => {
   expect(none?.AGENT_COMPUTER_URL).toBe("http://agent-computer:4100");
 });
 
-test("puts the server beside the database and the Bots, and nothing else beside the database", () => {
+test("puts the server beside the database and the Bots, and nothing a Bot can reach beside the database", () => {
   const services = composeServices();
 
   expect(services.server.networks).toEqual(["data", "default"]);
   const besideTheDatabase = Object.entries(services)
     .filter(([, service]) => service.networks?.includes("data"))
     .map(([name]) => name);
-  expect(besideTheDatabase.sort()).toEqual(["postgres", "server"]);
+  // `migrate` and `worker` for this one release, on `data` alone, as they always were.
+  expect(besideTheDatabase.sort()).toEqual([
+    "migrate",
+    "postgres",
+    "server",
+    "worker",
+  ]);
 });
 
 test("hands the desktop's host-access token to the server and nothing else", () => {

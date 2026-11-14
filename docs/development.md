@@ -120,8 +120,10 @@ in the composer deletes it outright, so it takes abandoned drafts rather than or
 
 The database schema and its migrations come with the server image. The server applies them itself
 when it starts, every run, and a database that is already current is left as it is. There is no
-`migrate` service and no migration step in `start.sh`, which only checks, once the server is up,
-that the tables are there. A `migrate` or `worker` container an earlier start left is removed.
+migration step in `start.sh`, which only checks, once the server is up, that the tables are there.
+`docker-compose.yml` still defines a `migrate` and a `worker` service for one release, for an
+OpenBot Desktop app from the release before to read, and nothing starts them; a container of
+either that an earlier start left is removed.
 
 ## Quality checks
 

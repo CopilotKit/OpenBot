@@ -139,8 +139,8 @@ info "1/3  App"
 stop_port "$APP_PORT" app
 
 info "2/3  API server"
-# A routine worker an earlier start ran. As a Compose service, which docker-compose.yml no longer
-# defines, so `docker compose down` below would leave its container running.
+# A routine worker an earlier start ran. As a Compose service, which nothing here starts any
+# more: removed here, by this project's labels.
 for retired in $(remove_retired_services); do
   green "  $retired from an earlier start: removed"
 done

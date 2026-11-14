@@ -1145,7 +1145,7 @@ pub fn compose(
         loopback_relays(ports, &intelligence.gateway_ws_url),
     );
 
-    // For an installation whose Compose file is a release's up to 1.0.2, which runs the routines
+    // For an installation whose Compose file is a release's up to 1.0.3, which runs the routines
     // sweep as a `worker` service: that worker refuses to start without this, by design. It is a
     // fact about where the process runs, and it would rather stop than guess. Later releases' server
     // does the sweep itself and reads neither this nor the worker's secret.

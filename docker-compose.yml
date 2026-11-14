@@ -1,3 +1,10 @@
+# The server applies its own migrations when it starts and does the scheduled work itself (firing
+# routines, cleaning up unsent attachments, suspending idle computers), so nothing in this release
+# starts the `worker` or `migrate` service below. OpenBot Desktop, scripts/start.sh and the updater
+# read this one line to tell this file from an earlier release's, where both are in use. Compose
+# ignores a top-level `x-` field.
+x-openbot-scheduled-work: server
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -10,9 +17,10 @@ services:
     # says it plainly: isolation is the container's job, a shell can reach whatever the container
     # can reach.
     #
-    # `server` reaches this by name, and it is all that belongs here: it applies its own migrations
-    # when it starts and does its scheduled work itself. Anything on the host connects through the
-    # published port below.
+    # `server` reaches this by name, and it is what belongs here: it applies its own migrations
+    # when it starts and does its scheduled work itself. (`migrate` and `worker` are here too, for
+    # this one release, and nothing starts them: see each.) Anything on the host connects through
+    # the published port below.
     environment:
       POSTGRES_DB: openbot
       POSTGRES_USER: openbot
@@ -207,6 +215,37 @@ services:
     networks:
       - data
       - default
+
+  # DEFINED FOR THIS ONE RELEASE, AND STARTED BY NOTHING IN IT. An OpenBot Desktop app from the
+  # release before reads a Compose file as current only when it defines `worker`, and starts the
+  # service by name. The server does the scheduled work itself now, so started that way this says
+  # so and waits. Nothing depends on it. It goes in the next release.
+  worker:
+    profiles: ["openbot"]
+    image: *server-image
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    command: ["bun", "../worker/src/index.ts"]
+    restart: unless-stopped
+    networks:
+      - data
+
+  # DEFINED FOR THIS ONE RELEASE, AND STARTED BY NOTHING IN IT. An OpenBot Desktop app from the
+  # release before asks for this service's image by name. The server applies its own migrations
+  # when it starts, so run by hand this finds nothing left to do and exits. Nothing depends on it.
+  # It goes in the next release.
+  migrate:
+    profiles: ["openbot"]
+    image: *server-image
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    command: ["bun", "scripts/migrate.ts"]
+    environment:
+      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - data
 
   # KEPT FOR ONE RELEASE, and started by nothing. Defined only so an app from the release before
   # (1.0.2 or 1.0.3) can merge its own port settings onto this file: on a Mac with Podman it names

@@ -2,9 +2,10 @@
 //!
 //! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, and the
 //! published image's `server` under the `openbot` profile. The server applies its own migrations
-//! when it starts and does the scheduled work itself. An installation whose Compose file is an
-//! earlier release's also has a one-shot `migrate` and a `worker`, and is run as that file
-//! requires (`selected_services`). Docker's restart policy keeps them up. Nothing runs on the
+//! when it starts and does the scheduled work itself, which this release's Compose file says on
+//! one line (`SCHEDULED_WORK_MARKER`). An installation whose Compose file is an earlier release's
+//! has no such line, and its one-shot `migrate` and its `worker` are in use: it is run as that
+//! file requires (`selected_services`). Docker's restart policy keeps them up. Nothing runs on the
 //! host: the person's own browser is on the one computer, shown in the OpenBot window.
 //!
 //! [`HOST_PROCESSES`] still names what earlier versions ran on the host, the server, the app, the
@@ -36,12 +37,12 @@ use crate::problem::Problem;
 /// computers an installation that predates this made for each Bot.
 const SERVICES: [&str; 3] = ["postgres", "agent-computer", "server"];
 
-/// The routines sweep as a service of its own, which releases up to 1.0.2 define beside `server`.
-/// Raised, stopped and restarted with the server in an installation whose Compose file defines it,
-/// and never named in one whose file does not.
+/// The routines sweep as a service of its own, which releases up to 1.0.3 run beside `server`.
+/// Raised, stopped and restarted with the server in an installation whose Compose file is one of
+/// theirs, and never named in any other (`installation_uses`).
 const WORKER: &str = "worker";
 
-/// The one-shot migration service the same releases define. Never raised by name: `server`
+/// The one-shot migration service the same releases run. Never raised by name: `server`
 /// depends on it there, so `up` runs it to completion first. Named only to list and pull its image.
 const MIGRATE: &str = "migrate";
 
@@ -50,26 +51,45 @@ const MIGRATE: &str = "migrate";
 /// rather than only on `up`, so `down` stops them and `config` describes them.
 const OPENBOT_PROFILE: &str = "openbot";
 
-/// Whether the Compose file laid out in `folder` defines `service`.
+/// The line a release's `docker-compose.yml` carries, at the top level, when its server applies
+/// its own migrations and does the scheduled work itself. Compose ignores a top-level `x-` field.
+///
+/// A positive statement by the file, read as text. This release's file still defines `worker` and
+/// `migrate`, so that an app from the release before reads it as current, and starts neither: what
+/// a file defines no longer says what it uses. A file from a release up to 1.0.3 cannot carry the
+/// line, and nothing else somebody edits in a file changes the answer.
+const SCHEDULED_WORK_MARKER: &str = "x-openbot-scheduled-work: server";
+
+/// Whether `text`, a Compose file, says its server does the scheduled work: the marker, on a line
+/// of its own at column 0, with nothing after it but a comment.
+fn server_does_the_scheduled_work(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.split('#').next().unwrap_or(line).trim_end() == SCHEDULED_WORK_MARKER)
+}
+
+/// Whether the installation laid out in `folder` runs `service` (`worker` or `migrate`) as a
+/// service of its own: its Compose file defines it and does not say the server does that work.
 ///
 /// The file on disk decides, not this app's release: an installation being updated still has the
 /// previous release's `docker-compose.yml` while this app backs its database up, and again after an
-/// update that rolled back. Compose refuses a command that names a service its file does not
-/// define, and leaves a defined service this app never names not running. A file that cannot be
-/// read defines nothing.
-fn installation_defines(folder: &Path, service: &str) -> bool {
+/// update that rolled back. There the worker is raised with the server and `migrate` is what
+/// `server` waits on. A file with the marker is never asked for either, though it may define them.
+/// Compose refuses a command that names a service its file does not define. A file that cannot be
+/// read uses nothing.
+fn installation_uses(folder: &Path, service: &str) -> bool {
     std::fs::read_to_string(folder.join("docker-compose.yml")).is_ok_and(|text| {
-        compose_service_names(&text)
-            .iter()
-            .any(|name| name == service)
+        !server_does_the_scheduled_work(&text)
+            && compose_service_names(&text)
+                .iter()
+                .any(|name| name == service)
     })
 }
 
 /// The services Start raises for the installation in `root`: [`SERVICES`], the `worker` its own
-/// Compose file defines, if it does, and the Bot the person picked.
+/// Compose file uses, if it does (`installation_uses`), and the Bot the person picked.
 pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
-    if installation_defines(root, WORKER) {
+    if installation_uses(root, WORKER) {
         services.push(WORKER);
     }
     if harness {
@@ -78,30 +98,32 @@ pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     services
 }
 
-/// [`selected_services`] and the one-shot `migrate`, where the file defines it: every service whose
+/// [`selected_services`] and the one-shot `migrate`, where the file uses it: every service whose
 /// image the installation needs on the computer before Start.
 fn services_with_images(folder: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = selected_services(folder, harness);
-    if installation_defines(folder, MIGRATE) {
+    if installation_uses(folder, MIGRATE) {
         services.push(MIGRATE);
     }
     services
 }
 
 /**
-Remove this installation's containers for `migrate` and `worker` once its Compose file defines
-neither, and say which services had one.
+Remove this installation's containers for `migrate` and `worker` once its Compose file no longer
+uses them (`installation_uses`), and say which services had one.
 
 An update from a release that ran them leaves their containers behind when the stack was not taken
-down under the old file first. Compose calls a container whose service is gone an orphan: it warns
-and leaves it, so the previous release's routines sweep would keep running beside a server that now
-does that work itself, on a network `down` can then not remove.
+down under the old file first. Nothing this app does under the new file touches them: it never
+names either service, and where the file does not define one, Compose calls its container an orphan
+and only warns. So the previous release's routines sweep would keep running beside a server that
+now does that work itself.
 
 Found by the labels Compose put on them: this installation's own project (`project`) and one of
 these two services, so no container of another project, and nothing the supervisor made, can match.
 `--remove-orphans` would also take every other container of the project this file does not name.
 Removed without `--volumes`: no volume is touched, and neither service ever had one. A service the
-file still defines is left to Compose, and an installation with no Compose file is left alone.
+file uses is never looked for, so a previous release's own worker and migrate containers are never
+removed while its file is the one installed. An installation with no Compose file is left alone.
 */
 fn remove_retired_containers(engine: &Address, root: &Path) -> Result<Vec<&'static str>, String> {
     if !root.join("docker-compose.yml").is_file() {
@@ -109,7 +131,7 @@ fn remove_retired_containers(engine: &Address, root: &Path) -> Result<Vec<&'stat
     }
     let retired: Vec<&'static str> = [MIGRATE, WORKER]
         .into_iter()
-        .filter(|service| !installation_defines(root, service))
+        .filter(|service| !installation_uses(root, service))
         .collect();
     if retired.is_empty() {
         return Ok(retired);
@@ -1328,7 +1350,7 @@ pub fn installation_images_by(
 }
 
 /// Pull the selected stack before `up`, including service dependencies and, where the
-/// installation's Compose file defines one, the one-shot migration.
+/// installation's Compose file uses one, the one-shot migration.
 /// Keep this separate from `up`: image transfer must not include container startup or migrations.
 /// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
 /// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
@@ -1763,9 +1785,10 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
          * defines one, and a Stop that left them running would leave the app answering a window
          * that says OpenBot is stopped.
          *
-         * A `worker` or `migrate` container whose service this file no longer defines is not
-         * Compose's to take down, and while one is attached the project's network stays. Removed
-         * first; a failure there is logged and the rest is still stopped.
+         * A `worker` or `migrate` container an earlier release left, under a file that no
+         * longer uses the service, is removed first: where the file does not define it, it is not
+         * Compose's to take down, and while one is attached the project's network stays. A
+         * failure there is logged and the rest is still stopped.
          */
         if let Err(error) = remove_retired_containers(engine, root) {
             log::warn!("[compose down] {error}");
@@ -3562,12 +3585,15 @@ pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
 
 /**
 Restart OpenBot itself and leave everything else running: the server, and the worker where the
-installation's Compose file defines one.
+installation's Compose file uses one.
 
 What the Status window's Restart did to the host processes, now done by the engine that runs them:
 the database and the Bots stay up, so nothing is lost and it takes seconds. The profile is named
 because the services sit behind it, and Compose refuses to restart a service it cannot see, as it
 refuses one its file does not define.
+
+Never the `worker` of a file that says its server does the scheduled work: nothing in that release
+starts it, so there is none to restart.
 */
 pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
     crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
@@ -3576,7 +3602,7 @@ pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
 fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root, &Secrets::new())
         .args(["--profile", OPENBOT_PROFILE, "restart", "server"])
-        .args(installation_defines(root, WORKER).then_some(WORKER))
+        .args(installation_uses(root, WORKER).then_some(WORKER))
         .output()
         .map_err(|error| format!("could not restart OpenBot: {error}"))?;
     if output.status.success() {
@@ -6834,7 +6860,8 @@ fn main() {
             // `up` makes a container for each service it is given, and for `migrate` when the
             // file's `server` waits on one. `down` takes the containers of the services the file
             // defines and leaves any other: that is what an orphan is. With
-            // `.fixture-this-release-does-not-start`, a file with no `worker` service fails its `up`.
+            // `.fixture-this-release-does-not-start`, a file whose `server` waits on no `migrate`
+            // fails its `up`.
             Some("compose")
                 if std::path::Path::new(".fixture-compose-containers").exists()
                     && actual.iter().any(|arg| arg == "up" || arg == "down") =>
@@ -6864,13 +6891,14 @@ fn main() {
                             std::process::exit(1);
                         }
                     }
-                    if !defined.iter().any(|name| name == "worker")
+                    let waits_on_migrate = file.contains("      migrate:\n        condition: service_completed_successfully");
+                    if !waits_on_migrate
                         && std::path::Path::new(".fixture-this-release-does-not-start").exists()
                     {
                         eprintln!("Container openbot-desktop-server-1 Error dependency failed to start");
                         std::process::exit(1);
                     }
-                    if defined.iter().any(|name| name == "migrate") && raised.iter().any(|name| name == "server") {
+                    if waits_on_migrate && raised.iter().any(|name| name == "server") {
                         raised.push("migrate".to_string());
                     }
                     for service in raised {
@@ -9402,7 +9430,7 @@ fn main() {
     /// with "service ... has neither an image nor a build context specified". The overlay names
     /// only what the installation's own file defines, whichever release wrote that file.
     #[test]
-    fn the_mac_podman_overlay_names_only_services_the_installation_defines() {
+    fn the_mac_podman_overlay_names_only_services_the_installation_uses() {
         let root = temp_root("compose-ports-installed");
         std::fs::create_dir_all(&root).unwrap();
         let files = ["docker-compose.yml".to_owned()];
@@ -9899,6 +9927,49 @@ fn main() {
     /// This release's own Compose file, which an installation has once it is on this release.
     const THIS_RELEASES_COMPOSE: &str = include_str!("../../../docker-compose.yml");
 
+    /// What tells this release's file from an earlier one's is one line the file itself carries,
+    /// at the top level, once. It is read as text, so no Compose has to resolve the file first, and
+    /// it is not what the file defines: this release's file defines `worker` and `migrate` too.
+    #[test]
+    fn this_releases_compose_file_says_once_that_its_server_does_the_scheduled_work() {
+        let marked: Vec<&str> = THIS_RELEASES_COMPOSE
+            .lines()
+            .filter(|line| line.contains("x-openbot-scheduled-work"))
+            .collect();
+        assert_eq!(marked, [SCHEDULED_WORK_MARKER]);
+        assert_eq!(SCHEDULED_WORK_MARKER, "x-openbot-scheduled-work: server");
+        assert!(server_does_the_scheduled_work(THIS_RELEASES_COMPOSE));
+        let defined = compose_service_names(THIS_RELEASES_COMPOSE);
+        for service in [WORKER, MIGRATE] {
+            assert!(defined.iter().any(|name| name == service), "{service}");
+        }
+
+        // 1.0.2's file has no such line, and is read as using both.
+        assert!(!server_does_the_scheduled_work(RELEASED_COMPOSE_1_0_2));
+        // Only the line itself counts: not a comment about it, a nested key, or another value.
+        for other in [
+            "# x-openbot-scheduled-work: server\nservices: {}\n",
+            "services:\n  x-openbot-scheduled-work: server\n",
+            "x-openbot-scheduled-work: worker\nservices: {}\n",
+        ] {
+            assert!(!server_does_the_scheduled_work(other), "{other}");
+        }
+        assert!(server_does_the_scheduled_work(
+            "x-openbot-scheduled-work: server # the server sweeps\nservices: {}\n"
+        ));
+
+        let root = temp_root("scheduled-work-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        assert!(installation_uses(&root, WORKER) && installation_uses(&root, MIGRATE));
+        // A later release's file, with neither service and no line, uses neither.
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// An installation in the fake engine's folder with `compose` as its Compose file and
     /// `containers` on its engine (`id<TAB>project<TAB>service` a line), and where the engine
     /// records what it is asked.
@@ -9936,9 +10007,9 @@ fn main() {
     }
 
     /// This release's server applies its own migrations and does the scheduled work itself, and
-    /// its Compose file defines no `migrate` and no `worker`. Compose refuses a command naming a
-    /// service its file does not define ("no such service: worker"), so Desktop names neither
-    /// anywhere: not to list images, pull, start, restart or stop.
+    /// its Compose file says so on one line. It still defines `migrate` and `worker`, for an app
+    /// from the release before to read, and nothing in this release starts them: Desktop names
+    /// neither anywhere, not to list images, pull, start, restart or stop.
     #[test]
     fn this_releases_compose_file_is_never_asked_for_migrate_or_worker() {
         if crate::test_support::isolated_process(
@@ -10080,7 +10151,7 @@ fn main() {
         }
         fn start(&mut self) -> Result<(), Problem> {
             up(self.engine, self.root, false, &Secrets::new())?;
-            if self.dies_starting && !installation_defines(self.root, WORKER) {
+            if self.dies_starting && !installation_uses(self.root, WORKER) {
                 panic!("the app stopped while the update was starting");
             }
             Ok(())
@@ -10174,8 +10245,8 @@ fn main() {
     }
 
     /// An update from 1.0.2 whose new version does not start is undone: 1.0.2's Compose file goes
-    /// back and 1.0.2 is started again. The failure comes after this release's file, which defines
-    /// no `migrate` and no `worker`, is in place.
+    /// back and 1.0.2 is started again. The failure comes after this release's file, which uses
+    /// neither `migrate` nor `worker`, is in place.
     #[test]
     fn an_update_from_1_0_2_that_does_not_start_goes_back_to_its_migrate_and_worker() {
         if crate::test_support::isolated_process(

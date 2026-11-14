@@ -47,6 +47,8 @@ type Run = {
   cli?: "missing-provision" | "provisions";
   /** The tag `backend-images.env` names in the copied checkout. */
   pinnedTag?: string;
+  /** The checkout's docker-compose.yml. This checkout's own unless a test gives another. */
+  composeFile?: string;
 };
 
 async function runStart({
@@ -59,6 +61,7 @@ async function runStart({
   composioSetup,
   cli,
   pinnedTag = "sha-pinned-for-the-test",
+  composeFile,
 }: Run = {}) {
   const root =
     await Bun.$`mktemp -d ${tmpdir()}/openbot-start-guard-XXXXXX`.text();
@@ -119,6 +122,10 @@ async function runStart({
   // The templates that say which settings the server reads.
   for (const template of [".env.example", ".env.personal.example"])
     await writeFile(join(directory, template), await readFile(template));
+  await writeFile(
+    join(directory, "docker-compose.yml"),
+    composeFile ?? (await readFile("docker-compose.yml")),
+  );
   await writeFile(
     join(directory, "backend-images.env"),
     `# The images the test runs.\nOPENBOT_BACKEND_TAG=${pinnedTag}\n`,
@@ -210,7 +217,6 @@ fi
 if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 # What Compose calls this checkout's project, and the services its file defines.
 if [[ "$args" == "compose config" ]]; then printf 'name: fixture-project\\nservices: {}\\n'; fi
-if [[ "$args" == "compose --profile openbot config --services" ]]; then printf 'postgres\\nserver\\n'; fi
 # A routine worker's container, left by a start from when the worker was a Compose service.
 if [[ "$args" == "ps -aq --filter label=com.docker.compose.project=fixture-project --filter label=com.docker.compose.service=worker" ]] && [ -n "\${TEST_OLD_WORKER_CONTAINER:-}" ]; then echo old-worker-container; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
@@ -676,10 +682,10 @@ describe("start.sh and the managed Bot", () => {
 
 describe("start.sh and the work the server does itself", () => {
   /**
-   * The server applies its own migrations when it starts and does the scheduled work itself, and
-   * docker-compose.yml defines no `migrate` and no `worker` service. So the start runs no migration
-   * step and starts no worker, as a container or on the host, and looks for the migrated tables
-   * once the server is up.
+   * The server applies its own migrations when it starts and does the scheduled work itself.
+   * docker-compose.yml still defines `migrate` and `worker`, for one release, and nothing starts
+   * them: the start runs no migration step and starts no worker, as a container or on the host, and
+   * looks for the migrated tables once the server is up.
    */
   test("runs no migrate step and starts no worker", async () => {
     const result = await runStart();
@@ -705,9 +711,10 @@ describe("start.sh and the work the server does itself", () => {
   });
 
   /**
-   * A checkout started before this had a `worker` container. Its service is gone from the Compose
-   * file, so Compose would leave it running beside a server that now does the same work. It is
-   * removed, found by this checkout's own Compose project and that one service.
+   * A checkout started before this had a `worker` container. Nothing starts that service now, as
+   * docker-compose.yml says on its `x-openbot-scheduled-work` line, so the container would be left
+   * running beside a server that does the same work. It is removed, found by this checkout's own
+   * Compose project and that one service.
    */
   test("removes the worker container an earlier start left", async () => {
     const result = await runStart({
@@ -720,6 +727,26 @@ describe("start.sh and the work the server does itself", () => {
     expect(result.stdout).toContain(
       "worker: removed the container an earlier start left",
     );
+  });
+});
+
+describe("start.sh and a docker-compose.yml from an earlier release", () => {
+  /**
+   * A docker-compose.yml without the `x-openbot-scheduled-work` line is an earlier release's, where
+   * `worker` is a service in use. Its container is not a left-over there and is never removed.
+   */
+  test("leaves that file's worker container alone", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+      composeFile: await readFile(
+        "desktop/src-tauri/test-fixtures/compose/docker-compose-v1.0.2.yml",
+        "utf8",
+      ),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+    expect(result.dockerLog).not.toMatch(/^ps -aq /m);
   });
 });
 
