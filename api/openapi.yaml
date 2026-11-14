@@ -2919,19 +2919,6 @@ paths:
         - webSession: []
         - appOAuth:
             - devices:read
-  /api/v2/organizations/{organizationId}/routines:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags:
-        - Routines
-      operationId: listRoutines
-      summary: List routines
-      description: Return one page of the caller's own routines, newest first. A routine that runs a goal names it in goalId. A missing cursor starts at the first page and nextCursor null ends the list.
-      security:
-        - webSession: []
-        - appOAuth:
-            - routines:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -2939,7 +2926,6 @@ paths:
       responses:
         '200':
           description: One page of devices.
-          description: One page of routines.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -3557,6 +3543,44 @@ paths:
               examples:
                 pushAndSlack:
                   $ref: '#/components/examples/NotificationTransportPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/routines:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Routines
+      operationId: listRoutines
+      summary: List routines
+      description: Return one page of the caller's own routines, newest first. A routine that runs a goal names it in goalId. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of routines.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
                 $ref: '#/components/schemas/RoutinePage'
               examples:
                 answer:
@@ -5502,6 +5526,11 @@ components:
       in: path
       required: true
       description: The destination's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
     RoutineId:
       name: routineId
       in: path
@@ -8312,69 +8341,6 @@ components:
       required:
         - id
         - platform
-    RoutineConversation:
-      type: object
-      description: Where a routine posts.
-      required:
-        - id
-        - name
-        - title
-        - gone
-      properties:
-        id:
-          type: string
-          description: The conversation's id.
-        name:
-          type:
-            - string
-            - 'null'
-          description: The names of the Bots in it, or null when the conversation is gone entirely.
-        title:
-          type:
-            - string
-            - 'null'
-          description: The conversation as the sidebar titles it, which is what a person knows it by. Null when it is gone entirely.
-        gone:
-          type: boolean
-          description: Whether the conversation was deleted. Such a routine is shown, not hidden.
-    RoutineLastRun:
-      type: object
-      required:
-        - status
-        - at
-      properties:
-        status:
-          type:
-            - string
-            - 'null'
-          enum:
-            - succeeded
-            - failed
-            - skipped
-            - waiting
-            - null
-          description: How it ended, or null while it is still open. Only failed is a failure.
-        at:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When it finished, or null while it is still open.
-    Routine:
-      type: object
-      description: 'One of a person''s routines. schedule is display text and never a value to parse: words for the schedules OpenBot can describe, the five cron fields for anything stranger. nextRunAt is the one time to rely on.'
-      required:
-        - id
-        - botId
-        - schedule
-        - timezone
-        - instruction
-        - title
-        - conversation
-        - enabled
-        - nextRunAt
-        - lastRun
-        - goalId
         - createdAt
       properties:
         id:
@@ -8398,58 +8364,6 @@ components:
           description: The first registered first, then by id.
           items:
             $ref: '#/components/schemas/Device'
-          description: The routine's id.
-        botId:
-          type: string
-          description: The Bot that carries it out.
-        schedule:
-          type: string
-          description: When it runs, as text to show.
-        timezone:
-          type: string
-          description: The IANA time zone the schedule is read in.
-        instruction:
-          type: string
-          description: What the Bot does on each run.
-        title:
-          type:
-            - string
-            - 'null'
-          description: What the person called it, or null when they named it nothing.
-        conversation:
-          $ref: '#/components/schemas/RoutineConversation'
-        enabled:
-          type: boolean
-          description: False while it is paused. A paused routine never runs.
-        nextRunAt:
-          type: string
-          format: date-time
-          description: When it runs next, if it is on.
-        lastRun:
-          oneOf:
-            - $ref: '#/components/schemas/RoutineLastRun'
-            - type: 'null'
-          description: Its newest run, or null when it has never run.
-        goalId:
-          type:
-            - string
-            - 'null'
-          description: The goal it runs, or null when it runs none.
-        createdAt:
-          type: string
-          format: date-time
-          description: When it was made.
-    RoutinePage:
-      type: object
-      required:
-        - routines
-        - nextCursor
-      properties:
-        routines:
-          type: array
-          description: Newest first.
-          items:
-            $ref: '#/components/schemas/Routine'
         nextCursor:
           type:
             - string
@@ -8701,6 +8615,276 @@ components:
           $ref: '#/components/schemas/DeliveryKind'
         state:
           $ref: '#/components/schemas/DeliveryState'
+        error:
+          type:
+            - string
+            - 'null'
+          description: Why it failed or may not have arrived, as the provider said. Null otherwise.
+        conversationId:
+          type: string
+          description: The conversation it was about.
+        botId:
+          type: string
+          description: The Bot that sent it.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was sent.
+    DeliveryPage:
+      type: object
+      required:
+        - deliveries
+        - nextCursor
+      properties:
+        deliveries:
+          type: array
+          description: The newest first, then by id.
+          items:
+            $ref: '#/components/schemas/Delivery'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    UpdateRoute:
+      description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
+      oneOf:
+        - type: string
+          enum:
+            - all
+        - type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationTransport'
+    UpdateRouting:
+      type: object
+      description: Where each kind of update may go.
+      required:
+        - progress
+        - decision
+        - question
+        - attention
+      properties:
+        progress:
+          $ref: '#/components/schemas/UpdateRoute'
+        decision:
+          $ref: '#/components/schemas/UpdateRoute'
+        question:
+          $ref: '#/components/schemas/UpdateRoute'
+        attention:
+          $ref: '#/components/schemas/UpdateRoute'
+    NotificationSettings:
+      type: object
+      description: 'Where a person''s updates go, for every one of their Bots at once. progress: replies and results from work they weren''t watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots'' check-ins found, at most once an hour, every Bot in one message.'
+      required:
+        - routing
+      properties:
+        routing:
+          $ref: '#/components/schemas/UpdateRouting'
+    UpdateNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - routing
+      properties:
+        routing:
+          type: object
+          description: The kinds of update to change. At least one.
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            progress:
+              $ref: '#/components/schemas/UpdateRoute'
+            decision:
+              $ref: '#/components/schemas/UpdateRoute'
+            question:
+              $ref: '#/components/schemas/UpdateRoute'
+            attention:
+              $ref: '#/components/schemas/UpdateRoute'
+    BotNotifyLevel:
+      type: string
+      enum:
+        - all
+        - needs_input
+        - none
+      description: 'How much one Bot may reach the person outside OpenBot: all of it, only what needs them (its questions and approvals), or nothing.'
+    BotNotificationSettings:
+      type: object
+      required:
+        - botId
+        - notify
+      properties:
+        botId:
+          type: string
+          description: The Bot.
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    UpdateBotNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - notify
+      properties:
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    NotificationTransportOption:
+      type: object
+      required:
+        - id
+        - title
+      properties:
+        id:
+          $ref: '#/components/schemas/NotificationTransport'
+        title:
+          type: string
+          description: Its name, as a person reads it.
+    NotificationTransportPage:
+      type: object
+      required:
+        - notificationTransports
+        - nextCursor
+      properties:
+        notificationTransports:
+          type: array
+          description: Push, then Slack, Microsoft Teams and text messages, as set up.
+          items:
+            $ref: '#/components/schemas/NotificationTransportOption'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    RoutineConversation:
+      type: object
+      description: Where a routine posts.
+      required:
+        - id
+        - name
+        - title
+        - gone
+      properties:
+        id:
+          type: string
+          description: The conversation's id.
+        name:
+          type:
+            - string
+            - 'null'
+          description: The names of the Bots in it, or null when the conversation is gone entirely.
+        title:
+          type:
+            - string
+            - 'null'
+          description: The conversation as the sidebar titles it, which is what a person knows it by. Null when it is gone entirely.
+        gone:
+          type: boolean
+          description: Whether the conversation was deleted. Such a routine is shown, not hidden.
+    RoutineLastRun:
+      type: object
+      required:
+        - status
+        - at
+      properties:
+        status:
+          type:
+            - string
+            - 'null'
+          enum:
+            - succeeded
+            - failed
+            - skipped
+            - waiting
+            - null
+          description: How it ended, or null while it is still open. Only failed is a failure.
+        at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it finished, or null while it is still open.
+    Routine:
+      type: object
+      description: 'One of a person''s routines. schedule is display text and never a value to parse: words for the schedules OpenBot can describe, the five cron fields for anything stranger. nextRunAt is the one time to rely on.'
+      required:
+        - id
+        - botId
+        - schedule
+        - timezone
+        - instruction
+        - title
+        - conversation
+        - enabled
+        - nextRunAt
+        - lastRun
+        - goalId
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The routine's id.
+        botId:
+          type: string
+          description: The Bot that carries it out.
+        schedule:
+          type: string
+          description: When it runs, as text to show.
+        timezone:
+          type: string
+          description: The IANA time zone the schedule is read in.
+        instruction:
+          type: string
+          description: What the Bot does on each run.
+        title:
+          type:
+            - string
+            - 'null'
+          description: What the person called it, or null when they named it nothing.
+        conversation:
+          $ref: '#/components/schemas/RoutineConversation'
+        enabled:
+          type: boolean
+          description: False while it is paused. A paused routine never runs.
+        nextRunAt:
+          type: string
+          format: date-time
+          description: When it runs next, if it is on.
+        lastRun:
+          oneOf:
+            - $ref: '#/components/schemas/RoutineLastRun'
+            - type: 'null'
+          description: Its newest run, or null when it has never run.
+        goalId:
+          type:
+            - string
+            - 'null'
+          description: The goal it runs, or null when it runs none.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was made.
+    RoutinePage:
+      type: object
+      required:
+        - routines
+        - nextCursor
+      properties:
+        routines:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/Routine'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     CreateRoutineRequest:
       type: object
       additionalProperties: false
@@ -8810,28 +8994,6 @@ components:
           type:
             - string
             - 'null'
-          description: Why it failed or may not have arrived, as the provider said. Null otherwise.
-        conversationId:
-          type: string
-          description: The conversation it was about.
-        botId:
-          type: string
-          description: The Bot that sent it.
-        createdAt:
-          type: string
-          format: date-time
-          description: When it was sent.
-    DeliveryPage:
-      type: object
-      required:
-        - deliveries
-        - nextCursor
-      properties:
-        deliveries:
-          type: array
-          description: The newest first, then by id.
-          items:
-            $ref: '#/components/schemas/Delivery'
           description: Why it failed or was skipped, or null.
         source:
           type: string
@@ -8858,74 +9020,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    UpdateRoute:
-      description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
-      oneOf:
-        - type: string
-          enum:
-            - all
-        - type: array
-          maxItems: 4
-          uniqueItems: true
-          items:
-            $ref: '#/components/schemas/NotificationTransport'
-    UpdateRouting:
-      type: object
-      description: Where each kind of update may go.
-      required:
-        - progress
-        - decision
-        - question
-        - attention
-      properties:
-        progress:
-          $ref: '#/components/schemas/UpdateRoute'
-        decision:
-          $ref: '#/components/schemas/UpdateRoute'
-        question:
-          $ref: '#/components/schemas/UpdateRoute'
-        attention:
-          $ref: '#/components/schemas/UpdateRoute'
-    NotificationSettings:
-      type: object
-      description: 'Where a person''s updates go, for every one of their Bots at once. progress: replies and results from work they weren''t watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots'' check-ins found, at most once an hour, every Bot in one message.'
-      required:
-        - routing
-      properties:
-        routing:
-          $ref: '#/components/schemas/UpdateRouting'
-    UpdateNotificationSettingsRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - routing
-      properties:
-        routing:
-          type: object
-          description: The kinds of update to change. At least one.
-          additionalProperties: false
-          minProperties: 1
-          properties:
-            progress:
-              $ref: '#/components/schemas/UpdateRoute'
-            decision:
-              $ref: '#/components/schemas/UpdateRoute'
-            question:
-              $ref: '#/components/schemas/UpdateRoute'
-            attention:
-              $ref: '#/components/schemas/UpdateRoute'
-    BotNotifyLevel:
-      type: string
-      enum:
-        - all
-        - needs_input
-        - none
-      description: 'How much one Bot may reach the person outside OpenBot: all of it, only what needs them (its questions and approvals), or nothing.'
-    BotNotificationSettings:
-      type: object
-      required:
-        - botId
-        - notify
     CheckInSkipReason:
       type: string
       enum:
@@ -9313,38 +9407,6 @@ components:
         botId:
           type: string
           description: The Bot.
-        notify:
-          $ref: '#/components/schemas/BotNotifyLevel'
-    UpdateBotNotificationSettingsRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - notify
-      properties:
-        notify:
-          $ref: '#/components/schemas/BotNotifyLevel'
-    NotificationTransportOption:
-      type: object
-      required:
-        - id
-        - title
-      properties:
-        id:
-          $ref: '#/components/schemas/NotificationTransport'
-        title:
-          type: string
-          description: Its name, as a person reads it.
-    NotificationTransportPage:
-      type: object
-      required:
-        - notificationTransports
-        - nextCursor
-      properties:
-        notificationTransports:
-          type: array
-          description: Push, then Slack, Microsoft Teams and text messages, as set up.
-          items:
-            $ref: '#/components/schemas/NotificationTransportOption'
         name:
           type: string
           description: What the Bot is called.
@@ -11097,8 +11159,6 @@ components:
                 traceId: trace_example
     TransportUnavailable:
       description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
-    InvalidRoutine:
-      description: A field is missing or out of bounds, the schedule is not five cron fields or runs more often than hourly, the Bot is not in that conversation, the routine is paused or already running, or the caller has 20 routines switched on.
       content:
         application/problem+json:
           schema:
@@ -11111,70 +11171,23 @@ components:
                 status: 404
                 detail: SMS is not configured on this deployment.
                 code: TRANSPORT_UNAVAILABLE
-            invalid:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: Choose when it runs.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    RoutineNotFound:
-      description: The routine does not exist or is somebody else's, or the organization does not exist.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            missing:
-              value:
-                type: https://open.bot/errors/routine-not-found
-                title: Routine not found.
-                status: 404
-                detail: That routine does not exist.
-                code: ROUTINE_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     DeviceConflict:
       description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
-    InvalidCheckIn:
-      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, or a check-in is running already or ran in the last ten minutes.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
             anotherAccount:
-            invalid:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: Invalid settings.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    CheckInConflict:
-      description: The Bot already checks in on this and refuseExisting was asked for, or the Idempotency-Key was already used for a different request.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            sameCheckIn:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
                 detail: This device is already registered to another account. Sign out of OpenBot on it first.
-                detail: This Bot already checks in on this. Give this one a different name, or change that one on its row.
                 code: CONFLICT
                 category: conflict
                 retryable: false
@@ -11193,8 +11206,6 @@ components:
                 traceId: trace_example
     DeviceNotFound:
       description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
-    CheckInNotFound:
-      description: The check-in does not exist or is somebody else's, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -11207,11 +11218,6 @@ components:
                 status: 404
                 detail: Device not found.
                 code: DEVICE_NOT_FOUND
-                type: https://open.bot/errors/check-in-not-found
-                title: Check-in not found.
-                status: 404
-                detail: This could not be found.
-                code: CHECK_IN_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -11295,8 +11301,6 @@ components:
                 traceId: trace_example
     DestinationNotFound:
       description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
-    CheckInItemNotFound:
-      description: The item does not exist, is somebody else's or is no longer open, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -11309,6 +11313,109 @@ components:
                 status: 404
                 detail: Connection not found.
                 code: DESTINATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidRoutine:
+      description: A field is missing or out of bounds, the schedule is not five cron fields or runs more often than hourly, the Bot is not in that conversation, the routine is paused or already running, or the caller has 20 routines switched on.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose when it runs.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    RoutineNotFound:
+      description: The routine does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/routine-not-found
+                title: Routine not found.
+                status: 404
+                detail: That routine does not exist.
+                code: ROUTINE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidCheckIn:
+      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, or a check-in is running already or ran in the last ten minutes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Invalid settings.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInConflict:
+      description: The Bot already checks in on this and refuseExisting was asked for, or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sameCheckIn:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This Bot already checks in on this. Give this one a different name, or change that one on its row.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInNotFound:
+      description: The check-in does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/check-in-not-found
+                title: Check-in not found.
+                status: 404
+                detail: This could not be found.
+                code: CHECK_IN_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInItemNotFound:
+      description: The item does not exist, is somebody else's or is no longer open, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
                 type: https://open.bot/errors/check-in-item-not-found
                 title: Item not found.
                 status: 404
