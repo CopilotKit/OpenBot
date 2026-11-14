@@ -406,9 +406,17 @@ beforeAll(() => {
       if (bots) return bots;
       if (/^\/api\/plugins\/for\/[^/]+$/.test(url.pathname))
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       if (
         /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(

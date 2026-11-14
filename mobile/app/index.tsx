@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { api, type Conversation } from "../src/api";
+import { api, type Conversation, ORGANIZATION } from "../src/api";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { useLoad } from "../src/use-load";
@@ -32,7 +32,7 @@ export default function Home() {
       api<{
         authProviders?: ("google" | "microsoft" | "okta")[];
         ssoConfigured?: boolean;
-      }>("/api/v2/organizations/default/deployment"),
+      }>(`${ORGANIZATION}/deployment`),
     [],
   );
   const options = useLoad(loadOptions, !session);
@@ -40,7 +40,7 @@ export default function Home() {
   const loadConversations = useCallback(
     () =>
       api<{ conversations: Conversation[]; nextCursor: string | null }>(
-        "/api/delivery/conversations",
+        `${ORGANIZATION}/conversations?limit=100`,
       ),
     [session?.user.id],
   );
@@ -184,7 +184,7 @@ export default function Home() {
                     conversations: Conversation[];
                     nextCursor: string | null;
                   }>(
-                    `/api/delivery/conversations?cursor=${encodeURIComponent(nextCursor)}`,
+                    `${ORGANIZATION}/conversations?limit=100&cursor=${encodeURIComponent(nextCursor)}`,
                   );
                   setOlder((items) => [...items, ...page.conversations]);
                   setOlderCursor(page.nextCursor);

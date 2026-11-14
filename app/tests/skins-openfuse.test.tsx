@@ -67,6 +67,13 @@ import {
   botOperationPath,
 } from "./bots-api";
 import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPage,
+  noContent,
+  problem,
+} from "./conversations-api";
+import {
   CHECK_IN_ITEMS_PATH,
   CHECK_INS_PATH,
   GOALS_PATH,
@@ -426,7 +433,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     }),
-    "/api/channels": { channels, nextCursor: null },
+    [CONVERSATIONS_PATH]: conversationPage(channels),
     [botOperationPath(fuse.id, "activity")]: activity,
     [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
@@ -466,6 +473,14 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
+      // A conversation marked read, or saying what it is doing, answers with nothing.
+      if (
+        method === "POST" &&
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(mark-read|activity|signal-busy)$/.test(
+          path,
+        )
+      )
+        return noContent();
       if (method !== "GET")
         return (
           approvalWriteResponse(input, init) ?? Response.json({ ok: true })
@@ -474,12 +489,14 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       if (bots) return bots;
       const waiting = answerBotAttention(input, init, { bots: attention });
       if (waiting) return waiting;
-      const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
+      const detail = path.match(
+        /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
+      );
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);
         return found
-          ? Response.json({ channel: found })
-          : Response.json({ error: "Not found" }, { status: 404 });
+          ? Response.json({ conversation: conversationOf(found) })
+          : problem(404, "Couldn't find that conversation.");
       }
       const approvals = approvalInboxResponse(input, inbox);
       if (approvals) return approvals;
@@ -728,10 +745,8 @@ describe("the frame", () => {
       const real = globalThis.fetch;
       return Object.assign(
         (input: RequestInfo | URL, init?: RequestInit) =>
-          String(input) === "/api/channels"
-            ? Promise.resolve(
-                Response.json({ channels: roster, nextCursor: null }),
-              )
+          String(input) === CONVERSATIONS_PATH
+            ? Promise.resolve(Response.json(conversationPage(roster)))
             : real(input, init),
         { preconnect: originalFetch.preconnect },
       );

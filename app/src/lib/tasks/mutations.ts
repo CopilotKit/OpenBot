@@ -1,7 +1,15 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { client } from "@/lib/client";
-import { type BotTask, taskKeys } from "./queries";
+import {
+  reopenTask,
+  resolveTask,
+  retryTask,
+} from "@/lib/api/generated/tasks/tasks";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { type BotTask, botTaskOf, taskKeys } from "./queries";
+
+/** A key for one write, so a retry of it is recognised as the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /** A task's state moves the sidebar's badge as well as the lists, so both are read again. */
 function invalidateTasks(queryClient: QueryClient) {
@@ -11,21 +19,24 @@ function invalidateTasks(queryClient: QueryClient) {
   ]);
 }
 
-const taskPath = (id: string) => `/api/tasks/${encodeURIComponent(id)}`;
-
 /** Mark a task done, or reopen one marked done. Its conversation stays either way. */
 export const resolveTaskMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: ({ id, done }: { id: string; done: boolean }) =>
-      client<BotTask>(
-        `${taskPath(id)}/${done ? "resolve" : "reopen"}`,
-        "task",
-        {
-          method: "POST",
-          fallback: done
-            ? "Couldn't mark this task done. Try again."
-            : "Couldn't reopen this task. Try again.",
-        },
+    mutationFn: async ({
+      id,
+      done,
+    }: {
+      id: string;
+      done: boolean;
+    }): Promise<BotTask> =>
+      botTaskOf(
+        (
+          await (done ? resolveTask : reopenTask)(ORGANIZATION_ID, id, once(), {
+            fallback: done
+              ? "Couldn't mark this task done. Try again."
+              : "Couldn't reopen this task. Try again.",
+          })
+        ).task,
       ),
     onSuccess: () => invalidateTasks(queryClient),
   });
@@ -36,10 +47,13 @@ export const resolveTaskMutationOptions = (queryClient: QueryClient) =>
  */
 export const tryTaskAgainMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
-    mutationFn: (id: string) =>
-      client<BotTask>(`${taskPath(id)}/again`, "task", {
-        method: "POST",
-        fallback: "Couldn't run this task again. Try again in a moment.",
-      }),
+    mutationFn: async (id: string): Promise<BotTask> =>
+      botTaskOf(
+        (
+          await retryTask(ORGANIZATION_ID, id, once(), {
+            fallback: "Couldn't run this task again. Try again in a moment.",
+          })
+        ).task,
+      ),
     onSuccess: () => invalidateTasks(queryClient),
   });

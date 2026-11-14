@@ -32,6 +32,13 @@ import {
 import { APPROVALS_PATH, approvalInboxResponse } from "./approvals-api";
 import { answerBotAttention, answerBotsList } from "./bots-api";
 import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  problem,
+  TASKS_PATH,
+  taskOf,
+} from "./conversations-api";
+import {
   answerScheduleLists,
   CHECK_IN_ITEMS_PATH,
   ORGANIZATION_PATH,
@@ -154,7 +161,10 @@ function serving() {
     const method = init?.method ?? "GET";
     if (method !== "GET") sent.push({ method, path });
     if (method === "GET" && failing.has(path))
-      return Response.json({ error: "Server error" }, { status: 500 });
+      // The API refuses with a problem document; the routes not yet in it with `{ error }`.
+      return path.startsWith(ORGANIZATION_PATH)
+        ? problem(500, "Server error")
+        : Response.json({ error: "Server error" }, { status: 500 });
     const started = path.startsWith(`${CHECK_IN_ITEMS_PATH}/`)
       ? path.slice(CHECK_IN_ITEMS_PATH.length).match(/^\/(.+)\/start$/)
       : null;
@@ -184,7 +194,9 @@ function serving() {
       items = items.filter((entry) => entry !== found);
       return Response.json({ checkInItem: { ...found, status: "dismissed" } });
     }
-    const acted = path.match(/^\/api\/tasks\/(.+)\/(resolve|reopen|again)$/);
+    const acted = path.match(
+      /^\/api\/v2\/organizations\/default\/tasks\/(.+)\/(resolve|reopen|retry)$/,
+    );
     if (acted) {
       const [, id, action] = acted;
       tasks = tasks.map((entry) =>
@@ -196,30 +208,35 @@ function serving() {
               ? { ...entry, status: "ready_for_review", resolvedAt: null }
               : { ...entry, status: "working", failure: null },
       );
-      return Response.json({ task: tasks.find((entry) => entry.id === id) });
+      const found = tasks.find((entry) => entry.id === id);
+      return found
+        ? Response.json({ task: taskOf(found) })
+        : problem(404, "Couldn't find that task.");
     }
     if (path === CHECK_IN_ITEMS_PATH)
       return Response.json({ checkInItems: items, nextCursor: null });
-    if (path === "/api/tasks") return Response.json({ tasks });
-    if (path.startsWith("/api/channels"))
-      return Response.json({
-        channels: busy.map((id) => ({
-          id,
-          name: "Task",
-          agentIds: ["inbox"],
-          threadId: `t-${id}`,
-          active: true,
-          lastMessageAt: now,
-          summary: null,
-          lastMessage: null,
-          lastMessageAgentId: null,
-          createdAt: now,
-          pinned: false,
-          lastReadAt: now,
-          busy: true,
-        })),
-        nextCursor: null,
-      });
+    if (path === TASKS)
+      return Response.json({ tasks: tasks.map(taskOf), nextCursor: null });
+    if (path.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json(
+        conversationPage(
+          busy.map((id) => ({
+            id,
+            name: "Task",
+            agentIds: ["inbox"],
+            threadId: `t-${id}`,
+            active: true,
+            lastMessageAt: now,
+            summary: null,
+            lastMessage: null,
+            lastMessageAgentId: null,
+            createdAt: now,
+            pinned: false,
+            lastReadAt: now,
+            busy: true,
+          })),
+        ),
+      );
     {
       const approvals = approvalInboxResponse(path, {
         enabled: true,
@@ -439,7 +456,10 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
 
   fireEvent.click(bots.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
-    expect(sent).toContainEqual({ method: "POST", path: "/api/tasks/f/again" }),
+    expect(sent).toContainEqual({
+      method: "POST",
+      path: "/api/v2/organizations/default/tasks/f/retry",
+    }),
   );
   await waitFor(() =>
     expect(
@@ -460,7 +480,7 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
   await waitFor(() =>
     expect(sent).toContainEqual({
       method: "POST",
-      path: "/api/tasks/r/reopen",
+      path: "/api/v2/organizations/default/tasks/r/reopen",
     }),
   );
   await waitFor(() =>
@@ -520,7 +540,8 @@ test("OpenDuet's Active lists the tasks under OpenDuet's headings, in its order"
  * must not hide what the others loaded, and must not read as "nothing waiting".
  */
 const APPROVALS = APPROVALS_PATH;
-const TASKS = "/api/tasks";
+// The fake reads a list in the API by its address, without the `limit` it is asked for with.
+const TASKS = TASKS_PATH;
 const CHECK_INS = CHECK_IN_ITEMS_PATH;
 
 async function botPage() {

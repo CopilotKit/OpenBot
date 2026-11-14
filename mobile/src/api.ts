@@ -148,17 +148,20 @@ export async function loadApprovalSettings(): Promise<ApprovalSettings> {
     },
   };
 }
+/** A conversation, as the API lists it. */
 export type Conversation = {
   id: string;
   name: string;
-  agentIds: string[];
+  botIds: string[];
   active: boolean;
 };
+/** One thing said in a conversation, as the API lists it. */
 export type TranscriptMessage = {
   id: string;
-  role: string;
-  content?: string | unknown[];
-  toolCalls?: unknown[];
+  role: "person" | "bot" | "tool" | "system";
+  text: string;
+  /** How many tools the Bot called in this message, when it called any. */
+  toolCalls?: number;
 };
 export type ApprovalInbox = {
   requests: {
@@ -234,11 +237,11 @@ export type TaskStatus =
   | "resolved"
   | "failed"
   | "ready_for_review";
-/** A task started from an item, as `GET /api/tasks` lists it. */
+/** A task started from an item, as the API lists it. */
 export type BotTask = {
   id: string;
-  agentId: string;
-  channelId: string;
+  botId: string;
+  conversationId: string;
   title: string;
   status: TaskStatus;
   /** Why its turn couldn't finish, while failed. */
