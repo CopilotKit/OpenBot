@@ -2978,7 +2978,7 @@ pub fn run(
                 break;
             }
             log::warn!(
-                "[local start] the engine refused to start the back end's node (exit 125); asking again in {}s",
+                "[local start] the engine refused to start the backend's node (exit 125); asking again in {}s",
                 wait.as_secs()
             );
             if !waited_uncancelled(wait, cancel) {
