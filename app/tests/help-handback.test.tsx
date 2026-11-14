@@ -27,6 +27,7 @@ import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A Bot asking the person to take over its browser, end to end in the app: the real chat, the real computer tools
@@ -277,8 +278,8 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname === `/api/plugins/for/${BOT}`)

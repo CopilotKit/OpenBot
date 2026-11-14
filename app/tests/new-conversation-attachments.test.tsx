@@ -31,6 +31,7 @@ import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A FILE ATTACHED BEFORE THE FIRST MESSAGE GOES WITH THAT MESSAGE.
@@ -156,8 +157,8 @@ beforeAll(() => {
         return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ tools: [], skills: [] });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === MY_CAPABILITIES_PATH)

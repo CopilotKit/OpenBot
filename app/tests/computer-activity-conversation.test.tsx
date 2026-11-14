@@ -34,6 +34,12 @@ import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+} from "./components-api";
 
 /**
  * The Activity pane beside a Bot's screen, fed by the conversation it sits next to.
@@ -361,14 +367,11 @@ beforeAll(() => {
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
       // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
-      if (url.pathname === "/api/components/catalogue")
-        return NativeResponse.json({ added: [] });
-      if (url.pathname === `/api/components/for-agent/${bot}`)
-        return NativeResponse.json({
-          components: [
-            { name: "askApproval", description: APPROVAL.description },
-          ],
-        });
+      if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
+      if (url.pathname === botComponentsPath(bot))
+        return botComponentsResponse([
+          { name: "askApproval", description: APPROVAL.description },
+        ]);
       // Grants, capabilities, profiles: none of them decides anything here, and the app reads none as a refusal.
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },

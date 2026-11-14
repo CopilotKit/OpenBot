@@ -28,6 +28,7 @@ import {
   problemResponse,
 } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A MODEL AND A THINKING EFFORT PICKED BEFORE A CONVERSATION EXISTS, SAVED BEFORE ITS FIRST RUN.
@@ -166,8 +167,8 @@ beforeAll(() => {
         return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ tools: [], skills: [] });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === MY_CAPABILITIES_PATH)

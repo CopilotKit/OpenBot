@@ -41,6 +41,7 @@ import {
   problemResponse,
 } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
 const NativeResponse = globalThis.Response;
@@ -212,8 +213,8 @@ beforeAll(() => {
           tools: [],
           skills: [],
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === MY_CAPABILITIES_PATH)

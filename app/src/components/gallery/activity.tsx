@@ -100,8 +100,7 @@ export function ActivityReportCard({
           ? { status: "read", data: result.data }
           : {
               status: "refused",
-              reason:
-                result.reason ?? result.error ?? "Couldn't read that data.",
+              reason: result.reason ?? "Couldn't read that data.",
             },
       );
     });

@@ -24,10 +24,20 @@ export default function PluginsScreen() {
     [botId],
   );
   const granted = useLoad(loadGranted, Boolean(session && botId));
-  const loadCatalogue = useCallback(
-    () => api<{ skills: SkillSummary[] }>("/api/plugins"),
-    [],
-  );
+  // Every skill this person can see, page after page.
+  const loadCatalogue = useCallback(async () => {
+    const skills: SkillSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { skills: SkillSummary[]; nextCursor: string | null } =
+        await api(
+          `/api/v2/organizations/default/skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        );
+      skills.push(...page.skills);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return { skills };
+  }, []);
   const catalogue = useLoad(loadCatalogue, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const on = new Set(granted.data?.skills.map((skill) => skill.slug));

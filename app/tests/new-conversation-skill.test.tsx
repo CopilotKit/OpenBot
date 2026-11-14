@@ -22,6 +22,7 @@ import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A SKILL ON THE FIRST MESSAGE OF A NEW CONVERSATION, FROM THE `/` CHIP TO THE RUN THAT LEAVES THE
@@ -132,8 +133,8 @@ beforeAll(() => {
             },
           ],
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === MY_CAPABILITIES_PATH)
