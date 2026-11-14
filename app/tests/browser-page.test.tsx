@@ -15,7 +15,6 @@ import type {
 import {
   type BrowserApiState,
   type BrowserOpenResponse,
-  browserApiPaths,
   browserNarrationRequestSchema,
   browserNavigateRequestSchema,
   browserRecordingRequestSchema,
@@ -222,16 +221,54 @@ function answerFor(window: "native" | "screen"): BrowserOpenResponse {
   };
 }
 
+/**
+ * The person's own browser's addresses in the API, where the generated client sends every read and write. Only these
+ * are answered here, so a call that slipped back to `/api/browser` reaches nothing and fails its case.
+ */
+const OWN_BROWSER = "/api/v2/organizations/default/people/me/browser";
+const browserApiPaths = {
+  state: OWN_BROWSER,
+  open: `${OWN_BROWSER}/open`,
+  recording: `${OWN_BROWSER}/recording`,
+  narration: `${OWN_BROWSER}/narration`,
+  tabs: `${OWN_BROWSER}/tabs`,
+  navigate: `${OWN_BROWSER}/navigate`,
+  clear: `${OWN_BROWSER}/clear`,
+} as const;
+
+/** A refusal as the API answers one: a problem (RFC 9457) whose `detail` is the sentence a person reads. */
+const problem = (status: number, detail: string) =>
+  new Response(
+    JSON.stringify({
+      type: "https://open.bot/errors/test",
+      title: detail,
+      status,
+      detail,
+      code: status === 409 ? "CONFLICT" : "VALIDATION_ERROR",
+      category: status === 409 ? "conflict" : "validation",
+      retryable: false,
+      requestId: "req_test",
+      traceId: "trace_test",
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+/** What the API answers a write that came without the key every write carries. */
+const NO_KEY =
+  "Every write needs an Idempotency-Key header: a value you make once for this write and send again only to retry it.";
+const keyed = (init?: RequestInit) =>
+  Boolean(new Headers(init?.headers).get("idempotency-key"));
+
 /** The server's Browser routes, as the contract has them. A body the contract refuses is a 400, as Zod would make it. */
 async function server(path: string, init?: RequestInit): Promise<Response> {
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   if (method !== "GET") writes.push({ path, method, body });
-  const refuse = () =>
-    Response.json({ error: "Invalid request" }, { status: 400 });
+  const refuse = () => problem(400, "Invalid request");
+  // Every write to the person's browser is made once per key, and refused without one.
+  if (path.startsWith(`${OWN_BROWSER}/`) && !keyed(init))
+    return problem(400, NO_KEY);
   const refusal = refusals[path];
-  if (refusal && method === "POST")
-    return Response.json({ error: refusal }, { status: 409 });
+  if (refusal && method === "POST") return problem(409, refusal);
   if (path === ME_PATH)
     return meResponse({
       user: {
@@ -626,10 +663,10 @@ test("an empty tab shows a start page with one field to search or go to a site, 
   await user.type(field, "openbot.ai{Enter}");
   await waitFor(() =>
     expect(
-      writes.filter((write) => write.path === "/api/browser/navigate"),
+      writes.filter((write) => write.path === browserApiPaths.navigate),
     ).toEqual([
       {
-        path: "/api/browser/navigate",
+        path: browserApiPaths.navigate,
         method: "POST",
         body: { url: "https://openbot.ai" },
       },
@@ -814,7 +851,7 @@ test("on OpenBot Desktop Open browser and record opens the browser, then starts 
   await user.click(view.getByRole("button", { name: OPEN_AND_RECORD }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/browser/recording",
+      path: browserApiPaths.recording,
       method: "POST",
       body: {
         action: "start",
@@ -840,7 +877,7 @@ test("on OpenBot Desktop Open browser and record opens the browser, then starts 
   await user.click(view.getByRole("button", { name: "Stop" }));
   await waitFor(() =>
     expect(writes.at(-1)).toEqual({
-      path: "/api/browser/recording",
+      path: browserApiPaths.recording,
       method: "POST",
       body: { action: "stop" },
     }),
@@ -1168,7 +1205,7 @@ async function recordAndStop(
   await user.click(view.getByRole("button", { name: "Stop" }));
   await waitFor(() =>
     expect(writes.at(-1)).toEqual({
-      path: "/api/browser/recording",
+      path: browserApiPaths.recording,
       method: "POST",
       body: { action: "stop" },
     }),
@@ -1362,7 +1399,7 @@ test("Record is offered while the Recorder is disconnected: the server connects 
   await waitFor(() =>
     expect(writes).toContainEqual(
       expect.objectContaining({
-        path: "/api/browser/recording",
+        path: browserApiPaths.recording,
         body: expect.objectContaining({ action: "start" }),
       }),
     ),
@@ -1433,7 +1470,7 @@ test("on hosted OpenBot the toolbar holds one Record button, which asks for the 
   await waitFor(() =>
     expect(writes).toContainEqual(
       expect.objectContaining({
-        path: "/api/browser/recording",
+        path: browserApiPaths.recording,
         body: expect.objectContaining({
           action: "start",
           title: "Refund an order",
@@ -1487,36 +1524,36 @@ test("on hosted OpenBot the page is the browser: its tabs, its address and its l
   await user.type(bar, "how to file an expense report{Enter}");
   await waitFor(() =>
     expect(
-      writes.filter((write) => write.path !== "/api/browser/open"),
+      writes.filter((write) => write.path !== browserApiPaths.open),
     ).toEqual([
       {
-        path: "/api/browser/tabs",
+        path: browserApiPaths.tabs,
         method: "POST",
         body: { action: "activate", tabId: "tab-2" },
       },
-      { path: "/api/browser/tabs", method: "POST", body: { action: "new" } },
+      { path: browserApiPaths.tabs, method: "POST", body: { action: "new" } },
       {
-        path: "/api/browser/tabs",
+        path: browserApiPaths.tabs,
         method: "POST",
         body: { action: "close", tabId: "tab-1" },
       },
       {
-        path: "/api/browser/navigate",
+        path: browserApiPaths.navigate,
         method: "POST",
         body: { action: "back" },
       },
       {
-        path: "/api/browser/navigate",
+        path: browserApiPaths.navigate,
         method: "POST",
         body: { action: "reload" },
       },
       {
-        path: "/api/browser/navigate",
+        path: browserApiPaths.navigate,
         method: "POST",
         body: { url: "https://openbot.ai" },
       },
       {
-        path: "/api/browser/navigate",
+        path: browserApiPaths.navigate,
         method: "POST",
         body: {
           url: "https://www.google.com/search?q=how%20to%20file%20an%20expense%20report",
@@ -1547,13 +1584,13 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
   await user.click(view.getByRole("button", { name: "Stop" }));
   await waitFor(() =>
     expect(writes.at(-1)).toEqual({
-      path: "/api/browser/recording",
+      path: browserApiPaths.recording,
       method: "POST",
       body: { action: "stop" },
     }),
   );
   const narration = writes.filter(
-    (write) => write.path === "/api/browser/narration",
+    (write) => write.path === browserApiPaths.narration,
   );
   // The Recorder is told the phrase began as its first words came back, then the phrase, then that nothing more is
   // being said, in that order and one at a time, each stamped with this computer's clock as it left.
@@ -1586,7 +1623,7 @@ test("on hosted OpenBot the page narrates a recording, and Stop sends the phrase
   expect(began?.sentAt ?? 0).toBeLessThanOrEqual(phrase?.sentAt ?? 0);
   // Everything reached the server before the recording was stopped.
   expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
-    writes.findLastIndex((write) => write.path === "/api/browser/recording"),
+    writes.findLastIndex((write) => write.path === browserApiPaths.recording),
   );
   // Then the page says where the recording went, and what it held: the phrase it narrated among them.
   expect(
@@ -1651,7 +1688,7 @@ test("in the OpenBot Desktop window the page narrates through the desktop app's 
   await user.click(view.getByRole("button", { name: "Stop" }));
   await waitFor(() =>
     expect(writes.at(-1)).toEqual({
-      path: "/api/browser/recording",
+      path: browserApiPaths.recording,
       method: "POST",
       body: { action: "stop" },
     }),
@@ -1678,7 +1715,7 @@ test("in the OpenBot Desktop window the page narrates through the desktop app's 
     { speaking: false },
   ]);
   expect(writes.indexOf(narration.at(-1) as Write)).toBeLessThan(
-    writes.findLastIndex((write) => write.path === "/api/browser/recording"),
+    writes.findLastIndex((write) => write.path === browserApiPaths.recording),
   );
   expect(view.queryByText("Narration is off.")).toBeNull();
 });
@@ -1701,7 +1738,7 @@ test("in the OpenBot Desktop window on a computer with no microphone, narration 
   const stopped = () =>
     waitFor(() =>
       expect(writes.at(-1)).toEqual({
-        path: "/api/browser/recording",
+        path: browserApiPaths.recording,
         method: "POST",
         body: { action: "stop" },
       }),
@@ -2011,7 +2048,7 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
   await waitFor(() =>
     expect(writes).toContainEqual(
       expect.objectContaining({
-        path: "/api/browser/recording",
+        path: browserApiPaths.recording,
         body: expect.objectContaining({ action: "start" }),
       }),
     ),
