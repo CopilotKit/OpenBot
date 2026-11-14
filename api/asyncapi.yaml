@@ -8,17 +8,33 @@ info:
   description: >-
     Everything live in OpenBot runs on WebSockets, and this file describes
     every one of them: a Bot's run as it streams into a conversation, what
-    changed in a person's conversations, a Bot's screen, and its terminal. It
-    is the companion of api/openapi.yaml, which describes the REST API, and
+    changed in a person's conversations, a Bot's screen, its terminal, a voice
+    call, and what the Recorder captures. It is the companion of
+    api/openapi.yaml, which describes the REST API, and
     the two are one API: the REST operations hand out what a socket needs, and
     the sockets carry what changes afterwards.
 
 
     A run streams through CopilotKit Intelligence's realtime gateway, which
-    OpenBot uses as it ships. The other sockets are served by OpenBot itself,
-    and are described at the addresses they have today, as the channels whose
-    names start with legacy. Addresses under the organization's, like every
-    REST resource has, are to follow, and these stay served beside them.
+    OpenBot uses as it ships, and so does what the Recorder captures. A voice
+    call's socket is the voice service's own. The other sockets are served by
+    OpenBot itself, under the organization's address like every REST resource
+    (/api/v2/organizations/{organizationId}/...), and are signed in to the
+    same three ways: the web app's session, an API key, or an app's access
+    token. A browser cannot set a header on a WebSocket, so the web app uses
+    its session; everything else sends Authorization: Bearer on the request
+    that opens the socket.
+
+
+    The three sockets OpenBot serves were first at other addresses, which are
+    still served for apps released before these and are described here as the
+    channels whose names start with legacy. They take a session only.
+
+
+    A voice call that the server sets up over WebRTC has no socket to
+    describe: its audio and its events travel on a peer connection, which is
+    outside what AsyncAPI describes. The REST operation that starts a call
+    says which of the two a deployment uses.
 
 
     Every operation is written from the server's side, as AsyncAPI has it:
@@ -53,9 +69,20 @@ servers:
       person's session.
     security:
       - $ref: "#/components/securitySchemes/joinToken"
+  voiceService:
+    host: api.x.ai
+    pathname: /v1/realtime
+    protocol: wss
+    description: >-
+      The voice service's realtime socket, for a deployment whose calls run on
+      Grok Voice. It is not OpenBot's: a client dials it directly, with the
+      address and the one-call secret the REST operation that starts a call
+      answers, and OpenBot carries none of the audio.
+    security:
+      - $ref: "#/components/securitySchemes/voiceClientSecret"
 channels:
-  legacyConversationEvents:
-    address: /api/channels/events
+  conversationEvents:
+    address: /api/v2/organizations/{organizationId}/conversation-events
     title: Conversation events
     description: >-
       What changed in the signed-in person's conversations, as it happens: a
@@ -64,6 +91,106 @@ channels:
       sends; anything a client sends is ignored. Nothing is replayed: on
       opening the socket, and again on a resync message, a client reads its
       conversations afresh over REST.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      conversationActivity:
+        $ref: "#/components/messages/ConversationActivity"
+      conversationResync:
+        $ref: "#/components/messages/ConversationResync"
+  botScreen:
+    address: /api/v2/organizations/{organizationId}/computers/{botId}/screen
+    title: A Bot's screen
+    description: >-
+      The screen of a Bot's computer, live, and the person's mouse and
+      keyboard going back to it. Frames are whole pictures, so a viewer shows
+      the newest and needs nothing before it. Input is taken only while the
+      person has control of the computer. One viewer at a time per person and
+      Bot: a newer one replaces the older, which is told so. An app whose
+      access token may watch a Bot's computer and not use it (computers:read
+      without computers:write) is sent the screen, and its input is answered
+      with an input error and goes no further.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+      botId:
+        $ref: "#/components/parameters/botId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      screenHello:
+        $ref: "#/components/messages/ScreenHello"
+      screenFrame:
+        $ref: "#/components/messages/ScreenFrame"
+      screenError:
+        $ref: "#/components/messages/ScreenError"
+      screenInputError:
+        $ref: "#/components/messages/ScreenInputError"
+      screenFrameReceived:
+        $ref: "#/components/messages/ScreenFrameReceived"
+      screenMouse:
+        $ref: "#/components/messages/ScreenMouse"
+      screenWheel:
+        $ref: "#/components/messages/ScreenWheel"
+      screenKey:
+        $ref: "#/components/messages/ScreenKey"
+      screenText:
+        $ref: "#/components/messages/ScreenText"
+  botTerminal:
+    address: /api/v2/organizations/{organizationId}/computers/{botId}/terminal
+    title: A Bot's terminal
+    description: >-
+      The terminal on a Bot's computer. The terminal's own bytes arrive as
+      binary frames; everything else is a JSON text frame. A snapshot message
+      means "clear, and draw what follows", and ready means the viewer is live.
+      Typing is taken only while the person has control of the computer. An
+      app whose access token may watch a Bot's computer and not use it is sent
+      the terminal, and its typing and resizing are answered with an error and
+      go no further.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+      botId:
+        $ref: "#/components/parameters/botId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      terminalOutput:
+        $ref: "#/components/messages/TerminalOutput"
+      terminalSnapshot:
+        $ref: "#/components/messages/TerminalSnapshot"
+      terminalReady:
+        $ref: "#/components/messages/TerminalReady"
+      terminalError:
+        $ref: "#/components/messages/TerminalError"
+      terminalInput:
+        $ref: "#/components/messages/TerminalInput"
+      terminalResize:
+        $ref: "#/components/messages/TerminalResize"
+      terminalAck:
+        $ref: "#/components/messages/TerminalAck"
+  legacyConversationEvents:
+    address: /api/channels/events
+    title: Conversation events, at the earlier address
+    description: >-
+      The conversationEvents channel at the address it had before the API's, still served
+      for apps released before then. The same messages. It takes a session
+      only, never an API key or an app's access token.
     servers:
       - $ref: "#/servers/openbot"
     bindings:
@@ -77,13 +204,11 @@ channels:
         $ref: "#/components/messages/ConversationResync"
   legacyBotScreen:
     address: /api/computers/{botId}/stream
-    title: A Bot's screen
+    title: A Bot's screen, at the earlier address
     description: >-
-      The screen of a Bot's computer, live, and the person's mouse and
-      keyboard going back to it. Frames are whole pictures, so a viewer shows
-      the newest and needs nothing before it. Input is taken only while the
-      person has control of the computer. One viewer at a time per person and
-      Bot: a newer one replaces the older, which is told so.
+      The botScreen channel at the address it had before the API's, still served
+      for apps released before then. The same messages. It takes a session
+      only, never an API key or an app's access token.
     servers:
       - $ref: "#/servers/openbot"
     parameters:
@@ -114,12 +239,11 @@ channels:
         $ref: "#/components/messages/ScreenText"
   legacyBotTerminal:
     address: /api/computers/{botId}/terminal
-    title: A Bot's terminal
+    title: A Bot's terminal, at the earlier address
     description: >-
-      The terminal on a Bot's computer. The terminal's own bytes arrive as
-      binary frames; everything else is a JSON text frame. A snapshot message
-      means "clear, and draw what follows", and ready means the viewer is live.
-      Typing is taken only while the person has control of the computer.
+      The botTerminal channel at the address it had before the API's, still served
+      for apps released before then. The same messages. It takes a session
+      only, never an API key or an app's access token.
     servers:
       - $ref: "#/servers/openbot"
     parameters:
@@ -212,60 +336,153 @@ channels:
         $ref: "#/components/messages/ThreadClose"
       threadError:
         $ref: "#/components/messages/ThreadError"
+  trajectoryCapture:
+    address: /websocket
+    title: What the Recorder captures
+    description: >-
+      The Recorder sending what a person does in their browser, as they record
+      it, on the gateway's socket for clients: the same socket and frames as a
+      conversation's runs, on the topic trajectory:{trajectoryId}. The
+      Recorder asks OpenBot for a pass first, which carries a join token for
+      one trajectory and the address to dial, and asks again for every
+      connection. It joins the topic, then sends its events in batches, each
+      answered by a reply; a batch with no reply is sent again, and the
+      gateway drops what it already holds by each event's sequence number.
+    servers:
+      - $ref: "#/servers/intelligenceGateway"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          required:
+            - join_token
+            - vsn
+          properties:
+            join_token:
+              type: string
+              description: The join token from the Recorder's pass. It works once.
+            vsn:
+              type: string
+              const: 2.0.0
+              description: The Phoenix Channels protocol version.
+        bindingVersion: 0.1.0
+    messages:
+      trajectoryJoin:
+        $ref: "#/components/messages/TrajectoryJoin"
+      trajectoryEvents:
+        $ref: "#/components/messages/TrajectoryEvents"
+      trajectoryReply:
+        $ref: "#/components/messages/TrajectoryReply"
+  voiceCall:
+    address: /
+    title: A voice call
+    description: >-
+      A call with a Bot on the voice service's realtime socket: the person's
+      audio in, the Bot's audio and its words out, as JSON events. Every event
+      has a type, and the events are the voice service's own, described in its
+      documentation (https://docs.x.ai/docs/guides/voice). A client sends
+      session.update first, with the session the REST answer carried, then
+      input_audio_buffer.append with the person's audio as base64 PCM at
+      24 kHz, input_audio_buffer.clear when muted, and
+      conversation.item.truncate when the person talks over the Bot. It
+      receives, among others, session.updated, response.created,
+      input_audio_buffer.speech_started, response.output_audio.delta with the
+      Bot's audio, and response.output_audio_transcript.delta and .done with
+      its words.
+    servers:
+      - $ref: "#/servers/voiceService"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          required:
+            - model
+          properties:
+            model:
+              type: string
+              description: The voice model, as the REST answer's address names it.
+        bindingVersion: 0.1.0
+    messages:
+      voiceClientEvent:
+        $ref: "#/components/messages/VoiceClientEvent"
+      voiceServiceEvent:
+        $ref: "#/components/messages/VoiceServiceEvent"
 operations:
-  sendLegacyConversationEvents:
+  sendConversationEvents:
     action: send
     title: Tell a person what changed in their conversations
     summary: A conversation the person is in changed, or everything may have.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/conversationsRead"
     channel:
-      $ref: "#/channels/legacyConversationEvents"
+      $ref: "#/channels/conversationEvents"
     messages:
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationActivity"
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationResync"
-  sendLegacyBotScreen:
+      - $ref: "#/channels/conversationEvents/messages/conversationActivity"
+      - $ref: "#/channels/conversationEvents/messages/conversationResync"
+  sendBotScreen:
     action: send
     title: Show a Bot's screen
     summary: The screen's pictures, and why something could not be shown or done.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersRead"
     channel:
-      $ref: "#/channels/legacyBotScreen"
+      $ref: "#/channels/botScreen"
     messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenHello"
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrame"
-      - $ref: "#/channels/legacyBotScreen/messages/screenError"
-      - $ref: "#/channels/legacyBotScreen/messages/screenInputError"
-  receiveLegacyBotScreenInput:
+      - $ref: "#/channels/botScreen/messages/screenHello"
+      - $ref: "#/channels/botScreen/messages/screenFrame"
+      - $ref: "#/channels/botScreen/messages/screenError"
+      - $ref: "#/channels/botScreen/messages/screenInputError"
+  receiveBotScreenInput:
     action: receive
     title: Take a person's mouse and keyboard
     summary: The person's input to the Bot's computer, and each picture's receipt.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersWrite"
     channel:
-      $ref: "#/channels/legacyBotScreen"
+      $ref: "#/channels/botScreen"
     messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrameReceived"
-      - $ref: "#/channels/legacyBotScreen/messages/screenMouse"
-      - $ref: "#/channels/legacyBotScreen/messages/screenWheel"
-      - $ref: "#/channels/legacyBotScreen/messages/screenKey"
-      - $ref: "#/channels/legacyBotScreen/messages/screenText"
-  sendLegacyBotTerminal:
+      - $ref: "#/channels/botScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/botScreen/messages/screenMouse"
+      - $ref: "#/channels/botScreen/messages/screenWheel"
+      - $ref: "#/channels/botScreen/messages/screenKey"
+      - $ref: "#/channels/botScreen/messages/screenText"
+  sendBotTerminal:
     action: send
     title: Show a Bot's terminal
     summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersRead"
     channel:
-      $ref: "#/channels/legacyBotTerminal"
+      $ref: "#/channels/botTerminal"
     messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalOutput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalSnapshot"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalReady"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalError"
-  receiveLegacyBotTerminalInput:
+      - $ref: "#/channels/botTerminal/messages/terminalOutput"
+      - $ref: "#/channels/botTerminal/messages/terminalSnapshot"
+      - $ref: "#/channels/botTerminal/messages/terminalReady"
+      - $ref: "#/channels/botTerminal/messages/terminalError"
+  receiveBotTerminalInput:
     action: receive
     title: Take a person's typing
     summary: What the person typed, the size of their terminal, and how much they have drawn.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersWrite"
     channel:
-      $ref: "#/channels/legacyBotTerminal"
+      $ref: "#/channels/botTerminal"
     messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalInput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalResize"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalAck"
+      - $ref: "#/channels/botTerminal/messages/terminalInput"
+      - $ref: "#/channels/botTerminal/messages/terminalResize"
+      - $ref: "#/channels/botTerminal/messages/terminalAck"
   sendThreadStream:
     action: send
     title: Stream a conversation's runs
@@ -293,6 +510,92 @@ operations:
       - $ref: "#/channels/threadStream/messages/threadHeartbeat"
       - $ref: "#/channels/threadStream/messages/threadStopRun"
       - $ref: "#/channels/threadStream/messages/threadLeave"
+  sendLegacyConversationEvents:
+    action: send
+    title: Tell a person what changed in their conversations, at the earlier address
+    summary: A conversation the person is in changed, or everything may have.
+    channel:
+      $ref: "#/channels/legacyConversationEvents"
+    messages:
+      - $ref: "#/channels/legacyConversationEvents/messages/conversationActivity"
+      - $ref: "#/channels/legacyConversationEvents/messages/conversationResync"
+  sendLegacyBotScreen:
+    action: send
+    title: Show a Bot's screen, at the earlier address
+    summary: The screen's pictures, and why something could not be shown or done.
+    channel:
+      $ref: "#/channels/legacyBotScreen"
+    messages:
+      - $ref: "#/channels/legacyBotScreen/messages/screenHello"
+      - $ref: "#/channels/legacyBotScreen/messages/screenFrame"
+      - $ref: "#/channels/legacyBotScreen/messages/screenError"
+      - $ref: "#/channels/legacyBotScreen/messages/screenInputError"
+  receiveLegacyBotScreenInput:
+    action: receive
+    title: Take a person's mouse and keyboard, at the earlier address
+    summary: The person's input to the Bot's computer, and each picture's receipt.
+    channel:
+      $ref: "#/channels/legacyBotScreen"
+    messages:
+      - $ref: "#/channels/legacyBotScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/legacyBotScreen/messages/screenMouse"
+      - $ref: "#/channels/legacyBotScreen/messages/screenWheel"
+      - $ref: "#/channels/legacyBotScreen/messages/screenKey"
+      - $ref: "#/channels/legacyBotScreen/messages/screenText"
+  sendLegacyBotTerminal:
+    action: send
+    title: Show a Bot's terminal, at the earlier address
+    summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
+    channel:
+      $ref: "#/channels/legacyBotTerminal"
+    messages:
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalOutput"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalSnapshot"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalReady"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalError"
+  receiveLegacyBotTerminalInput:
+    action: receive
+    title: Take a person's typing, at the earlier address
+    summary: What the person typed, the size of their terminal, and how much they have drawn.
+    channel:
+      $ref: "#/channels/legacyBotTerminal"
+    messages:
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalInput"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalResize"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalAck"
+  receiveTrajectoryEvents:
+    action: receive
+    title: Take what the Recorder captured
+    summary: The Recorder joins a trajectory's topic and sends its events in batches.
+    channel:
+      $ref: "#/channels/trajectoryCapture"
+    messages:
+      - $ref: "#/channels/trajectoryCapture/messages/trajectoryJoin"
+      - $ref: "#/channels/trajectoryCapture/messages/trajectoryEvents"
+  sendTrajectoryReplies:
+    action: send
+    title: Answer the Recorder
+    summary: The gateway's answer to a join and to each batch.
+    channel:
+      $ref: "#/channels/trajectoryCapture"
+    messages:
+      - $ref: "#/channels/trajectoryCapture/messages/trajectoryReply"
+  receiveVoiceCall:
+    action: receive
+    title: Take a person's side of a call
+    summary: The session, the person's audio, and what they interrupt.
+    channel:
+      $ref: "#/channels/voiceCall"
+    messages:
+      - $ref: "#/channels/voiceCall/messages/voiceClientEvent"
+  sendVoiceCall:
+    action: send
+    title: Send a Bot's side of a call
+    summary: The Bot's audio and words, and what the voice service heard.
+    channel:
+      $ref: "#/channels/voiceCall"
+    messages:
+      - $ref: "#/channels/voiceCall/messages/voiceServiceEvent"
 components:
   securitySchemes:
     webSession:
@@ -305,14 +608,80 @@ components:
         __Secure-better-auth.session_token. A single-user install signs its
         one person in without a cookie. A request from another site is
         refused before the socket opens.
+    apiKey:
+      type: http
+      scheme: bearer
+      description: >-
+        An API key a person made for automation, sent as Authorization:
+        Bearer on the request that opens the socket. It acts as that person,
+        with everything they may do.
+    conversationsRead:
+      type: oauth2
+      description: >-
+        An access token one of OpenBot's apps holds (Desktop, mobile, the
+        CLI), from OAuth 2.1 authorization code with PKCE, sent as
+        Authorization: Bearer on the request that opens the socket. The
+        person allowed the app to see their conversations.
+      flows:
+        authorizationCode:
+          authorizationUrl: http://127.0.0.1:3001/api/auth/oauth2/authorize
+          tokenUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          refreshUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          availableScopes:
+            conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
+      scopes:
+        - conversations:read
+    computersRead:
+      type: oauth2
+      description: >-
+        An app's access token, as above. The person allowed the app to watch
+        their Bots' screens and terminals.
+      flows:
+        authorizationCode:
+          authorizationUrl: http://127.0.0.1:3001/api/auth/oauth2/authorize
+          tokenUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          refreshUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          availableScopes:
+            computers:read: Watch the signed-in person's Bots' screens and terminals.
+            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
+      scopes:
+        - computers:read
+    computersWrite:
+      type: oauth2
+      description: >-
+        An app's access token, as above. The person allowed the app to use
+        their Bots' computers as well as watch them.
+      flows:
+        authorizationCode:
+          authorizationUrl: http://127.0.0.1:3001/api/auth/oauth2/authorize
+          tokenUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          refreshUrl: http://127.0.0.1:3001/api/auth/oauth2/token
+          availableScopes:
+            computers:read: Watch the signed-in person's Bots' screens and terminals.
+            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
+      scopes:
+        - computers:read
+        - computers:write
     joinToken:
       type: httpApiKey
       in: query
       name: join_token
       description: >-
-        A join token for one thread, handed out by the REST API to a person
-        who may read that thread. It works once and for about half a minute.
+        A join token for one thread or one trajectory, handed out by OpenBot
+        to somebody who may have it. It works once and for about half a
+        minute.
+    voiceClientSecret:
+      type: httpApiKey
+      in: header
+      name: Sec-WebSocket-Protocol
+      description: >-
+        The one-call secret from the REST operation that starts a call, sent
+        as the socket's subprotocol: xai-client-secret.{secret}.
   parameters:
+    organizationId:
+      description: >-
+        The organization. Until multi-organization lands every install has
+        one, addressed as default.
     botId:
       description: The Bot whose computer it is.
   messages:
@@ -508,6 +877,36 @@ components:
       summary: The thread's topic failed on the gateway. Ask for a new join token and connect again.
       payload:
         $ref: "#/components/schemas/ThreadErrorFrame"
+    TrajectoryJoin:
+      name: trajectoryJoin
+      title: Join a trajectory
+      summary: Open the trajectory's topic before sending to it.
+      payload:
+        $ref: "#/components/schemas/TrajectoryJoinFrame"
+    TrajectoryEvents:
+      name: trajectoryEvents
+      title: Captured events
+      summary: One batch of what the person did, oldest first.
+      payload:
+        $ref: "#/components/schemas/TrajectoryEventsFrame"
+    TrajectoryReply:
+      name: trajectoryReply
+      title: Reply
+      summary: Whether the join or the batch was taken.
+      payload:
+        $ref: "#/components/schemas/TrajectoryReplyFrame"
+    VoiceClientEvent:
+      name: voiceClientEvent
+      title: An event from the person's side
+      summary: The session, the person's audio, a mute, or an interruption.
+      payload:
+        $ref: "#/components/schemas/VoiceEvent"
+    VoiceServiceEvent:
+      name: voiceServiceEvent
+      title: An event from the voice service
+      summary: The Bot's audio or words, or what the service heard and did.
+      payload:
+        $ref: "#/components/schemas/VoiceEvent"
   schemas:
     ConversationActivity:
       type: object
@@ -1164,3 +1563,86 @@ components:
         - type: string
           const: phx_error
         - type: object
+    TrajectoryTopic:
+      type: string
+      pattern: ^trajectory:.+$
+      description: The trajectory, as trajectory:{trajectoryId}.
+    TrajectoryJoinFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_join\", {}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/TrajectoryTopic"
+        - type: string
+          const: phx_join
+        - type: object
+    TrajectoryEventsFrame:
+      type: array
+      description: "[join reference, reference, topic, \"events\", {events, dropped}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/TrajectoryTopic"
+        - type: string
+          const: events
+        - type: object
+          required:
+            - events
+            - dropped
+          properties:
+            events:
+              type: array
+              description: >-
+                AG-UI custom events, each with the sequence number the
+                Recorder gave it. A whole batch is at most 65,536 bytes.
+              items:
+                type: object
+                required:
+                  - type
+                properties:
+                  type:
+                    type: string
+            dropped:
+              type: integer
+              minimum: 0
+              description: How many events the Recorder had to let go since it last said.
+    TrajectoryReplyFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_reply\", {status, response}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/TrajectoryTopic"
+        - type: string
+          const: phx_reply
+        - type: object
+          required:
+            - status
+            - response
+          properties:
+            status:
+              type: string
+              enum:
+                - ok
+                - error
+            response:
+              type: object
+              description: On error, reason says why.
+    VoiceEvent:
+      type: object
+      description: >-
+        One event of the voice service's realtime protocol. Its other members
+        depend on its type and are the voice service's to define.
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          description: The event's name, such as session.update or response.output_audio.delta.
