@@ -23,6 +23,11 @@ import type { CapabilityTranslation } from "@/lib/capability-changes/translate";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { Route as DescribeRoute } from "@/routes/_authed/admin/permissions_.describe";
+import {
+  overviewResponse,
+  PREVIEW_CAPABILITIES_PATH,
+  TRANSLATE_CAPABILITIES_PATH,
+} from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -70,23 +75,25 @@ const PREVIEW: CapabilityPreview = {
 
 function serving() {
   global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path === "/api/admin/enterprise/capabilities/translate")
-      return Response.json(TRANSLATION);
-    if (path === "/api/admin/enterprise/capabilities/preview")
-      return Response.json(PREVIEW);
-    if (path === "/api/admin/enterprise")
-      return Response.json({
-        capabilities: [
-          {
-            capability: "localComputer",
-            title: "Local computer access",
-            description: "Bots use folders and commands on a person's machine.",
-          },
-        ],
-        groups: [],
-        network: [],
-      });
+    const path = String(input).split("?")[0];
+    if (path === TRANSLATE_CAPABILITIES_PATH) return Response.json(TRANSLATION);
+    if (path === PREVIEW_CAPABILITIES_PATH) return Response.json(PREVIEW);
+    const overview = overviewResponse(path, {
+      capabilities: [
+        {
+          capability: "localComputer",
+          title: "Local computer access",
+          description: "Bots use folders and commands on a person's machine.",
+          default: true,
+          organization: null,
+          roles: {},
+          groups: {},
+        },
+      ],
+      groups: [],
+      network: [],
+    });
+    if (overview) return overview;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
