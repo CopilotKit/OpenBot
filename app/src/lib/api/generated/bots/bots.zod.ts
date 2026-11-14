@@ -83,10 +83,10 @@ export const ListBotsResponse = zod.object({
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
         endpoint: zod
-          .url()
+          .string()
           .nullable()
           .describe(
-            "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
+            "The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.",
           ),
         hasAuth: zod
           .boolean()
@@ -325,10 +325,10 @@ export const CreateBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .url()
+        .string()
         .nullable()
         .describe(
-          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.",
         ),
       hasAuth: zod
         .boolean()
@@ -448,10 +448,10 @@ export const GetBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .url()
+        .string()
         .nullable()
         .describe(
-          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.",
         ),
       hasAuth: zod
         .boolean()
@@ -661,10 +661,10 @@ export const UpdateBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .url()
+        .string()
         .nullable()
         .describe(
-          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.",
         ),
       hasAuth: zod
         .boolean()
