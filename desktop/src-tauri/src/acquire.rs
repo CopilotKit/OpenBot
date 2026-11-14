@@ -1518,7 +1518,13 @@ fn api_answers_in(
     }
 }
 
-fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
+/// The machine `name`'s state as `podman machine inspect` says it ("running", "stopped",
+/// "starting"), or None when inspect does not list it or says none.
+pub fn machine_state_named(name: &str) -> Result<Option<String>, String> {
+    machine_state(&podman(&["machine", "inspect", name])?, name)
+}
+
+pub fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
     let machines: Vec<Value> = serde_json::from_str(listing)
         .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
     Ok(machines

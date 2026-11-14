@@ -4905,6 +4905,7 @@ fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
         .stopped_in_session
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let root = root_for_stop(shell, fallback_root);
+    let engine = engine_at_stop(shell, &root);
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -4914,9 +4915,10 @@ fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
         |root: &Path| down_owned_containers(shell, root),
         intelligence_step(Shutdown::Stop),
     );
-    stop_everything_then(
+    stop_everything_at(
         shell,
         &root,
+        engine,
         stack::stop_processes_under,
         down,
         intelligence,
@@ -4930,6 +4932,7 @@ where
 {
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -4939,9 +4942,10 @@ where
         |root: &Path| down_containers_on_quit(shell, root),
         intelligence_step(Shutdown::Quit),
     );
-    let stopped = exit_cleanup_reporting(
+    let stopped = exit_cleanup_reporting_at(
         shell,
         &stack::default_root(),
+        engine,
         stack::stop_processes_under,
         down,
         intelligence,
@@ -5209,6 +5213,30 @@ where
     D: FnOnce(&Path) -> Result<(), String>,
     I: FnOnce(&Path) -> Result<(), String>,
 {
+    stop_everything_at(
+        shell,
+        fallback_root,
+        EngineAtStop::Answers,
+        cleanup,
+        down,
+        intelligence,
+    )
+}
+
+/// `stop_everything_then`, with what was found of the engine first (`EngineAtStop`).
+fn stop_everything_at<C, D, I>(
+    shell: &Shell,
+    fallback_root: &Path,
+    engine: EngineAtStop,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+{
     let _closing = local_eval::closing_for_stop();
     shell
         .start_generation
@@ -5219,13 +5247,14 @@ where
     let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
-    if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
+    if let Err(problem) = cleanup_host_state_at(shell, &root, engine, cleanup) {
         failures.push(problem_detail(problem));
     }
 
-    if let Err(problem) = down_containers_with(shell, &root, down) {
+    if let Err(problem) = down_containers_with(shell, &root, engine.down(down)) {
         failures.push(format!("Compose down failed: {problem}"));
     }
+    engine.say_first(&mut failures);
 
     // Recovery is about what OpenBot runs, so only OpenBot's own failures keep it.
     if failures.is_empty() {
@@ -5234,7 +5263,7 @@ where
     drop(startup);
     Stopped {
         openbot: failures,
-        intelligence: intelligence(&root)
+        intelligence: engine.intelligence(intelligence)(&root)
             .err()
             .map(|problem| format!("{INTELLIGENCE_STOP_FAILED}{problem}")),
     }
@@ -5541,6 +5570,135 @@ fn answering_before_stop(address: &engine::Address) {
     }
 }
 
+/// What Stop says, first, when the software OpenBot runs on did not answer and its machine did not
+/// say it was stopped.
+const ENGINE_UNREACHABLE_AT_STOP: &str = "OpenBot couldn't reach the software it runs on, so some of OpenBot may still be running. Stop OpenBot again to retry.";
+
+/// What the next launch says of a Quit that found the same.
+const ENGINE_UNREACHABLE_AT_QUIT: &str =
+    "OpenBot couldn't reach the software it runs on, so some of OpenBot may still be running.";
+
+/**
+What Stop and Quit find of the engine before they stop anything.
+
+On the EC2 Mac, OpenBot's Podman machine was stopped and then OpenBot quit. Every stop asked an
+engine that could not answer: the Bots' computers, `compose down`, the back end's `local stop` and
+the folder operations' check each failed, and the next launch said "OpenBot had trouble shutting
+down last time." Nothing could have been running: every container stops with its machine.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngineAtStop {
+    /// It answers, or it is not a Podman machine's, with no machine to ask. The stops run as they
+    /// always have.
+    Answers,
+    /// It does not answer, and its machine says it is stopped. Each stop is done already.
+    MachineStopped,
+    /// It does not answer, and its machine says it is running, or says nothing. The stops run, and
+    /// their failures are said as what they are.
+    Unreachable,
+}
+
+impl EngineAtStop {
+    /// From whether the engine answers and its machine's state as `podman machine inspect` says it.
+    fn from(answers: bool, machine_state: Option<&str>) -> Self {
+        if answers {
+            EngineAtStop::Answers
+        } else if machine_state.is_some_and(|state| state.eq_ignore_ascii_case("stopped")) {
+            EngineAtStop::MachineStopped
+        } else {
+            EngineAtStop::Unreachable
+        }
+    }
+
+    /// `compose down`, or nothing to do with the machine stopped.
+    fn down<'a>(self, down: impl FnOnce(&Path) -> Result<(), String> + 'a) -> StopStep<'a> {
+        if self == EngineAtStop::MachineStopped {
+            Box::new(|_| {
+                log::info!("[stop] OpenBot's machine is stopped: its containers stopped with it");
+                Ok(())
+            })
+        } else {
+            Box::new(down)
+        }
+    }
+
+    /// The back end's stop, or nothing to do with the machine stopped. Its calls in flight were
+    /// cancelled when Stop or Quit closed local evaluation.
+    fn intelligence<'a>(
+        self,
+        intelligence: impl FnOnce(&Path) -> Result<(), String> + 'a,
+    ) -> StopStep<'a> {
+        if self == EngineAtStop::MachineStopped {
+            Box::new(|_| Ok(()))
+        } else {
+            Box::new(intelligence)
+        }
+    }
+
+    /// With the engine unreachable, its failures start by saying so.
+    fn say_first(self, failures: &mut Vec<String>) {
+        if self == EngineAtStop::Unreachable
+            && failures
+                .first()
+                .is_some_and(|first| !first.starts_with(ENGINE_UNREACHABLE_AT_STOP))
+        {
+            failures.insert(0, ENGINE_UNREACHABLE_AT_STOP.to_string());
+        }
+    }
+}
+
+/// `EngineAtStop` for the engine Stop or Quit would stop things on: OpenBot's own containers'
+/// while they run, otherwise the Podman the installation at `root` was set up on.
+fn engine_at_stop(shell: &Shell, root: &Path) -> EngineAtStop {
+    // Only a Podman machine on a Mac or a PC has a machine of its own to ask.
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return EngineAtStop::Answers;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    let address = match owned {
+        Some(address) => address,
+        None => {
+            if preparation::saved_engine(root) != Some(engine::Engine::Podman) {
+                return EngineAtStop::Answers;
+            }
+            let found = engine::detect_saved(Some(engine::Engine::Podman));
+            if found.responding {
+                return EngineAtStop::Answers;
+            }
+            found.address.unwrap_or_else(|| {
+                engine::Address::new(engine::Engine::Podman, Some(acquire::MACHINE.into()))
+            })
+        }
+    };
+    // Docker, or a Podman reached through a URL, has no machine of its own to ask.
+    if address.engine != engine::Engine::Podman || address.responds() {
+        return EngineAtStop::Answers;
+    }
+    let machine = acquire::machine_reached(&address);
+    let state =
+        machine
+            .as_deref()
+            .and_then(|machine| match acquire::machine_state_named(machine) {
+                Ok(state) => state,
+                Err(error) => {
+                    log::warn!("[stop] could not ask {machine} for its state: {error}");
+                    None
+                }
+            });
+    let found = EngineAtStop::from(false, state.as_deref());
+    log::info!(
+        "[stop] the engine does not answer; its machine {} is {}: {found:?}",
+        machine.as_deref().unwrap_or("(none)"),
+        state.as_deref().unwrap_or("unknown")
+    );
+    found
+}
+
 /// The engine Stop and Quit stop things on: OpenBot's own containers' while they run, otherwise
 /// the one the installation at `root` was set up on, when it answers.
 fn engine_for_stop(shell: &Shell, root: &Path) -> Option<engine::Address> {
@@ -5618,11 +5776,28 @@ fn cleanup_host_state<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize
 where
     C: FnOnce(&Path) -> Result<usize, Problem>,
 {
+    cleanup_host_state_at(shell, root, EngineAtStop::Answers, cleanup)
+}
+
+/// `cleanup_host_state`, with what Stop or Quit found of the engine first (`EngineAtStop`).
+fn cleanup_host_state_at<C>(
+    shell: &Shell,
+    root: &Path,
+    engine: EngineAtStop,
+    cleanup: C,
+) -> Result<usize, Problem>
+where
+    C: FnOnce(&Path) -> Result<usize, Problem>,
+{
     // Also runs for startup replacement and failure recovery, so a retired authorization session
     // cannot leave a job running beside a new server.
     let host_access_result = {
         let mut slot = shell.host_access.lock().unwrap();
         let result = slot.as_ref().map_or(Ok(()), |broker| {
+            if engine == EngineAtStop::MachineStopped {
+                broker.stop_with_machine_stopped();
+                return Ok(());
+            }
             broker.stop().map_err(|error| error.to_string())
         });
         if result.is_ok() {
@@ -5639,6 +5814,9 @@ where
     let result = cleanup(&selected);
     let result = match (host_access_result, result) {
         (Ok(()), result) => result,
+        (Err(error), Ok(_)) if engine == EngineAtStop::Unreachable => {
+            Err(Problem::with(ENGINE_UNREACHABLE_AT_STOP, error))
+        }
         (Err(error), Ok(_)) => Err(Problem::with(
             "OpenBot could not stop a folder operation.",
             error,
@@ -5792,10 +5970,16 @@ struct QuitCleanupNotice {
 enum QuitCleanupFailure {
     HostProcesses,
     Containers,
+    EngineUnreachable,
 }
 
 fn known_safe_quit_cleanup_failure(line: &str) -> QuitCleanupFailure {
-    if line.starts_with("[exit] cleanup failed: Compose down failed:") {
+    if line
+        .strip_prefix("[exit] cleanup failed: ")
+        .is_some_and(|failure| failure.starts_with(ENGINE_UNREACHABLE_AT_STOP))
+    {
+        QuitCleanupFailure::EngineUnreachable
+    } else if line.starts_with("[exit] cleanup failed: Compose down failed:") {
         QuitCleanupFailure::Containers
     } else {
         QuitCleanupFailure::HostProcesses
@@ -5806,6 +5990,7 @@ fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
     match failure {
         QuitCleanupFailure::HostProcesses => "OpenBot could not confirm all app processes stopped.",
         QuitCleanupFailure::Containers => "OpenBot could not confirm all containers stopped.",
+        QuitCleanupFailure::EngineUnreachable => ENGINE_UNREACHABLE_AT_QUIT,
     }
 }
 
@@ -6002,9 +6187,37 @@ when a stack OpenBot created is recorded, which is when its step stops anything;
 way, as before. A failure always gets its row, so the screen never says everything stopped when
 something did not.
 */
+#[cfg(test)]
 fn exit_cleanup_reporting<C, D, I, P>(
     shell: &Shell,
     fallback_root: &Path,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+    progress: P,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+    P: FnMut(QuitStep, QuitStepState),
+{
+    exit_cleanup_reporting_at(
+        shell,
+        fallback_root,
+        EngineAtStop::Answers,
+        cleanup,
+        down,
+        intelligence,
+        progress,
+    )
+}
+
+/// `exit_cleanup_reporting`, with what was found of the engine first (`EngineAtStop`).
+fn exit_cleanup_reporting_at<C, D, I, P>(
+    shell: &Shell,
+    fallback_root: &Path,
+    engine: EngineAtStop,
     cleanup: C,
     down: D,
     intelligence: I,
@@ -6033,12 +6246,13 @@ where
     let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
-    if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
+    if let Err(problem) = cleanup_host_state_at(shell, &root, engine, cleanup) {
         failures.push(problem_detail(problem));
     }
-    if let Err(problem) = down_containers_with(shell, &root, down) {
+    if let Err(problem) = down_containers_with(shell, &root, engine.down(down)) {
         failures.push(format!("Compose down failed: {problem}"));
     }
+    engine.say_first(&mut failures);
     #[cfg(target_os = "linux")]
     if let Err(problem) = shell.podman_api.lock().unwrap().stop() {
         failures.push(format!(
@@ -6062,7 +6276,7 @@ where
     if created {
         progress(QuitStep::Intelligence, QuitStepState::Running);
     }
-    let stopped = intelligence(&root);
+    let stopped = engine.intelligence(intelligence)(&root);
     if created || stopped.is_err() {
         progress(QuitStep::Intelligence, QuitStepState::of(&stopped));
     }
@@ -17274,6 +17488,196 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    /// A run OpenBot holds on a Podman machine that no longer answers, with folder access running:
+    /// what the EC2 Mac had when its machine was stopped and OpenBot then quit.
+    fn running_on_a_gone_engine(label: &str) -> (Shell, PathBuf) {
+        let root = local_eval_root(label, Some(local_eval_state::Ownership::Created));
+        let shell = Shell::default();
+        let gone = engine::Address::new(engine::Engine::Podman, Some(format!("{label}-gone")));
+        *shell.root.lock().unwrap() = Some(root.clone());
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: gone.clone(),
+        });
+        *shell.host_access.lock().unwrap() = Some(
+            host_access::HostAccess::start(
+                "http://127.0.0.1:9",
+                "host-token",
+                gone,
+                "openbot-agent-computer:test",
+                Vec::new(),
+            )
+            .unwrap(),
+        );
+        mark_recovery_required(&shell, &root, 0);
+        (shell, root)
+    }
+
+    /// Each stop as the EC2 Mac's log had it, against an engine that could not answer.
+    fn down_on_a_gone_engine(_: &Path) -> Result<(), String> {
+        Err(
+            "could not resolve computer namespace: Compose configuration failed (exit status: 125)"
+                .into(),
+        )
+    }
+
+    fn intelligence_on_a_gone_engine(_: &Path) -> Result<(), String> {
+        Err("the backend's command-line tool did not stop the backend (blocked: docker-unavailable)".into())
+    }
+
+    /// Quit's failures as the exit handler records them, for the next launch.
+    fn record_quit(root: &Path, stopped: Stopped) {
+        report_exit_cleanup_failures(stopped.lines(), |lines| {
+            write_quit_cleanup_notice(root, &lines)
+        })
+        .unwrap();
+    }
+
+    /**
+    The EC2 Mac: OpenBot's machine was stopped, then OpenBot quit. Every stop failed against the
+    engine ("could not resolve computer namespace", `local stop` "docker_unavailable", and "OpenBot
+    could not stop a folder operation"), and the next launch said "OpenBot had trouble shutting down
+    last time." With the machine stopped nothing of OpenBot's can run, so Quit and Stop each find
+    every stop done, and the next launch says nothing.
+    */
+    #[test]
+    fn quit_and_stop_with_the_machine_stopped_find_everything_stopped() {
+        for quit in [true, false] {
+            let (shell, root) = running_on_a_gone_engine("openbot-machine-stopped");
+            let stopped = if quit {
+                exit_cleanup_reporting_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::MachineStopped,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                    |_, _| {},
+                )
+            } else {
+                stop_everything_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::MachineStopped,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                )
+            };
+
+            assert_eq!(stopped, Stopped::default(), "quit: {quit}");
+            assert!(shell.containers.lock().unwrap().is_none(), "quit: {quit}");
+            assert!(shell.host_access.lock().unwrap().is_none(), "quit: {quit}");
+            assert!(!recovery_required(&shell, &root), "quit: {quit}");
+            record_quit(&root, stopped);
+            assert!(read_quit_cleanup_notice(&root).unwrap().is_none());
+            assert!(take_local_eval_stop_notice(&root).is_none());
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// The engine does not answer and its machine says it is running: still a failure, said as the
+    /// engine not answering, never as a folder operation that would not stop.
+    #[test]
+    fn quit_and_stop_that_cannot_reach_a_running_machine_say_so() {
+        for quit in [true, false] {
+            let (shell, root) = running_on_a_gone_engine("openbot-engine-unreachable");
+            let stopped = if quit {
+                exit_cleanup_reporting_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::Unreachable,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                    |_, _| {},
+                )
+            } else {
+                stop_everything_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::Unreachable,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                )
+            };
+
+            assert!(
+                stopped
+                    .openbot
+                    .first()
+                    .is_some_and(|first| first.starts_with(ENGINE_UNREACHABLE_AT_STOP)),
+                "{stopped:?}"
+            );
+            assert_eq!(
+                stopped
+                    .openbot
+                    .iter()
+                    .filter(|line| line.contains(ENGINE_UNREACHABLE_AT_STOP))
+                    .count(),
+                1,
+                "{stopped:?}"
+            );
+            assert!(
+                stopped
+                    .openbot
+                    .iter()
+                    .all(|line| !line.contains("folder operation")),
+                "{stopped:?}"
+            );
+            assert!(stopped.intelligence.is_some(), "quit: {quit}");
+            // Kept for the Stop that retries.
+            assert!(shell.containers.lock().unwrap().is_some(), "quit: {quit}");
+            assert!(recovery_required(&shell, &root), "quit: {quit}");
+            if quit {
+                record_quit(&root, stopped);
+                let notice = read_quit_cleanup_notice(&root).unwrap().unwrap();
+                assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
+                assert!(
+                    notice
+                        .detail
+                        .as_deref()
+                        .unwrap()
+                        .contains(ENGINE_UNREACHABLE_AT_QUIT),
+                    "{notice:?}"
+                );
+            }
+            if let Some(broker) = shell.host_access.lock().unwrap().take() {
+                broker.stop_with_machine_stopped();
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// What `podman machine inspect` says decides it; only "stopped" means nothing runs.
+    #[test]
+    fn only_a_machine_that_says_stopped_has_nothing_running() {
+        let inspect = |state: &str| {
+            serde_json::json!([{ "Name": "openbot", "State": state, "Rootful": true }]).to_string()
+        };
+        for (answers, state, expected) in [
+            (true, Some("running"), EngineAtStop::Answers),
+            (false, Some("stopped"), EngineAtStop::MachineStopped),
+            (false, Some("running"), EngineAtStop::Unreachable),
+            (false, Some("starting"), EngineAtStop::Unreachable),
+            (false, None, EngineAtStop::Unreachable),
+        ] {
+            let found = state
+                .map(|state| acquire::machine_state(&inspect(state), "openbot").unwrap())
+                .unwrap_or(None);
+            assert_eq!(
+                EngineAtStop::from(answers, found.as_deref()),
+                expected,
+                "{answers} {state:?}"
+            );
+        }
+        assert_eq!(
+            acquire::machine_state(&inspect("stopped"), "someone-else").unwrap(),
+            None
+        );
     }
 
     #[test]
