@@ -184,6 +184,8 @@ To run the open-source template locally, you’ll need the following.
 
 The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access. On a Mac, the free Developer plan also covers [running Intelligence locally](#intelligence-on-your-own-machine) with Docker.
 
+https://github.com/user-attachments/assets/f1236620-4279-4aa2-98d7-1116ec52b9d0
+
 > **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
 > same steps as below plus the things that are easy to get wrong: which of the blank keys in
 > `.env.example` are actually yours to fill (the CopilotKit key and a model key), which the start
