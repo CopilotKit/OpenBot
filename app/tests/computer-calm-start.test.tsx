@@ -310,6 +310,52 @@ test("a card in a turn does not start a computer that is off: the Bot's action d
   expect(asked.times).toBe(0);
 });
 
+test("a server with no way to start a computer leaves the screen as it was: off, never starting, no problem", async () => {
+  let asked = 0;
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  console.warn = (...args: unknown[]) => void errors.push(args);
+  globalThis.fetch = (async (input) => {
+    const path = String(input);
+    if (path.endsWith("/wake")) {
+      asked += 1;
+      // Slow enough that whatever the screen says while it waits is seen.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return Response.json({ error: "Not found." }, { status: 404 });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const view = renderWithQueries(
+      <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+    );
+    const off = "Sales's computer is off. It starts when the Bot next uses it.";
+    await view.findByText(off);
+    // While the call is out, once it is refused, and for many polls after: off, and nothing else.
+    for (let pass = 0; pass < 30; pass++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(view.getByText(off)).toBeDefined();
+      expect(view.queryByText(/^Starting/)).toBeNull();
+      expect(view.queryByText(/can't show the screen/i)).toBeNull();
+    }
+    expect(asked).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+});
+
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
   HTMLCanvasElement.prototype.getContext = (() => ({
     drawImage: () => undefined,

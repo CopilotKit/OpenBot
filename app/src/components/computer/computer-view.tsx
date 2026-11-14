@@ -600,10 +600,12 @@ export function ComputerView({
     if (openedOn.current === computerId) return;
     openedOn.current = computerId;
     if (computerState !== "absent") return;
-    setStartAsked(true);
+    /*
+     * "Starting" only once the server says it is. Until then, and for a server that has no such
+     * call or refuses it, the screen says what it always said: the computer is off.
+     */
     void startComputer(computerId).then((state) => {
-      // Not started (an answer of off, or none): the screen says it is off, which it is.
-      if (state === null || state === "absent") setStartAsked(false);
+      if (state === "starting" || state === "ready") setStartAsked(true);
     });
   }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
   useEffect(() => {
