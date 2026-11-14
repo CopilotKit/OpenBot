@@ -301,6 +301,13 @@ mod native {
             return;
         }
         cover_now(window.0 as isize);
+        // Its title bar in the cover's light or dark from this first show, not from whenever
+        // `build()` returns: on a new machine WebView2 can take a minute (`crate::match_title_bar`
+        // takes over from there).
+        if COVERED.load(Ordering::SeqCst) == window.0 as isize {
+            let dark = *PALETTE.lock().unwrap_or_else(|held| held.into_inner()) == super::DARK;
+            crate::tint_title_bar_of(window.0 as isize, Some(dark));
+        }
     }
 
     /**
