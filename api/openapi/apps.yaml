@@ -529,9 +529,10 @@ paths:
       summary: List the apps that can be added
       description: >-
         Return one page of what can be added with createApp: the apps in
-        OpenBot's own catalogue (source catalogue), then apps from the wider
-        directory (source directory), each kind by title and then by id.
-        appId names the app an entry was added as, or is null. search narrows
+        OpenBot's own catalogue (source catalogue) in the catalogue's own
+        order, then apps from the wider directory (source directory) by title
+        and then by id. appId names the app an entry was added as, or is null.
+        search narrows
         the list to entries whose name or description holds it, ignoring case.
         source narrows it to one kind. Anybody signed in may read the
         catalogue. Only an administrator sees the wider directory, so anybody
@@ -1297,7 +1298,7 @@ components:
       properties:
         entries:
           type: array
-          description: The catalogue, then the wider directory, each by title and then by id.
+          description: The catalogue in its own order, then the wider directory by title and then by id.
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
         nextCursor:

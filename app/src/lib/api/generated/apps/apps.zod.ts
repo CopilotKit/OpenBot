@@ -1797,7 +1797,7 @@ export const SetAppOAuthClientBody = zod.object({
 export const SetAppOAuthClientResponse = zod.void();
 
 /**
- * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue), then apps from the wider directory (source directory), each kind by title and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else's list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
+ * Return one page of what can be added with createApp: the apps in OpenBot's own catalogue (source catalogue) in the catalogue's own order, then apps from the wider directory (source directory) by title and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else's list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they're already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.
  * @summary List the apps that can be added
  */
 
@@ -1951,7 +1951,7 @@ export const ListAppDirectoryResponse = zod.object({
         .describe("One app that can be added, by where it comes from."),
     )
     .describe(
-      "The catalogue, then the wider directory, each by title and then by id.",
+      "The catalogue in its own order, then the wider directory by title and then by id.",
     ),
   nextCursor: zod
     .string()
