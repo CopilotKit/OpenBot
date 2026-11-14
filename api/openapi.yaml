@@ -2910,20 +2910,6 @@ paths:
         - webSession: []
         - appOAuth:
             - apps:read
-  /api/v2/organizations/{organizationId}/people/{personId}/connections:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/PersonId'
-    get:
-      tags:
-        - Connections
-      operationId: listConnections
-      summary: List a person's connections
-      description: 'Return one page of the apps a person connected their own accounts to, so their Bots can act there for them, oldest first. An app''s one shared account is not listed here: read it with getSharedConnection. A connection whose access was withdrawn stays listed, revoked, until the person connects again. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - connections:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -2931,7 +2917,6 @@ paths:
       responses:
         '200':
           description: One page of apps.
-          description: One page of connections.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -2942,17 +2927,12 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/AppPageExample'
-                $ref: '#/components/schemas/ConnectionPage'
-              examples:
-                lastPage:
-                  $ref: '#/components/examples/ConnectionPageLast'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
-          $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -3050,25 +3030,6 @@ paths:
       responses:
         '200':
           description: The app.
-  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/PersonId'
-      - $ref: '#/components/parameters/AppId'
-    get:
-      tags:
-        - Connections
-      operationId: getConnection
-      summary: Read a person's connection to an app
-      description: Return a person's connection to one app. Not found when they haven't connected it, or when the app uses one shared account, which getSharedConnection reads. Only the person themselves may read it.
-      security:
-        - webSession: []
-        - appOAuth:
-            - connections:read
-        - apiKey: []
-      responses:
-        '200':
-          description: The connection.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -3079,10 +3040,6 @@ paths:
               examples:
                 address:
                   $ref: '#/components/examples/AddressAppExample'
-                $ref: '#/components/schemas/Connection'
-              examples:
-                checked:
-                  $ref: '#/components/examples/ConnectionExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3091,9 +3048,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/AppNotFound'
-          $ref: '#/components/responses/OwnOnly'
-        '404':
-          $ref: '#/components/responses/ConnectionNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -3108,21 +3062,6 @@ paths:
         - webSession: []
         - appOAuth:
             - apps:write
-  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/connect:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/PersonId'
-      - $ref: '#/components/parameters/AppId'
-    post:
-      tags:
-        - Connections
-      operationId: connectApp
-      summary: Start connecting a person's account at an app
-      description: 'Start connecting a person''s own account at an app, and say what happens next. consent answers the address of the app''s own sign-in page: the client opens it, and the app sends the person back to the page returnTo names. form answers the boxes an app that takes a key asks for; sending them back as values connects it. connected means the account is connected already. Coming back from a sign-in page proves nothing by itself, so call confirmConnection when the person lands. Connecting over a standing connection asks for more permissions on the same account, unless anotherAccount asks for a second account beside it. Only the person themselves may connect their accounts, and an app with one shared account is connected by an administrator with connectSharedApp. The address and the values are never logged.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - connections:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3148,22 +3087,6 @@ paths:
       responses:
         '200':
           description: The server, as saved.
-              $ref: '#/components/schemas/ConnectAppRequest'
-            examples:
-              signIn:
-                value:
-                  returnTo: connections
-              anotherAccount:
-                value:
-                  returnTo: connections
-                  anotherAccount: true
-              key:
-                value:
-                  values:
-                    api_key: lin_api_example
-      responses:
-        '200':
-          description: What the person does next.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -3198,6 +3121,508 @@ paths:
         - webSession: []
         - appOAuth:
             - apps:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppRequest'
+            examples:
+              adminOnly:
+                value:
+                  ownerGrants: admin
+              default:
+                value:
+                  ownerGrants: null
+      responses:
+        '200':
+          description: The changed app.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                catalogue:
+                  $ref: '#/components/examples/CatalogueAppExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Apps
+      operationId: deleteApp
+      summary: Remove an app
+      description: Remove an app for everybody. Every person's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The app was removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AppRemovalForbidden'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/refresh:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    post:
+      tags:
+        - Apps
+      operationId: refreshApp
+      summary: Ask an app what it offers now
+      description: Ask the app what actions it offers now, replace the ones OpenBot has recorded, and answer the app. Where asking needs an account, it is asked with the administrator's own. An app that can't be asked still answers 200, with the reason in lastError and its actions as they were. Bots keep any action the app stopped offering, listed in withdrawn. Recorded on the audit trail when that changes. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The app, with what it offers now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                address:
+                  $ref: '#/components/examples/AddressAppExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/account-mode:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    put:
+      tags:
+        - Apps
+      operationId: setAppAccountMode
+      summary: Choose whose account an app acts in
+      description: 'Choose whose account an app from the directory acts in: each person''s own (personal), or one account OpenBot holds for everybody (shared). Every account the switch leaves behind is ended at the app''s service first. Nothing changes unless all of them ended, and the problem''s problems then names each account that didn''t. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccountModeRequest'
+            examples:
+              preview:
+                summary: What switching to shared would do.
+                value:
+                  mode: shared
+                  validateOnly: true
+              shared:
+                summary: Switch to shared, with one Bot's approval chosen.
+                value:
+                  mode: shared
+                  approvals:
+                    agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21:
+                      audience: team
+                      outsideInput: false
+                      members: []
+      responses:
+        '200':
+          description: What the switch did, or would do.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccountModeChange'
+              examples:
+                preview:
+                  $ref: '#/components/examples/AppAccountModePreviewExample'
+                applied:
+                  $ref: '#/components/examples/AppAccountModeAppliedExample'
+        '400':
+          $ref: '#/components/responses/InvalidAppChange'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppAccountModeUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/oauth-client:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    put:
+      tags:
+        - Apps
+      operationId: setAppOAuthClient
+      summary: Set the OAuth client people sign in to an app with
+      description: Set the OAuth client OpenBot signs people in to an app with, for a catalogue app whose vendor doesn't let OpenBot register one itself. Register redirectUri from getAppSetup with the vendor first. Setting a client again replaces the one before. The secret is kept in the vault and never answered. Recorded on the audit trail. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppOAuthClientRequest'
+            examples:
+              client:
+                value:
+                  clientId: 1234567890-openbot.apps.example.com
+                  clientSecret: example-client-secret
+      responses:
+        '204':
+          description: The client was set.
+        '400':
+          $ref: '#/components/responses/InvalidAppChange'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-directory:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Apps
+      operationId: listAppDirectory
+      summary: List the apps that can be added
+      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue), then apps from the wider directory (source directory), each kind by title and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else''s list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:read
+        - apiKey: []
+      parameters:
+        - name: search
+          in: query
+          description: Part of an entry's name or description, matched without regard to case.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
+        - name: source
+          in: query
+          description: Only the catalogue, or only the wider directory.
+          schema:
+            $ref: '#/components/schemas/AppDirectorySource'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of what can be added.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppDirectoryPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/AppDirectoryPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AppStateConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-setup:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Apps
+      operationId: getAppSetup
+      summary: Read how apps are set up here
+      description: 'Return how apps are set up on this OpenBot: whether the app directory is available and the service it comes from, the address an administrator registers with an app''s vendor, whether a connection approves one action at a time, and whether a Bot with no key of its own can still use an app''s actions. Anybody signed in may read it. It holds no secret.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:read
+        - apiKey: []
+      responses:
+        '200':
+          description: How apps are set up here.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppSetup'
+              examples:
+                directory:
+                  $ref: '#/components/examples/AppSetupExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/shortened-tool-names:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Apps
+      operationId: getShortenedToolNames
+      summary: Read the action names that were shortened
+      description: Return every app action name that was cut to fit a model's limit of 64 characters, with the whole name it stands for, so a client shows a step by the action's own name. Names only, and nothing about who may use them. Anybody signed in may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - apps:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The shortened names.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShortenedToolNames'
+              examples:
+                one:
+                  $ref: '#/components/examples/ShortenedToolNamesExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags:
+        - Connections
+      operationId: listConnections
+      summary: List a person's connections
+      description: 'Return one page of the apps a person connected their own accounts to, so their Bots can act there for them, oldest first. An app''s one shared account is not listed here: read it with getSharedConnection. A connection whose access was withdrawn stays listed, revoked, until the person connects again. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - connections:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ConnectionPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/AppId'
+    get:
+      tags:
+        - Connections
+      operationId: getConnection
+      summary: Read a person's connection to an app
+      description: Return a person's connection to one app. Not found when they haven't connected it, or when the app uses one shared account, which getSharedConnection reads. Only the person themselves may read it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - connections:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The connection.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+              examples:
+                checked:
+                  $ref: '#/components/examples/ConnectionExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/ConnectionNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/connect:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/AppId'
+    post:
+      tags:
+        - Connections
+      operationId: connectApp
+      summary: Start connecting a person's account at an app
+      description: 'Start connecting a person''s own account at an app, and say what happens next. consent answers the address of the app''s own sign-in page: the client opens it, and the app sends the person back to the page returnTo names. form answers the boxes an app that takes a key asks for; sending them back as values connects it. connected means the account is connected already. Coming back from a sign-in page proves nothing by itself, so call confirmConnection when the person lands. Connecting over a standing connection asks for more permissions on the same account, unless anotherAccount asks for a second account beside it. Only the person themselves may connect their accounts, and an app with one shared account is connected by an administrator with connectSharedApp. The address and the values are never logged.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - connections:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectAppRequest'
+            examples:
+              signIn:
+                value:
+                  returnTo: connections
+              anotherAccount:
+                value:
+                  returnTo: connections
+                  anotherAccount: true
+              key:
+                value:
+                  values:
+                    api_key: lin_api_example
+      responses:
+        '200':
+          description: What the person does next.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
                 $ref: '#/components/schemas/ConnectionStart'
               examples:
                 consent:
@@ -3490,17 +3915,6 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateAppRequest'
-            examples:
-              adminOnly:
-                value:
-                  ownerGrants: admin
-              default:
-                value:
-                  ownerGrants: null
-      responses:
-        '200':
-          description: The changed app.
               $ref: '#/components/schemas/AuthorizeActionRequest'
             examples:
               action:
@@ -3516,50 +3930,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/App'
-              examples:
-                catalogue:
-                  $ref: '#/components/examples/CatalogueAppExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/AppNotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-    delete:
-      tags:
-        - Apps
-      operationId: deleteApp
-      summary: Remove an app
-      description: Remove an app for everybody. Every person's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator may.
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '204':
-          description: The app was removed.
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AppRemovalForbidden'
-        '404':
-          $ref: '#/components/responses/AppNotFound'
-        '409':
-          $ref: '#/components/responses/AppConflict'
                 $ref: '#/components/schemas/AuthorizationStart'
               examples:
                 consent:
@@ -3579,10 +3949,6 @@ paths:
         '502':
           $ref: '#/components/responses/AppServiceFailed'
         '503':
-          $ref: '#/components/responses/AppDirectoryUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/apps/{appId}/refresh:
           $ref: '#/components/responses/ConnectionsUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
@@ -3771,58 +4137,6 @@ paths:
       - $ref: '#/components/parameters/AppId'
     post:
       tags:
-        - Apps
-      operationId: refreshApp
-      summary: Ask an app what it offers now
-      description: Ask the app what actions it offers now, replace the ones OpenBot has recorded, and answer the app. Where asking needs an account, it is asked with the administrator's own. An app that can't be asked still answers 200, with the reason in lastError and its actions as they were. Bots keep any action the app stopped offering, listed in withdrawn. Recorded on the audit trail when that changes. Only an administrator may.
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The app, with what it offers now.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/App'
-              examples:
-                address:
-                  $ref: '#/components/examples/AddressAppExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/AppNotFound'
-        '409':
-          $ref: '#/components/responses/AppConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/apps/{appId}/account-mode:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/AppId'
-    put:
-      tags:
-        - Apps
-      operationId: setAppAccountMode
-      summary: Choose whose account an app acts in
-      description: 'Choose whose account an app from the directory acts in: each person''s own (personal), or one account OpenBot holds for everybody (shared). Every account the switch leaves behind is ended at the app''s service first. Nothing changes unless all of them ended, and the problem''s problems then names each account that didn''t. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:write
         - Connections
       operationId: connectSharedApp
       summary: Start connecting an app's shared account
@@ -3839,25 +4153,6 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AppAccountModeRequest'
-            examples:
-              preview:
-                summary: What switching to shared would do.
-                value:
-                  mode: shared
-                  validateOnly: true
-              shared:
-                summary: Switch to shared, with one Bot's approval chosen.
-                value:
-                  mode: shared
-                  approvals:
-                    agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21:
-                      audience: team
-                      outsideInput: false
-                      members: []
-      responses:
-        '200':
-          description: What the switch did, or would do.
               $ref: '#/components/schemas/ConnectSharedAppRequest'
             examples:
               signIn:
@@ -3872,14 +4167,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AppAccountModeChange'
-              examples:
-                preview:
-                  $ref: '#/components/examples/AppAccountModePreviewExample'
-                applied:
-                  $ref: '#/components/examples/AppAccountModeAppliedExample'
-        '400':
-          $ref: '#/components/responses/InvalidAppChange'
                 $ref: '#/components/schemas/ConnectionStart'
               examples:
                 consent:
@@ -3895,30 +4182,12 @@ paths:
         '404':
           $ref: '#/components/responses/AppNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
           $ref: '#/components/responses/SharedConnectionConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         '502':
           $ref: '#/components/responses/AppServiceFailed'
         '503':
-          $ref: '#/components/responses/AppAccountModeUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/apps/{appId}/oauth-client:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/AppId'
-    put:
-      tags:
-        - Apps
-      operationId: setAppOAuthClient
-      summary: Set the OAuth client people sign in to an app with
-      description: Set the OAuth client OpenBot signs people in to an app with, for a catalogue app whose vendor doesn't let OpenBot register one itself. Register redirectUri from getAppSetup with the vendor first. Setting a client again replaces the one before. The secret is kept in the vault and never answered. Recorded on the audit trail. Only an administrator may.
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:write
           $ref: '#/components/responses/ConnectionsUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
@@ -4133,17 +4402,6 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AppOAuthClientRequest'
-            examples:
-              client:
-                value:
-                  clientId: 1234567890-openbot.apps.example.com
-                  clientSecret: example-client-secret
-      responses:
-        '204':
-          description: The client was set.
-        '400':
-          $ref: '#/components/responses/InvalidAppChange'
               $ref: '#/components/schemas/AuthorizeActionRequest'
             examples:
               action:
@@ -4172,146 +4430,12 @@ paths:
         '404':
           $ref: '#/components/responses/AppNotFound'
         '409':
-          $ref: '#/components/responses/AppConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/app-directory:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags:
-        - Apps
-      operationId: listAppDirectory
-      summary: List the apps that can be added
-      description: 'Return one page of what can be added with createApp: the apps in OpenBot''s own catalogue (source catalogue), then apps from the wider directory (source directory), each kind by title and then by id. appId names the app an entry was added as, or is null. search narrows the list to entries whose name or description holds it, ignoring case. source narrows it to one kind. Anybody signed in may read the catalogue. Only an administrator sees the wider directory, so anybody else''s list holds catalogue entries only, and asking for source=directory is refused. Where no directory is set up, the list holds the catalogue only and source=directory is unavailable. In the personal edition the catalogue leaves out entries meant for a team, unless they''re already added. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search and source that made it, so changing either starts again without one.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:read
-        - apiKey: []
-      parameters:
-        - name: search
-          in: query
-          description: Part of an entry's name or description, matched without regard to case.
-          schema:
-            type: string
-            maxLength: 200
-            pattern: ^[^\x00]*$
-        - name: source
-          in: query
-          description: Only the catalogue, or only the wider directory.
-          schema:
-            $ref: '#/components/schemas/AppDirectorySource'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: One page of what can be added.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppDirectoryPage'
-              examples:
-                lastPage:
-                  $ref: '#/components/examples/AppDirectoryPageExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
-        '409':
-          $ref: '#/components/responses/AppStateConflict'
           $ref: '#/components/responses/SharedConnectionConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         '502':
           $ref: '#/components/responses/AppServiceFailed'
         '503':
-          $ref: '#/components/responses/AppDirectoryUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/app-setup:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags:
-        - Apps
-      operationId: getAppSetup
-      summary: Read how apps are set up here
-      description: 'Return how apps are set up on this OpenBot: whether the app directory is available and the service it comes from, the address an administrator registers with an app''s vendor, whether a connection approves one action at a time, and whether a Bot with no key of its own can still use an app''s actions. Anybody signed in may read it. It holds no secret.'
-      x-openbot-singleton: true
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:read
-        - apiKey: []
-      responses:
-        '200':
-          description: How apps are set up here.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppSetup'
-              examples:
-                directory:
-                  $ref: '#/components/examples/AppSetupExample'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/shortened-tool-names:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags:
-        - Apps
-      operationId: getShortenedToolNames
-      summary: Read the action names that were shortened
-      description: Return every app action name that was cut to fit a model's limit of 64 characters, with the whole name it stands for, so a client shows a step by the action's own name. Names only, and nothing about who may use them. Anybody signed in may read them.
-      x-openbot-singleton: true
-      security:
-        - webSession: []
-        - appOAuth:
-            - apps:read
-        - apiKey: []
-      responses:
-        '200':
-          description: The shortened names.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ShortenedToolNames'
-              examples:
-                one:
-                  $ref: '#/components/examples/ShortenedToolNamesExample'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
-        '500':
-          $ref: '#/components/responses/ServerError'
           $ref: '#/components/responses/ConnectionsUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
@@ -7581,19 +7705,6 @@ components:
             - 'null'
           description: The email address of whoever added the app, where OpenBot knows it.
         toolsRefreshedAt:
-    ConnectionCheckState:
-      type: object
-      description: What the last check of a connection found, and whether it can be checked now.
-      required:
-        - verified
-        - verifiedAt
-        - checkedAction
-        - checkable
-      properties:
-        verified:
-          type: boolean
-          description: Whether the last check made a real call with the connection, and it worked.
-        verifiedAt:
           type:
             - string
             - 'null'
@@ -7630,60 +7741,6 @@ components:
           description: By title, then by id.
           items:
             $ref: '#/components/schemas/App'
-          description: When verified was last earned. Null when it never was.
-        checkedAction:
-          type:
-            - string
-            - 'null'
-          description: The action the last check called. Null when nothing was tried, because the app offered nothing safe to call.
-        checkable:
-          type: boolean
-          description: Whether the app offers a safe action to check the connection with now, as recheckConnection does.
-    Connection:
-      type: object
-      description: 'A person''s connection to an app: their own account there, which their Bots act as. Never the credential behind it.'
-      required:
-        - appId
-        - connectedAt
-        - revoked
-        - scope
-        - check
-        - canAddAccount
-      properties:
-        appId:
-          type: string
-          description: The app, as listApps answers it.
-        connectedAt:
-          type: string
-          format: date-time
-          description: When the person first connected it.
-        revoked:
-          type: boolean
-          description: Whether the access behind it was withdrawn. A revoked connection can't be used until the person connects again.
-        scope:
-          type:
-            - string
-            - 'null'
-          description: What the app granted, in its own words, where OpenBot keeps the sign-in itself. Null where the app keeps it.
-        check:
-          description: The last check of the connection with the app. Null where OpenBot keeps the sign-in itself, which leaves nothing to check.
-          oneOf:
-            - $ref: '#/components/schemas/ConnectionCheckState'
-            - type: 'null'
-        canAddAccount:
-          type: boolean
-          description: Whether the person can connect a second account at this app beside this one, with connectApp's anotherAccount.
-    ConnectionPage:
-      type: object
-      required:
-        - connections
-        - nextCursor
-      properties:
-        connections:
-          type: array
-          description: The oldest connection first, then by app id.
-          items:
-            $ref: '#/components/schemas/Connection'
         nextCursor:
           type:
             - string
@@ -8037,6 +8094,136 @@ components:
           description: The catalogue, then the wider directory, each by title and then by id.
           items:
             $ref: '#/components/schemas/AppDirectoryEntry'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    AppSetup:
+      type: object
+      description: How apps are set up on this OpenBot. Never a key.
+      required:
+        - directoryAvailable
+        - directoryProvider
+        - redirectUri
+        - authorizesPerAction
+        - botsMayCallBack
+      properties:
+        directoryAvailable:
+          type: boolean
+          description: Whether apps from the wider directory can be listed and added here.
+        directoryProvider:
+          type:
+            - string
+            - 'null'
+          enum:
+            - composio
+            - arcade
+            - null
+          description: The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenBot names none.
+        redirectUri:
+          type:
+            - string
+            - 'null'
+          description: The address to register with a vendor for an OAuth client (setAppOAuthClient), exactly as OpenBot sends it. Null when this OpenBot has no public address, so nobody can sign in to an app through it.
+        authorizesPerAction:
+          type: boolean
+          description: Whether a connection is approved one action at a time, so a person approves each action the first time a Bot uses it.
+        botsMayCallBack:
+          type: boolean
+          description: Whether a Bot with no key of its own can still use an app's actions. Without it, only a Bot that holds its own key can.
+    ShortenedToolNames:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: object
+          description: Each shortened name, with the whole name it stands for.
+          propertyNames:
+            maxLength: 64
+          additionalProperties:
+            type: string
+    ConnectionCheckState:
+      type: object
+      description: What the last check of a connection found, and whether it can be checked now.
+      required:
+        - verified
+        - verifiedAt
+        - checkedAction
+        - checkable
+      properties:
+        verified:
+          type: boolean
+          description: Whether the last check made a real call with the connection, and it worked.
+        verifiedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When verified was last earned. Null when it never was.
+        checkedAction:
+          type:
+            - string
+            - 'null'
+          description: The action the last check called. Null when nothing was tried, because the app offered nothing safe to call.
+        checkable:
+          type: boolean
+          description: Whether the app offers a safe action to check the connection with now, as recheckConnection does.
+    Connection:
+      type: object
+      description: 'A person''s connection to an app: their own account there, which their Bots act as. Never the credential behind it.'
+      required:
+        - appId
+        - connectedAt
+        - revoked
+        - scope
+        - check
+        - canAddAccount
+      properties:
+        appId:
+          type: string
+          description: The app, as listApps answers it.
+        connectedAt:
+          type: string
+          format: date-time
+          description: When the person first connected it.
+        revoked:
+          type: boolean
+          description: Whether the access behind it was withdrawn. A revoked connection can't be used until the person connects again.
+        scope:
+          type:
+            - string
+            - 'null'
+          description: What the app granted, in its own words, where OpenBot keeps the sign-in itself. Null where the app keeps it.
+        check:
+          description: The last check of the connection with the app. Null where OpenBot keeps the sign-in itself, which leaves nothing to check.
+          oneOf:
+            - $ref: '#/components/schemas/ConnectionCheckState'
+            - type: 'null'
+        canAddAccount:
+          type: boolean
+          description: Whether the person can connect a second account at this app beside this one, with connectApp's anotherAccount.
+    ConnectionPage:
+      type: object
+      required:
+        - connections
+        - nextCursor
+      properties:
+        connections:
+          type: array
+          description: The oldest connection first, then by app id.
+          items:
+            $ref: '#/components/schemas/Connection'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     ConnectionReturnTo:
       type: string
       enum:
@@ -8413,51 +8600,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    AppSetup:
-      type: object
-      description: How apps are set up on this OpenBot. Never a key.
-      required:
-        - directoryAvailable
-        - directoryProvider
-        - redirectUri
-        - authorizesPerAction
-        - botsMayCallBack
-      properties:
-        directoryAvailable:
-          type: boolean
-          description: Whether apps from the wider directory can be listed and added here.
-        directoryProvider:
-          type:
-            - string
-            - 'null'
-          enum:
-            - composio
-            - arcade
-            - null
-          description: The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenBot names none.
-        redirectUri:
-          type:
-            - string
-            - 'null'
-          description: The address to register with a vendor for an OAuth client (setAppOAuthClient), exactly as OpenBot sends it. Null when this OpenBot has no public address, so nobody can sign in to an app through it.
-        authorizesPerAction:
-          type: boolean
-          description: Whether a connection is approved one action at a time, so a person approves each action the first time a Bot uses it.
-        botsMayCallBack:
-          type: boolean
-          description: Whether a Bot with no key of its own can still use an app's actions. Without it, only a Bot that holds its own key can.
-    ShortenedToolNames:
-      type: object
-      required:
-        - names
-      properties:
-        names:
-          type: object
-          description: Each shortened name, with the whole name it stands for.
-          propertyNames:
-            maxLength: 64
-          additionalProperties:
-            type: string
     AccountDisconnection:
       type: object
       required:
@@ -9484,61 +9626,17 @@ components:
                 traceId: trace_example
     InvalidApp:
       description: A field is missing or out of bounds, the directory entry isn't one that can be added, the address is refused, the server needs a key nobody gave, or the server couldn't be reached or set up for signing in.
-    ConnectionNotFound:
-      description: No app has that id here, the person hasn't connected it, the app uses one shared account, or the organization does not exist.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
             title:
-            notConnected:
-              value:
-                type: https://open.bot/errors/connection-not-found
-                title: Connection not found.
-                status: 404
-                detail: You haven't connected Linear.
-                code: CONNECTION_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-            shared:
-              value:
-                type: https://open.bot/errors/connection-not-found
-                title: Connection not found.
-                status: 404
-                detail: Linear uses one shared account. An admin connects it on its page under Apps.
-                code: CONNECTION_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-            noApp:
-              value:
-                type: https://open.bot/errors/app-not-found
-                title: App not found.
-                status: 404
-                detail: That app hasn't been added.
-                code: APP_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    ConnectionRefused:
-      description: 'A parameter or the body is malformed, or the app can''t be connected this way: it needs no account, OpenBot keeps its sign-in itself so there is nothing to confirm or check, the values don''t match the form it asks for, the app refused the key, or it has no action by that name.'
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            notThisWay:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
                 detail: Give the server a name and an address.
-                detail: That app doesn't connect this way.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -9641,33 +9739,28 @@ components:
                 title: Request validation failed.
                 status: 400
                 detail: Acme Wiki needs no account, so there is nothing to share.
-                detail: Weather needs no account, so there's nothing to connect. Bots that can use it already work.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
             noOAuthClient:
-            required:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
                 detail: acme-wiki is not reached with an OAuth client.
-                detail: Linear needs api_key, so nothing was sent. Fill in every required box and press Connect again.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
             id:
-            noAction:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
                 detail: A server name is lower-case letters, numbers and hyphens.
-                detail: GitHub has no action by that name.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -9675,8 +9768,6 @@ components:
                 traceId: trace_example
     AppConflict:
       description: OpenBot's own records of the app disagree, so it can't do this until they're corrected, or the Idempotency-Key was used for a different request.
-    ConnectionForbidden:
-      description: The caller asked to connect somebody else's account, which only that person may do, or the app connects only as one shared account.
       content:
         application/problem+json:
           schema:
@@ -9694,26 +9785,22 @@ components:
             $ref: '#/components/schemas/Problem'
           examples:
             notAdmin:
-            notYours:
               value:
                 type: https://open.bot/errors/permission-denied
                 title: Permission denied.
                 status: 403
                 detail: Only an admin can do this.
-                detail: Only they can see or change their connections.
                 code: PERMISSION_DENIED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
             alwaysOn:
-            sharedOnly:
               value:
                 type: https://open.bot/errors/permission-denied
                 title: Permission denied.
                 status: 403
                 detail: Routines are always on, for every Bot.
-                detail: Shopify connects only as one shared account, so no account was made. Ask an admin to make it shared on its page under Apps and connect it there.
                 code: PERMISSION_DENIED
                 category: permission
                 retryable: false
@@ -9721,8 +9808,6 @@ components:
                 traceId: trace_example
     AppAccountModeUnavailable:
       description: 'This OpenBot can''t switch whose account an app acts in: shared accounts aren''t available here, or the app directory isn''t set up. Trying again won''t help until an administrator changes something.'
-    ConnectionConflict:
-      description: The app uses one shared account, which an administrator connects on its own page. Or, on a write, a connection or consent is already in progress or settled another way, or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
@@ -9746,6 +9831,146 @@ components:
                 status: 503
                 detail: Apps from the directory aren't set up on this OpenBot. Ask an admin.
                 code: APP_DIRECTORY_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppStateConflict:
+      description: OpenBot's own records of its apps disagree, so it can't answer until they're corrected.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            records:
+              $ref: '#/components/examples/AppRecordsConflictExample'
+    ConnectionNotFound:
+      description: No app has that id here, the person hasn't connected it, the app uses one shared account, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notConnected:
+              value:
+                type: https://open.bot/errors/connection-not-found
+                title: Connection not found.
+                status: 404
+                detail: You haven't connected Linear.
+                code: CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            shared:
+              value:
+                type: https://open.bot/errors/connection-not-found
+                title: Connection not found.
+                status: 404
+                detail: Linear uses one shared account. An admin connects it on its page under Apps.
+                code: CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noApp:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionRefused:
+      description: 'A parameter or the body is malformed, or the app can''t be connected this way: it needs no account, OpenBot keeps its sign-in itself so there is nothing to confirm or check, the values don''t match the form it asks for, the app refused the key, or it has no action by that name.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notThisWay:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That app doesn't connect this way.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noAccount:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Weather needs no account, so there's nothing to connect. Bots that can use it already work.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            required:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Linear needs api_key, so nothing was sent. Fill in every required box and press Connect again.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noAction:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: GitHub has no action by that name.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionForbidden:
+      description: The caller asked to connect somebody else's account, which only that person may do, or the app connects only as one shared account.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see or change their connections.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            sharedOnly:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Shopify connects only as one shared account, so no account was made. Ask an admin to make it shared on its page under Apps and connect it there.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionConflict:
+      description: The app uses one shared account, which an administrator connects on its own page. Or, on a write, a connection or consent is already in progress or settled another way, or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
             shared:
               value:
                 type: https://open.bot/errors/conflict
@@ -9797,8 +10022,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    AppStateConflict:
-      description: OpenBot's own records of its apps disagree, so it can't answer until they're corrected.
     ConnectedAccountNotFound:
       description: The person has no account by that id at the app, no app has that id here, or the organization does not exist.
       content:
@@ -9806,8 +10029,6 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            records:
-              $ref: '#/components/examples/AppRecordsConflictExample'
             notConnected:
               value:
                 type: https://open.bot/errors/connected-account-not-found
