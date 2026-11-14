@@ -32,6 +32,7 @@ import {
 } from "@/components/channels/tool-activity";
 import { TeamBotConsents } from "@/components/settings/team-bot-consents";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -129,8 +130,8 @@ beforeEach(() => {
         visible: [{ id: "shopper-bot", name: "Shop" }],
       });
       if (bots) return bots;
-      if (url === "/api/me")
-        return Response.json({
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
       return new Response(null, { status: 404 });

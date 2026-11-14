@@ -4,7 +4,7 @@
 import type { ApiKey } from "./apiKey";
 
 export interface ApiKeyPage {
-  /** Newest first. */
+  /** Newest first, then by id. */
   apiKeys: ApiKey[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

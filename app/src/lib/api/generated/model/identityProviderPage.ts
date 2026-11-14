@@ -4,7 +4,7 @@
 import type { IdentityProvider } from "./identityProvider";
 
 export interface IdentityProviderPage {
-  /** By domain. */
+  /** By domain, then by id. */
   identityProviders: IdentityProvider[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

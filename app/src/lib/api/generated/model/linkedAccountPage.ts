@@ -4,6 +4,7 @@
 import type { LinkedAccount } from "./linkedAccount";
 
 export interface LinkedAccountPage {
+  /** The oldest link first, then by id. */
   linkedAccounts: LinkedAccount[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

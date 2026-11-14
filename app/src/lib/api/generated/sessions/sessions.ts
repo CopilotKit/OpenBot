@@ -26,6 +26,7 @@ import type {
   ServerErrorResponse,
   SessionNotFoundResponse,
   SessionPage,
+  SignInUnavailableResponse,
   SignedInOwnOnlyResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -78,7 +79,7 @@ export const getListSessionsUrl = (
 };
 
 /**
- * Return one page of the sessions a person is signed in with, the most recently used first, with the one this request came on marked current. Never a session's token. Only the person themselves may list them, signed in to OpenBot. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the sessions a person is signed in with, the newest sign-in first, with the one this request came on marked current. Never a session's token. Only the person themselves may list them, signed in to OpenBot. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where a person is signed in
  */
 export const listSessions = async (
@@ -115,6 +116,7 @@ export const getListSessionsQueryOptions = <
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -166,6 +168,7 @@ export type ListSessionsQueryError =
   | SignedInOwnOnlyResponse
   | OrganizationNotFoundResponse
   | ServerErrorResponse
+  | SignInUnavailableResponse
   | UnexpectedErrorResponse;
 
 export function useListSessions<
@@ -176,6 +179,7 @@ export function useListSessions<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -207,6 +211,7 @@ export function useListSessions<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -238,6 +243,7 @@ export function useListSessions<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -265,6 +271,7 @@ export function useListSessions<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -355,6 +362,7 @@ export const getDeleteSessionMutationOptions = <
     | SessionNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -409,6 +417,7 @@ export type DeleteSessionMutationError =
   | SessionNotFoundResponse
   | IdempotencyConflictResponse
   | ServerErrorResponse
+  | SignInUnavailableResponse
   | UnexpectedErrorResponse;
 export type DeleteSessionMutationVariables = {
   organizationId: string;
@@ -428,6 +437,7 @@ export const useDeleteSession = <
     | SessionNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(

@@ -50,6 +50,13 @@ import {
   tabFor,
 } from "@/skins/openfuse/model";
 import { SKINS } from "@/skins/registry";
+import {
+  LINKED_ACCOUNT_PROVIDERS_PATH,
+  LINKED_ACCOUNTS_PATH,
+  ME_PATH,
+  meBody,
+  PREFERENCES_PATH,
+} from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 
 /*
@@ -399,7 +406,7 @@ type Call = { method: string; path: string; body: unknown };
 function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
   const calls: Call[] = [];
   const routes: Record<string, unknown> = {
-    "/api/me": {
+    [ME_PATH]: meBody({
       user: {
         id: options.userId ?? "u-1",
         email: "alex@example.com",
@@ -407,7 +414,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         role: options.role ?? "admin",
         onboarding: null,
       },
-    },
+    }),
     "/api/channels": { channels, nextCursor: null },
     "/api/approvals": inbox,
     "/api/bots/attention": { bots: attention, lastPingId: null },
@@ -428,10 +435,16 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       connections: [{ serverId: "notion", holder: "person" }],
       redirectUri: null,
     },
-    "/api/identity/links": { links: [] },
-    "/api/identity/providers": { providers: { slack: false, github: false } },
+    [`${LINKED_ACCOUNTS_PATH}?limit=100`]: {
+      linkedAccounts: [],
+      nextCursor: null,
+    },
+    [`${LINKED_ACCOUNT_PROVIDERS_PATH}?limit=100`]: {
+      linkedAccountProviders: [],
+      nextCursor: null,
+    },
     "/api/capabilities": {},
-    "/api/settings/preferences": { preferences: {} },
+    [PREFERENCES_PATH]: {},
   };
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {

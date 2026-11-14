@@ -22,6 +22,7 @@ import {
   appAccessSentence,
 } from "@/components/plugins/app-access-action";
 import type { AppAccess } from "@/lib/app-access/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { appAccess } from "./app-access-fixture";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
@@ -86,8 +87,8 @@ function mounted(
       url,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
-    if (options.admin && url === "/api/me")
-      return Response.json({ user: { id: "usr_admin", role: "admin" } });
+    if (options.admin && url === ME_PATH)
+      return meResponse({ user: { id: "usr_admin", role: "admin" } });
     if (options.personal && url === "/api/capabilities")
       return Response.json({ edition: "personal" });
     if (options.admin && url === botPath("expenses"))

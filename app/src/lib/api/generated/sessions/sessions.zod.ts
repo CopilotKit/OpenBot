@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the sessions a person is signed in with, the most recently used first, with the one this request came on marked current. Never a session's token. Only the person themselves may list them, signed in to OpenBot. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the sessions a person is signed in with, the newest sign-in first, with the one this request came on marked current. Never a session's token. Only the person themselves may list them, signed in to OpenBot. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where a person is signed in
  */
 
@@ -93,7 +93,9 @@ export const ListSessionsResponse = zod.object({
           "Somewhere a person is signed in. Never the session's token.",
         ),
     )
-    .describe("The most recently used first."),
+    .describe(
+      "The newest sign-in first, then by id, an order that doesn't move while somebody pages.",
+    ),
   nextCursor: zod
     .string()
     .max(listSessionsResponseNextCursorMax)

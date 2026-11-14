@@ -19,6 +19,7 @@ import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
@@ -188,7 +189,14 @@ test.each([
     ).toBeTruthy();
     // Nothing it would have shown was asked for.
     await settleReactWork();
-    expect(asked.filter((path) => path.startsWith("/api/admin"))).toEqual([]);
+    expect(
+      asked.filter(
+        (path) =>
+          path.startsWith("/api/admin") ||
+          path.startsWith(PEOPLE_PATH) ||
+          path.startsWith(IDENTITY_PROVIDERS_PATH),
+      ),
+    ).toEqual([]);
   },
 );
 
@@ -253,5 +261,5 @@ test("in the team edition the same pages are the team's, and ask for what they s
   await view.findByRole("heading", { level: 1, name: "People" });
   await settleReactWork();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked.some((path) => path.startsWith("/api/admin/people"))).toBe(true);
+  expect(asked.some((path) => path.startsWith(PEOPLE_PATH))).toBe(true);
 });

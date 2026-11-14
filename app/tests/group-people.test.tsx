@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GroupPeopleButton } from "@/components/channels/group-people";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -46,8 +47,8 @@ function serving(initial: Record<string, unknown>[]) {
       }
       return Response.json({ ok: true });
     }
-    if (url === "/api/me") {
-      return Response.json({
+    if (url === ME_PATH) {
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
     }

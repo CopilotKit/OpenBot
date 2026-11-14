@@ -21,6 +21,7 @@ import { ProactiveResearchSettings } from "@/components/suggestions/proactive-pa
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -58,14 +59,14 @@ function serving() {
       skin: "openbot",
       proactive,
     });
-    if (path === "/api/settings/preferences" && method === "PATCH") {
+    if (path === PREFERENCES_PATH && method === "PATCH") {
       const body = JSON.parse(String(init?.body));
       writes.push({ request: `${method} ${path}`, body });
       proactive = body.proactive;
-      return Response.json({ preferences: preferences() });
+      return preferencesResponse({ preferences: preferences() });
     }
-    if (path === "/api/settings/preferences")
-      return Response.json({ preferences: preferences() });
+    if (path === PREFERENCES_PATH)
+      return preferencesResponse({ preferences: preferences() });
     if (path === "/api/proactive/settings")
       return Response.json({
         settings: [
@@ -134,7 +135,7 @@ test("turning check-ins off for all Bots saves it and says so", async () => {
   await waitFor(() =>
     expect(writes).toEqual([
       {
-        request: "PATCH /api/settings/preferences",
+        request: `PATCH ${PREFERENCES_PATH}`,
         body: { proactive: "off" },
       },
     ]),

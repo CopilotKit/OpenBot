@@ -12,6 +12,7 @@ import { SkillTools } from "@/lib/copilot/skill-tools";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import { SKILL_CREATOR_SLUG } from "@/lib/skills/proposal";
 import { queryClient } from "@/query-client";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -94,8 +95,8 @@ function serving(grant: string) {
             { slug: grant, title: grant, summary: "", instructions: "" },
           ],
         });
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH)
+        return meResponse({
           user: { id: ME, email: "me@example.com", role: "user" },
         });
       const bots = answerBotsList(input, init, { visible: [existingBot] });

@@ -28,6 +28,7 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
+import { ME_PATH, meResponse, PREFERENCES_PATH } from "./accounts-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -113,8 +114,8 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/me")
-        return NativeResponse.json({
+      if (url.pathname === ME_PATH)
+        return meResponse({
           user: {
             id: "person",
             name: "Sam",
@@ -123,8 +124,8 @@ beforeAll(() => {
             onboarding: null,
           },
         });
-      if (url.pathname === "/api/settings/preferences")
-        return NativeResponse.json({ preferences });
+      if (url.pathname === PREFERENCES_PATH)
+        return NativeResponse.json(preferences);
       if (url.pathname === "/api/capabilities")
         return NativeResponse.json({ generativeUi: true });
       if (url.pathname === "/api/setup")

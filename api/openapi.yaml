@@ -1217,6 +1217,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
     post:
@@ -1310,6 +1312,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/sessions:
@@ -1321,9 +1325,9 @@ paths:
       operationId: listSessions
       summary: List where a person is signed in
       description: >-
-        Return one page of the sessions a person is signed in with, the most
-        recently used first, with the one this request came on marked
-        current. Never a session's token. Only the person themselves may list
+        Return one page of the sessions a person is signed in with, the newest
+        sign-in first, with the one this request came on marked current.
+        Never a session's token. Only the person themselves may list
         them, signed in to OpenBot. A missing cursor starts at the first page
         and nextCursor null ends the list.
       security:
@@ -1354,6 +1358,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/sessions/{sessionId}:
@@ -1389,6 +1395,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts:
@@ -2857,7 +2865,7 @@ components:
       properties:
         apiKeys:
           type: array
-          description: Newest first.
+          description: Newest first, then by id.
           items:
             $ref: '#/components/schemas/ApiKey'
         nextCursor:
@@ -2929,7 +2937,9 @@ components:
       properties:
         sessions:
           type: array
-          description: The most recently used first.
+          description: >-
+            The newest sign-in first, then by id, an order that doesn't move
+            while somebody pages.
           items:
             $ref: '#/components/schemas/Session'
         nextCursor:
@@ -2974,6 +2984,7 @@ components:
       properties:
         linkedAccounts:
           type: array
+          description: The oldest link first, then by id.
           items:
             $ref: '#/components/schemas/LinkedAccount'
         nextCursor:
@@ -3087,7 +3098,7 @@ components:
       properties:
         identityProviders:
           type: array
-          description: By domain.
+          description: By domain, then by id.
           items:
             $ref: '#/components/schemas/IdentityProvider'
         nextCursor:
@@ -3835,7 +3846,8 @@ components:
     SignInUnavailable:
       description: >-
         This deployment signs nobody in, as OpenBot Desktop runs for one
-        person, so it has no API keys and no single sign-on to set up.
+        person, so it has no API keys, no sessions and no single sign-on to set
+        up.
       content:
         application/problem+json:
           schema:

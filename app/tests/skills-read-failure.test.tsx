@@ -21,6 +21,7 @@ import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
 import { learningKeys } from "@/lib/learning/queries";
 import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
+import { ME_PATH, meBody } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -53,15 +54,17 @@ beforeEach(() => {
         new Response(JSON.stringify(body), {
           headers: { "content-type": "application/json" },
         });
-      if (path === "/api/me") {
-        return json({
-          user: {
-            id: "user-1",
-            email: "person@example.com",
-            role: "admin",
-            onboarding: null,
-          },
-        });
+      if (path === ME_PATH) {
+        return json(
+          meBody({
+            user: {
+              id: "user-1",
+              email: "person@example.com",
+              role: "admin",
+              onboarding: null,
+            },
+          }),
+        );
       }
       const bots = answerBotsList(path, init, { visible: [] });
       if (bots) return bots;

@@ -43,6 +43,12 @@ import { Toaster, toast } from "@/components/ui/toast";
 import type { Recognition } from "@/lib/browser/narration";
 import { browserKeys } from "@/lib/browser/queries";
 import { queryClient } from "@/query-client";
+import {
+  ME_PATH,
+  meResponse,
+  PREFERENCES_PATH,
+  preferencesResponse,
+} from "./accounts-api";
 import { installChrome } from "./browser-narration.fixture";
 import {
   type DesktopShellOptions,
@@ -226,8 +232,8 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   const refusal = refusals[path];
   if (refusal && method === "POST")
     return Response.json({ error: refusal }, { status: 409 });
-  if (path === "/api/me")
-    return Response.json({
+  if (path === ME_PATH)
+    return meResponse({
       user: {
         id: "ada",
         email: "ada@example.com",
@@ -235,7 +241,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
         onboarding: null,
       },
     });
-  if (path === "/api/settings/preferences") {
+  if (path === PREFERENCES_PATH) {
     if (method === "GET") {
       await preferencesHeld;
       if (preferencesFail)
@@ -244,7 +250,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
     // As the server's own route takes it: one preference at a time, merged into the rest.
     if (method === "PATCH" && body && "narration" in body)
       narrationChoice = body.narration;
-    return Response.json({
+    return preferencesResponse({
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
@@ -2014,7 +2020,7 @@ test("on hosted OpenBot in a browser with no speech recognition, the page says n
 // for it, and what they say is turned into text without leaving it ---------------------------------------------------
 
 const preferenceWrites = () =>
-  writes.filter((write) => write.path === "/api/settings/preferences");
+  writes.filter((write) => write.path === PREFERENCES_PATH);
 const starts = () =>
   writes.filter(
     (write) =>
@@ -2043,7 +2049,7 @@ test("Record asks whether to narrate before the first recording, keeps the answe
   // The answer is kept, and the Recorder opens no microphone for this recording.
   expect(preferenceWrites()).toEqual([
     {
-      path: "/api/settings/preferences",
+      path: PREFERENCES_PATH,
       method: "PATCH",
       body: { narration: "off" },
     },

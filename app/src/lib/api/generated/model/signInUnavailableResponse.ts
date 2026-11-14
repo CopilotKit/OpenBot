@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * This deployment signs nobody in, as OpenBot Desktop runs for one person, so it has no API keys and no single sign-on to set up.
+ * This deployment signs nobody in, as OpenBot Desktop runs for one person, so it has no API keys, no sessions and no single sign-on to set up.
  */
 export type SignInUnavailableResponse = Problem;

@@ -14,6 +14,7 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { GroupChat } from "@/components/channels/group-chat";
 import type { GroupMessage } from "@/lib/groups";
 import { queryClient } from "@/query-client";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -81,8 +82,8 @@ beforeAll(() => {
       "http://localhost",
     );
     const method = init?.method ?? "GET";
-    if (url.pathname === "/api/me")
-      return Response.json({
+    if (url.pathname === ME_PATH)
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
     const bots = answerBotsList(url, init, {

@@ -12,6 +12,7 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import { AppsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -63,7 +64,7 @@ const BOT: AgentProfile = {
 const PERSONAL_USER = {
   id: "dev-local-user",
   email: "dev@openbot.local",
-  role: "admin",
+  role: "admin" as const,
 };
 
 function servePersonal() {
@@ -75,7 +76,7 @@ function servePersonal() {
       return Response.json({ apps: [] });
     if (path === `/api/plugins/for/${BOT.id}`)
       return Response.json({ tools: [], skills: [] });
-    if (path === "/api/me") return Response.json({ user: PERSONAL_USER });
+    if (path === ME_PATH) return meResponse({ user: PERSONAL_USER });
     return Response.json({});
   }) as unknown as typeof fetch;
 }

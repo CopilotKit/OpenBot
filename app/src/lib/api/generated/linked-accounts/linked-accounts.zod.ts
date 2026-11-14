@@ -63,33 +63,35 @@ export const listLinkedAccountsResponseNextCursorRegExp = new RegExp(
 );
 
 export const ListLinkedAccountsResponse = zod.object({
-  linkedAccounts: zod.array(
-    zod
-      .object({
-        id: zod.string().describe("The link's id."),
-        provider: zod
-          .enum(["slack", "github"])
-          .describe("A service a person can link an account at."),
-        title: zod
-          .string()
-          .describe("The service's name, as a person reads it."),
-        handle: zod
-          .string()
-          .nullable()
-          .describe(
-            "Who they are there, such as their GitHub login, when the service said.",
-          ),
-        status: zod
-          .enum(["active", "needs_reconnect"])
-          .describe(
-            "needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.",
-          ),
-        createdAt: zod.iso.datetime({ offset: true }),
-      })
-      .describe(
-        "A person's account at another service, which OpenBot knows is theirs. Never the credential it holds.",
-      ),
-  ),
+  linkedAccounts: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().describe("The link's id."),
+          provider: zod
+            .enum(["slack", "github"])
+            .describe("A service a person can link an account at."),
+          title: zod
+            .string()
+            .describe("The service's name, as a person reads it."),
+          handle: zod
+            .string()
+            .nullable()
+            .describe(
+              "Who they are there, such as their GitHub login, when the service said.",
+            ),
+          status: zod
+            .enum(["active", "needs_reconnect"])
+            .describe(
+              "needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.",
+            ),
+          createdAt: zod.iso.datetime({ offset: true }),
+        })
+        .describe(
+          "A person's account at another service, which OpenBot knows is theirs. Never the credential it holds.",
+        ),
+    )
+    .describe("The oldest link first, then by id."),
   nextCursor: zod
     .string()
     .max(listLinkedAccountsResponseNextCursorMax)
