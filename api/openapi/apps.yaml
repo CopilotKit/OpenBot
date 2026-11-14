@@ -1,0 +1,124 @@
+# Apps: the apps this OpenBot has added for its Bots to use, the directory of apps it can add, and
+# how apps are set up here. Also the parts every apps area shares (an app's id, the shared-account
+# approval, and the refusals about an app), listed in common.yaml for the connections and Bot grants
+# areas to use.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths: {}
+components:
+  parameters:
+    AppId:
+      name: appId
+      in: path
+      required: true
+      description: >-
+        The app's id, as listApps answers it. Percent-encode it in the path.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: github
+  schemas:
+    SharedAccountApproval:
+      type: object
+      additionalProperties: false
+      description: >-
+        Who may have a Bot use an app's one shared account, approved by an
+        administrator: only the Bot's owner, named people and directory
+        groups, or everybody; and whether the Bot may act on what people
+        outside the organization send it.
+      required:
+        - audience
+        - outsideInput
+        - members
+      properties:
+        audience:
+          type: string
+          enum:
+            - owner
+            - people
+            - team
+        outsideInput:
+          type: boolean
+        members:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - kind
+              - value
+            properties:
+              kind:
+                type: string
+                enum:
+                  - user
+                  - group
+              value:
+                type: string
+                minLength: 1
+                maxLength: 320
+                pattern: \S
+  responses:
+    AppNotFound:
+      description: No app has that id here, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppDirectoryUnavailable:
+      description: >-
+        This OpenBot can't add or connect apps from the directory: it isn't
+        set up here, or what it was asked for can't be used here. Trying
+        again won't help until an administrator changes something.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/app-directory-unavailable
+                title: The app directory isn't available here.
+                status: 503
+                detail: Apps from the directory aren't set up on this OpenBot. Ask an admin.
+                code: APP_DIRECTORY_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppServiceFailed:
+      description: >-
+        The service behind an app was asked and didn't answer usefully.
+        Nothing here broke; trying again later can succeed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            failed:
+              value:
+                type: https://open.bot/errors/app-service-failed
+                title: The service behind this app didn't answer.
+                status: 502
+                detail: Couldn't reach the app. Try again in a moment.
+                code: APP_SERVICE_FAILED
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example

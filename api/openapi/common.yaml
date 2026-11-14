@@ -53,6 +53,10 @@ tags:
   - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
+  - { name: Apps, description: "The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here." }
+  - { name: Connections, description: "A person's connections to apps: the accounts they signed in with so their Bots can act there for them, and an app's one shared account when an administrator connects it for everybody." }
+  - { name: Bot grants, description: "What each Bot may use: the app actions, skills and other Bots it was given, and each app as it stands for the person asking." }
+  - { name: App access requests, description: "A person asking an administrator to turn an app on, give it to a Bot, or connect its shared account." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -153,6 +157,14 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:write: Add, change, refresh and remove apps, when the signed-in person may.
+            connections:read: Read the signed-in person's connections to apps, and each app's shared account.
+            connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
+            bot-grants:read: Read what the signed-in person's Bots may use, and describe or test a change to it.
+            bot-grants:write: Give and take back what the signed-in person's Bots may use.
+            app-access-requests:read: Read requests for apps, the signed-in person's own or, for an administrator, everybody's.
+            app-access-requests:write: Ask for an app, withdraw a request, and for an administrator approve or dismiss one.
     apiKey:
       type: http
       scheme: bearer
@@ -193,6 +205,7 @@ components:
     CapabilityIdParameter: { $ref: './admin-settings.yaml#/components/parameters/CapabilityIdParameter' }
     NetworkPolicyId: { $ref: './admin-settings.yaml#/components/parameters/NetworkPolicyId' }
     BotId: { $ref: './bots.yaml#/components/parameters/BotId' }
+    AppId: { $ref: './apps.yaml#/components/parameters/AppId' }
     Limit:
       name: limit
       in: query
@@ -495,6 +508,7 @@ components:
     ModelCatalogue: { $ref: './model-connections.yaml#/components/schemas/ModelCatalogue' }
     ModelChoice: { $ref: './model-connections.yaml#/components/schemas/ModelChoice' }
     ModelChoiceInput: { $ref: './model-connections.yaml#/components/schemas/ModelChoiceInput' }
+    SharedAccountApproval: { $ref: './apps.yaml#/components/schemas/SharedAccountApproval' }
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -808,6 +822,9 @@ components:
     ModelKeyNotFound: { $ref: './model-connections.yaml#/components/responses/ModelKeyNotFound' }
     InvalidModelChoice: { $ref: './model-connections.yaml#/components/responses/InvalidModelChoice' }
     ModelChoiceForbidden: { $ref: './model-connections.yaml#/components/responses/ModelChoiceForbidden' }
+    AppNotFound: { $ref: './apps.yaml#/components/responses/AppNotFound' }
+    AppDirectoryUnavailable: { $ref: './apps.yaml#/components/responses/AppDirectoryUnavailable' }
+    AppServiceFailed: { $ref: './apps.yaml#/components/responses/AppServiceFailed' }
   examples:
     ReactionPageLast: { $ref: './conversations.yaml#/components/examples/ReactionPageLast' }
     AuditEventPageFirst: { $ref: './audit-events.yaml#/components/examples/AuditEventPageFirst' }

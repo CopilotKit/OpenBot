@@ -43,6 +43,14 @@ tags:
     description: 'The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
   - name: Models
     description: The models Bots can run on, and the one a person chose for each of their conversations.
+  - name: Apps
+    description: The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here.
+  - name: Connections
+    description: 'A person''s connections to apps: the accounts they signed in with so their Bots can act there for them, and an app''s one shared account when an administrator connects it for everybody.'
+  - name: Bot grants
+    description: 'What each Bot may use: the app actions, skills and other Bots it was given, and each app as it stands for the person asking.'
+  - name: App access requests
+    description: A person asking an administrator to turn an app on, give it to a Bot, or connect its shared account.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -2932,6 +2940,14 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:write: Add, change, refresh and remove apps, when the signed-in person may.
+            connections:read: Read the signed-in person's connections to apps, and each app's shared account.
+            connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
+            bot-grants:read: Read what the signed-in person's Bots may use, and describe or test a change to it.
+            bot-grants:write: Give and take back what the signed-in person's Bots may use.
+            app-access-requests:read: Read requests for apps, the signed-in person's own or, for an administrator, everybody's.
+            app-access-requests:write: Ask for an app, withdraw a request, and for an administrator approve or dismiss one.
     apiKey:
       type: http
       scheme: bearer
@@ -3025,6 +3041,17 @@ components:
         minLength: 1
         pattern: \S
       example: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    AppId:
+      name: appId
+      in: path
+      required: true
+      description: The app's id, as listApps answers it. Percent-encode it in the path.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: github
     Limit:
       name: limit
       in: query
@@ -5901,6 +5928,43 @@ components:
           maxLength: 40
           pattern: \S
           description: An effort the model takes, or null for its own. Trimmed, and read in lower case.
+    SharedAccountApproval:
+      type: object
+      additionalProperties: false
+      description: 'Who may have a Bot use an app''s one shared account, approved by an administrator: only the Bot''s owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.'
+      required:
+        - audience
+        - outsideInput
+        - members
+      properties:
+        audience:
+          type: string
+          enum:
+            - owner
+            - people
+            - team
+        outsideInput:
+          type: boolean
+        members:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - kind
+              - value
+            properties:
+              kind:
+                type: string
+                enum:
+                  - user
+                  - group
+              value:
+                type: string
+                minLength: 1
+                maxLength: 320
+                pattern: \S
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -6799,6 +6863,60 @@ components:
                 code: PERMISSION_DENIED
                 category: permission
                 retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppNotFound:
+      description: No app has that id here, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppDirectoryUnavailable:
+      description: 'This OpenBot can''t add or connect apps from the directory: it isn''t set up here, or what it was asked for can''t be used here. Trying again won''t help until an administrator changes something.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/app-directory-unavailable
+                title: The app directory isn't available here.
+                status: 503
+                detail: Apps from the directory aren't set up on this OpenBot. Ask an admin.
+                code: APP_DIRECTORY_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppServiceFailed:
+      description: The service behind an app was asked and didn't answer usefully. Nothing here broke; trying again later can succeed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            failed:
+              value:
+                type: https://open.bot/errors/app-service-failed
+                title: The service behind this app didn't answer.
+                status: 502
+                detail: Couldn't reach the app. Try again in a moment.
+                code: APP_SERVICE_FAILED
+                category: dependency
+                retryable: true
                 requestId: req_example
                 traceId: trace_example
   examples:
