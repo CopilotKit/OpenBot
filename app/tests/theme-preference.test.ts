@@ -1,32 +1,62 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-  applyDarkTheme,
-  parseStoredDarkTheme,
+  applyTheme,
+  parseStoredTheme,
+  resolveDarkTheme,
   THEME_STORAGE_KEY,
 } from "../src/lib/theme";
 
+function recorded() {
+  const calls: Array<[string, ...Array<string | boolean>]> = [];
+  return {
+    calls,
+    effects: {
+      setStoredValue: (key: string, value: string) =>
+        calls.push(["set", key, value]),
+      removeStoredValue: (key: string) => calls.push(["remove", key]),
+      toggleRootClass: (name: string, force: boolean) =>
+        calls.push(["class", name, force]),
+      setRootColorScheme: (scheme: string) => calls.push(["scheme", scheme]),
+    },
+  };
+}
+
 describe("theme preference", () => {
-  test("only the stored dark value enables dark theme", () => {
-    expect(parseStoredDarkTheme("dark")).toBe(true);
-    expect(parseStoredDarkTheme("light")).toBe(false);
-    expect(parseStoredDarkTheme(null)).toBe(false);
+  test("nothing saved follows the system; a saved light or dark is the person's own", () => {
+    expect(parseStoredTheme(null)).toBe("system");
+    expect(parseStoredTheme("system")).toBe("system");
+    expect(parseStoredTheme("something else")).toBe("system");
+    // What every release before this one saved.
+    expect(parseStoredTheme("dark")).toBe("dark");
+    expect(parseStoredTheme("light")).toBe("light");
   });
 
-  test("persists and applies the selected theme", () => {
-    const writes: Array<[string, string]> = [];
-    const toggles: Array<[string, boolean]> = [];
-    const schemes: Array<string> = [];
+  test("the system decides only for somebody who follows it", () => {
+    expect(resolveDarkTheme("system", true)).toBe(true);
+    expect(resolveDarkTheme("system", false)).toBe(false);
+    expect(resolveDarkTheme("light", true)).toBe(false);
+    expect(resolveDarkTheme("dark", false)).toBe(true);
+  });
 
-    applyDarkTheme(true, {
-      setStoredValue: (key, value) => writes.push([key, value]),
-      toggleRootClass: (name, force) => toggles.push([name, force]),
-      setRootColorScheme: (scheme) => schemes.push(scheme),
-    });
+  test("an explicit choice is saved and applied over the system's", () => {
+    const { calls, effects } = recorded();
+    applyTheme("dark", false, effects);
+    expect(calls).toEqual([
+      ["set", THEME_STORAGE_KEY, "dark"],
+      ["class", "dark", true],
+      ["scheme", "dark"],
+    ]);
+  });
 
-    expect(writes).toEqual([[THEME_STORAGE_KEY, "dark"]]);
-    expect(toggles).toEqual([["dark", true]]);
-    expect(schemes).toEqual(["dark"]);
+  test("following the system saves nothing and applies the system's", () => {
+    const { calls, effects } = recorded();
+    applyTheme("system", true, effects);
+    expect(calls).toEqual([
+      ["remove", THEME_STORAGE_KEY],
+      ["class", "dark", true],
+      ["scheme", "dark"],
+    ]);
   });
 });
 
