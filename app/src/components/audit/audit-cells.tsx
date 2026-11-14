@@ -1178,6 +1178,9 @@ const DECISIONS: Record<string, string> = {
   "computer.browser_cleared": "A person cleared the browser",
   "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
+  // Not "Allowed": nobody asked. The computer was idle, and its files and sign-ins are kept.
+  "computer.suspended": "Turned off while idle",
+  "computer.resumed": "Started again",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

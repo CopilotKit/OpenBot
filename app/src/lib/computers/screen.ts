@@ -65,6 +65,37 @@ export async function readScreenshot(
   }
 }
 
+/**
+ * Say the Bot's screen was opened, which starts a computer that is off.
+ *
+ * The reads above never start one: a conversation makes them too, and a computer that started for
+ * every look would never stay off. Opening the screen is a person asking to see the computer, so
+ * that is said on its own. The server answers at once with the computer's state (`starting` for one
+ * it has just started) and does not wait for it to come up.
+ *
+ * Fails closed: nothing when the server could not be asked or has no such route, and the screen then
+ * says the computer is off, which it is.
+ */
+export async function startComputer(
+  computerId: string,
+): Promise<ComputerState | null> {
+  try {
+    const response = await tryClient(
+      `/api/computers/${encodeURIComponent(computerId)}/wake`,
+      { method: "POST" },
+    );
+    if (!response.ok) return null;
+    const body = (await response.json().catch(() => null)) as {
+      state?: unknown;
+    } | null;
+    return COMPUTER_STATES.includes(body?.state as ComputerState)
+      ? (body?.state as ComputerState)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The server's "not ready yet" answer, or nothing when the body is something else. */
 function notReadyOf(body: unknown): ScreenshotRead["notReady"] {
   if (!body || typeof body !== "object" || Array.isArray(body)) return;
