@@ -26,4 +26,5 @@ export * from "./reviewer-guidance/reviewer-guidance";
 export * from "./routines/routines";
 export * from "./sessions/sessions";
 export * from "./shared-use/shared-use";
+export * from "./team-bots/team-bots";
 export * from "./what-if/what-if";
