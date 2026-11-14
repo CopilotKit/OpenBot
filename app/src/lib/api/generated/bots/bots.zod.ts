@@ -23,6 +23,8 @@ export const listBotsQueryLimitMax = 100;
 
 export const listBotsQueryCursorMax = 4096;
 
+export const listBotsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
 export const ListBotsQueryParams = zod.object({
   hidden: zod
     .boolean()
@@ -38,13 +40,16 @@ export const ListBotsQueryParams = zod.object({
     .string()
     .min(1)
     .max(listBotsQueryCursorMax)
+    .regex(listBotsQueryCursorRegExp)
     .optional()
     .describe(
-      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it.",
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
 export const listBotsResponseNextCursorMax = 4096;
+
+export const listBotsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListBotsResponse = zod.object({
   bots: zod.array(
@@ -78,10 +83,10 @@ export const ListBotsResponse = zod.object({
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
         endpoint: zod
-          .string()
+          .url()
           .nullable()
           .describe(
-            "The AG-UI address it runs at. Null for a Bot that runs inside OpenBot.",
+            "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
           ),
         hasAuth: zod
           .boolean()
@@ -157,8 +162,11 @@ export const ListBotsResponse = zod.object({
   nextCursor: zod
     .string()
     .max(listBotsResponseNextCursorMax)
+    .regex(listBotsResponseNextCursorRegExp)
     .nullable()
-    .describe("Pass as cursor for the next page. Null ends the list."),
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
 });
 
 /**
@@ -193,6 +201,11 @@ export const createBotBodyOneTitleMax = 120;
 
 export const createBotBodyOneRoleDescriptionMax = 1000;
 
+export const createBotBodyOneEndpointOneMax = 0;
+
+export const createBotBodyOneEndpointTwoRegExp = new RegExp(
+  "^[Hh][Tt][Tt][Pp][Ss]?:/",
+);
 export const createBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
 export const createBotBodyOneInstructionsMax = 1000;
 
@@ -220,10 +233,13 @@ export const CreateBotBody = zod
       .enum(["public", "private"])
       .describe("Public Bots are shared with everybody in the organization."),
     endpoint: zod
-      .string()
+      .union([
+        zod.string().max(createBotBodyOneEndpointOneMax),
+        zod.url().regex(createBotBodyOneEndpointTwoRegExp),
+      ])
       .optional()
       .describe(
-        "The AG-UI address it runs at. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. The server refuses an address this deployment may not reach.",
+        "The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it.",
       ),
     auth: zod
       .object({
@@ -258,10 +274,25 @@ export const CreateBotBody = zod
   .and(
     zod.object({
       harness: zod
-        .string()
+        .enum([
+          "",
+          "crewai",
+          "llamaindex",
+          "agno",
+          "langgraph",
+          "google-adk",
+          "antigravity",
+          "pydantic-ai",
+          "microsoft-agent-framework",
+          "claude-agent-sdk",
+          "strands",
+          "ag2",
+          "langroid",
+          "mastra",
+        ])
         .optional()
         .describe(
-          "The framework an agent somebody runs themselves is built on, by its id in OpenBot's harness list. Kept only with an endpoint.",
+          'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.',
         ),
     }),
   )
@@ -294,10 +325,10 @@ export const CreateBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .string()
+        .url()
         .nullable()
         .describe(
-          "The AG-UI address it runs at. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
         ),
       hasAuth: zod
         .boolean()
@@ -417,10 +448,10 @@ export const GetBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .string()
+        .url()
         .nullable()
         .describe(
-          "The AG-UI address it runs at. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
         ),
       hasAuth: zod
         .boolean()
@@ -531,6 +562,11 @@ export const updateBotBodyOneTitleMax = 120;
 
 export const updateBotBodyOneRoleDescriptionMax = 1000;
 
+export const updateBotBodyOneEndpointOneMax = 0;
+
+export const updateBotBodyOneEndpointTwoRegExp = new RegExp(
+  "^[Hh][Tt][Tt][Pp][Ss]?:/",
+);
 export const updateBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
 export const updateBotBodyOneInstructionsMax = 1000;
 
@@ -558,10 +594,13 @@ export const UpdateBotBody = zod
       .enum(["public", "private"])
       .describe("Public Bots are shared with everybody in the organization."),
     endpoint: zod
-      .string()
+      .union([
+        zod.string().max(updateBotBodyOneEndpointOneMax),
+        zod.url().regex(updateBotBodyOneEndpointTwoRegExp),
+      ])
       .optional()
       .describe(
-        "The AG-UI address it runs at. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. The server refuses an address this deployment may not reach.",
+        "The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it.",
       ),
     auth: zod
       .object({
@@ -622,10 +661,10 @@ export const UpdateBotResponse = zod.object({
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
       endpoint: zod
-        .string()
+        .url()
         .nullable()
         .describe(
-          "The AG-UI address it runs at. Null for a Bot that runs inside OpenBot.",
+          "The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.",
         ),
       hasAuth: zod
         .boolean()

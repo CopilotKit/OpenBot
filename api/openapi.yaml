@@ -88,6 +88,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -138,6 +140,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     post:
       tags: [Bots]
       operationId: createBot
@@ -181,7 +185,7 @@ paths:
                   auth:
                     header: Authorization
                     value: Bearer example-key
-                  harness: langgraph-python
+                  harness: langgraph
       responses:
         '201':
           description: The Bot was created.
@@ -212,6 +216,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots/{botId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -250,6 +256,8 @@ paths:
           $ref: '#/components/responses/BotNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     patch:
       tags: [Bots]
       operationId: updateBot
@@ -308,6 +316,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags: [Bots]
       operationId: deleteBot
@@ -338,6 +348,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -407,11 +419,16 @@ components:
       in: query
       description: >-
         Opaque continuation from the previous page's nextCursor, bound to the
-        organization and the filters that made it.
+        organization and the filters that made it. The server only ever issues
+        cursors written in URL-safe base64 (letters, digits, - and _, no
+        padding) and refuses anything else, so the pattern says so. A cursor
+        that fits the pattern can still be refused: one this list never gave
+        out, or one made for another organization or other filters.
       schema:
         type: string
         minLength: 1
         maxLength: 4096
+        pattern: ^[A-Za-z0-9_-]+$
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -493,9 +510,10 @@ components:
           description: Whether it comes with OpenBot rather than belonging to a person.
         endpoint:
           type: [string, 'null']
+          format: uri
           description: >-
-            The AG-UI address it runs at. Null for a Bot that runs inside
-            OpenBot.
+            The AG-UI address it runs at, as an absolute address. Null for a
+            Bot that runs inside OpenBot.
         hasAuth:
           type: boolean
           description: Whether a key is set for its address. Never the key.
@@ -566,7 +584,10 @@ components:
         nextCursor:
           type: [string, 'null']
           maxLength: 4096
-          description: Pass as cursor for the next page. Null ends the list.
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
     Reaction:
       type: object
       required: [messageId, agentId, emoji, createdAt]
@@ -595,7 +616,10 @@ components:
         nextCursor:
           type: [string, 'null']
           maxLength: 4096
-          description: Pass as cursor for the next page. Null ends the list.
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
     BotResponse:
       type: object
       required: [bot]
@@ -676,9 +700,19 @@ components:
         endpoint:
           type: string
           description: >-
-            The AG-UI address it runs at. Empty or absent on create means it
-            runs inside OpenBot; empty or absent on a change leaves it as it
-            is. The server refuses an address this deployment may not reach.
+            The AG-UI address it runs at: empty, or an absolute http or https
+            address, the only kinds the server has ever taken. Empty or absent
+            on create means it runs inside OpenBot; empty or absent on a
+            change leaves it as it is. An address that fits can still be
+            refused: the server refuses one this deployment may not reach,
+            such as a private network address on a deployment that keeps Bots
+            off it.
+          anyOf:
+            - type: string
+              maxLength: 0
+            - type: string
+              format: uri
+              pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
         auth:
           $ref: '#/components/schemas/BotKey'
         isolated:
@@ -704,8 +738,25 @@ components:
               type: string
               description: >-
                 The framework an agent somebody runs themselves is built on,
-                by its id in OpenBot's harness list. Kept only with an
-                endpoint.
+                by its id in OpenBot's harness list (shared/harnesses.json),
+                which the server checks every create against. Empty means none
+                was named, as for an agent somebody already runs. "byo-url" is
+                not one: it names no framework. Kept only with an endpoint.
+              enum:
+                - ''
+                - crewai
+                - llamaindex
+                - agno
+                - langgraph
+                - google-adk
+                - antigravity
+                - pydantic-ai
+                - microsoft-agent-framework
+                - claude-agent-sdk
+                - strands
+                - ag2
+                - langroid
+                - mastra
     UpdateBotRequest:
       description: A Bot's fields after the change.
       allOf:
@@ -960,6 +1011,30 @@ components:
                 detail: Unexpected server error.
                 code: INTERNAL_SERVER_ERROR
                 category: internal
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    UnexpectedError:
+      description: >-
+        Any other status, in the same problem details shape. The statuses
+        listed for an operation are the ones its own rules produce; this
+        covers the rest, such as a proxy in front of the server refusing a
+        request too large to read (413, 414, 431) or a gateway that cannot
+        reach it (502, 503, 504). A client reads detail and retryable from
+        it like any other problem.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: OpenBot isn't available right now.
+                status: 503
+                detail: OpenBot isn't available right now. Try again in a moment.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
                 retryable: true
                 requestId: req_example
                 traceId: trace_example

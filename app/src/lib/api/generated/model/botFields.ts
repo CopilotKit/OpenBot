@@ -23,7 +23,7 @@ export interface BotFields {
    */
   roleDescription: string;
   visibility: BotVisibility;
-  /** The AG-UI address it runs at. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. The server refuses an address this deployment may not reach. */
+  /** The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it. */
   endpoint?: string;
   auth?: BotKey;
   /** Whether it gets a computer of its own. Absent leaves it as it is. True needs the owner's Isolated Bots switch. */

@@ -26,7 +26,7 @@ export interface Bot {
   /** Whether it comes with OpenBot rather than belonging to a person. */
   systemOwned: boolean;
   /**
-   * The AG-UI address it runs at. Null for a Bot that runs inside OpenBot.
+   * The AG-UI address it runs at, as an absolute address. Null for a Bot that runs inside OpenBot.
    * @nullable
    */
   endpoint: string | null;

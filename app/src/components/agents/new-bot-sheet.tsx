@@ -62,6 +62,7 @@ import {
   agentCapabilitiesQueryOptions,
   testAgentConnection,
 } from "@/lib/agents/queries";
+import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
   type GiveableApp,
@@ -133,6 +134,18 @@ type Step = (typeof STEPS)[number];
  * so the server never hears which was picked.
  */
 type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+
+/**
+ * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
+ * fails if the two drift apart.
+ */
+function declaredFramework(id: string): CreateBotRequestHarness | undefined {
+  const known: readonly string[] = Object.values(CreateBotRequestHarness);
+  return id !== "" && known.includes(id)
+    ? (id as CreateBotRequestHarness)
+    : undefined;
+}
 
 /** Framework name used in default custom-agent instructions. */
 function frameworkName(runtime: Runtime): string {
@@ -290,6 +303,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
+    const framework = managed ? declaredFramework(chosen.harness) : undefined;
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -306,9 +320,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       }),
       // The framework picked from the list, so the Bot is told what runs it. None for an agent
       // somebody already runs, since nobody said what is behind its address.
-      ...(managed && chosen.harness !== "byo-url"
-        ? { harness: chosen.harness }
-        : {}),
+      ...(framework ? { harness: framework } : {}),
     });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,

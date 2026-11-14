@@ -6,9 +6,10 @@ import type { Reaction } from "./reaction";
 export interface ReactionPage {
   reactions: Reaction[];
   /**
-   * Pass as cursor for the next page. Null ends the list.
+   * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
    * @maxLength 4096
    * @nullable
+   * @pattern ^[A-Za-z0-9_-]+$
    */
   nextCursor: string | null;
 }
