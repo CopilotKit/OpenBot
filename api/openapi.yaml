@@ -4259,19 +4259,6 @@ paths:
         - webSession: []
         - appOAuth:
             - devices:read
-  /api/v2/organizations/{organizationId}/computers:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    get:
-      tags:
-        - Computers
-      operationId: listComputers
-      summary: List the organization's computers
-      description: 'Return one page of the computers Bots run on: each person''s, and each isolated Bot''s. Where every person''s Bots share one computer, each entry is one person''s seat on one Bot there. Ordered by whose computer it is, then by Bot. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - computers:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -4279,7 +4266,6 @@ paths:
       responses:
         '200':
           description: One page of devices.
-          description: One page of computers, and how they are separated.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4290,17 +4276,12 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/DevicePageLast'
-                $ref: '#/components/schemas/ComputerPage'
-              examples:
-                answer:
-                  $ref: '#/components/examples/ComputerPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/OwnOnly'
-          $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -4322,23 +4303,6 @@ paths:
         - webSession: []
         - appOAuth:
             - devices:write
-        '503':
-          $ref: '#/components/responses/ComputerUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/computers/stop:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    post:
-      tags:
-        - Computers
-      operationId: stopComputer
-      summary: Stop a computer
-      description: Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
-      security:
-        - webSession: []
-        - appOAuth:
-            - computers:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -4357,14 +4321,6 @@ paths:
       responses:
         '200':
           description: The device, registered.
-              $ref: '#/components/schemas/ComputerTarget'
-            examples:
-              request:
-                value:
-                  computer: person:user_2b8kq4
-      responses:
-        '200':
-          description: Whether it was running.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4375,10 +4331,6 @@ paths:
               examples:
                 device:
                   $ref: '#/components/examples/DeviceResponseExample'
-                $ref: '#/components/schemas/ComputerStopped'
-              examples:
-                answer:
-                  $ref: '#/components/examples/ComputerStoppedExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4572,9 +4524,6 @@ paths:
           $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/TransportUnavailable'
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -4597,22 +4546,6 @@ paths:
         - webSession: []
         - appOAuth:
             - destinations:write
-          $ref: '#/components/responses/ComputerUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/computers/reset:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    post:
-      tags:
-        - Computers
-      operationId: resetComputer
-      summary: Reset a computer
-      description: Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
-      security:
-        - webSession: []
-        - appOAuth:
-            - computers:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -4630,14 +4563,6 @@ paths:
       responses:
         '201':
           description: The phone, connected.
-              $ref: '#/components/schemas/ComputerTarget'
-            examples:
-              request:
-                value:
-                  computer: person:user_2b8kq4
-      responses:
-        '200':
-          description: Whether there was a profile to delete.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4656,18 +4581,6 @@ paths:
           $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/TransportUnavailable'
-                $ref: '#/components/schemas/ComputerReset'
-              examples:
-                answer:
-                  $ref: '#/components/examples/ComputerResetExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -4805,22 +4718,6 @@ paths:
         - webSession: []
         - appOAuth:
             - notification-settings:write
-          $ref: '#/components/responses/ComputerUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/computers/update:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    post:
-      tags:
-        - Computers
-      operationId: updateComputer
-      summary: Update a computer
-      description: Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. Only an administrator may do this.
-      security:
-        - webSession: []
-        - appOAuth:
-            - computers:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -4840,14 +4737,6 @@ paths:
       responses:
         '200':
           description: The person's notification settings, as saved.
-              $ref: '#/components/schemas/ComputerTarget'
-            examples:
-              request:
-                value:
-                  computer: person:user_2b8kq4
-      responses:
-        '200':
-          description: Whether it moved, and whether it was running.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4858,17 +4747,12 @@ paths:
               examples:
                 settings:
                   $ref: '#/components/examples/NotificationSettingsExample'
-                $ref: '#/components/schemas/ComputerUpdated'
-              examples:
-                answer:
-                  $ref: '#/components/examples/ComputerUpdatedExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/OwnOnly'
-          $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '409':
@@ -4897,28 +4781,6 @@ paths:
       responses:
         '200':
           description: How much the Bot may reach the person.
-        '503':
-          $ref: '#/components/responses/ComputerUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/computers/{botId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/BotId'
-    get:
-      tags:
-        - Computers
-      operationId: getComputer
-      summary: Read a Bot's computer
-      description: 'Say where the Bot''s computer is in its life for the caller: absent (not running, and it starts on the Bot''s next action), starting, ready or unreachable. Reading it never starts the computer.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - computers:read
-        - apiKey: []
-      responses:
-        '200':
-          description: The computer's state.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -5021,6 +4883,251 @@ paths:
               examples:
                 pushAndSlack:
                   $ref: '#/components/examples/NotificationTransportPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Computers
+      operationId: listComputers
+      summary: List the organization's computers
+      description: 'Return one page of the computers Bots run on: each person''s, and each isolated Bot''s. Where every person''s Bots share one computer, each entry is one person''s seat on one Bot there. Ordered by whose computer it is, then by Bot. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - computers:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of computers, and how they are separated.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/stop:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Computers
+      operationId: stopComputer
+      summary: Stop a computer
+      description: Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+      security:
+        - webSession: []
+        - appOAuth:
+            - computers:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerTarget'
+            examples:
+              request:
+                value:
+                  computer: person:user_2b8kq4
+      responses:
+        '200':
+          description: Whether it was running.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerStopped'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerStoppedExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/reset:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Computers
+      operationId: resetComputer
+      summary: Reset a computer
+      description: Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+      security:
+        - webSession: []
+        - appOAuth:
+            - computers:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerTarget'
+            examples:
+              request:
+                value:
+                  computer: person:user_2b8kq4
+      responses:
+        '200':
+          description: Whether there was a profile to delete.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerReset'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerResetExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/update:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Computers
+      operationId: updateComputer
+      summary: Update a computer
+      description: Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. Only an administrator may do this.
+      security:
+        - webSession: []
+        - appOAuth:
+            - computers:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputerTarget'
+            examples:
+              request:
+                value:
+                  computer: person:user_2b8kq4
+      responses:
+        '200':
+          description: Whether it moved, and whether it was running.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerUpdated'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerUpdatedExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ComputerUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags:
+        - Computers
+      operationId: getComputer
+      summary: Read a Bot's computer
+      description: 'Say where the Bot''s computer is in its life for the caller: absent (not running, and it starts on the Bot''s next action), starting, ready or unreachable. Reading it never starts the computer.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - computers:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The computer's state.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
                 $ref: '#/components/schemas/ComputerStatus'
               examples:
                 answer:
@@ -13140,6 +13247,11 @@ components:
       in: path
       required: true
       description: The destination's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
     ComputerToolCallId:
       name: toolCallId
       in: path
@@ -17316,54 +17428,124 @@ components:
           description: The newest first, then by id.
           items:
             $ref: '#/components/schemas/Delivery'
-    ComputerControlRequest:
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    UpdateRoute:
+      description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
+      oneOf:
+        - type: string
+          enum:
+            - all
+        - type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationTransport'
+    UpdateRouting:
       type: object
-      description: A request for a person to drive a Bot's computer.
+      description: Where each kind of update may go.
+      required:
+        - progress
+        - decision
+        - question
+        - attention
+      properties:
+        progress:
+          $ref: '#/components/schemas/UpdateRoute'
+        decision:
+          $ref: '#/components/schemas/UpdateRoute'
+        question:
+          $ref: '#/components/schemas/UpdateRoute'
+        attention:
+          $ref: '#/components/schemas/UpdateRoute'
+    NotificationSettings:
+      type: object
+      description: 'Where a person''s updates go, for every one of their Bots at once. progress: replies and results from work they weren''t watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots'' check-ins found, at most once an hour, every Bot in one message.'
+      required:
+        - routing
+      properties:
+        routing:
+          $ref: '#/components/schemas/UpdateRouting'
+    UpdateNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - routing
+      properties:
+        routing:
+          type: object
+          description: The kinds of update to change. At least one.
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            progress:
+              $ref: '#/components/schemas/UpdateRoute'
+            decision:
+              $ref: '#/components/schemas/UpdateRoute'
+            question:
+              $ref: '#/components/schemas/UpdateRoute'
+            attention:
+              $ref: '#/components/schemas/UpdateRoute'
+    BotNotifyLevel:
+      type: string
+      enum:
+        - all
+        - needs_input
+        - none
+      description: 'How much one Bot may reach the person outside OpenBot: all of it, only what needs them (its questions and approvals), or nothing.'
+    BotNotificationSettings:
+      type: object
+      required:
+        - botId
+        - notify
+      properties:
+        botId:
+          type: string
+          description: The Bot.
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    UpdateBotNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - notify
+      properties:
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    NotificationTransportOption:
+      type: object
       required:
         - id
-        - reason
-        - source
-        - status
-        - createdAt
-        - updatedAt
+        - title
       properties:
         id:
+          $ref: '#/components/schemas/NotificationTransport'
+        title:
           type: string
-        toolCallId:
-          type: string
-        reason:
-          type: string
-        source:
-          type: string
-          enum:
-            - model
-            - cloudflare
-            - visible-challenge
-            - manual
-          description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
-        status:
-          type: string
-          enum:
-            - waiting
-            - taken
-            - completed
-            - cancelled
-            - expired
-            - interrupted
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-        expiresAt:
-          type: string
-        finishedAt:
-          type: string
-        interruption:
-          type: string
-        url:
-          type: string
-        keepsPage:
-          type: boolean
+          description: Its name, as a person reads it.
+    NotificationTransportPage:
+      type: object
+      required:
+        - notificationTransports
+        - nextCursor
+      properties:
+        notificationTransports:
+          type: array
+          description: Push, then Slack, Microsoft Teams and text messages, as set up.
+          items:
+            $ref: '#/components/schemas/NotificationTransportOption'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     Computer:
       type: object
       description: 'One computer as an administrator sees it: a person''s, or an isolated Bot''s. Where every person''s Bots share one computer, one person''s seat on one Bot there.'
@@ -18798,89 +18980,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    UpdateRoute:
-      description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
-      oneOf:
-        - type: string
-          enum:
-            - all
-        - type: array
-          maxItems: 4
-          uniqueItems: true
-          items:
-            $ref: '#/components/schemas/NotificationTransport'
-    UpdateRouting:
-      type: object
-      description: Where each kind of update may go.
-      required:
-        - progress
-        - decision
-        - question
-        - attention
-      properties:
-        progress:
-          $ref: '#/components/schemas/UpdateRoute'
-        decision:
-          $ref: '#/components/schemas/UpdateRoute'
-        question:
-          $ref: '#/components/schemas/UpdateRoute'
-        attention:
-          $ref: '#/components/schemas/UpdateRoute'
-    NotificationSettings:
-      type: object
-      description: 'Where a person''s updates go, for every one of their Bots at once. progress: replies and results from work they weren''t watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots'' check-ins found, at most once an hour, every Bot in one message.'
-      required:
-        - routing
-      properties:
-        routing:
-          $ref: '#/components/schemas/UpdateRouting'
-    UpdateNotificationSettingsRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - routing
-      properties:
-        routing:
-          type: object
-          description: The kinds of update to change. At least one.
-          additionalProperties: false
-          minProperties: 1
-          properties:
-            progress:
-              $ref: '#/components/schemas/UpdateRoute'
-            decision:
-              $ref: '#/components/schemas/UpdateRoute'
-            question:
-              $ref: '#/components/schemas/UpdateRoute'
-            attention:
-              $ref: '#/components/schemas/UpdateRoute'
-    BotNotifyLevel:
-      type: string
-      enum:
-        - all
-        - needs_input
-        - none
-      description: 'How much one Bot may reach the person outside OpenBot: all of it, only what needs them (its questions and approvals), or nothing.'
-    BotNotificationSettings:
-      type: object
-      required:
-        - botId
-        - notify
-      properties:
-        botId:
-          type: string
-          description: The Bot.
-        notify:
-          $ref: '#/components/schemas/BotNotifyLevel'
-    UpdateBotNotificationSettingsRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - notify
-      properties:
-        notify:
-          $ref: '#/components/schemas/BotNotifyLevel'
-    NotificationTransportOption:
     CreateSignInRequestRequest:
       type: object
       additionalProperties: false
@@ -19111,23 +19210,6 @@ components:
       required:
         - id
         - title
-      properties:
-        id:
-          $ref: '#/components/schemas/NotificationTransport'
-        title:
-          type: string
-          description: Its name, as a person reads it.
-    NotificationTransportPage:
-      type: object
-      required:
-        - notificationTransports
-        - nextCursor
-      properties:
-        notificationTransports:
-          type: array
-          description: Push, then Slack, Microsoft Teams and text messages, as set up.
-          items:
-            $ref: '#/components/schemas/NotificationTransportOption'
         - recordedAt
         - ended
         - reason
@@ -24864,12 +24946,10 @@ components:
                 traceId: trace_example
     TransportUnavailable:
       description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
-    ComputerUnavailable:
-      description: 'The computer could not be reached, or is still starting: the call was not performed, and is worth sending again in a moment.'
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/ComputerProblem'
+            $ref: '#/components/schemas/Problem'
           examples:
             sms:
               value:
@@ -24878,6 +24958,159 @@ components:
                 status: 404
                 detail: SMS is not configured on this deployment.
                 code: TRANSPORT_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceConflict:
+      description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            anotherAccount:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This device is already registered to another account. Sign out of OpenBot on it first.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceNotFound:
+      description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/device-not-found
+                title: Device not found.
+                status: 404
+                detail: Device not found.
+                code: DEVICE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidDestination:
+      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notTheirs:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose an accessible Bot in your conversation.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            wrongCode:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: The verification code was not approved.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DestinationForbidden:
+      description: The caller asked to link somebody else's account, or an administrator hasn't let them add Bots to Slack and Teams.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see or change where their Bots reach them.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            switchedOff:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: An admin hasn't turned this on for you.
+                status: 403
+                detail: An admin has turned off "Add Bots to Slack and Teams" for you, so that wasn't done.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: slackTeams
+    TextMessagesUnavailable:
+      description: The text message provider didn't answer, so no code was sent or checked. Trying again can work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            provider:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: Delivery is unavailable. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    DestinationNotFound:
+      description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/destination-not-found
+                title: Destination not found.
+                status: 404
+                detail: Connection not found.
+                code: DESTINATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ComputerUnavailable:
+      description: 'The computer could not be reached, or is still starting: the call was not performed, and is worth sending again in a moment.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ComputerProblem'
+          examples:
             starting:
               value:
                 type: https://open.bot/errors/computer-starting
@@ -24918,8 +25151,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    DeviceConflict:
-      description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
             file:
               value:
                 type: https://open.bot/errors/not-found
@@ -24960,7 +25191,6 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
-            anotherAccount:
             stale:
               value:
                 type: https://open.bot/errors/computer-snapshot-stale
@@ -25013,7 +25243,6 @@ components:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: This device is already registered to another account. Sign out of OpenBot on it first.
                 detail: That element is no longer on the page.
                 code: CONFLICT
                 category: conflict
@@ -25031,8 +25260,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    DeviceNotFound:
-      description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
     ComputerControlConflict:
       description: The control request has already ended or is somebody else's, or the Idempotency-Key was already used for a different request.
       content:
@@ -25040,19 +25267,6 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
-            missing:
-              value:
-                type: https://open.bot/errors/device-not-found
-                title: Device not found.
-                status: 404
-                detail: Device not found.
-                code: DEVICE_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    InvalidDestination:
-      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
             ended:
               value:
                 type: https://open.bot/errors/control-request-conflict
@@ -25082,7 +25296,6 @@ components:
           schema:
             $ref: '#/components/schemas/ComputerProblem'
           examples:
-            notTheirs:
             'off':
               value:
                 type: https://open.bot/errors/capability-required
@@ -25160,28 +25373,23 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: Choose an accessible Bot in your conversation.
                 detail: Only web addresses open here.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            wrongCode:
             phraseTimes:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: The verification code was not approved.
                 detail: That phrase's times do not fit the recording, so it was not added.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    DestinationForbidden:
-      description: The caller asked to link somebody else's account, or an administrator hasn't let them add Bots to Slack and Teams.
     BrowserForbidden:
       description: The sign-in does not allow this, the browser is somebody else's own, or nothing can be recorded in a Bot's browser here.
       content:
@@ -25194,20 +25402,12 @@ components:
                 type: https://open.bot/errors/permission-denied
                 title: Permission denied.
                 status: 403
-                detail: Only they can see or change where their Bots reach them.
                 detail: Only they can use their browser.
                 code: PERMISSION_DENIED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            switchedOff:
-              value:
-                type: https://open.bot/errors/capability-required
-                title: An admin hasn't turned this on for you.
-                status: 403
-                detail: An admin has turned off "Add Bots to Slack and Teams" for you, so that wasn't done.
-                code: CAPABILITY_REQUIRED
             sharedComputer:
               value:
                 type: https://open.bot/errors/permission-denied
@@ -25219,9 +25419,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-                capability: slackTeams
-    TextMessagesUnavailable:
-      description: The text message provider didn't answer, so no code was sent or checked. Trying again can work.
     BrowserUnfinished:
       description: 'The server could not complete the request, or did part of it: a browser that was cleared whose record could not be written, or a Recorder that could not be connected.'
       content:
@@ -25229,13 +25426,6 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            provider:
-              value:
-                type: https://open.bot/errors/service-unavailable
-                title: A service OpenBot depends on is unavailable.
-                status: 503
-                detail: Delivery is unavailable. Try again.
-                code: SERVICE_UNAVAILABLE
             cleared:
               value:
                 type: https://open.bot/errors/browser-unfinished
@@ -25276,8 +25466,6 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
-    DestinationNotFound:
-      description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
     BrowserConflict:
       description: The caller does not hold control of the Bot's computer, the recording is not theirs or not running, the browser is not open, or the Idempotency- Key was used for a different request.
       content:
@@ -25446,11 +25634,6 @@ components:
           examples:
             missing:
               value:
-                type: https://open.bot/errors/destination-not-found
-                title: Destination not found.
-                status: 404
-                detail: Connection not found.
-                code: DESTINATION_NOT_FOUND
                 type: https://open.bot/errors/sign-in-request-not-found
                 title: Sign-in request not found.
                 status: 404
