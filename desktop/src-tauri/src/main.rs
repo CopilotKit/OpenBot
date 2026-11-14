@@ -6786,26 +6786,38 @@ pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark
 
 /**
 Windows 11's title bar in the ground of the page under it, or Windows's own colours for `None`.
-
-`Some(dark)` is the setup screens' ground, which OpenBot's own pages share (`--background` in the
-app's styles): the bar, its text and the window's border become one surface with the page instead
-of a white band across its top. Windows 10 has no such attributes and keeps its bar; the calls fail
-there and are ignored.
+See `tint_title_bar_of`.
 */
 #[cfg(target_os = "windows")]
 fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<bool>) {
-    #[link(name = "dwmapi")]
-    extern "system" {
-        fn DwmSetWindowAttribute(
-            window: *mut std::ffi::c_void,
-            attribute: u32,
-            value: *const std::ffi::c_void,
-            size: u32,
-        ) -> i32;
+    if let Ok(hwnd) = window.hwnd() {
+        tint_title_bar_of(hwnd.0 as isize, dark);
     }
-    const BORDER_COLOR: u32 = 34;
-    const CAPTION_COLOR: u32 = 35;
-    const TEXT_COLOR: u32 = 36;
+}
+
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE`: Windows's own dark title bar, on Windows 10 (build 18985 on,
+/// so Windows Server 2022 too) and Windows 11.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const IMMERSIVE_DARK_MODE: u32 = 20;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const BORDER_COLOR: u32 = 34;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const CAPTION_COLOR: u32 = 35;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const TEXT_COLOR: u32 = 36;
+
+/**
+The window attributes, in the order they are set, that give the title bar `dark`'s look.
+
+`Some(dark)`: Windows's own dark or light bar, then (Windows 11) the setup screens' ground, which
+OpenBot's own pages share (`--background` in the app's styles), so the bar, its text and the
+window's border are one surface with the page instead of a band across its top. Windows 10 and
+Windows Server 2022 have no colour attributes; those calls fail there and the dark or light bar is
+what shows. `None`: Windows's own colours, and its dark or light left to the window's theme.
+*/
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn title_bar_attributes(dark: Option<bool>) -> Vec<(u32, u32)> {
     /// `DWMWA_COLOR_DEFAULT`: give the attribute back to Windows.
     const DEFAULT: u32 = 0xFFFF_FFFF;
     // COLORREF is 0x00BBGGRR.
@@ -6817,26 +6829,71 @@ fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<boo
         Some(false) => (colorref(SETUP_BACKGROUND), colorref(SETUP_BACKGROUND_DARK)),
         None => (DEFAULT, DEFAULT),
     };
-    let Ok(hwnd) = window.hwnd() else {
-        return;
+    dark.map(|dark| (IMMERSIVE_DARK_MODE, u32::from(dark)))
+        .into_iter()
+        .chain([
+            (CAPTION_COLOR, caption),
+            (BORDER_COLOR, caption),
+            (TEXT_COLOR, text),
+        ])
+        .collect()
+}
+
+/**
+The title bar of the window `hwnd` in `dark`'s look (`title_bar_attributes`), repainted now.
+
+MEASURED on Windows Server 2022 (box H) in dark: the bar stayed light until the window was resized.
+Windows applies these attributes to the frame only when it next draws it, and nothing here moved or
+resized the window, so the frame is redrawn on the spot (`SWP_FRAMECHANGED`). Called as the main
+window first shows (`first_paint`), for each page it loads, on every theme change, and whenever
+OpenBot's own page reports its light or dark.
+*/
+#[cfg(target_os = "windows")]
+pub(crate) fn tint_title_bar_of(hwnd: isize, dark: Option<bool>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SWP_NOZORDER,
     };
-    let hwnd = hwnd.0;
-    for (attribute, value) in [
-        (CAPTION_COLOR, caption),
-        (BORDER_COLOR, caption),
-        (TEXT_COLOR, text),
-    ] {
-        // SAFETY: `hwnd` is this window's live handle, and `value` is a u32 that outlives the call,
-        // which is the size and type these three attributes take.
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            window: *mut std::ffi::c_void,
+            attribute: u32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+    let window = HWND(hwnd as *mut std::ffi::c_void);
+    for (attribute, value) in title_bar_attributes(dark) {
+        // SAFETY: `window` is a live window handle, and `value` is a u32 that outlives the call,
+        // which is the size and type these attributes take (a BOOL or a COLORREF).
         unsafe {
             DwmSetWindowAttribute(
-                hwnd,
+                window.0,
                 attribute,
                 (&value as *const u32).cast(),
                 std::mem::size_of::<u32>() as u32,
             );
         }
     }
+    // SAFETY: a plain call on a window handle; it neither moves, sizes, reorders nor activates it.
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER
+                | SWP_NOOWNERZORDER
+                | SWP_NOACTIVATE,
+        )
+    };
 }
 
 /// The title text in the title bar. AppKit, so on the main thread.
@@ -16553,6 +16610,97 @@ mod tests {
                 SETUP_BACKGROUND_DARK
             );
         }
+    }
+
+    /// Box H (Windows Server 2022) in dark: the title bar stayed light until the window was
+    /// resized. Server 2022 has none of Windows 11's colour attributes, so its bar is Windows's own
+    /// dark or light, which is set with the colours and drawn on the spot, from the window's first
+    /// show and on every change after.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
+        let dark = title_bar_attributes(Some(true));
+        assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        let light = title_bar_attributes(Some(false));
+        assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        // Windows's own colours, and the window's theme left to decide its dark or light.
+        let own = title_bar_attributes(None);
+        assert!(own
+            .iter()
+            .all(|&(attribute, _)| attribute != IMMERSIVE_DARK_MODE));
+        assert!(
+            own.iter().all(|&(_, value)| value == 0xFFFF_FFFF),
+            "{own:?}"
+        );
+
+        let main = include_str!("main.rs");
+        let tint = &main[main.find("pub(crate) fn tint_title_bar_of").unwrap()..];
+        let tint = &tint[..tint.find("\n}\n").unwrap()];
+        let set = tint.find("title_bar_attributes(dark)").expect("{tint}");
+        let redraw = tint
+            .find("SWP_FRAMECHANGED\n")
+            .expect("the frame is redrawn");
+        assert!(set < redraw, "{tint}");
+        for flag in ["SWP_NOMOVE", "SWP_NOSIZE", "SWP_NOZORDER", "SWP_NOACTIVATE"] {
+            assert!(tint[redraw..].contains(flag), "{flag}: {tint}");
+        }
+        let body = |name: &str| {
+            let from = &main[main.find(name).unwrap_or_else(|| panic!("{name}"))..];
+            &from[..from.find("\n}\n").unwrap()]
+        };
+        let window = body("fn tint_title_bar<R: tauri::Runtime>");
+        assert!(
+            window.contains("tint_title_bar_of(hwnd.0 as isize, dark)"),
+            "{window}"
+        );
+        // A theme change from the system: the window's ThemeChanged event redraws the bar on every
+        // page but OpenBot's own, which reports its own theme (below).
+        let changed = &main[main
+            .find("tauri::WindowEvent::ThemeChanged(_) => {")
+            .unwrap()..];
+        let changed = &changed[..changed.find("\n            }\n").unwrap()];
+        assert!(
+            changed.contains("match_title_bar(window, window_page(app, &url));"),
+            "{changed}"
+        );
+        let matched = body("fn match_title_bar<R: tauri::Runtime>");
+        let windows = &matched[matched.find("#[cfg(target_os = \"windows\")]").unwrap()..];
+        assert!(windows.contains("WindowPage::Setup => {"), "{windows}");
+        assert!(
+            windows.contains("tint_title_bar(window, Some(dark));"),
+            "{windows}"
+        );
+        assert!(
+            windows.contains(
+                "WindowPage::LocalApp | WindowPage::Other => tint_title_bar(window, None)"
+            ),
+            "{windows}"
+        );
+        // A theme change from OpenBot's own page, through `desktop_page::appearance`.
+        let reported = body("pub(crate) fn page_appearance<R: tauri::Runtime>");
+        assert!(
+            reported.contains("tint_title_bar(window, Some(dark));"),
+            "{reported}"
+        );
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("crate::page_appearance(&window, dark);"),
+            "{command}"
+        );
+        // As the main window first shows, before `build()` returns.
+        let first_paint = include_str!("first_paint.rs");
+        let shown = &first_paint[first_paint
+            .find("unsafe extern \"system\" fn shown")
+            .unwrap()..];
+        let shown = &shown[..shown.find("\n    }\n").unwrap()];
+        assert!(
+            shown.contains("crate::tint_title_bar_of(window.0 as isize, Some(dark));"),
+            "{shown}"
+        );
     }
 
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
