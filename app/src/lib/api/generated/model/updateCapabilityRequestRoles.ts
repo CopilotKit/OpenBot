@@ -5,5 +5,5 @@ import type { SwitchValue } from "./switchValue";
 
 export type UpdateCapabilityRequestRoles = {
   admin?: SwitchValue | null;
-  user?: SwitchValue | null;
+  member?: SwitchValue | null;
 };

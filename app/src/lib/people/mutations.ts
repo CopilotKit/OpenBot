@@ -17,7 +17,7 @@ export function setPersonRoleMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
       userId: string;
-      role: "admin" | "user";
+      role: "admin" | "member";
     }): Promise<Person> =>
       (
         await updatePerson(

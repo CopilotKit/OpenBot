@@ -3,11 +3,12 @@
  */
 
 /**
- * What a person may do in the organization. An administrator governs it: its people, its sign-in and its policy.
+ * The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.
  */
 export type PersonRole = (typeof PersonRole)[keyof typeof PersonRole];
 
 export const PersonRole = {
+  owner: "owner",
   admin: "admin",
-  user: "user",
+  member: "member",
 } as const;

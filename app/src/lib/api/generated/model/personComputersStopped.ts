@@ -4,7 +4,7 @@
 import type { PersonComputersStoppedFailedItem } from "./personComputersStoppedFailedItem";
 
 export interface PersonComputersStopped {
-  /** The Bots whose computers stopped. */
+  /** The computers stopped: `person:<id>` for the person's own, which every Bot they use runs on, and `bot:<id>` for each of their Bots that has a computer of its own. */
   stopped: string[];
   /** The ones that would not stop, and why. */
   failed: PersonComputersStoppedFailedItem[];

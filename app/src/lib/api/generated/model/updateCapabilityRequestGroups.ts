@@ -4,7 +4,7 @@
 import type { SwitchValue } from "./switchValue";
 
 /**
- * By directory group name, 1 to 200 characters.
+ * By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.
  */
 export type UpdateCapabilityRequestGroups = {
   [key: string]: SwitchValue | null;

@@ -6,9 +6,10 @@ import type { CapabilityId } from "./capabilityId";
 import type { SwitchValue } from "./switchValue";
 
 export interface CapabilityChange {
+  /** Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive. */
   scopeKind: CapabilityChangeScopeKind;
   /**
-   * Empty for the organization; admin or user for a role; the group's name for a group.
+   * Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
    * @maxLength 200
    * @pattern ^[^\x00]*$
    */

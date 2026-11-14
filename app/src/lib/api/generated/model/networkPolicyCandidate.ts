@@ -6,9 +6,10 @@ import type { NetworkMode } from "./networkMode";
 import type { NetworkPolicyCandidateScopeKind } from "./networkPolicyCandidateScopeKind";
 
 export interface NetworkPolicyCandidate {
+  /** Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive. */
   scopeKind: NetworkPolicyCandidateScopeKind;
   /**
-   * The group's name. Empty for the organization.
+   * The directory group's name. Empty for the organization.
    * @maxLength 200
    * @pattern ^[^\x00]*$
    */
