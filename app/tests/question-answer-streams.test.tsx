@@ -23,6 +23,7 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
 import {
   answerBotAttention,
   answerBotsList,
@@ -238,8 +239,8 @@ beforeAll(() => {
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The question the Bot is waiting on, in this conversation, until it is answered.
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
@@ -258,19 +259,23 @@ beforeAll(() => {
               ]
             : [],
         });
+        if (approvals) return approvals;
+      }
       /*
        * As the server answers it: a question the person's own turn asked, answered in its
        * conversation, is closed and left to that conversation to run. Anything else is queued.
        */
-      if (url.pathname === "/api/approvals/questions/q-1/respond") {
+      if (
+        url.pathname ===
+        "/api/v2/organizations/default/people/me/questions/q-1/respond"
+      ) {
         const body = (await request().json()) as { inConversation?: boolean };
         answers.push(body);
         open = false;
-        return NativeResponse.json(
-          body.inConversation === true
-            ? { id: "q-1", continueHere: true }
-            : { id: "q-1", queued: true },
-        );
+        return NativeResponse.json({
+          id: "q-1",
+          continueHere: body.inConversation === true,
+        });
       }
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

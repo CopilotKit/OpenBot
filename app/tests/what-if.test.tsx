@@ -124,14 +124,14 @@ function renderWhatIf() {
 
 test("a question becomes chips, and Check shows every control in order with the one that decides", async () => {
   const asked = serve({
-    "/api/admin/what-if/vocabulary": answers.vocabulary,
-    "/api/admin/what-if/ask": {
+    "/api/v2/organizations/default/what-if/vocabulary": answers.vocabulary,
+    "/api/v2/organizations/default/what-if/ask": {
       understood: "yes",
       action: answers.checked.action,
       labels: answers.checked.labels,
       missing: null,
     },
-    "/api/admin/what-if/check": answers.checked,
+    "/api/v2/organizations/default/what-if/check": answers.checked,
   });
   const view = renderWhatIf();
   const user = userEvent.setup({ document });
@@ -213,7 +213,8 @@ test("a question becomes chips, and Check shows every control in order with the 
 test("an Audit row a control decided carries Why?, which explains it from the row with today's settings", async () => {
   const asked = serve({
     [AUDIT_PATH]: auditPageBody([answers.event]),
-    [`/api/admin/what-if/explain/${answers.event.id}`]: answers.explained,
+    [`/api/v2/organizations/default/what-if/explanations/${answers.event.id}`]:
+      answers.explained,
   });
   const router = createRouter({
     routeTree: createRootRoute({ component: () => <AuditPage ask /> }),
@@ -247,7 +248,9 @@ test("an Audit row a control decided carries Why?, which explains it from the ro
   );
   expect(
     asked.some(
-      (call) => call.path === `/api/admin/what-if/explain/${answers.event.id}`,
+      (call) =>
+        call.path ===
+        `/api/v2/organizations/default/what-if/explanations/${answers.event.id}`,
     ),
   ).toBe(true);
 });

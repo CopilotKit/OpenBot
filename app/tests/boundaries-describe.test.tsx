@@ -75,6 +75,13 @@ const SOCIAL: PolicyTranslation = {
   warning: null,
 };
 
+/** A refusal as the API answers it: problem details, the sentence in `detail`. */
+const problem = (status: number, detail: string, extra: object = {}) =>
+  Response.json(
+    { type: "about:blank", title: detail, status, detail, ...extra },
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+
 let stored: ActionPolicy;
 let translation: PolicyTranslation | { error: string; status: number };
 const saved: Record<string, unknown>[] = [];
@@ -87,51 +94,49 @@ function serving(policy: ActionPolicy) {
   replayed.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path.endsWith("/api/computers/policy") && init?.method === "PUT") {
+    if (
+      path.endsWith("/api/v2/organizations/default/boundaries") &&
+      init?.method === "PUT"
+    ) {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       saved.push(body);
       const { authoring: _authoring, ...policy } = body;
       stored = policy as ActionPolicy;
-      return Response.json({ policy: stored });
+      return Response.json(stored);
     }
-    if (path.endsWith("/api/computers/policy"))
-      return Response.json({ policy: stored });
-    if (path.endsWith("/api/computers/policy-translate")) {
+    if (path.endsWith("/api/v2/organizations/default/boundaries"))
+      return Response.json(stored);
+    if (path.endsWith("/api/v2/organizations/default/boundaries/translate")) {
       described.push(JSON.parse(String(init?.body)).text);
       return "status" in translation
-        ? Response.json(
-            { error: translation.error },
-            { status: translation.status },
-          )
+        ? problem(translation.status, translation.error)
         : Response.json(translation);
     }
-    if (path.endsWith("/api/computers/policy-dry-run")) {
-      replayed.push(JSON.parse(String(init?.body)).policy);
+    if (path.endsWith("/api/v2/organizations/default/boundaries/replay")) {
+      replayed.push(JSON.parse(String(init?.body)).boundaries);
       return Response.json({
-        report: {
-          scanned: 3,
-          wouldRefuse: 1,
-          wouldAllow: 0,
-          unchanged: 2,
-          changes: [
-            {
-              id: "e1",
-              createdAt: "2026-11-09T18:00:00.000Z",
-              kind: "computer",
-              initiator: { kind: "person", id: "" },
-              action: "computer_navigate",
-              bot: "research-assistant",
-              page: "https://www.facebook.com/groups/x",
-              element: null,
-              command: null,
-              file: null,
-              was: "allowed",
-              would: "refused",
-              rule: SOCIAL.rule,
-              reason: "blocked",
-            },
-          ],
-        },
+        scanned: 3,
+        wouldRefuse: 1,
+        wouldAllow: 0,
+        unchanged: 2,
+        changes: [
+          {
+            id: "e1",
+            createdAt: "2026-11-09T18:00:00.000Z",
+            kind: "computer",
+            initiator: { kind: "person", id: "" },
+            action: "computer_navigate",
+            bot: "research-assistant",
+            page: "https://www.facebook.com/groups/x",
+            element: null,
+            command: null,
+            file: null,
+            was: "allowed",
+            would: "refused",
+            rule: SOCIAL.rule,
+            reason: "blocked",
+          },
+        ],
       });
     }
     const bots = answerBotsList(path, init, {

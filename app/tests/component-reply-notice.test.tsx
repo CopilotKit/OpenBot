@@ -437,7 +437,11 @@ async function serve(url: URL, request: Request): Promise<Response> {
     return NativeResponse.json({ skills: [], tools: [] });
   if (path === "/api/voice/sessions")
     return NativeResponse.json({ sessions: [], nextCursor: null });
-  if (/^\/api\/approvals\/threads\/[^/]+$/.test(path))
+  if (
+    /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+      path,
+    )
+  )
     return NativeResponse.json({ asksEveryStep: false });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }

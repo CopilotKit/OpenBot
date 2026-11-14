@@ -25,6 +25,7 @@ import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { CopilotProvider } from "@/lib/copilot/provider";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { COMPUTER_STEPS_PATH } from "./approvals-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -356,12 +357,13 @@ beforeAll(() => {
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The gate, answering as it does when nothing asks: the step is done, and here is its result.
-      if (/^\/api\/approvals\/computer\/[^/]+$/.test(url.pathname)) {
+      if (url.pathname === COMPUTER_STEPS_PATH) {
         gated.push({
           path: url.pathname,
           body: (await request.json()) as Record<string, unknown>,
         });
         return NativeResponse.json({
+          outcome: "done",
           result: { ok: true, element: { role: "button", name: "Save" } },
         });
       }
@@ -408,7 +410,11 @@ beforeAll(() => {
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },
@@ -676,14 +682,17 @@ test("a step a rule asks about, in a run that starts after its person has left, 
 
   expect(gated).toEqual([
     {
-      path: `/api/approvals/computer/${BOT}`,
-      body: expect.objectContaining({
-        runId: runs[1]?.runId,
-        threadId: channel.threadId,
-        toolCallId: callId(1),
-        toolName: "computer_click",
-        args: { ref: "e1", snapshotId: 7 },
-      }),
+      path: COMPUTER_STEPS_PATH,
+      body: {
+        botId: BOT,
+        conversation: expect.objectContaining({
+          runId: runs[1]?.runId,
+          threadId: channel.threadId,
+          toolCallId: callId(1),
+          toolName: "computer_click",
+          args: { ref: "e1", snapshotId: 7 },
+        }),
+      },
     },
   ]);
   // Nothing went to the computer without its conversation.

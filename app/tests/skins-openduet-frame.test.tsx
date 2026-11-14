@@ -30,6 +30,11 @@ import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  type TestInbox,
+} from "./approvals-api";
 import { answerBotAttention, answerBotsList } from "./bots-api";
 import {
   CHECK_IN_ITEMS_PATH,
@@ -71,6 +76,9 @@ class QuietSocket {
 }
 
 type Sent = { method: string; path: string; body: unknown };
+
+/** Where the table below keeps the approvals inbox, which is served as the API's separate reads. */
+const INBOX = "approvals inbox";
 
 const now = "2026-10-27T10:00:00.000Z";
 
@@ -115,7 +123,7 @@ function api(role: "admin" | "user") {
       ],
       nextCursor: null,
     },
-    "/api/approvals": {
+    [INBOX]: {
       enabled: true,
       rules: [],
       teamRules: [],
@@ -141,8 +149,10 @@ function api(role: "admin" | "user") {
         },
         {
           id: "r-decided",
-          status: "allowed",
+          status: "approved",
+          decision: "allow_once",
           createdAt: now,
+          decidedAt: now,
           action: {
             botId: "b-1",
             toolRef: "mcp/drive/share",
@@ -261,7 +271,7 @@ function api(role: "admin" | "user") {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : null,
       });
-      return Response.json({ ok: true });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
     }
     const bots = answerBotsList(input, init, {
       visible: [
@@ -272,6 +282,8 @@ function api(role: "admin" | "user") {
     if (bots) return bots;
     const waiting = answerBotAttention(input, init, { bots: [] });
     if (waiting) return waiting;
+    const approvals = approvalInboxResponse(input, bodies[INBOX] as TestInbox);
+    if (approvals) return approvals;
     if (path in bodies) return Response.json(bodies[path]);
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
@@ -505,7 +517,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/approvals/r-waiting/decision",
+        path: "/api/v2/organizations/default/people/me/approvals/r-waiting/decide",
         body: { decision: "allow_once" },
       }),
     );
@@ -525,7 +537,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/approvals/questions/q-1/respond",
+        path: "/api/v2/organizations/default/people/me/questions/q-1/respond",
         body: { response: "Kiln 2" },
       }),
     );

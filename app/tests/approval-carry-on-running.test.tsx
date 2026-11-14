@@ -13,6 +13,7 @@ import {
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalBody, approvalInboxResponse } from "./approvals-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -156,9 +157,14 @@ beforeAll(() => {
       const method = (
         input instanceof Request ? input.method : (init?.method ?? "GET")
       ).toUpperCase();
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json(inbox());
-      if (url.pathname === "/api/approvals/approval-1/decision") {
+      {
+        const approvals = approvalInboxResponse(url.pathname, inbox());
+        if (approvals) return approvals;
+      }
+      if (
+        url.pathname ===
+        "/api/v2/organizations/default/people/me/approvals/approval-1/decide"
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         const { decision } = (await request.json()) as { decision: string };
@@ -166,7 +172,9 @@ beforeAll(() => {
         // As the server does: decided, and handed to the loop that carries the conversation on.
         status = "approved";
         decidedAt = new Date().toISOString();
-        return NativeResponse.json({ id: "approval-1", status });
+        return NativeResponse.json(
+          approvalBody({ ...inbox().requests[0], decision }),
+        );
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;

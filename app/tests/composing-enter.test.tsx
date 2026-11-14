@@ -89,8 +89,8 @@ beforeEach(() => {
         typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
       if (method !== "GET") writes.push({ request: `${method} ${path}`, body });
       const json = (value: unknown) => Response.json(value);
-      if (path === "/api/computers/policy") {
-        return json({ policy: method === "PUT" ? body : POLICY });
+      if (path === "/api/v2/organizations/default/boundaries") {
+        return json(method === "PUT" ? body : POLICY);
       }
       if (path === DEPLOYMENT_PATH) {
         return deploymentResponse({ builtInBots: true });
@@ -224,7 +224,7 @@ test("a boundary rule is not added by the Enter that confirms a composed charact
   await settle();
   expect(writes).toEqual([
     {
-      request: "PUT /api/computers/policy",
+      request: "PUT /api/v2/organizations/default/boundaries",
       body: {
         ...POLICY,
         deny: [rule],

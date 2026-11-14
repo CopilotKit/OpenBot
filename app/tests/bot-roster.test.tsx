@@ -20,6 +20,7 @@ import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { approvalInboxResponse } from "./approvals-api";
 import {
   answerBotAttention,
   answerBotsList,
@@ -101,7 +102,10 @@ function serving(
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });
     return (
-      answerBotsList(input, init, { visible, hidden }) ?? Response.json({})
+      answerBotsList(input, init, { visible, hidden }) ??
+      // Nothing waits on the person: the inbox is read, and is empty.
+      approvalInboxResponse(input) ??
+      Response.json({})
     );
   }) as unknown as typeof fetch;
 }

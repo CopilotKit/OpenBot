@@ -97,6 +97,24 @@ const REPORT: ApprovalBacktest = {
 };
 
 const sent: { path: string; body: Record<string, unknown> }[] = [];
+const RULES = "/api/v2/organizations/default/approval-rules";
+
+/** A refusal as the API answers one. */
+const problem = (status: number, detail: string) =>
+  new Response(
+    JSON.stringify({
+      type: "https://open.bot/errors/validation-error",
+      title: "Request validation failed.",
+      status,
+      detail,
+      code: "VALIDATION_ERROR",
+      category: "validation",
+      retryable: false,
+      requestId: "req_test",
+      traceId: "trace_test",
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
 const originalFetch = global.fetch;
 
 /** The check the real backtest route makes of rows as they stand. */
@@ -138,12 +156,29 @@ beforeEach(() => {
     const path = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (init?.method === "POST") sent.push({ path, body });
-    if (path.endsWith("/api/approvals/team/rules/translate"))
-      return Response.json(OPPORTUNITIES);
-    if (path.endsWith("/api/approvals/team/rules/backtest"))
-      return Response.json(checked(body.rules));
-    if (path.endsWith("/api/approvals/team/rules/batch"))
-      return Response.json({ rules: body.rules }, { status: 201 });
+    // The API's addresses and nothing else: a call to an older one finds nothing here.
+    const address = new URL(path, "http://openbot.test").pathname;
+    if (address.startsWith(`${RULES}/`)) {
+      // Each is a write once per key, as the server takes it.
+      if (!new Headers(init?.headers).get("idempotency-key"))
+        return problem(400, "Every write needs an Idempotency-Key header.");
+      if (address === `${RULES}/translate`) return Response.json(OPPORTUNITIES);
+      if (address === `${RULES}/replay`)
+        return Response.json(checked(body.rules));
+      if (address === `${RULES}/batch-create`)
+        return Response.json(
+          {
+            rules: (body.rules as ApprovalRuleInput[]).map((rule, index) => ({
+              id: `rule-${index + 1}`,
+              ...rule,
+              createdBy: "admin",
+              revokedAt: null,
+              createdAt: "2026-11-13T17:20:00.000Z",
+            })),
+          },
+          { status: 201 },
+        );
+    }
     const bots = answerBotsList(path, init, {
       visible: [{ id: SALES, name: "Sales Assistant" }],
     });
@@ -219,15 +254,22 @@ test("a description fills the rules, shows their reading and check, replays them
     ),
   ).toBeTruthy();
   expect(view.getByText("A person denied it.")).toBeTruthy();
-  expect(sent.filter((call) => call.path.endsWith("/batch"))).toHaveLength(0);
+  expect(
+    sent.filter((call) => call.path.endsWith("/approval-rules/batch-create")),
+  ).toHaveLength(0);
 
   const save = view.getByRole("button", { name: "Save rules" });
   await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(save);
   await waitFor(() =>
-    expect(sent.filter((call) => call.path.endsWith("/batch"))).toHaveLength(1),
+    expect(
+      sent.filter((call) => call.path.endsWith("/approval-rules/batch-create")),
+    ).toHaveLength(1),
   );
-  expect(sent.find((call) => call.path.endsWith("/batch"))?.body).toEqual({
+  expect(
+    sent.find((call) => call.path.endsWith("/approval-rules/batch-create"))
+      ?.body,
+  ).toEqual({
     rules: OPPORTUNITIES.rules,
     authoring: { source: "english", text: TEXT },
   });

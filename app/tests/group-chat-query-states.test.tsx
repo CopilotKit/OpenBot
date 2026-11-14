@@ -13,6 +13,7 @@ import { GroupChat } from "@/components/channels/group-chat";
 import { groupKeys } from "@/lib/groups";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -76,14 +77,16 @@ beforeAll(() => {
       });
     const bots = answerBotsList(url, init, { visible: [] });
     if (bots) return bots;
-    if (url.pathname === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(url.pathname, {
         enabled: true,
         requests: [],
         rules: [],
         teamRules: [],
         questions: [],
       });
+      if (approvals) return approvals;
+    }
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
 });

@@ -5,6 +5,7 @@ import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { WaitingForYou } from "@/components/approvals/waiting";
 import { BotNeedsYou } from "@/components/needs-you/board";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
@@ -28,7 +29,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** A pending computer action as `GET /api/approvals` returns it (`publicApproval`). */
+/** A pending computer action as the inbox the screens read holds it (`publicApproval`). */
 const request = (
   id: string,
   toolRef: string,
@@ -57,8 +58,8 @@ const request = (
 function serving() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(url, {
         enabled: true,
         rules: [],
         teamRules: [],
@@ -82,6 +83,8 @@ function serving() {
           ),
         ],
       });
+      if (approvals) return approvals;
+    }
     if (pathOf(url) === CHECK_IN_ITEMS_PATH)
       return Response.json({ checkInItems: [], nextCursor: null });
     if (url === "/api/tasks") return Response.json({ tasks: [] });
