@@ -6830,6 +6830,60 @@ fn main() {
             Some("compose") if actual == ["compose", "pull", "--help"] => {
                 println!("      --policy string   Apply pull policy (\"missing\"|\"always\")");
             }
+            // Compose's own container bookkeeping, where `.fixture-compose-containers` asks for it.
+            // `up` makes a container for each service it is given, and for `migrate` when the
+            // file's `server` waits on one. `down` takes the containers of the services the file
+            // defines and leaves any other: that is what an orphan is. With
+            // `.fixture-this-release-does-not-start`, a file with no `worker` service fails its `up`.
+            Some("compose")
+                if std::path::Path::new(".fixture-compose-containers").exists()
+                    && actual.iter().any(|arg| arg == "up" || arg == "down") =>
+            {
+                let file = std::fs::read_to_string("docker-compose.yml").unwrap();
+                let mut inside = false;
+                let mut defined: Vec<String> = Vec::new();
+                for line in file.lines() {
+                    if !line.starts_with(' ') && !line.trim().is_empty() && !line.starts_with('#') {
+                        inside = line.trim_end() == "services:";
+                    } else if inside && line.starts_with("  ") && !line.starts_with("   ") && !line.starts_with("  #") {
+                        if let Some((name, _)) = line.trim().split_once(':') { defined.push(name.to_string()); }
+                    }
+                }
+                let mut containers = listed();
+                if actual.iter().any(|arg| arg == "down") {
+                    containers.retain(|(_, project, service)| project != "openbot-desktop" || !defined.contains(service));
+                } else {
+                    let at = actual.iter().position(|arg| arg == "up").unwrap();
+                    let mut raised: Vec<String> = actual[at + 1..].iter()
+                        .filter(|arg| !arg.starts_with('-') && *arg != "never")
+                        .cloned()
+                        .collect();
+                    for service in &raised {
+                        if !defined.contains(service) {
+                            eprintln!("no such service: {service}");
+                            std::process::exit(1);
+                        }
+                    }
+                    if !defined.iter().any(|name| name == "worker")
+                        && std::path::Path::new(".fixture-this-release-does-not-start").exists()
+                    {
+                        eprintln!("Container openbot-desktop-server-1 Error dependency failed to start");
+                        std::process::exit(1);
+                    }
+                    if defined.iter().any(|name| name == "migrate") && raised.iter().any(|name| name == "server") {
+                        raised.push("migrate".to_string());
+                    }
+                    for service in raised {
+                        if !containers.iter().any(|(_, project, made)| project == "openbot-desktop" && *made == service) {
+                            containers.push((format!("{service}-1"), "openbot-desktop".to_string(), service));
+                        }
+                    }
+                }
+                let kept: String = containers.into_iter()
+                    .map(|(id, project, service)| format!("{id}\t{project}\t{service}\n"))
+                    .collect();
+                std::fs::write(".fixture-containers", kept).unwrap();
+            }
             Some("compose") if actual.iter().any(|arg| arg == "--images") => println!("fixture/image:1"),
             Some("compose") if actual.iter().any(|arg| arg == "config") => {
                 println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}");
@@ -9995,6 +10049,209 @@ fn main() {
             std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
             containers
         );
+    }
+
+    /// The update's own steps (`upgrade::Steps`) through the functions Start and Stop use, on the
+    /// fake engine: Stop is `down`, the new release is this release's Compose file, installing asks
+    /// for its image list, and Start is `up`. With `dies_starting`, the app stops the moment the new
+    /// release has started, as a crash or a forced quit would. There is no database to dump here.
+    struct UpdateTo<'a> {
+        engine: &'a Address,
+        root: &'a Path,
+        dies_starting: bool,
+    }
+
+    impl crate::upgrade::Steps for UpdateTo<'_> {
+        fn stop(&mut self) -> Result<(), Problem> {
+            down(self.engine, self.root).map_err(Problem::from)
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(false)
+        }
+        fn back_up(&mut self, _to: &Path) -> Result<(), Problem> {
+            unreachable!("there is no database to back up")
+        }
+        fn lay_out(&mut self) -> Result<(), Problem> {
+            std::fs::write(self.root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+            Ok(())
+        }
+        fn install(&mut self) -> Result<(), Problem> {
+            installation_images(self.engine, self.root, false, &Secrets::new()).map(|_| ())
+        }
+        fn start(&mut self) -> Result<(), Problem> {
+            up(self.engine, self.root, false, &Secrets::new())?;
+            if self.dies_starting && !installation_defines(self.root, WORKER) {
+                panic!("the app stopped while the update was starting");
+            }
+            Ok(())
+        }
+        fn restore(&mut self, _from: &Path) -> Result<(), Problem> {
+            unreachable!("there is no dump to restore")
+        }
+    }
+
+    /// An installation laid out as 1.0.2 and running, on an engine that keeps containers the way
+    /// Compose does: `up` under 1.0.2's file has made its `migrate` and `worker` beside the rest.
+    fn running_1_0_2(path: &PathFixture, docker: &Address, label: &str) -> (PathBuf, PathBuf) {
+        let (root, record) = installed_services_root(path, label, RELEASED_COMPOSE_1_0_2, "");
+        std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
+        up(docker, &root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            fixture_services(&root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        std::fs::remove_file(&record).unwrap();
+        (root, record)
+    }
+
+    /// The services this installation has a container for on the fake engine.
+    fn fixture_services(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join(".fixture-containers"))
+            .unwrap()
+            .lines()
+            .map(|line| line.rsplit('\t').next().unwrap().to_string())
+            .collect()
+    }
+
+    /// What the engine was asked, without the folder each command ran in.
+    fn engine_commands(record: &Path) -> Vec<String> {
+        std::fs::read_to_string(record)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command.to_string())
+            .collect()
+    }
+
+    /// What must hold once an update from 1.0.2 has been undone: the installed Compose file is
+    /// 1.0.2's again, byte for byte; the previous version was started as that file requires, with
+    /// its `worker` named and its `migrate` raised by that `up`; its image list still asks for
+    /// both; and nothing looked for, or removed, a `worker` or `migrate` container once that file
+    /// was back, or at any point removed one.
+    fn assert_back_on_1_0_2(docker: &Address, root: &Path, record: &Path) {
+        assert_eq!(
+            std::fs::read(root.join("docker-compose.yml")).unwrap(),
+            RELEASED_COMPOSE_1_0_2.as_bytes()
+        );
+        assert!(!crate::upgrade::interrupted(root));
+        let commands = engine_commands(record);
+        let listing = format!("{commands:#?}");
+        let previous_start =
+            "compose up -d --no-build --pull never postgres agent-computer server worker";
+        assert_eq!(
+            commands.last().map(String::as_str),
+            Some(previous_start),
+            "{listing}"
+        );
+        // The update's own Stop, under this release's file, is the last to look for left-overs;
+        // the previous version's Start, under 1.0.2's file, does not.
+        let last_down = commands
+            .iter()
+            .rposition(|command| command.ends_with(" down"))
+            .unwrap();
+        assert!(
+            !commands[last_down..]
+                .iter()
+                .any(|command| command.starts_with("ps --all --quiet")),
+            "{listing}"
+        );
+        assert!(
+            !commands.iter().any(|command| command.starts_with("rm ")),
+            "{listing}"
+        );
+        // Its `migrate` ran as the dependency that `up` completes, and its `worker` is running.
+        assert_eq!(
+            fixture_services(root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        // And what Install would ask for now is 1.0.2's list, `migrate` and `worker` included.
+        std::fs::remove_file(record).unwrap();
+        installation_images(docker, root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            engine_commands(record),
+            ["compose config --images postgres agent-computer server worker migrate"]
+        );
+    }
+
+    /// An update from 1.0.2 whose new version does not start is undone: 1.0.2's Compose file goes
+    /// back and 1.0.2 is started again. The failure comes after this release's file, which defines
+    /// no `migrate` and no `worker`, is in place.
+    #[test]
+    fn an_update_from_1_0_2_that_does_not_start_goes_back_to_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_1_0_2_that_does_not_start_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) = running_1_0_2(&path, &docker, "update-fails");
+        std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+
+        let mut steps = UpdateTo {
+            engine: &docker,
+            root: &root,
+            dies_starting: false,
+        };
+        let ran = crate::upgrade::run(&root, &mut steps);
+        assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
+
+        // The new version was tried under its own file: asked for no `migrate` or `worker`.
+        let commands = engine_commands(&record);
+        assert!(
+            commands
+                .contains(&"compose config --images postgres agent-computer server".to_string())
+                && commands.contains(
+                    &"compose up -d --no-build --pull never postgres agent-computer server"
+                        .to_string()
+                ),
+            "{commands:#?}"
+        );
+        assert_back_on_1_0_2(&docker, &root, &record);
+    }
+
+    /// The same, for an update the app stopped part way: the new version had started when the app
+    /// died, and the next Start puts 1.0.2 back first (`upgrade::recover`) and starts it.
+    #[test]
+    fn an_update_from_1_0_2_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_1_0_2_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) = running_1_0_2(&path, &docker, "update-interrupted");
+
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: true,
+            };
+            crate::upgrade::run(&root, &mut steps)
+        }));
+        assert!(died.is_err(), "the app was to stop part way");
+        // Left as the app left it: this release's file in place and running, 1.0.2's set aside.
+        assert!(crate::upgrade::interrupted(&root));
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            THIS_RELEASES_COMPOSE
+        );
+        assert_eq!(
+            fixture_services(&root),
+            ["postgres", "agent-computer", "server"]
+        );
+
+        // The next Start.
+        let mut steps = UpdateTo {
+            engine: &docker,
+            root: &root,
+            dies_starting: false,
+        };
+        assert!(crate::upgrade::recover(&root, &mut steps).unwrap());
+        crate::upgrade::Steps::start(&mut steps).unwrap();
+        assert_back_on_1_0_2(&docker, &root, &record);
     }
 
     /// The update from 1.0.2: once this release's Compose file is in place, the `worker` and
