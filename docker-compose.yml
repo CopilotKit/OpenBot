@@ -130,10 +130,15 @@ services:
       OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       INTELLIGENCE_API_URL: ${INTELLIGENCE_CONTAINER_API_URL:-${INTELLIGENCE_API_URL:-}}
       INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:-${INTELLIGENCE_GATEWAY_WS_URL:-}}
-      # The browser opens the gateway too, at the address the server gives it in `/info`, and the
-      # browser is on the host. So it gets the deployment's own address, the one a host server would
-      # have used, whatever this container uses itself.
-      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-}
+      # ONE ADDRESS. The browser opens the gateway's socket too, at the address the server gives it,
+      # and with Intelligence on this machine that address is OpenBot's own: the server carries the
+      # socket at `/api/intelligence/client`, so the app, the Recorder and every other client are
+      # given the address they already reached OpenBot at and never the gateway's own port. On
+      # exactly when the gateway has a container address, which is what an Intelligence on this
+      # machine is given (OpenBot Desktop and `scripts/start.sh` both write it for a loopback
+      # address). An Intelligence somewhere else, managed Intelligence among them, has a host of
+      # its own that the browser reaches itself, as before.
+      INTELLIGENCE_GATEWAY_PROXY: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:+on}
       # The person's own browser, where a host-side computer runs it (scripts/start.sh's personal
       # edition), listening on the host's loopback, and its container address when one is given.
       # Unset, the person's browser runs on the computers the Bots run on and shows in the page.

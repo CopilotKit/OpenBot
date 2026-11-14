@@ -34,6 +34,14 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **OpenBot on your own computer is one address.** With CopilotKit Intelligence on the same machine
+  (OpenBot Desktop's own, or one `scripts/start.sh` is pointed at on loopback), the app used to open
+  a second connection, straight to Intelligence's gateway on a port of its own. It now opens
+  everything on OpenBot's own address: the server carries that socket (`INTELLIGENCE_GATEWAY_PROXY`,
+  which `docker-compose.yml` turns on for a gateway on this machine), and the OpenBot Recorder is
+  given the same address. Nothing is moved or rewritten in an installation; the change takes effect
+  at the next Start. An Intelligence somewhere else, managed Intelligence among them, is reached at
+  its own address as before. The dev server passes that socket on with the rest of `/api`.
 - **OpenBot Desktop 1.0.2 and 1.0.3 can start an installation a newer version updated.** Put back
   over one, they stopped with "container-images.json for … names no agent-bot image". For one
   release, `container-images.json` names `agent-bot` and `agent-langgraph` again, both as the
