@@ -3254,20 +3254,6 @@ paths:
         - webSession: []
         - appOAuth:
             - components:read
-  /api/v2/organizations/{organizationId}/people/{personId}/devices:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/PersonId'
-    get:
-      tags:
-        - Devices
-      operationId: listDevices
-      summary: List a person's devices
-      description: Return one page of the phones a person registered for push notifications, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
-      security:
-        - webSession: []
-        - appOAuth:
-            - devices:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -3275,7 +3261,6 @@ paths:
       responses:
         '200':
           description: One page of data functions.
-          description: One page of devices.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -3632,17 +3617,12 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/SkillPageExample'
-                $ref: '#/components/schemas/DevicePage'
-              examples:
-                lastPage:
-                  $ref: '#/components/examples/DevicePageLast'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
-          $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -3699,6 +3679,123 @@ paths:
         - webSession: []
         - appOAuth:
             - skills:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+            examples:
+              standup:
+                value:
+                  title: Standup
+                  summary: Write today's standup from my calendar and my pull requests.
+                  instructions: Read my calendar for today and my open pull requests, then write three short lines for yesterday, today and blockers.
+                  tools:
+                    - google-calendar/list_events
+      responses:
+        '200':
+          description: The skill as saved, new or rewritten.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+              examples:
+                saved:
+                  $ref: '#/components/examples/SkillExample'
+        '400':
+          $ref: '#/components/responses/InvalidSkill'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SkillForbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Skills
+      operationId: deleteSkill
+      summary: Delete a skill
+      description: Delete a skill, and stop every Bot offering it. Anybody may delete their own. Only an admin may delete the organization's or anybody else's. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth:
+            - skills:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The skill was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SkillForbidden'
+        '404':
+          $ref: '#/components/responses/SkillNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/devices:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags:
+        - Devices
+      operationId: listDevices
+      summary: List a person's devices
+      description: Return one page of the phones a person registered for push notifications, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - devices:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of devices.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevicePage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/DevicePageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -3722,18 +3819,6 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SkillInput'
-            examples:
-              standup:
-                value:
-                  title: Standup
-                  summary: Write today's standup from my calendar and my pull requests.
-                  instructions: Read my calendar for today and my open pull requests, then write three short lines for yesterday, today and blockers.
-                  tools:
-                    - google-calendar/list_events
-      responses:
-        '200':
-          description: The skill as saved, new or rewritten.
               $ref: '#/components/schemas/RegisterDeviceRequest'
             examples:
               iphone:
@@ -3750,16 +3835,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Skill'
-              examples:
-                saved:
-                  $ref: '#/components/examples/SkillExample'
-        '400':
-          $ref: '#/components/responses/InvalidSkill'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/SkillForbidden'
                 $ref: '#/components/schemas/DeviceResponse'
               examples:
                 device:
@@ -4194,22 +4269,6 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
-    delete:
-      tags:
-        - Skills
-      operationId: deleteSkill
-      summary: Delete a skill
-      description: Delete a skill, and stop every Bot offering it. Anybody may delete their own. Only an admin may delete the organization's or anybody else's. Recorded on the audit trail.
-      security:
-        - webSession: []
-        - appOAuth:
-            - skills:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '204':
-          description: The skill was deleted.
   /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -4245,9 +4304,6 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/SkillForbidden'
-        '404':
-          $ref: '#/components/responses/SkillNotFound'
           $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/BotNotFound'
@@ -7530,108 +7586,6 @@ components:
           type: boolean
           description: Whether Bots may draw it. Changed only by publishComponent and unpublishComponent.
         publishedAt:
-    DevicePlatform:
-      type: string
-      enum:
-        - ios
-        - android
-      description: The phone's operating system.
-    Device:
-      type: object
-      description: A phone that gets push notifications for the person, from every one of their Bots. Never its push token.
-      required:
-        - id
-        - platform
-        - createdAt
-      properties:
-        id:
-          type: string
-          format: uuid
-          description: The id the OpenBot app made for the phone.
-        platform:
-          $ref: '#/components/schemas/DevicePlatform'
-        createdAt:
-          type: string
-          format: date-time
-          description: When OpenBot first registered the phone.
-    DevicePage:
-      type: object
-      required:
-        - devices
-        - nextCursor
-      properties:
-        devices:
-          type: array
-          description: The first registered first, then by id.
-          items:
-            $ref: '#/components/schemas/Device'
-        nextCursor:
-          type:
-            - string
-            - 'null'
-          maxLength: 4096
-          pattern: ^[A-Za-z0-9_-]+$
-          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    RegisterDeviceRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - token
-        - projectId
-        - platform
-      properties:
-        token:
-          type: string
-          maxLength: 256
-          pattern: ^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$
-          description: 'The phone''s Expo push token, as the OpenBot app read it when it started. It is a credential: OpenBot never sends it back.'
-        projectId:
-          type: string
-          format: uuid
-          description: The OpenBot app's project, which must be the one this deployment sends push notifications through.
-        platform:
-          $ref: '#/components/schemas/DevicePlatform'
-    DeviceResponse:
-      type: object
-      required:
-        - device
-      properties:
-        device:
-          $ref: '#/components/schemas/Device'
-    DestinationTransport:
-      type: string
-      enum:
-        - slack
-        - teams
-        - sms
-      description: Slack, Microsoft Teams, or text messages.
-    Destination:
-      type: object
-      description: 'Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.'
-      required:
-        - id
-        - transport
-        - conversationId
-        - botId
-        - address
-        - optedOutAt
-        - createdAt
-      properties:
-        id:
-          type: string
-          description: The destination's id.
-        transport:
-          $ref: '#/components/schemas/DestinationTransport'
-        conversationId:
-          type: string
-          description: The conversation it continues.
-        botId:
-          type: string
-          description: The Bot that answers there.
-        address:
-          type: string
-          description: 'Where the Bot sends: the phone number for text messages, or the chat''s own id in Slack or Teams.'
-        optedOutAt:
           type:
             - string
             - 'null'
@@ -7690,22 +7644,6 @@ components:
           description: By kind, then title, then name.
           items:
             $ref: '#/components/schemas/Component'
-          description: 'Text messages only: when the person texted STOP. Nothing is texted until they text START. Null while they can be texted.'
-        createdAt:
-          type: string
-          format: date-time
-          description: When it was connected.
-    DestinationPage:
-      type: object
-      required:
-        - destinations
-        - nextCursor
-      properties:
-        destinations:
-          type: array
-          description: The first connected first, then by id.
-          items:
-            $ref: '#/components/schemas/Destination'
         nextCursor:
           type:
             - string
@@ -7814,6 +7752,320 @@ components:
           description: By name.
           items:
             $ref: '#/components/schemas/DataFunction'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    BotComponent:
+      type: object
+      description: A component one Bot may draw now.
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: The tool name to offer the Bot.
+        description:
+          type: string
+          minLength: 1
+          description: The published description, which the model reads.
+    BotComponentPage:
+      type: object
+      required:
+        - components
+        - nextCursor
+      properties:
+        components:
+          type: array
+          description: By name.
+          items:
+            $ref: '#/components/schemas/BotComponent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    ComponentCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        functions:
+          type: array
+          description: The data functions the component will read when it is drawn with these arguments, so the answer covers them too. None when left out.
+          items:
+            type: string
+            minLength: 1
+            pattern: \S
+    ComponentCheck:
+      type: object
+      required:
+        - allowed
+        - reason
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type:
+            - string
+            - 'null'
+          description: Why not, for the model and for the person, when allowed is false. Null when it is true.
+    ComponentCallRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - function
+      properties:
+        function:
+          type: string
+          minLength: 1
+          description: The data function to run, such as botActivity.
+        arguments:
+          type: object
+          description: The function's arguments. None when left out.
+          additionalProperties: true
+    ComponentCall:
+      type: object
+      required:
+        - allowed
+        - data
+        - reason
+      properties:
+        allowed:
+          type: boolean
+        data:
+          description: What the function read, when allowed is true; null otherwise. botActivity answers days and rows of bot and actions; recentRefusals answers rows of at, bot, what and reason.
+        reason:
+          type:
+            - string
+            - 'null'
+          description: Why it didn't run, when allowed is false. Null when it ran.
+    Skill:
+      type: object
+      description: A named instruction a person runs with / in a conversation, on a Bot that offers it.
+      required:
+        - slug
+        - title
+        - summary
+        - instructions
+        - tools
+        - ownerId
+        - botIds
+      properties:
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 40
+          description: What a person types after /, and the skill's address.
+        title:
+          type: string
+        summary:
+          type: string
+          description: One line, shown in the / menu. May be empty.
+        instructions:
+          type: string
+          description: What the Bot is told when the skill runs.
+        tools:
+          type: array
+          description: 'The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.'
+          items:
+            type: string
+        ownerId:
+          type:
+            - string
+            - 'null'
+          description: Whose it is, by person id. Null when it is the organization's.
+        botIds:
+          type: array
+          description: The Bots that offer it, by id.
+          items:
+            type: string
+    SkillPage:
+      type: object
+      required:
+        - skills
+        - nextCursor
+      properties:
+        skills:
+          type: array
+          description: By title, then slug.
+          items:
+            $ref: '#/components/schemas/Skill'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    SkillInput:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - instructions
+        - tools
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed.
+        summary:
+          type: string
+          default: ''
+          description: One line, shown in the / menu.
+        instructions:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed.
+        tools:
+          type: array
+          description: Every action the skill needs, as appId/toolName, each one OpenBot has seen. Replaces what it named before; empty names none.
+          items:
+            type: string
+            minLength: 1
+            pattern: \S
+        forEveryone:
+          type: boolean
+          default: false
+          description: 'Make a new skill the organization''s. Only an admin may. It applies when the skill is made: rewriting one keeps whose it is.'
+    DevicePlatform:
+      type: string
+      enum:
+        - ios
+        - android
+      description: The phone's operating system.
+    Device:
+      type: object
+      description: A phone that gets push notifications for the person, from every one of their Bots. Never its push token.
+      required:
+        - id
+        - platform
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the OpenBot app made for the phone.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first registered the phone.
+    DevicePage:
+      type: object
+      required:
+        - devices
+        - nextCursor
+      properties:
+        devices:
+          type: array
+          description: The first registered first, then by id.
+          items:
+            $ref: '#/components/schemas/Device'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - projectId
+        - platform
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          pattern: ^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$
+          description: 'The phone''s Expo push token, as the OpenBot app read it when it started. It is a credential: OpenBot never sends it back.'
+        projectId:
+          type: string
+          format: uuid
+          description: The OpenBot app's project, which must be the one this deployment sends push notifications through.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+    DeviceResponse:
+      type: object
+      required:
+        - device
+      properties:
+        device:
+          $ref: '#/components/schemas/Device'
+    DestinationTransport:
+      type: string
+      enum:
+        - slack
+        - teams
+        - sms
+      description: Slack, Microsoft Teams, or text messages.
+    Destination:
+      type: object
+      description: 'Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.'
+      required:
+        - id
+        - transport
+        - conversationId
+        - botId
+        - address
+        - optedOutAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The destination's id.
+        transport:
+          $ref: '#/components/schemas/DestinationTransport'
+        conversationId:
+          type: string
+          description: The conversation it continues.
+        botId:
+          type: string
+          description: The Bot that answers there.
+        address:
+          type: string
+          description: 'Where the Bot sends: the phone number for text messages, or the chat''s own id in Slack or Teams.'
+        optedOutAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: 'Text messages only: when the person texted STOP. Nothing is texted until they text START. Null while they can be texted.'
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was connected.
+    DestinationPage:
+      type: object
+      required:
+        - destinations
+        - nextCursor
+      properties:
+        destinations:
+          type: array
+          description: The first connected first, then by id.
+          items:
+            $ref: '#/components/schemas/Destination'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     DestinationConversationId:
       type: string
       minLength: 1
@@ -8004,144 +8256,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    BotComponent:
-      type: object
-      description: A component one Bot may draw now.
-      required:
-        - name
-        - description
-      properties:
-        name:
-          type: string
-          minLength: 1
-          description: The tool name to offer the Bot.
-        description:
-          type: string
-          minLength: 1
-          description: The published description, which the model reads.
-    BotComponentPage:
-      type: object
-      required:
-        - components
-        - nextCursor
-      properties:
-        components:
-          type: array
-          description: By name.
-          items:
-            $ref: '#/components/schemas/BotComponent'
-        nextCursor:
-          type:
-            - string
-            - 'null'
-          maxLength: 4096
-          pattern: ^[A-Za-z0-9_-]+$
-          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    ComponentCheckRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        functions:
-          type: array
-          description: The data functions the component will read when it is drawn with these arguments, so the answer covers them too. None when left out.
-          items:
-            type: string
-            minLength: 1
-            pattern: \S
-    ComponentCheck:
-      type: object
-      required:
-        - allowed
-        - reason
-      properties:
-        allowed:
-          type: boolean
-        reason:
-          type:
-            - string
-            - 'null'
-          description: Why not, for the model and for the person, when allowed is false. Null when it is true.
-    ComponentCallRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - function
-      properties:
-        function:
-          type: string
-          minLength: 1
-          description: The data function to run, such as botActivity.
-        arguments:
-          type: object
-          description: The function's arguments. None when left out.
-          additionalProperties: true
-    ComponentCall:
-      type: object
-      required:
-        - allowed
-        - data
-        - reason
-      properties:
-        allowed:
-          type: boolean
-        data:
-          description: What the function read, when allowed is true; null otherwise. botActivity answers days and rows of bot and actions; recentRefusals answers rows of at, bot, what and reason.
-        reason:
-          type:
-            - string
-            - 'null'
-          description: Why it didn't run, when allowed is false. Null when it ran.
-    Skill:
-      type: object
-      description: A named instruction a person runs with / in a conversation, on a Bot that offers it.
-      required:
-        - slug
-        - title
-        - summary
-        - instructions
-        - tools
-        - ownerId
-        - botIds
-      properties:
-        slug:
-          type: string
-          minLength: 2
-          maxLength: 40
-          description: What a person types after /, and the skill's address.
-        title:
-          type: string
-        summary:
-          type: string
-          description: One line, shown in the / menu. May be empty.
-        instructions:
-          type: string
-          description: What the Bot is told when the skill runs.
-        tools:
-          type: array
-          description: 'The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.'
-          items:
-            type: string
-        ownerId:
-          type:
-            - string
-            - 'null'
-          description: Whose it is, by person id. Null when it is the organization's.
-        botIds:
-          type: array
-          description: The Bots that offer it, by id.
-          items:
-            type: string
-    SkillPage:
-      type: object
-      required:
-        - skills
-        - nextCursor
-      properties:
-        skills:
-          type: array
-          description: By title, then slug.
-          items:
-            $ref: '#/components/schemas/Skill'
     UpdateRoute:
       description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
       oneOf:
@@ -8253,39 +8367,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    SkillInput:
-      type: object
-      additionalProperties: false
-      required:
-        - title
-        - instructions
-        - tools
-      properties:
-        title:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: Trimmed.
-        summary:
-          type: string
-          default: ''
-          description: One line, shown in the / menu.
-        instructions:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: Trimmed.
-        tools:
-          type: array
-          description: Every action the skill needs, as appId/toolName, each one OpenBot has seen. Replaces what it named before; empty names none.
-          items:
-            type: string
-            minLength: 1
-            pattern: \S
-        forEveryone:
-          type: boolean
-          default: false
-          description: 'Make a new skill the organization''s. Only an admin may. It applies when the skill is made: rewriting one keeps whose it is.'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -9188,8 +9269,6 @@ components:
                 traceId: trace_example
     InvalidComponent:
       description: 'A field is missing or blank once trimmed, holds text that can''t be kept, or doesn''t fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn''t custom_ and lower-case letters, numbers and underscores, or a data function this OpenBot doesn''t ship.'
-    TransportUnavailable:
-      description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
       content:
         application/problem+json:
           schema:
@@ -9219,48 +9298,6 @@ components:
                 traceId: trace_example
     ComponentNotFound:
       description: No component has that name, the caller isn't an admin and it isn't published, or the organization does not exist.
-            sms:
-              value:
-                type: https://open.bot/errors/transport-unavailable
-                title: That way of reaching people isn't set up here.
-                status: 404
-                detail: SMS is not configured on this deployment.
-                code: TRANSPORT_UNAVAILABLE
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    DeviceConflict:
-      description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            anotherAccount:
-              value:
-                type: https://open.bot/errors/conflict
-                title: The request conflicts with the current state.
-                status: 409
-                detail: This device is already registered to another account. Sign out of OpenBot on it first.
-                code: CONFLICT
-                category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-            reused:
-              value:
-                type: https://open.bot/errors/idempotency-key-conflict
-                title: That Idempotency-Key was used for a different request.
-                status: 409
-                detail: That Idempotency-Key was used for a different request.
-                code: IDEMPOTENCY_KEY_CONFLICT
-                category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    DeviceNotFound:
-      description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
       content:
         application/problem+json:
           schema:
@@ -9273,19 +9310,12 @@ components:
                 status: 404
                 detail: No component is called showWeather.
                 code: COMPONENT_NOT_FOUND
-                type: https://open.bot/errors/device-not-found
-                title: Device not found.
-                status: 404
-                detail: Device not found.
-                code: DEVICE_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     ComponentConflict:
       description: A Playground component needs a description and HTML before it can be published, a component that comes with OpenBot can't be deleted or written in Playground, or the Idempotency-Key was used for a different request.
-    InvalidDestination:
-      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
       content:
         application/problem+json:
           schema:
@@ -9315,30 +9345,6 @@ components:
                 traceId: trace_example
     BotComponentNotFound:
       description: The Bot does not exist, was deleted or is not visible to the caller, no component has that name, or the organization does not exist.
-            notTheirs:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: Choose an accessible Bot in your conversation.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-            wrongCode:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: The verification code was not approved.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    DestinationForbidden:
-      description: The caller asked to link somebody else's account, or an administrator hasn't let them add Bots to Slack and Teams.
       content:
         application/problem+json:
           schema:
@@ -9368,31 +9374,6 @@ components:
                 traceId: trace_example
     DataReadFailed:
       description: The data function ran and failed. Nothing refused it, so asking again may work.
-            notYours:
-              value:
-                type: https://open.bot/errors/permission-denied
-                title: Permission denied.
-                status: 403
-                detail: Only they can see or change where their Bots reach them.
-                code: PERMISSION_DENIED
-                category: permission
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-            switchedOff:
-              value:
-                type: https://open.bot/errors/capability-required
-                title: An admin hasn't turned this on for you.
-                status: 403
-                detail: An admin has turned off "Add Bots to Slack and Teams" for you, so that wasn't done.
-                code: CAPABILITY_REQUIRED
-                category: permission
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-                capability: slackTeams
-    TextMessagesUnavailable:
-      description: The text message provider didn't answer, so no code was sent or checked. Trying again can work.
       content:
         application/problem+json:
           schema:
@@ -9405,21 +9386,12 @@ components:
                 status: 502
                 detail: Couldn't read that data. Try again in a moment.
                 code: DATA_READ_FAILED
-            provider:
-              value:
-                type: https://open.bot/errors/service-unavailable
-                title: A service OpenBot depends on is unavailable.
-                status: 503
-                detail: Delivery is unavailable. Try again.
-                code: SERVICE_UNAVAILABLE
                 category: dependency
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
     SkillNotFound:
       description: No skill has that slug, it is somebody else's and the caller isn't an admin, or the organization does not exist.
-    DestinationNotFound:
-      description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
       content:
         application/problem+json:
           schema:
@@ -9432,11 +9404,6 @@ components:
                 status: 404
                 detail: There's no skill called standup.
                 code: SKILL_NOT_FOUND
-                type: https://open.bot/errors/destination-not-found
-                title: Destination not found.
-                status: 404
-                detail: Connection not found.
-                code: DESTINATION_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -9496,6 +9463,166 @@ components:
                 detail: standup is somebody else's skill.
                 code: PERMISSION_DENIED
                 category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TransportUnavailable:
+      description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sms:
+              value:
+                type: https://open.bot/errors/transport-unavailable
+                title: That way of reaching people isn't set up here.
+                status: 404
+                detail: SMS is not configured on this deployment.
+                code: TRANSPORT_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceConflict:
+      description: Another account has the phone registered and hasn't signed out on it. Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            anotherAccount:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This device is already registered to another account. Sign out of OpenBot on it first.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceNotFound:
+      description: 'The person has no such device: it was removed already, or never registered. Or the organization does not exist.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/device-not-found
+                title: Device not found.
+                status: 404
+                detail: Device not found.
+                code: DEVICE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidDestination:
+      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notTheirs:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose an accessible Bot in your conversation.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            wrongCode:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: The verification code was not approved.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DestinationForbidden:
+      description: The caller asked to link somebody else's account, or an administrator hasn't let them add Bots to Slack and Teams.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see or change where their Bots reach them.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            switchedOff:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: An admin hasn't turned this on for you.
+                status: 403
+                detail: An admin has turned off "Add Bots to Slack and Teams" for you, so that wasn't done.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: slackTeams
+    TextMessagesUnavailable:
+      description: The text message provider didn't answer, so no code was sent or checked. Trying again can work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            provider:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: Delivery is unavailable. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    DestinationNotFound:
+      description: 'The person has no such destination: it was disconnected already, or never connected. Or the organization does not exist.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/destination-not-found
+                title: Destination not found.
+                status: 404
+                detail: Connection not found.
+                code: DESTINATION_NOT_FOUND
+                category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
