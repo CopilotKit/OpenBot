@@ -10199,6 +10199,10 @@ fn publish_connection_failure<R: tauri::Runtime>(
     Ok(true)
 }
 
+/// How long a running OpenBot's server goes unanswered before the watcher asks whether it is still
+/// up. Longer than the server takes to come back after its restart policy restarts it.
+const SERVER_GONE_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+
 /**
 Watch a running OpenBot for a connection it reports refused, and send the window back to setup to
 refresh it.
@@ -10225,6 +10229,9 @@ fn watch_connections<R: tauri::Runtime>(
         };
         let mut notice_sent = false;
         let mut poll_failed = false;
+        // Since when the server has not answered, and whether setup has been shown for it.
+        let mut unanswered_since: Option<std::time::Instant> = None;
+        let mut setup_shown = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -10242,7 +10249,13 @@ fn watch_connections<R: tauri::Runtime>(
             if notice_sent {
                 continue;
             }
-            match desktop_connection::poll(&client, server_port, &token) {
+            let polled = desktop_connection::poll(&client, server_port, &token);
+            if polled.is_ok() {
+                poll_failed = false;
+                unanswered_since = None;
+                setup_shown = false;
+            }
+            match polled {
                 Ok(Some(connection)) => {
                     match publish_connection_failure(&app, &root, generation, connection) {
                         Ok(published) => notice_sent = published,
@@ -10251,16 +10264,83 @@ fn watch_connections<R: tauri::Runtime>(
                         }
                     }
                 }
-                Ok(None) => poll_failed = false,
+                Ok(None) => {}
                 Err(error) => {
                     if !poll_failed {
                         log::warn!("[watch] {error}");
                     }
                     poll_failed = true;
+                    let since = *unanswered_since.get_or_insert_with(std::time::Instant::now);
+                    if setup_shown || since.elapsed() < SERVER_GONE_AFTER {
+                        continue;
+                    }
+                    match show_setup_when_stopped(&app, &root, generation) {
+                        Ok(Unanswered::Stopped) => setup_shown = true,
+                        // Still up after all: ask again only after as long a silence again.
+                        Ok(Unanswered::Running) => unanswered_since = None,
+                        Ok(Unanswered::NotNow) => {}
+                        Err(error) => log::warn!("[watch] could not show setup: {error}"),
+                    }
                 }
             }
         }
     })
+}
+
+/// What [`show_setup_when_stopped`] found.
+#[derive(Debug, PartialEq)]
+enum Unanswered {
+    /// OpenBot is not running, and the window shows setup.
+    Stopped,
+    /// OpenBot is running after all.
+    Running,
+    /// Not the watcher's to decide now: setup is at work, the run is over, or it needs recovery.
+    NotNow,
+}
+
+/**
+A running OpenBot's server stopped answering: when OpenBot is no longer running, send the window to
+setup, which shows it stopped with its Start.
+
+The same decision bringing the window forward makes (`restore_window_on`), taken by the watcher on
+its own. Without it, the engine's machine stopped or the back end gone under a window on OpenBot
+left that window as it was, unable to load anything, until the person brought it forward. Setup is
+shown without bringing the window forward: the person finds it there when they look. The run stays
+this session's, as it does when the window is brought forward, so Start raises it again.
+*/
+fn show_setup_when_stopped<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    generation: u64,
+) -> Result<Unanswered, String> {
+    let shell = app.state::<Shell>();
+    // Busy means setup is at work (a Start, a Stop, an update): it decides what the window shows.
+    let _startup = match shell.startup.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(Unanswered::NotNow),
+        Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+    };
+    if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+        || shell.root.lock().unwrap().as_deref() != Some(root)
+        || recovery_required_or_pending_quit_notice(&shell, root)
+    {
+        return Ok(Unanswered::NotNow);
+    }
+    let ports = openbot_env::Ports::read(root).map_err(|error| error.to_string())?;
+    if owned_app(&shell, root, &ports).is_some() {
+        return Ok(Unanswered::Running);
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
+        return Ok(Unanswered::Stopped);
+    }
+    log::info!("[watch] OpenBot stopped answering and is not running; the window shows setup");
+    window
+        .navigate(setup_destination(app)?)
+        .map_err(|error| format!("could not go back to setup: {error}"))?;
+    Ok(Unanswered::Stopped)
 }
 
 /// Point the window at OpenBot if it is up, and at the setup screen if it is not.
@@ -13085,6 +13165,97 @@ mod tests {
             last_failure_now(app.handle()).is_none(),
             "one refresh per run; a second signal cannot replace the pending screen"
         );
+    }
+
+    /// The bug: with OpenBot's engine stopped under a window showing OpenBot, the watcher logged
+    /// "Connection status request failed" once and left the window on a page that could no longer
+    /// load anything. Only bringing the window forward showed OpenBot as stopped. The watcher now
+    /// sends the window to setup by itself once the server has stopped answering for a while, and
+    /// leaves it where it is while the server answers.
+    #[test]
+    fn a_running_openbot_whose_server_goes_away_shows_setup_by_itself() {
+        use std::io::{BufRead, BufReader, Write};
+        let root = temp_root("server-gone-under-window");
+        std::fs::create_dir_all(&root).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(root.join(".env"), format!("SERVER_PORT={port}\n")).unwrap();
+        let setup = "http://tauri.localhost/setup";
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        remember_selected_root(&shell, &root);
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        shell
+            .generation
+            .store(3, std::sync::atomic::Ordering::SeqCst);
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let home = "http://127.0.0.1:3010/";
+        window.navigate(home.parse().unwrap()).unwrap();
+
+        // The server answers "nothing refused" to the watcher's first few asks, then goes away.
+        let answered = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server = {
+            let answered = answered.clone();
+            std::thread::spawn(move || {
+                for _ in 0..3 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        if line == "\r\n" || line.is_empty() {
+                            break;
+                        }
+                    }
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnull").unwrap();
+                    answered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            })
+        };
+        watch_connections(
+            app.handle().clone(),
+            root.clone(),
+            "synthetic-run-token".into(),
+            3,
+            port,
+        );
+        server.join().unwrap();
+        assert_eq!(answered.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            home,
+            "a server that answers keeps the window on OpenBot"
+        );
+
+        let gone = std::time::Instant::now();
+        while window.url().unwrap().as_str() != setup {
+            assert!(
+                gone.elapsed() < SERVER_GONE_AFTER + std::time::Duration::from_secs(8),
+                "the window was still on {} after the server went away",
+                window.url().unwrap()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(
+            gone.elapsed() >= SERVER_GONE_AFTER,
+            "a moment's silence is not a stopped OpenBot"
+        );
+        // Shown as stopped, the way bringing the window forward shows it: no failure to explain,
+        // and the run is still this session's for Start to raise again.
+        let shell = app.state::<Shell>();
+        assert!(last_failure_now(app.handle()).is_none());
+        assert!(!recovery_required(&shell, &root));
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&root));
+        shell
+            .generation
+            .store(4, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
