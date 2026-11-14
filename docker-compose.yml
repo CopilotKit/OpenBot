@@ -237,6 +237,11 @@ services:
     entrypoint: ["/app/bin/openbot"]
     command: ["worker"]
     working_dir: /app/server
+    # No health check. The image's own asks after a server on its port, which this container does
+    # not run, so it would be reported unhealthy for ever, and an app that starts its services with
+    # `up --wait` would be told the start failed.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     networks:
       - data
@@ -252,6 +257,9 @@ services:
     entrypoint: ["/app/bin/openbot"]
     command: ["migrate"]
     working_dir: /app/server
+    # No health check, as `worker` above: this runs to its end and is never a server.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
     depends_on:

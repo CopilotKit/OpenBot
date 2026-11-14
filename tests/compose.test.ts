@@ -261,6 +261,7 @@ function runComposeConfig(
         entrypoint?: string[] | null;
         command?: string[] | null;
         working_dir?: string;
+        healthcheck?: { disable?: boolean; test?: string[] };
         environment: Record<string, string>;
         extra_hosts?: string[];
         volumes?: Array<{ type: string; source: string; target: string }>;
@@ -770,6 +771,18 @@ test("starts each service on the OpenBot image as its own part of it, never as t
   // The image's own PORT is the server's, so the computer is told its own.
   expect(services["agent-computer"].environment?.PORT).toBe("4100");
 
+  // And each answers for its own health, or says it has none to answer for. The image's own check
+  // asks after a server on its port, so a service left with it that is not the server (the worker
+  // an app from the release before starts) is unhealthy for ever, and `up --wait` fails on it.
+  for (const [name, service] of Object.entries(services)) {
+    if (service.image !== pinned) continue;
+    const check = service.healthcheck;
+    expect({
+      name,
+      own: check?.disable === true || (check?.test?.length ?? 0) > 0,
+    }).toEqual({ name, own: true });
+  }
+
   // Every other service on that image names an executable too.
   for (const [name, service] of Object.entries(services)) {
     if (service.image !== pinned) continue;
@@ -849,6 +862,7 @@ test("still defines migrate and worker for one release, with nothing that waits 
     entrypoint: ["/app/bin/openbot"],
     command: ["worker"],
     working_dir: "/app/server",
+    healthcheck: { disable: true },
     restart: "unless-stopped",
     networks: ["data"],
   });
@@ -860,6 +874,7 @@ test("still defines migrate and worker for one release, with nothing that waits 
     entrypoint: ["/app/bin/openbot"],
     command: ["migrate"],
     working_dir: "/app/server",
+    healthcheck: { disable: true },
     environment: {
       DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
     },
