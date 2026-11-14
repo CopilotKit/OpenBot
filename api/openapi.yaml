@@ -79,6 +79,11 @@ tags:
     description: >-
       Where Bot computers may connect, for the organization and for a
       directory group.
+  - name: Conversations
+    description: >-
+      A person's conversations with Bots. What a Bot is doing in one streams
+      over a WebSocket, described in api/asyncapi.yaml; the operations here
+      hand out what that socket needs.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -2723,6 +2728,58 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/join-tokens:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Conversations]
+      operationId: createConversationJoinToken
+      summary: Get a token to watch a conversation live
+      description: >-
+        Make a join token for the conversation's thread, and say where to use
+        it. The token opens the threadStream channel of api/asyncapi.yaml: a
+        WebSocket that replays the Bot's runs in the conversation, a run in
+        progress from its start, and then carries on live. The token works
+        once and for about half a minute, so ask for a new one for every
+        connection, and again to reconnect. Only a person in the conversation
+        may have one, and it opens the thread they see there and no other. A
+        conversation no Bot has run in yet has nothing to join.
+      security:
+        - webSession: []
+        - appOAuth: [conversations:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: A join token, and where to use it.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationJoinToken'
+              examples:
+                running:
+                  $ref: '#/components/examples/ConversationJoinTokenExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/ConversationNotJoinable'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LiveChannelsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -2746,6 +2803,9 @@ components:
           tokenUrl: /api/auth/oauth2/token
           refreshUrl: /api/auth/oauth2/token
           scopes:
+            conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
+            computers:read: Watch the signed-in person's Bots' screens and terminals.
+            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
             bots:read: Read the Bots the signed-in person can see.
             bots:write: Create, change and delete the signed-in person's Bots.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
@@ -3012,6 +3072,16 @@ components:
       schema:
         type: string
         format: date-time
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      description: The conversation's id.
+      schema:
+        type: string
+        minLength: 1
+        pattern: \S
+      example: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
   headers:
     PrivateNoStore:
       description: A Bot is private to the caller.
@@ -5205,6 +5275,57 @@ components:
           description: >-
             The switch an administrator can turn on for this person, when the
             refusal is for want of one (isolatedComputers).
+    ConversationJoinToken:
+      type: object
+      description: >-
+        What a client needs to watch a conversation live: a token, and the
+        socket and topic to use it on (the threadStream channel of
+        api/asyncapi.yaml).
+      required:
+        - joinToken
+        - expiresAt
+        - threadId
+        - runId
+        - realtime
+      properties:
+        joinToken:
+          type: string
+          minLength: 1
+          description: >-
+            Sent as the join_token query parameter when opening the socket. It
+            works once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            After this the token no longer opens a socket. A socket it already
+            opened stays open.
+        threadId:
+          type: string
+          minLength: 1
+          description: The conversation's thread, as the caller sees it.
+        runId:
+          type:
+            - string
+            - 'null'
+          description: The run in progress in the thread, or null when the Bot is not working.
+        realtime:
+          type: object
+          description: Where to use the token.
+          required:
+            - clientUrl
+            - topic
+          properties:
+            clientUrl:
+              type: string
+              minLength: 1
+              description: >-
+                The socket's address, without the /websocket it ends in or its
+                query. A ws or wss address, or a path on this server.
+            topic:
+              type: string
+              pattern: ^thread:.+$
+              description: The topic to join on the socket, thread:{threadId}.
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -5976,6 +6097,65 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+    ConversationNotFound:
+      description: >-
+        The conversation does not exist, was removed, or the caller is not in
+        it, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/conversation-not-found
+                title: Conversation not found.
+                status: 404
+                detail: Couldn't find that conversation.
+                code: CONVERSATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConversationNotJoinable:
+      description: >-
+        The conversation has nothing to join: no Bot has run in it yet, or it
+        is a group conversation, which has no single thread. Or the
+        Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notStarted:
+              value:
+                type: https://open.bot/errors/conversation-not-started
+                title: Nothing to join yet.
+                status: 409
+                detail: No Bot has run in this conversation yet.
+                code: CONVERSATION_NOT_STARTED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LiveChannelsUnavailable:
+      description: The service that carries live runs did not answer. Try again.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/live-channels-unavailable
+                title: Live updates are unavailable.
+                status: 502
+                detail: Couldn't reach live updates. Try again.
+                code: LIVE_CHANNELS_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
   examples:
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
@@ -6625,3 +6805,13 @@ components:
               kind: page
               label: Apps
               path: /admin/plugins
+    ConversationJoinTokenExample:
+      summary: A conversation whose Bot is working
+      value:
+        joinToken: jt_example
+        expiresAt: '2026-11-14T12:00:30.000Z'
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+        runId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        realtime:
+          clientUrl: wss://realtime.example.com/client
+          topic: thread:6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
