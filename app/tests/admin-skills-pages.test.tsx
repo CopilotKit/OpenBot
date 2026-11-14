@@ -29,6 +29,7 @@ import { NewSkillPage } from "@/components/manage/new-skill-page";
 import { SkillPage } from "@/components/manage/skill-page";
 import { SkillsPage } from "@/components/manage/skills-page";
 import { type PluginSkill, pluginKeys } from "@/lib/plugins/queries";
+import { answerAppsApi } from "./apps-api";
 import { botGrantPath } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
@@ -96,36 +97,32 @@ beforeEach(() => {
         hidden: [],
       });
       if (bots) return bots;
-      if (path === "/api/plugins")
-        return json({
-          catalogue: [],
-          servers: [
-            {
-              id: "notion",
-              title: "Notion",
-              logo: null,
-              tools: [
-                {
-                  name: "search_pages",
-                  description: "Search pages by title. Returns ids.",
-                  ref: "notion/search_pages",
-                  effect: "read",
-                },
-                {
-                  name: "create_page",
-                  description: "Create a page.",
-                  ref: "notion/create_page",
-                  effect: "write",
-                },
-              ],
-            },
-          ],
-          skills,
-          botsMayCallBack: true,
-          redirectUri: null,
-          composioConfigured: false,
-          authorizesPerAction: false,
-        });
+      const apps = answerAppsApi(input, init, {
+        servers: [
+          {
+            id: "notion",
+            title: "Notion",
+            logo: null,
+            tools: [
+              {
+                name: "search_pages",
+                description: "Search pages by title. Returns ids.",
+                ref: "notion/search_pages",
+                effect: "read",
+              },
+              {
+                name: "create_page",
+                description: "Create a page.",
+                ref: "notion/create_page",
+                effect: "write",
+              },
+            ],
+          },
+        ],
+        botsMayCallBack: true,
+      });
+      if (apps) return apps;
+      if (path === "/api/plugins") return json({ skills });
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

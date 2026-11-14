@@ -40,6 +40,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
@@ -47,10 +48,7 @@ import {
   invalidatePlugins,
   setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
-import {
-  type PluginTool,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import type { PluginTool } from "@/lib/plugins/queries";
 import {
   botSharedAppsQueryOptions,
   type SharedUseApproval,
@@ -105,7 +103,8 @@ export function PluginBotPage({
   const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
   const agents = useQuery(agentListQueryOptions());
   /*
    * The ones this person has hidden. A hidden Bot is still a Bot, and still holds whatever it was
@@ -133,7 +132,7 @@ export function PluginBotPage({
     onError: (thrown: Error) => setError(thrown.message),
   });
 
-  const server = plugins.data?.servers.find((row) => row.id === key);
+  const server = plugins.data?.find((row) => row.id === key);
   /*
    * Shared only once the server itself says so. `exposure` is fetched for exactly that case — it is
    * this Bot's whole shared-apps picture, and here it is read for one app's current approval, so a
@@ -158,7 +157,7 @@ export function PluginBotPage({
   });
   const [grantingShared, setGrantingShared] = useState(false);
   const appTitle =
-    plugins.data?.catalogue.find((item) => item.key === key)?.title ??
+    catalogue.data?.find((item) => item.key === key)?.title ??
     server?.title ??
     key;
   const bot =

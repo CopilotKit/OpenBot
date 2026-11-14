@@ -22,11 +22,11 @@ import {
   brokeredKeyMissing,
   disconnectSiblingsNotice,
 } from "@/lib/plugins/provider-vocabulary";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import {
   Route as ConnectedAccountRoute,
   landedActionFrom,
 } from "@/routes/_authed/_app/connections.$key";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import {
   confirmationResponse,
   connectionPage,
@@ -82,7 +82,7 @@ afterEach(() => {
 
 type Provider = "composio" | "arcade";
 
-function server(provider: Provider): PluginServer {
+function server(provider: Provider): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -126,10 +126,9 @@ const siblingReads: string[] = [];
 
 function install(setup: Setup) {
   siblingReads.length = 0;
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(setup.provider)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: setup.configured ?? true,
@@ -142,9 +141,10 @@ function install(setup: Setup) {
       headers: { "content-type": "application/json" },
       status,
     });
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
-    if (path === "/api/plugins") return json(page);
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
     if (path === MY_CONNECTIONS_PATH) {
       return connectionPage(
         setup.connected

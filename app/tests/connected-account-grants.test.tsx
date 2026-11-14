@@ -20,9 +20,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import type { GrantState } from "@/lib/plugins/grants";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { ME_PATH, meBody } from "./accounts-api";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import {
   authorizationsResponse,
   authorizationStartResponse,
@@ -87,7 +87,7 @@ type Provider = "composio" | "arcade";
 function server(
   provider: Provider,
   accountMode: "shared" | null = null,
-): PluginServer {
+): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -139,10 +139,9 @@ const siblingReads: string[] = [];
 
 function install(setup: Setup) {
   siblingReads.length = 0;
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(setup.provider, setup.accountMode ?? null)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: setup.configured ?? true,
@@ -173,7 +172,8 @@ function install(setup: Setup) {
           user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
         }),
       );
-    if (path === "/api/plugins") return json(page);
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
     if (path === MY_CONNECTIONS_PATH) {
       return connectionPage(
         setup.connected

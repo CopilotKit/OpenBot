@@ -65,11 +65,14 @@ export class ClientError extends Error {
    * (`LINKED_ACCOUNTS_UNAVAILABLE`), or the `code` a few of today's routes answer beside `error`.
    */
   readonly code: string | undefined;
-  constructor(message: string, status: number, code?: string) {
+  /** The app a refusal names, where it names one: the app already at an address (`APP_ALREADY_ADDED`). */
+  readonly appId: string | undefined;
+  constructor(message: string, status: number, code?: string, appId?: string) {
     super(message);
     this.name = "ClientError";
     this.status = status;
     this.code = code;
+    this.appId = appId;
   }
 }
 
@@ -88,6 +91,7 @@ async function refusal(
     error?: unknown;
     detail?: unknown;
     code?: unknown;
+    appId?: unknown;
   } | null;
   const message =
     typeof body?.error === "string"
@@ -99,6 +103,7 @@ async function refusal(
     message ?? fallback ?? "That request failed.",
     response.status,
     typeof body?.code === "string" ? body.code : undefined,
+    typeof body?.appId === "string" ? body.appId : undefined,
   );
 }
 

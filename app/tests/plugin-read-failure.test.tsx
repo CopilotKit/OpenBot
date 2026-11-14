@@ -17,16 +17,17 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
+import { appKeys } from "@/lib/apps/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as AdminToolRoute } from "@/routes/_authed/admin/plugins/$key_.tools.$tool";
+import { seedAppReads } from "./apps-api";
 import { answerBotsList } from "./bots-api";
 
 /**
- * A connector's own pages, when `GET /api/plugins` fails.
+ * A connector's own pages, when the apps read (listApps) fails.
  *
- * Each of them decides whether the connector exists from `plugins.data`, and `isPending` goes false
+ * Each of them decides whether the connector exists from the apps read, and `isPending` goes false
  * on a failed fetch exactly as it does on a successful one, so a request that never came back fell
  * through to "there is no such connector" — about a connector that may be added and granted right
  * now. The per-Bot grant screen beside them already tells the two apart (`plugins.data && !server`,
@@ -76,19 +77,10 @@ function failingQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-/** A client already holding a plugins page that genuinely lacks this connector. */
+/** A client already holding app reads that genuinely lack this connector. */
 function answeredWithout() {
   const client = failingQueryClient();
-  const page: PluginsPage = {
-    catalogue: [],
-    servers: [],
-    skills: [],
-    botsMayCallBack: true,
-    redirectUri: null,
-    composioConfigured: false,
-    authorizesPerAction: false,
-  };
-  client.setQueryData(pluginKeys.page(), page);
+  seedAppReads(client, { botsMayCallBack: true });
   return client;
 }
 
@@ -219,7 +211,7 @@ function renderAccount(client: QueryClient) {
 
 async function waitForFailedRead(client: QueryClient) {
   await waitFor(() => {
-    expect(client.getQueryState(pluginKeys.page())?.status).toBe("error");
+    expect(client.getQueryState(appKeys.list())?.status).toBe("error");
   });
 }
 

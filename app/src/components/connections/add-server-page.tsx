@@ -15,17 +15,17 @@ import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import {
+  type AddServerByUrlOutcome,
+  addServerByUrlMutationOptions,
+} from "@/lib/apps/mutations";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import {
   type AddServerFormValues,
   addServerFormSchema,
 } from "@/lib/plugins/form";
-import {
-  type AddServerByUrlOutcome,
-  addServerByUrlMutationOptions,
-  connectAccountMutationOptions,
-} from "@/lib/plugins/mutations";
+import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
 
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
@@ -313,7 +313,7 @@ function RefusalNotice({
       <p className="break-words text-destructive text-sm" role="alert">
         {sentence}
       </p>
-      {refusal.code === "not-approved" && refusal.canApprove ? (
+      {refusal.code === "not-approved" && mayGiveKey ? (
         <Button
           disabled={busy}
           onClick={onApprove}

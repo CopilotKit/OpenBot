@@ -34,6 +34,7 @@ import {
 } from "@/lib/agents/isolation";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { APPS_PATH, answerAppsApi, type TodayServer } from "./apps-api";
 import {
   botAppPath,
   GIVEABLE_APPS_PATH,
@@ -90,8 +91,8 @@ let giveable: {
   account: string;
 }[] = [];
 let given: string[] = [];
-/** Every app that is turned on, as `GET /api/plugins` lists them, and every path the sheet asked for. */
-let servers: { id: string; title: string; logo: null }[] = [];
+/** Every app that is turned on, as listApps lists them, and every path the sheet asked for. */
+let servers: TodayServer[] = [];
 let requested: string[] = [];
 
 beforeEach(() => {
@@ -136,8 +137,8 @@ beforeEach(() => {
             account: app.account as "personal" | "shared" | "deployment",
           })),
         );
-      if (path === "/api/plugins")
-        return Response.json({ catalogue: [], servers, skills: [] });
+      const apps = answerAppsApi(path, init, { servers });
+      if (apps) return apps;
       if (String(path).endsWith("/give") && init?.method === "POST") {
         given.push(String(path));
         return Response.json({ given: [] });
@@ -517,7 +518,7 @@ test("personal Bot creation hides team visibility and isolation controls and lin
  * from the start, and Routines. Only Routines is the person's to give, so the sheet listed only
  * Routines, and the Bot it made came out with all three.
  */
-const TURNED_ON = [
+const TURNED_ON: TodayServer[] = [
   { id: "composio-gmail", title: "Gmail", logo: null },
   { id: "parallel-search", title: "Parallel Search", logo: null },
   { id: "routines", title: "Routines", logo: null },
@@ -569,7 +570,7 @@ test("team: the sheet offers only the apps the person can give, ticked", async (
   expect(
     view.getByText("It always uses the account of whoever is asking."),
   ).toBeTruthy();
-  expect(requested).not.toContain("/api/plugins");
+  expect(requested.filter((path) => path.startsWith(APPS_PATH))).toEqual([]);
 });
 
 test("the LangGraph harness is offered as LangChain, the name people know it by", async () => {

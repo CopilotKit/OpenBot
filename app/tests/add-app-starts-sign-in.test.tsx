@@ -23,7 +23,13 @@ import { BrokerDirectory } from "@/components/plugins/broker-directory";
 import { connectionRows } from "@/lib/connections/rows";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
-import type { ComposioApp, PluginServer } from "@/lib/plugins/queries";
+import {
+  APPS_PATH,
+  answerAppsApi,
+  appBody,
+  type TodayDirectoryApp,
+  type TodayServer,
+} from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 import {
   connectionPage,
@@ -41,8 +47,8 @@ import {
  * as a Bot's Connect card does. And an app that is added and not signed in to says "Not connected"
  * beside Connect, in either edition, never "Added" on its own.
  *
- * Every response below is the shape the real route answers: the directory's rows, the `server` the
- * add route returns (201), and the `authorizationUrl` connectApp returns for a sign-in app.
+ * Every response below is the shape the real API answers: the directory's entries, the app createApp
+ * returns (201), and the `authorizationUrl` connectApp returns for a sign-in app.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -52,7 +58,7 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-type Kind = ComposioApp["connection"]["kind"];
+type Kind = TodayDirectoryApp["connection"]["kind"];
 
 function app(slug: string, name: string, kind: Kind, enabled: boolean) {
   return {
@@ -67,10 +73,10 @@ function app(slug: string, name: string, kind: Kind, enabled: boolean) {
     scopedActionCount: null,
     connection: { kind },
     enabled,
-  } satisfies ComposioApp;
+  } satisfies TodayDirectoryApp;
 }
 
-function server(provider: PluginsProvider, slug: string): PluginServer {
+function server(provider: PluginsProvider, slug: string): TodayServer {
   return {
     id: `${provider}-${slug}`,
     title: slug,
@@ -88,11 +94,11 @@ function server(provider: PluginsProvider, slug: string): PluginServer {
     tools: [],
     withdrawn: [],
     accountMode: "personal",
-  } as unknown as PluginServer;
+  };
 }
 
-let apps: ComposioApp[] = [];
-let servers: PluginServer[] = [];
+let apps: TodayDirectoryApp[] = [];
+let servers: TodayServer[] = [];
 let connected: string[] = [];
 let provider: PluginsProvider = "composio";
 const writes: string[] = [];
@@ -105,17 +111,18 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
-      if (init?.method === "POST" && path === "/api/plugins/composio/apps") {
-        const { slug } = JSON.parse(String(init.body)) as { slug: string };
+      if (init?.method === "POST" && path === APPS_PATH) {
+        const { directoryEntryId } = JSON.parse(String(init.body)) as {
+          directoryEntryId: string;
+        };
+        const slug = directoryEntryId.replace(/^directory:/, "");
         writes.push(`add ${slug}`);
-        servers = [...servers, server(provider, slug)];
+        const added = server(provider, slug);
+        servers = [...servers, added];
         apps = apps.map((row) =>
           row.slug === slug ? { ...row, enabled: true } : row,
         );
-        return Response.json(
-          { server: { id: `${provider}-${slug}` } },
-          { status: 201 },
-        );
+        return Response.json(appBody(added), { status: 201 });
       }
       const call = connectionsCall(path, init);
       if (call?.operation === "connect") {
@@ -125,17 +132,14 @@ beforeEach(() => {
           authorizationUrl: `https://sign-in.example/${id}`,
         });
       }
-      if (path === "/api/plugins/composio/apps") return Response.json({ apps });
-      if (path === "/api/plugins")
-        return Response.json({
-          catalogue: [],
-          servers,
-          skills: [],
-          botsMayCallBack: true,
-          redirectUri: null,
-          composioConfigured: true,
-          provider,
-        });
+      const answered = answerAppsApi(input, init, {
+        servers,
+        directory: apps,
+        botsMayCallBack: true,
+        composioConfigured: true,
+        provider,
+      });
+      if (answered) return answered;
       if (call?.operation === "list")
         return connectionPage(
           connected.map((serverId) => ({
@@ -344,7 +348,9 @@ describe("the Connections tile", () => {
   test("an added app that signs in reads Not connected until it is", () => {
     const rows = connectionRows({
       catalogue: [],
-      brokered: [server("composio", "slack"), server("arcade", "Gmail")],
+      brokered: [server("composio", "slack"), server("arcade", "Gmail")].map(
+        appBody,
+      ),
       shared: [],
       connected: new Set(["arcade-Gmail"]),
       links: [],
@@ -359,7 +365,7 @@ describe("the Connections tile", () => {
   });
 
   test("GitHub is not Connected off the sign-in link while its tools are not connected", () => {
-    const github = server("composio", "github");
+    const github = appBody(server("composio", "github"));
     const rows = connectionRows({
       catalogue: [],
       brokered: [github],

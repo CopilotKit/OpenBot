@@ -30,7 +30,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import {
@@ -194,8 +194,8 @@ function asDay(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string, title = "Gmail"): PluginServer {
+/** A minimal but complete app from the directory, as `GET /api/plugins` listed it. */
+function brokeredServer(authScheme: string, title = "Gmail"): TodayServer {
   return {
     authScheme,
     id: APP_KEY,
@@ -223,11 +223,10 @@ function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
   title?: string,
-): PluginsPage {
+): AppsFixture {
   return {
     catalogue: [],
     servers: [brokeredServer(authScheme, title)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
@@ -330,7 +329,7 @@ type Deployment = {
    */
   refusesFields?: { error: string; status: 400 | 409 | 502 | 503 };
   /**
-   * Whether listConnections answers 500, with `/api/plugins` answering perfectly.
+   * Whether listConnections answers 500, with the apps reads answering perfectly.
    *
    * THE ONE STATE BOTH SCREENS DEFAULTED THROUGH. Every fact a brokered row draws — `recorded`,
    * `verified`, `verifiedAt`, `probe`, `checkable` — comes off that read, and both screens gated
@@ -655,11 +654,13 @@ function installDeployment(deployment: Deployment): Server {
     // Nobody has asked an admin for anything here.
     if (path.startsWith(APP_ACCESS_REQUESTS_PATH))
       return appAccessRequestsResponse([]);
-    if (path.startsWith("/api/plugins")) {
-      return json(
-        pluginsPage(state.composioConfigured, state.authScheme, state.title),
-      );
-    }
+    const apps = answerAppsApi(
+      input,
+      init,
+      pluginsPage(state.composioConfigured, state.authScheme, state.title),
+    );
+    if (apps) return apps;
+    if (path.startsWith("/api/plugins")) return json({ skills: [] });
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
@@ -2110,7 +2111,7 @@ test("a key refused with its account left standing stops offering Connect", asyn
 /**
  * A CONNECTIONS READ THAT FAILED IS SAID, NOT DEFAULTED TO "YOU HAVE NEVER CONNECTED THIS".
  *
- * CRITERION. With `/api/plugins` answering perfectly and `/api/plugins/connections` answering 500,
+ * CRITERION. With the apps reads answering perfectly and listConnections answering 500,
  * neither screen draws the brokered row, neither offers Connect, and each says the state could not
  * be read.
  *
@@ -2686,7 +2687,7 @@ function AccountProbe() {
     probe: null,
     checkable: true,
     reconnectsInPlace: false,
-    authScheme: "API_KEY",
+    connectsWith: "key",
     returnTo: "settings",
     report: () => {},
   });

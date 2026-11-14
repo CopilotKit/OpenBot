@@ -5,27 +5,29 @@ import {
   mutationOptions,
   QueryClient,
 } from "@tanstack/react-query";
-import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
 import {
   accountModePreview,
   addCuratedServerMutationOptions,
-  addCustomServerMutationOptions,
+  addDirectoryAppMutationOptions,
+  refreshPluginServerMutationOptions,
+  registerOAuthClientMutationOptions,
+  removePluginServerMutationOptions,
+  setAccountModeMutationOptions,
+  setOwnerGrantsMutationOptions,
+} from "../src/lib/apps/mutations";
+import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
+import {
   brokeredConnectionFieldsMutationOptions,
   confirmBrokeredConnectionMutationOptions,
   connectAccountMutationOptions,
   connectBrokeredWithFieldsMutationOptions,
   disconnectBrokeredMutationOptions,
-  enableComposioAppMutationOptions,
   recheckBrokeredConnectionMutationOptions,
-  refreshPluginServerMutationOptions,
-  registerOAuthClientMutationOptions,
-  removePluginServerMutationOptions,
   removeSkillMutationOptions,
   saveSkillMutationOptions,
-  setAccountModeMutationOptions,
-  setOwnerGrantsMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
+import { appPath } from "./apps-api";
 import { pluginKeys } from "../src/lib/plugins/queries";
 import { myConnectionPath } from "./connections-api";
 
@@ -167,36 +169,24 @@ const REFUSALS: {
   },
   {
     name: "adding a curated server",
-    route: "POST /api/plugins/servers",
+    route: "POST apps (createApp, from a catalogue entry)",
     status: 409,
     message: "That server was added but its tools could not be read.",
     factory: addCuratedServerMutationOptions,
     variables: { key: "linear" },
   },
   {
-    name: "adding a server by URL",
-    route: "POST /api/plugins/servers/custom",
-    status: 409,
-    message: "That server was added but its tools could not be read.",
-    factory: addCustomServerMutationOptions,
-    variables: {
-      id: "in-house",
-      title: "In house",
-      url: "https://example.invalid/mcp",
-    },
-  },
-  {
-    name: "enabling a Composio app",
-    route: "POST /api/plugins/composio/apps",
+    name: "adding an app from the directory",
+    route: "POST apps (createApp, from a directory entry)",
     status: 409,
     message:
       "The app was added, but its tools could not be read just now. Press Refresh on the Apps page.",
-    factory: enableComposioAppMutationOptions,
-    variables: { slug: "linear" },
+    factory: addDirectoryAppMutationOptions,
+    variables: { directoryEntryId: "directory:linear" },
   },
   {
     name: "refreshing a server's tools",
-    route: "POST /api/plugins/servers/:id/refresh",
+    route: "POST apps/{appId}/refresh (refreshApp)",
     status: 409,
     message: "That server's tools could not be recorded.",
     factory: refreshPluginServerMutationOptions,
@@ -204,7 +194,7 @@ const REFUSALS: {
   },
   {
     name: "removing a server",
-    route: "DELETE /api/plugins/servers/:id",
+    route: "DELETE apps/{appId} (deleteApp)",
     status: 409,
     message: "That server could not be removed.",
     factory: removePluginServerMutationOptions,
@@ -233,7 +223,7 @@ const REFUSALS: {
   },
   {
     name: "registering an OAuth client",
-    route: "POST /api/plugins/servers/:id/oauth-client",
+    route: "PUT apps/{appId}/oauth-client (setAppOAuthClient)",
     status: 409,
     message: "That OAuth client could not be registered.",
     factory: registerOAuthClientMutationOptions,
@@ -281,7 +271,7 @@ const REFUSALS: {
   },
   {
     name: "switching a server's account mode",
-    route: "PUT /api/plugins/servers/:id/account-mode",
+    route: "PUT apps/{appId}/account-mode (setAppAccountMode)",
     status: 500,
     message: "The switch did not finish, and nothing was changed.",
     factory: setAccountModeMutationOptions,
@@ -292,7 +282,7 @@ const REFUSALS: {
   },
   {
     name: "choosing who may give an app to a Bot",
-    route: "PUT /api/plugins/servers/:id/owner-grants",
+    route: "PATCH apps/{appId} (updateApp)",
     status: 404,
     message: "That app hasn't been added.",
     factory: setOwnerGrantsMutationOptions,
@@ -398,19 +388,19 @@ const ENCODED_REQUESTS: {
 }[] = [
   {
     name: "refreshing a server's tools",
-    url: `/api/plugins/servers/${ENCODED_ID}/refresh`,
+    url: `${appPath(HOSTILE_ID)}/refresh`,
     build: refreshPluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "removing a server",
-    url: `/api/plugins/servers/${ENCODED_ID}`,
+    url: appPath(HOSTILE_ID),
     build: removePluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "registering an OAuth client",
-    url: `/api/plugins/servers/${ENCODED_ID}/oauth-client`,
+    url: `${appPath(HOSTILE_ID)}/oauth-client`,
     build: registerOAuthClientMutationOptions,
     variables: { clientId: "abc", clientSecret: "shh", serverId: HOSTILE_ID },
   },
@@ -458,7 +448,7 @@ const ENCODED_REQUESTS: {
   },
   {
     name: "previewing an account mode switch",
-    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
     build: () =>
       mutationOptions({
         mutationFn: (variables: {
@@ -470,13 +460,13 @@ const ENCODED_REQUESTS: {
   },
   {
     name: "switching a server's account mode",
-    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
     build: setAccountModeMutationOptions,
     variables: { serverId: HOSTILE_ID, mode: "shared" as const },
   },
   {
     name: "choosing who may give an app to a Bot",
-    url: `/api/plugins/servers/${ENCODED_ID}/owner-grants`,
+    url: appPath(HOSTILE_ID),
     build: setOwnerGrantsMutationOptions,
     variables: { serverId: HOSTILE_ID, ownerGrants: "any" as const },
   },

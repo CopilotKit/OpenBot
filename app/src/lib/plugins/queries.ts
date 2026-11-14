@@ -8,23 +8,15 @@ import {
   listConnectedAccounts,
   listConnections,
 } from "@/lib/api/generated/connections/connections";
-import type { BotGrant, Connection } from "@/lib/api/generated/model";
+import type {
+  App,
+  AppTool,
+  AppWithdrawnGrant,
+  BotGrant,
+  Connection,
+} from "@/lib/api/generated/model";
 import { ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
-// This import closes a cycle: `./provider-vocabulary` imports `pluginsProvider` from this file.
-// It is safe for one reason, and the reason is the rule. Both live bindings that cross it —
-// `directoryReadFailure` here, `pluginsProvider` there — are `export function` declarations,
-// which are fully initialised during module instantiation, so neither can be caught in the
-// temporal dead zone whichever module evaluates first; and both are only ever called from inside
-// a function body (a `queryFn`, `directoryRouteDecision`), long after both modules have finished
-// evaluating. Nothing may call across this import at module scope. A
-// `const X = directoryReadFailure("...")` at the top level of this file would reach `VOCABULARY`,
-// a lexical `const` in the other module, mid-evaluation: it throws under one evaluation order and
-// not the other, so it can pass every test and still fail in a production bundle.
-import {
-  directoryReadFailure,
-  type PluginsProvider,
-} from "./provider-vocabulary";
 
 /**
  * Re-exported, not re-declared.
@@ -34,129 +26,20 @@ import {
  */
 export type { BrokerField } from "./mutations";
 
-/** A tool one server offers, as the Plugins page sees it. */
-export type PluginTool = {
-  serverId: string;
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  /** `<serverId>/<name>`. What a grant names. */
-  ref: string;
-  /** Whether it changes something. Anything not positively known to be a read is a write. */
-  effect: "read" | "write";
-  /**
-   * Whether the vendor warns that it destroys something.
-   *
-   * Beside {@link effect} rather than folded into it: the rule engine judges reads and writes and
-   * gains nothing from a third value, while a person deciding whether to switch an action on is
-   * asking a different question. Recorded from the vendor's own labels, so false is an absence of a
-   * claim rather than a claim of safety.
-   */
-  destructive: boolean;
-  grantedTo: string[];
-};
+/**
+ * An app added here, as the API answers it (listApps). A screen reads `source` for how it was added
+ * and `connectsWith` for how a person connects an app from the directory, never a broker's name.
+ */
+export type PluginServer = App;
+
+/** One action an app offers, and the Bots that may use it. */
+export type PluginTool = AppTool;
 
 /**
- * A grant on a tool this server does not currently advertise.
- *
- * Held and not offered: nothing reaches a model, because a Bot is told about a tool only when the
- * grant and the tool list agree. That is a fact about what the vendor advertises today, not about the
- * grant, so it is reported rather than quietly dropped — a connector that starts advertising the name
- * again offers it again.
+ * An action Bots were given that the app no longer offers. Held and not offered: a Bot is told about
+ * an action only while the app offers it, and it comes back if the app offers it again.
  */
-export type WithdrawnGrant = {
-  /** `<serverId>/<toolName>`. What a grant names, and what an administrator revokes. */
-  ref: string;
-  name: string;
-  grantedTo: string[];
-};
-
-export type PluginServer = {
-  id: string;
-  title: string;
-  logo?: string | null;
-  vendor: string;
-  url: string;
-  summary: string;
-  docsUrl: string;
-  /** `first-party` for a reviewed entry, `custom` for one an administrator added by URL. */
-  provenance: string;
-  hasCredential: boolean;
-  toolsRefreshedAt: string | null;
-  lastError: string | null;
-  /**
-   * What the last refresh left out for its names. A warning: the rest were stored. Optional because
-   * a server replica older than this field does not send it, mid-rollout.
-   */
-  skippedTools?: string[];
-  addedBy: string | null;
-  /**
-   * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an
-   * administrator to paste one in.
-   */
-  dynamicClient: boolean;
-  /**
-   * A server added by its address that signs each person in: each person connects their own account
-   * in their browser, and a Bot's call runs on theirs. Absent from a server older than the field.
-   */
-  signIn?: boolean;
-  /**
-   * How this server's authorization config was CREATED, for the brokered rows that have one.
-   *
-   * What was written down when somebody enabled the app, not what the catalogue publishes today.
-   * The catalogue is the vendor's, and an app it starts advertising under a different scheme has
-   * not moved the config this deployment already created — so a screen deciding what a live
-   * connection does reads this and never a fresh listing. The vocabulary is the vendor's own scheme
-   * literals (`OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH`, and the rest), so it is a string rather
-   * than a union this page would have to keep level with Composio's.
-   *
-   * Null is not an older brokered row. It is a row that is not brokered at all.
-   */
-  authScheme: string | null;
-  /**
-   * The Microsoft Entra scope a server added by URL is reached with as the person asking, or null
-   * for one reached on the deployment's own token. Optional because a server replica older than
-   * this field does not send it, mid-rollout.
-   */
-  entraScope?: string | null;
-  tools: PluginTool[];
-  /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
-  withdrawn: WithdrawnGrant[];
-  /**
-   * Whether this app is PERSONAL, held one credential per person, or SHARED, with a single
-   * deployment-held account that every Bot holding a grant acts as. Null for a server that has
-   * never been asked, which reads as personal everywhere today.
-   *
-   * What a row's {@link PluginConnection.holder} is checked against, and the only place that
-   * distinction is decided — a connection row never switches an app between the two on its own.
-   */
-  accountMode: "personal" | "shared" | null;
-  /**
-   * Whether a Shared app's one deployment-held account is connected yet.
-   *
-   * Asked of the server rather than read off the connections list, because a Shared app with
-   * nothing connected is not an absence from that list — see `GET /connections`, which lists it
-   * anyway so it can be offered a Connect action. Meaningless, and always false, while
-   * {@link accountMode} is not `"shared"`.
-   */
-  sharedVendorConnected: boolean;
-  /**
-   * Whether this app may only hold the deployment's one shared account: it connects on this
-   * deployment's own OAuth client, so a person's own account would be the organization's access
-   * under their name. Decided by the server from how the app connects; a screen offers no personal
-   * Connect where this is true, and the server refuses one anyway. Optional because a server
-   * replica older than this field does not send it, mid-rollout, and absent reads as false.
-   */
-  sharedOnly?: boolean;
-  /**
-   * Who may give this app to a Bot: any Bot's owner, for their own Bot (`any`), or only an admin
-   * (`admin`), with the default for its account filled in. Every person's own account defaults to
-   * `any`, as do the built-in Routines; everything else to `admin`.
-   */
-  ownerGrants: "any" | "admin";
-  /** What an admin chose, or null where the default is in force. */
-  ownerGrantsChosen: "any" | "admin" | null;
-};
+export type WithdrawnGrant = AppWithdrawnGrant;
 
 export type PluginSkill = {
   id: string;
@@ -180,137 +63,15 @@ export type PluginSkill = {
   tools: string[];
 };
 
-export type CatalogueItem = {
-  key: string;
-  title: string;
-  vendor: string;
-  summary: string;
-  docsUrl: string;
-  /**
-   * Whose credential reaches this server.
-   *
-   * `deployment-bearer` is a token an administrator holds for everybody, and the only one this page
-   * can collect. `user-oauth` is reached as whoever is asking, so each person connects their own
-   * account and there is no token to type here. `builtin` is a first-party capability that runs
-   * inside this deployment — there is nothing to connect and nothing to type.
-   */
-  auth: "none" | "deployment-bearer" | "user-oauth" | "builtin";
-  /** True for a vendor that gives every customer their own hostname. */
-  perInstance: boolean;
-  /**
-   * Whether connecting needs nothing typed first: no account, or an OAuth vendor the deployment
-   * registers itself with. Optional so an older server's answer still reads, as "no".
-   */
-  oneStep?: boolean;
-};
-
-/** One app in Composio's directory, as the picker shows it. */
-export type ComposioApp = {
-  slug: string;
-  name: string;
-  description: string;
-  logo: string | null;
-  categories: string[];
-  /** The size of the decision, shown before enabling. */
-  actionCount: number;
-  /**
-   * How many of those actions the provider classified, how many distinct non-empty scope sets they
-   * ask for, and how many carry a scope at all — three more facts of the size-of-the-decision kind.
-   *
-   * REQUIRED AND NULLABLE, NEVER OPTIONAL, AND NOTHING HERE WRITES `?? 0`. `0` means measured and
-   * none, so the coverage warning fires; `null` means the provider does not publish it, so the page
-   * says nothing. An optional field makes those the same shape at the call site, and the natural
-   * `?? 0` fires a coverage warning on a Composio deployment — a false alarm at exactly the moment
-   * somebody is deciding whether to trust an app.
-   *
-   * An action with no scopes is not its own permission: it is covered by any approval at all, so it
-   * joins no group. `scopedActionCount` is what keeps `permissionCount: 1` over two actions from
-   * reading as one permission covering both.
-   */
-  classifiedCount: number | null;
-  permissionCount: number | null;
-  scopedActionCount: number | null;
-  /**
-   * How a person connects the app, as the server decided it off the broker's catalogue. `fields`
-   * is the one that asks for a key typed in; every other kind is a sign-in, or nothing at all.
-   * The directory says so on the row before anybody adds the app.
-   */
-  connection: {
-    kind: "consent" | "self-registering" | "fields" | "no-auth" | "unsupported";
-  };
-  enabled: boolean;
-};
-
-export type PluginsPage = {
-  catalogue: CatalogueItem[];
-  servers: PluginServer[];
-  skills: PluginSkill[];
-  /**
-   * Whether a Bot holding no credential of its own can still call a tool back.
-   *
-   * True when the deployment has a shared secret configured for it. A grant decides whether a tool
-   * is offered to a model at all; this decides whether the call it makes can be authenticated. With
-   * neither this nor a credential issued to the Bot, every call is refused before it reaches the
-   * grant, the boundary or the audit trail, which is not something a grant switch can show.
-   */
-  botsMayCallBack: boolean;
-  /**
-   * The redirect URI to register with a `user-oauth` vendor, exactly as this deployment will send it.
-   *
-   * From the server rather than assembled here, because it has to match what was registered
-   * character for character. Null when the deployment has no public URL and so cannot complete a
-   * consent flow at all.
-   */
-  redirectUri: string | null;
-  /**
-   * Whether this deployment has Composio configured.
-   *
-   * A boolean about configuration and never the key: the page needs to know whether the directory
-   * can be browsed at all, and that question is answerable without the API key ever leaving the
-   * server.
-   */
-  composioConfigured: boolean;
-  /**
-   * Whether this deployment's broker authorizes ONE ACTION AT A TIME.
-   *
-   * A DECLARED CAPABILITY, read with a presence test and never a vendor name. The server computes
-   * it from the very expression authorizeConnectionAction and the `/arcade/verify` return leg gate
-   * on, so a screen that draws the per-action grant list and the routes that serve its buttons
-   * cannot key on different facts. Gating on `provider === "arcade"` instead left a broker named
-   * arcade whose flow is absent drawing a list whose every Authorize press 503s.
-   *
-   * Required, like `composioConfigured` and unlike `provider`: a capability is a value the server
-   * declares, so the type does not offer "did not say" as a third answer. False on Composio, whose
-   * auth config fixes one state for a whole toolkit, so a Composio deployment is unchanged.
-   */
-  authorizesPerAction: boolean;
-  /**
-   * Which vendor brokers this deployment's apps, as a NAME. Read it through {@link pluginsProvider}.
-   *
-   * A screen that FILTERS by brokered-ness needs no provider name: one provider holds rows at a
-   * time (spec D3), which is why `brokeredAccountsListedOn` is a predicate over `provenance`. A
-   * screen that NAMES a vendor ("Browse Composio", the `/admin/plugins/composio` route,
-   * `COMPOSIO_API_KEY`, "Reached through Composio") cannot derive that name from a row, and this
-   * field is the only thing that answers it. Separate from `composioConfigured`, which asks whether
-   * the directory can be browsed at all.
-   *
-   * A name, never a key and never a capability: nothing about the vendor key travels with it.
-   * Optional because a payload from an older server does not carry it.
-   */
-  provider?: "composio" | "arcade";
-};
+export type { CatalogueItem } from "@/lib/apps/queries";
 
 /**
- * The provider a payload names, `"composio"` when the server did not say.
- *
- * So a Composio deployment renders byte-identically and a page served by an older server does not
- * blank. Also `"composio"` before the page has loaded.
+ * The skills half of `GET /api/plugins`, the one part of it the screens still read there. The apps,
+ * the catalogue and how apps are set up are read through the API (lib/apps/queries.ts).
  */
-export function pluginsProvider(
-  page: PluginsPage | undefined,
-): "composio" | "arcade" {
-  return page?.provider ?? "composio";
-}
+export type PluginsPage = {
+  skills: PluginSkill[];
+};
 
 /**
  * What one Bot holds and is offered now: each app action whose app still lists it, as
@@ -369,8 +130,6 @@ export const pluginKeys = {
     ["plugins", "shared-connection", serverId] as const,
   siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
   accounts: (serverId: string) => ["plugins", "accounts", serverId] as const,
-  composioApps: (query: string) =>
-    ["plugins", "composio", "apps", query] as const,
 };
 
 /**
@@ -445,9 +204,9 @@ export type PluginConnection = {
    * Composio's own dashboard. A held connection has no equivalent question, so its rows carry
    * neither field, and the absence of the pair is what tells the two READS apart — nothing more.
    *
-   * It is NOT how a reader learns how an app connects. That comes from {@link PluginServer.authScheme}
-   * on the server, and a page deriving it from a connection row instead would be a second answer to
-   * a question already carried.
+   * It is NOT how a reader learns how an app connects. That comes from the app's `connectsWith`
+   * (listApps), and a page deriving it from a connection row instead would be a second answer to a
+   * question already carried.
    */
   verified?: boolean;
   /**
@@ -634,28 +393,6 @@ export function pluginsPageQueryOptions() {
       const response = await client("/api/plugins", {
         fallback: "Couldn't load your apps. Reload the page.",
       });
-      return response.json();
-    },
-  });
-}
-
-/**
- * The active broker's app directory, narrowed by a search term.
- *
- * The term goes to our own endpoint because the vendor's client drops a search parameter and
- * answers with an unfiltered page, so filtering has to happen somewhere that admits to doing it.
- */
-export function composioAppsQueryOptions(
-  query: string,
-  provider: PluginsProvider,
-) {
-  return queryOptions({
-    queryKey: pluginKeys.composioApps(query),
-    queryFn: async (): Promise<{ apps: ComposioApp[] }> => {
-      const response = await client(
-        `/api/plugins/composio/apps?q=${encodeURIComponent(query)}`,
-        { fallback: directoryReadFailure(provider) },
-      );
       return response.json();
     },
   });

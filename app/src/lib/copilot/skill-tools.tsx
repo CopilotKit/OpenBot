@@ -2,6 +2,7 @@ import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -112,7 +113,8 @@ export function SkillTools() {
     description:
       "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet.",
     parameters: z.object({}),
-    handler: async () => describeToolRefs((await page()).servers),
+    handler: async () =>
+      describeToolRefs(await queryClient.ensureQueryData(appsQueryOptions())),
   });
 
   useHumanInTheLoop({

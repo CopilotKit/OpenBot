@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { desktopShell } from "@/lib/desktop/shell";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -71,24 +70,22 @@ const RECHECK_FAILED =
  * What this person actually does to connect: click through a consent screen, type a secret, or
  * nothing at all.
  *
- * A coarser question than the scheme the app's authorization config was created as. The recorded
- * `authScheme` is a vendor literal — `OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH` and the rest — and
- * a row that branched on it would be re-asking the same three-way question at every branch, each
- * copy free to forget a literal the others remembered.
+ * The app's `connectsWith` (listApps) answers it: `sign-in`, `key`, `nothing`, or `unreadable` where
+ * OpenBot can't tell from what it recorded. A row branches on the three kinds below, never on the
+ * answer itself, so each branch asks the same question.
  */
 export type { BrokeredAccountKind };
 
 /**
- * Which of the three a recorded scheme is.
+ * Which of the three an app's `connectsWith` is.
  *
- * Everything that is not `NO_AUTH` and not one of the typed schemes is consent, including a scheme
- * this file has never heard of: the catalogue is the vendor's and it may name a new one tomorrow,
- * and sending somebody to a consent screen that turns out not to exist is a refusal they can read,
- * where an empty form is a box they cannot fill in.
+ * Everything that is not `nothing` and not `key` is consent, including one OpenBot couldn't read:
+ * sending somebody to a consent screen that turns out not to exist is a refusal they can read, where
+ * an empty form is a box they cannot fill in.
  */
-function kindOf(authScheme: string | null): BrokeredAccountKind {
-  if (authScheme === "NO_AUTH") return "no-auth";
-  return schemeNeedsKey(authScheme) ? "fields" : "consent";
+function kindOf(connectsWith: string | null): BrokeredAccountKind {
+  if (connectsWith === "nothing") return "no-auth";
+  return connectsWith === "key" ? "fields" : "consent";
 }
 
 /** The row's state and the things it can do, from {@link useBrokeredAccount}. */
@@ -312,13 +309,13 @@ export function useBrokeredAccount(input: {
    */
   checkable: boolean;
   /**
-   * How the app's authorization config was CREATED, as the vendor's own scheme literal.
+   * How a person connects the app, from the app itself (listApps' `connectsWith`).
    *
-   * Read off the recorded server row rather than off a connection row: the connections endpoint
-   * answers two different row shapes, so the absence of a field there says which READ a row came
-   * from and never how an app connects. Null where the app is not brokered at all.
+   * Read off the app rather than off a connection row: the connections endpoint answers two
+   * different row shapes, so the absence of a field there says which READ a row came from and never
+   * how an app connects. Null where the app is not from the directory at all.
    */
-  authScheme: string | null;
+  connectsWith: string | null;
   /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
   reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
@@ -335,7 +332,7 @@ export function useBrokeredAccount(input: {
 }): BrokeredAccount {
   const queryClient = useQueryClient();
   const {
-    authScheme,
+    connectsWith,
     brokered,
     checkable,
     configured,
@@ -473,8 +470,8 @@ export function useBrokeredAccount(input: {
        *
        * The route this pressed serves both kinds of brokered app and answers a field list to the
        * kind whose key somebody types — so a 200 with nothing to leave for means this press went to
-       * a key app that `kindOf` above read as consent, which is what happens the day Composio names
-       * a typed scheme this app's copy of `FIELD_SCHEMES` does not carry. Assigning that nothing
+       * a key app that `kindOf` above read as consent, which is what happens when OpenBot couldn't
+       * read how the app connects (`unreadable`) and it turns out to take a key. Assigning that nothing
        * navigated: the browser resolved the string `undefined` against the current document and
        * followed it, putting the person on a page of that name on this deployment's own origin,
        * with no sentence anywhere saying why.
@@ -762,7 +759,7 @@ export function useBrokeredAccount(input: {
      * which is equally true of an app nobody ever connected.
      */
     disconnected: disconnect.isSuccess,
-    kind: kindOf(authScheme),
+    kind: kindOf(connectsWith),
     fields: published?.fields ?? null,
     guide: published?.guide ?? null,
     requestFields: () => {

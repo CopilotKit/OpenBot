@@ -87,15 +87,7 @@ function failingQueryClient() {
 /** A client already holding a plugins page with no skills in it: the honest empty answer. */
 function answeredEmpty() {
   const client = failingQueryClient();
-  const page: PluginsPage = {
-    catalogue: [],
-    servers: [],
-    skills: [],
-    botsMayCallBack: true,
-    redirectUri: null,
-    composioConfigured: false,
-    authorizesPerAction: false,
-  };
+  const page: PluginsPage = { skills: [] };
   client.setQueryData(pluginKeys.page(), page);
   // Nothing learned either: the person has no skills at all. Held, so only the plugins read fails.
   client.setQueryDefaults(learningKeys.personal, { staleTime: Infinity });

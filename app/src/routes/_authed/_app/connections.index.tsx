@@ -44,6 +44,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -63,12 +68,13 @@ import {
   serversListedFor,
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
-import { moreAppsRow } from "@/lib/plugins/provider-vocabulary";
+import {
+  directoryProvider,
+  moreAppsRow,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   connectionsQueryOptions,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
@@ -295,7 +301,13 @@ function RouteComponent() {
     });
   }, [outcome, authorized, linked, navigate]);
   const [search, setSearch] = React.useState("");
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const apps = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
+  /* The three reads the apps on this page come from, waited for and failed together. */
+  const appReads = [apps, catalogue, setup];
+  const appsError = appReads.find((read) => read.error)?.error ?? null;
+  const appsFetching = appReads.some((read) => read.isFetching);
   const connections = useQuery(connectionsQueryOptions());
 
   /*
@@ -307,7 +319,7 @@ function RouteComponent() {
       (row) => row.serverId,
     ),
   );
-  const added = new Set((plugins.data?.servers ?? []).map((s) => s.id));
+  const added = new Set((apps.data ?? []).map((s) => s.id));
 
   /*
    * Only vendors reached as a person, and only ones an administrator has enabled.
@@ -316,7 +328,7 @@ function RouteComponent() {
    * so listing it here would offer a choice you do not have. And a vendor nobody has enabled cannot
    * be connected at all, because there is no OAuth client to consent against.
    */
-  const yours = (plugins.data?.catalogue ?? []).filter(
+  const yours = (catalogue.data ?? []).filter(
     (entry) => entry.auth === "user-oauth" && added.has(entry.key),
   );
 
@@ -336,12 +348,19 @@ function RouteComponent() {
    * a page that says the app needs no account and draws no button — the list and the page it opens
    * contradicting each other, with the list the more believable of the two.
    *
-   * ASKED OF THE RECORDED SCHEME, which this read already carries and the detail route already
-   * consumes. Anything that is not the vendor's `NO_AUTH` is an app somebody connects, an
-   * unrecorded scheme included: a row whose column was never written is far likelier to be a key or
-   * consent app, and dropping it here would hide a connection somebody does have.
+   * ASKED OF THE APP'S `connectsWith`, which this read already carries and the detail route already
+   * consumes. Anything that is not `nothing` is an app somebody connects, one OpenBot couldn't read
+   * included: such an app is far likelier to take a key or a sign-in, and dropping it here would
+   * hide a connection somebody does have.
    */
-  const listed = plugins.data ? serversListedFor(plugins.data) : [];
+  const listed =
+    apps.data && setup.data
+      ? serversListedFor({
+          servers: apps.data,
+          directoryAvailable: setup.data.directoryAvailable,
+          directoryProvider: directoryProvider(setup.data),
+        })
+      : [];
   /*
    * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
    * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
@@ -353,10 +372,10 @@ function RouteComponent() {
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
-  const provider = pluginsProvider(plugins.data);
+  const provider = directoryProvider(setup.data);
   const moreApps = moreAppsRow(
     provider,
-    plugins.data?.composioConfigured ?? false,
+    setup.data?.directoryAvailable ?? false,
     paths.edition,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
@@ -367,7 +386,7 @@ function RouteComponent() {
   const query = search.trim().toLocaleLowerCase();
   const rows = personal
     ? personalConnectionRows({
-        catalogue: plugins.data?.catalogue ?? [],
+        catalogue: catalogue.data ?? [],
         added,
         brokered: brokeredAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
@@ -399,7 +418,7 @@ function RouteComponent() {
    * links read costs the GitHub and Slack rows and says so, not the whole page.
    */
   const loading =
-    plugins.isPending ||
+    appReads.some((read) => read.isPending) ||
     connections.isPending ||
     links.isPending ||
     providers.isPending ||
@@ -411,7 +430,7 @@ function RouteComponent() {
    */
   const showingApps =
     !loading &&
-    !plugins.error &&
+    !appsError &&
     !connections.error &&
     rows.length > 0 &&
     matching.length > 0;
@@ -484,14 +503,14 @@ function RouteComponent() {
        */}
       <PageSection>
         {/*
-         * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
+         * BOTH APP READS DECIDE THIS. Apps that loaded (listApps, the catalogue, getAppSetup) beside a
          * listConnections that failed would leave the `connected` set empty and every row
          * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
          * nothing is listed rather than a list that may be wrong.
          */}
         {loading ? (
           <ConnectionsLoading />
-        ) : plugins.error || connections.error ? (
+        ) : appsError || connections.error ? (
           /*
            * A failed read is not missing setup, so Retry comes first. Only the team edition has an
            * admin to ask; a personal owner is pointed at Setup, which is theirs.
@@ -506,17 +525,16 @@ function RouteComponent() {
             </p>
             <div className="flex gap-2">
               <Button
-                disabled={plugins.isFetching || connections.isFetching}
+                disabled={appsFetching || connections.isFetching}
                 onClick={() => {
-                  if (plugins.error) void plugins.refetch();
+                  for (const read of appReads)
+                    if (read.error) void read.refetch();
                   if (connections.error) void connections.refetch();
                 }}
                 size="sm"
                 variant="outline"
               >
-                {plugins.isFetching || connections.isFetching
-                  ? "Retrying…"
-                  : "Retry"}
+                {appsFetching || connections.isFetching ? "Retrying…" : "Retry"}
               </Button>
               {edition === "personal" ? (
                 <Button
