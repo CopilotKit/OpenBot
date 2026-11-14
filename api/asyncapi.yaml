@@ -1397,11 +1397,12 @@ components:
       type: object
       description: >-
         One AG-UI event, with every member the AG-UI protocol gives its type
-        (see https://docs.ag-ui.com/concepts/events), plus where it belongs
-        and its id.
+        (see https://docs.ag-ui.com/concepts/events), plus its id, and where
+        it belongs when the gateway says. An event may come without
+        thread_id, run_id and organization_id: the topic it arrives on is its
+        thread.
       required:
         - type
-        - thread_id
       properties:
         type:
           type: string
