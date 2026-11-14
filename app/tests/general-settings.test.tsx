@@ -15,6 +15,7 @@ import { StandingInstructionsRow } from "@/components/settings/standing-instruct
 import { authKeys } from "@/lib/auth/queries";
 import { settingsKeys } from "@/lib/settings/queries";
 import { queryClient } from "@/query-client";
+import { INSTRUCTIONS_PATH, ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -37,10 +38,9 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0]) => {
       const path = String(input);
-      if (path === "/api/settings/instructions")
-        return Response.json({ instructions });
-      if (path === "/api/me")
-        return Response.json({
+      if (path === INSTRUCTIONS_PATH) return Response.json({ instructions });
+      if (path === ME_PATH)
+        return meResponse({
           user: { id: "ada", email: "ada@example.com", name: "Ada" },
         });
       return new Response(null, { status: 404 });

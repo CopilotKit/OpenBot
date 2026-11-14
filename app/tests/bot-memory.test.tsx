@@ -14,6 +14,8 @@ import type { ReactNode } from "react";
 import { MemorySources } from "@/components/memory/sources";
 import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
+import { answerBotsList } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** A Bot's Memory page: the apps that feed it facts, and its background research. */
@@ -43,8 +45,8 @@ const source = (id: string, agentId: string, title: string) => ({
 
 const research = (id: string, agentId: string, focus: string) => ({
   id,
-  agentId,
-  channelId: `channel-${agentId}`,
+  botId: agentId,
+  conversationId: `channel-${agentId}`,
   focus,
   enabled: true,
   intervalMinutes: 240,
@@ -94,9 +96,10 @@ function serving() {
         ],
       });
     }
-    if (url === "/api/proactive/settings") {
+    if (pathOf(url) === CHECK_INS_PATH) {
       return Response.json({
-        settings: [
+        nextCursor: null,
+        checkIns: [
           research("p1", "expenses", "Unpaid invoices"),
           research("p2", "knowledge", "Stale pages"),
         ],
@@ -106,12 +109,14 @@ function serving() {
     if (url.startsWith("/api/channels")) {
       return Response.json({ channels: [], nextCursor: null });
     }
-    return Response.json({
-      agents: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
-      ],
-    });
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 

@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    runs-on: windows-2025
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-2025' || 'openbot-windows-16core' }}
     timeout-minutes: 60
     defaults:
       run:

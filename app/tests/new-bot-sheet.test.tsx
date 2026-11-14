@@ -32,7 +32,19 @@ import {
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
 } from "@/lib/agents/isolation";
-import { deploymentKeys } from "@/lib/deployment/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  DEPLOYMENT_PATH,
+  deploymentResponse,
+  MY_CAPABILITIES_PATH,
+} from "./admin-settings-api";
+import {
+  BOTS_PATH,
+  connectionTestResponse,
+  type SentRequest,
+  sentRequest,
+  TEST_CONNECTION_PATH,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -65,12 +77,18 @@ afterAll(async () => {
 });
 
 const originalFetch = global.fetch;
+let edition: "team" | "personal" = "team";
 let builtInAvailable = true;
 /** Whether the deployment can make a computer for one Bot, and whether the person holds the switch. */
 let isolationAvailable = true;
 let mayIsolate = true;
-/** What the server says when asked to reach an address. */
-let verdict: { ok: true; events: string[] } | { ok: false; reason: string };
+/** What the server says when asked to reach an address, or the Response it answers instead. */
+let verdict:
+  | { ok: true; events: string[] }
+  | { ok: false; reason: string }
+  | (() => Response);
+/** Every request to try an address, as sent. */
+let tests: SentRequest[] = [];
 /** Every create sent, with its body. */
 let creates: Record<string, unknown>[] = [];
 /** Every address the server was asked to reach. */
@@ -92,6 +110,7 @@ beforeEach(() => {
   isolationAvailable = true;
   mayIsolate = true;
   verdict = { ok: true, events: ["RUN_STARTED"] };
+  tests = [];
   creates = [];
   dialled = [];
   giveable = [];
@@ -102,25 +121,30 @@ beforeEach(() => {
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       requested.push(String(path));
-      if (path === "/api/agents/capabilities") {
-        return Response.json({
-          capabilities: { builtInAvailable, isolationAvailable },
+      if (path === DEPLOYMENT_PATH) {
+        return deploymentResponse({
+          edition,
+          builtInBots: builtInAvailable,
+          isolatedBots: isolationAvailable,
         });
       }
-      // The switches as they apply to this person, shaped as `/api/admin/enterprise/me` answers.
-      if (path === "/api/admin/enterprise/me") {
+      // The switches as they apply to this person, shaped as the API's `people/me/capabilities` answers.
+      if (path === MY_CAPABILITIES_PATH) {
         return Response.json({
           capabilities: { isolatedComputers: mayIsolate },
           enforced: true,
         });
       }
-      if (path === "/api/agents/test-connection") {
+      if (path === TEST_CONNECTION_PATH) {
+        tests.push(sentRequest(path, init));
         dialled.push(body.endpoint);
-        return Response.json(verdict);
+        return typeof verdict === "function"
+          ? verdict()
+          : connectionTestResponse(verdict);
       }
-      if (path === "/api/agents" && init?.method === "POST") {
+      if (path === BOTS_PATH && init?.method === "POST") {
         creates.push(body);
-        return Response.json({ agent: { id: "agent_new" } }, { status: 201 });
+        return Response.json({ bot: { id: "agent_new" } }, { status: 201 });
       }
       if (path === "/api/plugins/giveable")
         return Response.json({ apps: giveable });
@@ -140,11 +164,13 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
+async function draw(screen: ReactNode, drawn: "team" | "personal" = "team") {
+  edition = drawn;
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  queryClient.setQueryData(deploymentKeys.capabilities(), { edition });
+  // What this OpenBot offers, read before the sheet opens as the app has read it by then.
+  await queryClient.prefetchQuery(deploymentCapabilitiesQueryOptions());
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
@@ -161,7 +187,7 @@ function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
 
 /** The sheet open, on its first step: where the Bot will run. */
 async function opened(onCreated: (id: string) => void = () => {}) {
-  const view = draw(
+  const view = await draw(
     <NewBotSheet onClose={() => {}} onCreated={onCreated} open />,
   );
   await view.findByLabelText("Name");
@@ -221,6 +247,9 @@ test("unavailable hosting still permits the custom path", async () => {
   builtInAvailable = false;
   const { view, user } = await opened();
   await settle();
+  // Whether a Bot can run here is the deployment's to say.
+  expect(requested).toContain(DEPLOYMENT_PATH);
+  expect(requested.filter((path) => path.includes("/api/agents"))).toEqual([]);
   expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   expect(
     view.queryByRole("button", { name: /^Bring your own agent/ }),
@@ -297,12 +326,55 @@ test("refuses an empty or unreachable custom endpoint without creating", async (
   expect(creates).toEqual([]);
 });
 
+test("a test the server refused says the server's own sentence, and creates nothing", async () => {
+  verdict = () =>
+    Response.json(
+      {
+        type: "about:blank",
+        title: "Forbidden",
+        status: 403,
+        detail: "You can't add Bots that run somewhere else.",
+      },
+      { status: 403, headers: { "content-type": "application/problem+json" } },
+    );
+  const { view, user } = await connected();
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(
+    await view.findByText("You can't add Bots that run somewhere else."),
+  ).toBeTruthy();
+  expect(creates).toEqual([]);
+});
+
+test("a test that never reached the server says it could not be tested, and creates nothing", async () => {
+  verdict = () => {
+    throw new TypeError("Failed to fetch");
+  };
+  const { view, user } = await connected();
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(
+    await view.findByText("The connection could not be tested."),
+  ).toBeTruthy();
+  expect(creates).toEqual([]);
+});
+
 test("checks the connection then creates with its saved name and key", async () => {
   const { view, user } = await connected();
   await user.type(view.getByLabelText(/Key/), "Bearer secret");
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await view.findByText("Expense Review is ready");
   expect(dialled).toEqual(["https://agent.example.com/ag-ui"]);
+  // The address is tried at the API's address, with the unsaved key, as a write of its own.
+  expect(tests).toEqual([
+    {
+      method: "POST",
+      path: TEST_CONNECTION_PATH,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: {
+        endpoint: "https://agent.example.com/ag-ui",
+        headers: { Authorization: "Bearer secret" },
+      },
+    },
+  ]);
   expect(creates[0]).toMatchObject({
     name: "Expense Review",
     endpoint: "https://agent.example.com/ag-ui",
@@ -473,7 +545,7 @@ test("custom-agent selection validates the name before advancing", async () => {
 });
 
 test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {
-  const view = draw(
+  const view = await draw(
     <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
     "personal",
   );
@@ -524,7 +596,7 @@ const ROUTINES_ONLY = [
 test("personal: the sheet lists every app that is turned on, with nothing to untick", async () => {
   servers = TURNED_ON;
   giveable = ROUTINES_ONLY;
-  const view = draw(
+  const view = await draw(
     <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
     "personal",
   );

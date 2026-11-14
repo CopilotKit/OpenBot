@@ -101,8 +101,8 @@ describe("bun installs come from a lockfile", () => {
   test("CI finds installs to check", () => {
     // A parser that matched nothing would pass every assertion below.
     expect(workflowInstalls().length).toBeGreaterThan(5);
-    // The Bots built with Bun: agent-bot, agent-langgraph and agent-mastra.
-    expect(dockerInstalls().length).toBeGreaterThanOrEqual(3);
+    // The Bot built with Bun: agent-mastra.
+    expect(dockerInstalls().length).toBeGreaterThanOrEqual(1);
   });
 
   test("every CI install is frozen, in a directory with a bun.lock", () => {

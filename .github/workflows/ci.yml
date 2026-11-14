@@ -48,8 +48,11 @@ jobs:
         run: bun desktop/scripts/desktop-version.ts check
 
   # The API contract. api/openapi.yaml is the single source of truth every client is generated from,
-  # so three things are checked about it, each its own step so a red run names which:
+  # so four things are checked about it, each its own step so a red run names which:
   #
+  # - it is what its sources bundle to: each area's operations live in api/openapi/<area>.yaml and the
+  #   shared conventions in api/openapi/common.yaml, so builders editing different areas do not
+  #   collide, and api/openapi.yaml is the bundle of them, checked in so every consumer reads one file;
   # - it keeps OpenBot's API conventions (redocly.yaml, api/redocly/rules.mjs), which are Intelligence
   #   v2's, and takes no address Intelligence already serves (api/intelligence-reserved.yaml);
   # - the client generated from it is the one committed (app/src/lib/api/generated): generated code
@@ -57,7 +60,9 @@ jobs:
   #   spec without regenerating or edited the output by hand;
   # - on a pull request, it breaks nothing a client of the base branch relies on. oasdiff compares the
   #   base branch's spec with this one and fails on any breaking change, warnings included: a field a
-  #   client reads going away is a warning to oasdiff and a broken screen to a person.
+  #   client reads going away is a warning to oasdiff and a broken screen to a person. A change that
+  #   takes nothing from a client (a rule the server already enforced, now written in the spec) is
+  #   listed with its reason in api/accepted-breaking-changes.md, and only that change passes.
   api:
     name: API spec
     runs-on: ubuntu-latest
@@ -76,6 +81,17 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: The bundled spec matches its sources
+        run: |
+          set -euo pipefail
+          bun run api:bundle
+          changed="$(git status --porcelain -- api/openapi.yaml)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git --no-pager diff -- api/openapi.yaml | head -n 200
+            echo "::error::api/openapi.yaml is not what api/openapi/*.yaml bundle to. Edit the sources, run bun run api:bundle and commit the result."
+            exit 1
+          fi
       - name: Lint the spec
         run: bun run api:lint
       - name: The generated client matches the spec
@@ -105,9 +121,32 @@ jobs:
           curl -fsSL -o "$archive" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
           echo "${OASDIFF_SHA256}  $archive" | sha256sum -c -
           tar -xzf "$archive" -C "$RUNNER_TEMP" oasdiff
+          # A change listed in api/accepted-breaking-changes.md, with its reason, is let through; oasdiff
+          # matches each line by method, path and the change's own words, so nothing else is.
+          accepted=api/accepted-breaking-changes.md
           # Twice: once readable in the log, once as annotations on the pull request's diff.
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof || true
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --err-ignore "$accepted" --warn-ignore "$accepted" || true
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions --err-ignore "$accepted" --warn-ignore "$accepted"
+      # The live channels (api/asyncapi.yaml). The differences come from the AsyncAPI CLI, pinned in
+      # api/asyncapi-tools with its own lockfile so only this job installs it; what counts as breaking
+      # is decided in api/asyncapi-diff.ts, whose tests run here against real edits to the file.
+      - name: Install the AsyncAPI CLI
+        run: bun install --cwd api/asyncapi-tools --frozen-lockfile
+      - name: The live channels' breaking-change check works
+        run: bun test api/asyncapi-diff.test.ts
+      - name: No breaking change to the live channels against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          if ! git cat-file -e FETCH_HEAD:api/asyncapi.yaml 2>/dev/null; then
+            echo "::notice::$BASE_REF has no api/asyncapi.yaml yet, so this pull request cannot break it."
+            exit 0
+          fi
+          git show FETCH_HEAD:api/asyncapi.yaml > "$RUNNER_TEMP/base-asyncapi.yaml"
+          bun run api:live:diff "$RUNNER_TEMP/base-asyncapi.yaml" api/asyncapi.yaml
 
   mobile:
     name: native types
@@ -149,14 +188,17 @@ jobs:
       # holding still as an update gets ready, Home's message box holding still while the
       # microphone's notice shows, a reply staying where it was written once its turn is over,
       # every skin's top-left corner clear of the Mac window's buttons, OpenDots' Bots badge on its
-      # icon's corner inside the rail, the version in the account row read whole, and a Bot's orb
-      # one color in the sidebar, on its page and at the top of its conversation, which only a
-      # browser's layout, cascade and paint resolve. The
+      # icon's corner inside the rail, the version in the account row read whole, a Bot's orb
+      # one color in the sidebar, on its page and at the top of its conversation, and Record on
+      # screen with a Bot's page in a window of any width, which only a browser's layout, cascade
+      # and paint resolve, and the app following the system's light or dark, which only a
+      # browser's `prefers-color-scheme` reports, with what OpenBot Desktop's window is told of
+      # it. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/bot-orb-one-color.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # The desktop setup window's, for the same reason: the AI step's form holding still while the
@@ -197,16 +239,9 @@ jobs:
         with:
           shard: ${{ matrix.shard }}/${{ strategy.job-total }}
       - run: bun install --frozen-lockfile
-      # The Bots are not root workspaces and each keeps its own lockfile. The startup tests spawn
-      # the real entrypoint, so its dependencies have to be installed as well.
-      - run: bun install --frozen-lockfile
-        working-directory: agent-bot
-      # Same for the LangGraph Bot: its history tests import @langchain/core, which lives in that
-      # Bot's own tree and not in the root one.
-      - run: bun install --frozen-lockfile
-        working-directory: agent-langgraph
-      # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
-      # from that Bot's own dependency tree.
+      # The Bots are not root workspaces and each keeps its own lockfile. The Mastra Bot's: root
+      # test discovery imports its receiver tests, which load Mastra from that Bot's own dependency
+      # tree.
       - run: bun install --frozen-lockfile
         working-directory: agent-mastra
       # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is

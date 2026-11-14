@@ -19,6 +19,8 @@ import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -114,10 +116,10 @@ beforeAll(() => {
         return NativeResponse.json({ channel }, { status: 201 });
       if (url.pathname === "/api/route")
         return NativeResponse.json({ agentId: BOT, reason: "chosen" });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({
           tools: [],
@@ -134,7 +136,7 @@ beforeAll(() => {
         return NativeResponse.json({ components: [] });
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

@@ -18,7 +18,16 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { approvalInboxResponse } from "./approvals-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  BOT_ATTENTION_PATH,
+} from "./bots-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -65,27 +74,39 @@ function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
   };
 }
 
+/** Every request the roster sent, as `METHOD path`. */
+const requests: string[] = [];
+
 /**
- * Serves the visible roster, the hidden roster, and an empty attention list, with nothing found by
- * check-ins and no tasks.
+ * Serves the visible roster, the hidden roster, and an attention list (empty unless given,
+ * `pageSize` Bots to a page), with nothing found by check-ins and no tasks.
  */
 function serving(
   visible: AgentProfile[],
   hidden: AgentProfile[],
-  attention: Record<string, unknown>[] = [],
+  attention: BotAttention[] = [],
+  pageSize?: number,
 ) {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  requests.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/bots/attention"))
-      return Response.json({ bots: attention, lastPingId: null });
-    if (url === "/api/proactive/suggestions")
-      return Response.json({ suggestions: [] });
+    requests.push(`${init?.method ?? "GET"} ${url}`);
+    const waiting = answerBotAttention(input, init, {
+      bots: attention,
+      pageSize,
+    });
+    if (waiting) return waiting;
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: [], nextCursor: null });
     if (url === "/api/tasks") return Response.json({ tasks: [] });
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });
-    return Response.json({
-      agents: url.includes("hidden=true") ? hidden : visible,
-    });
+    return (
+      answerBotsList(input, init, { visible, hidden }) ??
+      // Nothing waits on the person: the inbox is read, and is empty.
+      approvalInboxResponse(input) ??
+      Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 
@@ -215,20 +236,7 @@ test("a Bot with something waiting stays in its own section, with its count", as
       bot({ id: "waiting", name: "Waiting", mine: false }),
     ],
     [],
-    [
-      {
-        agentId: "waiting",
-        name: "Waiting",
-        questions: 1,
-        approvals: 1,
-        handoffs: 0,
-        unread: 0,
-        paused: false,
-        notify: "all",
-        items: 0,
-        tasks: { needsInput: 0, ready: 0, failed: 0 },
-      },
-    ],
+    [attentionOf("waiting", "Waiting", { questions: 1, approvals: 1 })],
   );
   const view = draw();
   expect(await view.findByText("2")).toBeTruthy();
@@ -244,24 +252,34 @@ test("a Bot's check-in items are counted in the words the badge and Needs you us
   serving(
     [bot({ id: "scout", name: "Scout", mine: false })],
     [],
-    [
-      {
-        agentId: "scout",
-        name: "Scout",
-        questions: 0,
-        approvals: 0,
-        handoffs: 0,
-        unread: 0,
-        paused: false,
-        notify: "all",
-        items: 2,
-        tasks: { needsInput: 0, ready: 0, failed: 0 },
-      },
-    ],
+    [attentionOf("scout", "Scout", { items: 2 })],
   );
   const view = draw();
   expect(await view.findByText("2 things need you")).toBeTruthy();
   expect(view.container.textContent).not.toContain("suggestion");
+});
+
+test("what each Bot waits on is read to the last page, so a Bot on the second still has its count", async () => {
+  serving(
+    [
+      bot({ id: "first", name: "First" }),
+      bot({ id: "second", name: "Second" }),
+    ],
+    [],
+    [
+      attentionOf("first", "First", { questions: 1 }),
+      attentionOf("second", "Second", { approvals: 3 }),
+    ],
+    1,
+  );
+  const view = draw();
+  expect(await view.findByText("3")).toBeTruthy();
+  expect(view.getByText("1")).toBeTruthy();
+  expect(requests).toContain(`GET ${BOT_ATTENTION_PATH}?limit=100`);
+  expect(requests).toContain(
+    `GET ${BOT_ATTENTION_PATH}?limit=100&cursor=from1`,
+  );
+  expect(requests.filter((line) => line.includes("/api/bots"))).toEqual([]);
 });
 
 test("personal edition labels starter Bots as included with OpenBot", async () => {

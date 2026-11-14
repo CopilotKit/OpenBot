@@ -435,7 +435,7 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
                       .map((routine) => routine.id),
                   ),
                   checkIns: (checkIns.data ?? []).filter(
-                    (checkIn) => checkIn.agentId === agentId && checkIn.enabled,
+                    (checkIn) => checkIn.botId === agentId && checkIn.enabled,
                   ).length,
                 })}
               </ItemDescription>

@@ -47,6 +47,8 @@ type Run = {
   cli?: "missing-provision" | "provisions";
   /** The tag `backend-images.env` names in the copied checkout. */
   pinnedTag?: string;
+  /** The checkout's docker-compose.yml. This checkout's own unless a test gives another. */
+  composeFile?: string;
 };
 
 async function runStart({
@@ -59,6 +61,7 @@ async function runStart({
   composioSetup,
   cli,
   pinnedTag = "sha-pinned-for-the-test",
+  composeFile,
 }: Run = {}) {
   const root =
     await Bun.$`mktemp -d ${tmpdir()}/openbot-start-guard-XXXXXX`.text();
@@ -83,7 +86,7 @@ async function runStart({
     "WORKER_SHARED_SECRET=worker-secret",
     "MANAGED_AGENT_TOKEN=managed-token",
     "AGENT_TOOL_TOKEN=agent-tool-token",
-    "MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui",
+    "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/",
     "OPENBOT_ONE_COMPUTER_EACH=true",
     "DATABASE_URL=postgres://openbot:openbot@localhost:5432/openbot",
   ].filter(
@@ -119,6 +122,10 @@ async function runStart({
   // The templates that say which settings the server reads.
   for (const template of [".env.example", ".env.personal.example"])
     await writeFile(join(directory, template), await readFile(template));
+  await writeFile(
+    join(directory, "docker-compose.yml"),
+    composeFile ?? (await readFile("docker-compose.yml")),
+  );
   await writeFile(
     join(directory, "backend-images.env"),
     `# The images the test runs.\nOPENBOT_BACKEND_TAG=${pinnedTag}\n`,
@@ -175,7 +182,7 @@ exit 1
 args="$*"
 printf '%s\\n' "$args" >> "$CURL_LOG"
 for port in ${unavailableHealthPorts.join(" ")}; do
-  if [[ "$args" == *"http://localhost:$port/health"* ]]; then exit 7; fi
+  if [[ "$args" == *"http://localhost:$port/health"* || "$args" == *"http://127.0.0.1:$port/health"* ]]; then exit 7; fi
 done
 if [[ "$args" == *"/api/copilotkit/info"* ]]; then
   printf '{"licenseStatus":"valid","mode":"test","agents":{"analyst":{}}}'
@@ -199,7 +206,7 @@ if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then ech
 # The server's container refused: for any reason, every time; or the way Docker Desktop refuses a
 # strict bind of a folder whose view is stale, until a plain -v bind of that folder resolves it.
 if [[ "$args" == run*" -v $PWD/.openbot:"* ]]; then touch "$DOCKER_LOG.seen"; fi
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then
   if [ -n "\${TEST_SERVER_FAILS:-}" ]; then echo "Error response from daemon: no space left on device" >&2; exit 1; fi
   if [ -n "\${TEST_MOUNT_NOT_SEEN:-}" ] && [ ! -f "$DOCKER_LOG.seen" ]; then
     echo "Error response from daemon: invalid mount config for type bind: bind source path does not exist: /host_mnt$PWD/.openbot" >&2
@@ -207,7 +214,11 @@ if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
   fi
 fi
 # The settings the server's container would be created with, kept for the test to read.
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+# What Compose calls this checkout's project, and the services its file defines.
+if [[ "$args" == "compose config" ]]; then printf 'name: fixture-project\\nservices: {}\\n'; fi
+# A routine worker's container, left by a start from when the worker was a Compose service.
+if [[ "$args" == "ps -aq --filter label=com.docker.compose.project=fixture-project --filter label=com.docker.compose.service=worker" ]] && [ -n "\${TEST_OLD_WORKER_CONTAINER:-}" ]; then echo old-worker-container; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
 if [[ "$args" == *"to_regclass('public.agent_preferences')"* ]]; then echo agent_preferences; fi
 exit 0
@@ -308,7 +319,7 @@ describe("start.sh and a server an earlier start ran on the host", () => {
     );
     expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     expect(result.pkillLog).toContain("bun worker/src/index.ts");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 });
 
@@ -545,7 +556,7 @@ describe("start.sh one computer each", () => {
       stderr: "",
     });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres agent-computer agent-bot agent-langgraph",
+      "compose up -d --build postgres agent-computer agent-langgraph-agui",
     );
     expect(result.dockerLog).not.toContain("supervisor");
   });
@@ -566,7 +577,7 @@ describe("start.sh one computer each", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+        "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
       );
     }
     // Two whole starts, one after the other.
@@ -617,71 +628,131 @@ describe("start.sh Learning container check", () => {
   });
 });
 
-describe("start.sh selected provider services", () => {
-  test.each([".env", "process environment"])(
-    "an Anthropic-only %s selection starts the managed Bot without the OpenAI-only sample",
-    async (source) => {
-      const selected = {
-        BOT_PROVIDER: "anthropic",
-        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
-      };
-      const result = await runStart({
-        settings: source === ".env" ? selected : { BOT_PROVIDER: "openai" },
-        processEnvironment: source === "process environment" ? selected : {},
-        unavailableHealthPorts: [4200],
-      });
-      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
-        exitCode: 0,
-        stderr: "",
-      });
-      expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-langgraph",
-      );
-      expect(result.dockerLog).not.toContain("agent-bot");
-      expect(result.dockerLog).toContain("compose run --rm migrate");
-      expect(result.curlLog).toContain("http://localhost:4100/health");
-      expect(result.curlLog).toContain("http://localhost:4201/health");
-      expect(result.curlLog).not.toContain("http://localhost:4200/health");
-      expect(result.stdout).toContain("agent-bot: skipped for Anthropic");
-      expect(result.stdout).not.toContain("agent-bot ready");
-      expect(result.stdout).toContain("agent-langgraph ready");
-      expect(result.stdout).toContain(
-        "managed coworker endpoint: http://localhost:4201/ag-ui",
-      );
-      expect(result.stdout).toContain("Ready. http://localhost:3010");
-    },
-  );
-
-  test("the default OpenAI startup still starts and checks the legacy sample", async () => {
-    const result = await runStart();
-    expect(result.exitCode).toBe(0);
-    expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
-    );
-    expect(result.curlLog).toContain("http://localhost:4200/health");
-    expect(result.stdout).toContain("agent-bot ready");
-    expect(result.stdout).not.toContain("agent-bot: skipped");
-  });
-
-  test("Anthropic startup still fails if its managed LangGraph Bot is unavailable", async () => {
-    const result = await runStart({
-      settings: {
+describe("start.sh and the managed Bot", () => {
+  /**
+   * The managed Bot is the LangGraph harness (agent-langgraph-agui), on whichever provider
+   * BOT_PROVIDER names. agent-bot, an OpenAI-only proof of concept, and the TypeScript
+   * agent-langgraph were retired, so neither is started or waited for, whichever provider is picked.
+   */
+  test.each([
+    ["the default provider", {}],
+    [
+      "an Anthropic-only selection",
+      {
         BOT_PROVIDER: "anthropic",
         ANTHROPIC_API_KEY: "synthetic-anthropic-key",
       },
-      unavailableHealthPorts: [4200, 4201],
+    ],
+  ])("%s starts the harness and no retired Bot", async (_, settings) => {
+    const result = await runStart({ settings });
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
     });
+    expect(result.dockerLog).toContain(
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
+    );
+    expect(result.dockerLog).not.toMatch(/agent-bot|agent-langgraph(?!-agui)/);
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.curlLog).not.toContain(":4200/health");
+    expect(result.stdout).toContain("agent-langgraph-agui ready");
+    expect(result.stdout).not.toMatch(/agent-bot/);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+    expect(result.stdout).toContain("Ready. http://localhost:3010");
+  });
+
+  test("names the harness's own address when .env names none", async () => {
+    const result = await runStart({ omitFromEnv: ["MANAGED_AGENT_AG_UI_URL"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+  });
+
+  test("startup fails if the managed Bot is unavailable", async () => {
+    const result = await runStart({ unavailableHealthPorts: [4201] });
     expect(result.exitCode).toBe(1);
-    expect(result.curlLog).not.toContain("http://localhost:4200/health");
-    expect(result.curlLog).toContain("http://localhost:4201/health");
-    expect(result.stdout).toContain("agent-langgraph never became ready");
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.stdout).toContain("agent-langgraph-agui never became ready");
     expect(result.stdout).not.toContain("Ready. http://localhost:3010");
+  });
+});
+
+describe("start.sh and the work the server does itself", () => {
+  /**
+   * The server applies its own migrations when it starts and does the scheduled work itself.
+   * docker-compose.yml still defines `migrate` and `worker`, for one release, and nothing starts
+   * them: the start runs no migration step and starts no worker, as a container or on the host, and
+   * looks for the migrated tables once the server is up.
+   */
+  test("runs no migrate step and starts no worker", async () => {
+    const result = await runStart();
+
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    const calls = result.dockerLog.trim().split("\n");
+    // Compose is never handed either name: not to pull, run, start or read logs from.
+    for (const call of calls.filter((call) => call.startsWith("compose "))) {
+      expect(call).not.toMatch(/\b(migrate|worker)\b/);
+    }
+    expect(calls.filter((call) => call.includes("--no-deps"))).toHaveLength(1);
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
+    expect(result.stdout).not.toMatch(/\bworker\b/);
+    expect(result.dockerLog.indexOf("to_regclass")).toBeGreaterThan(
+      result.dockerLog.indexOf("compose up -d --no-deps server tool="),
+    );
+    expect(result.stdout).toContain("coworker tables migrated");
+    // Nothing of an earlier start's is there to remove.
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+  });
+
+  /**
+   * A checkout started before this had a `worker` container. Nothing starts that service now, as
+   * docker-compose.yml says on its `x-openbot-scheduled-work` line, so the container would be left
+   * running beside a server that does the same work. It is removed, found by this checkout's own
+   * Compose project and that one service.
+   */
+  test("removes the worker container an earlier start left", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).toMatch(/^rm -f old-worker-container /m);
+    expect(result.dockerLog.match(/^rm /gm)).toHaveLength(1);
+    expect(result.stdout).toContain(
+      "worker: removed the container an earlier start left",
+    );
+  });
+});
+
+describe("start.sh and a docker-compose.yml from an earlier release", () => {
+  /**
+   * A docker-compose.yml without the `x-openbot-scheduled-work` line is an earlier release's, where
+   * `worker` is a service in use. Its container is not a left-over there and is never removed.
+   */
+  test("leaves that file's worker container alone", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+      composeFile: await readFile(
+        "desktop/src-tauri/test-fixtures/compose/docker-compose-v1.0.2.yml",
+        "utf8",
+      ),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+    expect(result.dockerLog).not.toMatch(/^ps -aq /m);
   });
 });
 
 describe("start.sh and the OpenBot images", () => {
   /**
-   * The server, the worker, the migrations, the computer and the supervisor all run from the
+   * The server, the computer and the supervisor all run from the
    * published OpenBot images, at the one tag `backend-images.env` names. Compose reads it as
    * OPENBOT_BACKEND_TAG, so every Compose call the script makes is handed it.
    */
@@ -692,8 +763,7 @@ describe("start.sh and the OpenBot images", () => {
     const calls = result.dockerLog.trim().split("\n");
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) expect(call).toEndWith(" tag=sha-from-the-file");
-    expect(result.dockerLog).toContain("compose run --rm migrate");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   /**
@@ -706,7 +776,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
     );
   });
 
@@ -721,7 +791,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("OpenBot images: main");
     const pull = result.dockerLog.indexOf(
-      "compose pull --quiet migrate supervisor agent-computer policy=always",
+      "compose pull --quiet server supervisor agent-computer policy=always",
     );
     expect(pull).toBeGreaterThan(-1);
     expect(pull).toBeLessThan(
@@ -743,7 +813,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain("/.openbot; showing it the folder");
     expect(result.stdout).toContain("server ready");
     expect(result.dockerLog).toMatch(
-      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot-server:sha-pinned-for-the-test /,
+      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot:sha-pinned-for-the-test /,
     );
     expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(2);
   });
@@ -768,7 +838,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain(
       "Could not fetch the OpenBot images at sha-pinned-for-the-test",
     );
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("IMAGE_PULL_POLICY=never fetches nothing", async () => {
@@ -778,7 +848,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).not.toContain("compose pull");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("a tag in .env or the environment runs another build", async () => {
@@ -789,7 +859,7 @@ describe("start.sh and the OpenBot images", () => {
       const result = await runStart(run);
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toMatch(
-        /compose up -d --no-deps server worker .* tag=sha-from-env-file\n/,
+        /compose up -d --no-deps server tool=.* tag=sha-from-env-file\n/,
       );
     }
     // Two whole starts, one after the other.

@@ -5,19 +5,38 @@ import {
   queryOptions,
   useQuery,
 } from "@tanstack/react-query";
+import type { UpdatePreferencesRequest } from "@/lib/api/generated/model";
+import {
+  getPreferences,
+  updatePreferences,
+} from "@/lib/api/generated/people/people";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { client } from "@/lib/client";
 import { getSkinId, setSkin } from "@/skins/store";
 import { settingsKeys } from "./queries";
 
 export type { MessageListEmphasis } from "@openbot/shared/user-preferences";
+
+/** Change the preferences sent, keep the rest, and answer every one as saved. */
+function savePreferences(
+  preferences: Partial<UserPreferences>,
+  fallback: string,
+): Promise<UserPreferences> {
+  return updatePreferences(
+    ORGANIZATION_ID,
+    "me",
+    preferences as UpdatePreferencesRequest,
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback },
+  );
+}
 
 export function userPreferencesQueryOptions(userId: string | undefined) {
   return queryOptions({
     queryKey: [...settingsKeys.all, "preferences", userId] as const,
     enabled: Boolean(userId),
     queryFn: ({ signal }): Promise<UserPreferences> =>
-      client("/api/settings/preferences", "preferences", {
+      getPreferences(ORGANIZATION_ID, "me", {
         signal,
         fallback: "Could not load your preferences",
       }),
@@ -51,11 +70,10 @@ export function dismissSelfHostBannerMutationOptions(
   return mutationOptions({
     mutationFn: (): Promise<UserPreferences> => {
       if (!userId) throw new Error("Sign in to save your preferences.");
-      return client("/api/settings/preferences", "preferences", {
-        method: "PATCH",
-        body: { selfHostBannerDismissed: true },
-        fallback: "Could not save your preferences",
-      });
+      return savePreferences(
+        { selfHostBannerDismissed: true },
+        "Could not save your preferences",
+      );
     },
     onMutate: () => {
       const previous = queryClient.getQueryData(queryKey);
@@ -84,11 +102,7 @@ export function saveUserPreferencesMutationOptions(
       preferences: Partial<UserPreferences>,
     ): Promise<UserPreferences> => {
       if (!userId) throw new Error("Sign in to save your preferences.");
-      return client("/api/settings/preferences", "preferences", {
-        method: "PATCH",
-        body: preferences,
-        fallback: "Could not save your preferences",
-      });
+      return savePreferences(preferences, "Could not save your preferences");
     },
     onSuccess: (preferences) =>
       queryClient.setQueryData(
@@ -122,11 +136,7 @@ export function saveSkinMutationOptions(
     mutationKey: saveSkinMutationKey,
     mutationFn: (skin: SkinId): Promise<UserPreferences> => {
       if (!userId) throw new Error("Sign in to save your preferences.");
-      return client("/api/settings/preferences", "preferences", {
-        method: "PATCH",
-        body: { skin },
-        fallback: "Could not save your skin",
-      });
+      return savePreferences({ skin }, "Could not save your skin");
     },
     onMutate: async (skin) => {
       const previousSkin = getSkinId();

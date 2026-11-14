@@ -28,7 +28,32 @@ export type ToolName = {
   detail?: string;
 };
 
-export function readToolName(name: string, running = false): ToolName {
+/**
+ * Tool names shortened for the wire, each with the whole name it stands for.
+ *
+ * A provider takes a tool name of at most 64 characters, so a long app action travels cut and ended
+ * with a hash: `mcp__composio-googlesheets__GOOGLESHEETS_UPDATE_DIMENSI_82883606`. Read as it
+ * stands, its step said "Update dimensi 82883606". A hash does not read backwards, so whoever
+ * shortened the names says what they stand for ({@link knowShortenedToolNames}), and a call is
+ * named by the action's whole name: "Update dimension properties".
+ */
+const wholeNames = new Map<string, string>();
+
+/** Learn what shortened tool names stand for. Adds to what is known; a name is never forgotten. */
+export function knowShortenedToolNames(
+  names: Readonly<Record<string, string>>,
+): void {
+  for (const [shortened, whole] of Object.entries(names))
+    if (typeof whole === "string" && whole) wholeNames.set(shortened, whole);
+}
+
+/** The whole name a shortened tool name stands for, or the name itself. */
+export function wholeToolName(name: string): string {
+  return wholeNames.get(name) ?? name;
+}
+
+export function readToolName(given: string, running = false): ToolName {
+  const name = wholeToolName(given);
   const own = ownToolLabel(name, running);
   if (own) return { label: own };
   const parts = name.split("__");

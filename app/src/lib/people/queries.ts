@@ -1,5 +1,6 @@
 import { infiniteQueryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { listPeople } from "@/lib/api/generated/people/people";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 
 /**
  * Somebody who has signed in to this deployment.
@@ -12,7 +13,8 @@ export type Person = {
   email: string;
   name: string | null;
   image: string | null;
-  role: "admin" | "user";
+  /** Their role as a member of the organization. Nobody is an owner yet. */
+  role: "owner" | "admin" | "member";
   /** The providers they have arrived through. More than one is normal mid-migration. */
   providers: string[];
   lastSignedInAt: string | null;
@@ -51,15 +53,16 @@ export function peopleListQueryOptions(search = "") {
   return infiniteQueryOptions({
     queryKey: peopleKeys.list(search),
     initialPageParam: "",
-    queryFn: ({ pageParam }): Promise<PeoplePage> => {
-      const query = new URLSearchParams();
-      if (search) query.set("search", search);
-      if (pageParam) query.set("cursor", pageParam as string);
-      const suffix = query.size > 0 ? `?${query}` : "";
-
-      return client(`/api/admin/people${suffix}`, {
-        fallback: "Could not load people",
-      }).then((response) => response.json() as Promise<PeoplePage>);
+    queryFn: async ({ pageParam, signal }): Promise<PeoplePage> => {
+      const page = await listPeople(
+        ORGANIZATION_ID,
+        {
+          ...(search ? { search } : {}),
+          ...(pageParam ? { cursor: pageParam as string } : {}),
+        },
+        { signal, fallback: "Could not load people" },
+      );
+      return { people: page.people, nextCursor: page.nextCursor };
     },
     getNextPageParam: (page: PeoplePage) => page.nextCursor ?? undefined,
   });

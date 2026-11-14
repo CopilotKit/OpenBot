@@ -1,6 +1,4 @@
 [
-  "agent-bot",
-  "agent-langgraph",
   "agent-crewai",
   "agent-llamaindex",
   "agent-agno",

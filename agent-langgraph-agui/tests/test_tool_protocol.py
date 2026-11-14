@@ -577,9 +577,9 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
 async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary, status, reply, expected
 ):
-    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
-    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
-    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`, and
+    # the harness passes that reason on: without it the model knows only a status code, and cannot
+    # tell the person why or repair its call.
     boundary["callback_status"] = status
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))

@@ -10,6 +10,8 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { meResponse } from "./accounts-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -131,8 +133,9 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
         },
       });
     }
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
-    return Response.json({
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
+    return meResponse({
       user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;

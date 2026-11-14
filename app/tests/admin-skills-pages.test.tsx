@@ -29,6 +29,7 @@ import { NewSkillPage } from "@/components/manage/new-skill-page";
 import { SkillPage } from "@/components/manage/skill-page";
 import { SkillsPage } from "@/components/manage/skills-page";
 import { type PluginSkill, pluginKeys } from "@/lib/plugins/queries";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -86,15 +87,14 @@ beforeEach(() => {
         });
         return json({ ok: true });
       }
-      if (path === "/api/agents")
-        return json({
-          agents: url.includes("hidden=true")
-            ? []
-            : [
-                { id: "bot-ada", name: "Ada" },
-                { id: "bot-grace", name: "Grace" },
-              ],
-        });
+      const bots = answerBotsList(input, init, {
+        visible: [
+          { id: "bot-ada", name: "Ada" },
+          { id: "bot-grace", name: "Grace" },
+        ],
+        hidden: [],
+      });
+      if (bots) return bots;
       if (path === "/api/plugins")
         return json({
           catalogue: [],

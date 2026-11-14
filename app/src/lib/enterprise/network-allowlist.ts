@@ -1,4 +1,5 @@
-import { client } from "@/lib/client";
+import { translateNetworkPolicy } from "@/lib/api/generated/network-policies/network-policies";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import type { EgressRule } from "./queries";
 
 /** Whether every entry parses with the computer's own parser, and what is wrong with each that doesn't. */
@@ -32,10 +33,12 @@ export type NetworkAllowlistTranslation = {
 export async function translateNetworkAllowlist(
   text: string,
 ): Promise<NetworkAllowlistTranslation> {
-  const response = await client("/api/admin/enterprise/network/translate", {
-    method: "POST",
-    body: { text },
-    fallback: "Couldn't write the list. Try again, or type it yourself.",
-  });
-  return (await response.json()) as NetworkAllowlistTranslation;
+  const translation = await translateNetworkPolicy(
+    ORGANIZATION_ID,
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't write the list. Try again, or type it yourself." },
+  );
+  // Entries that don't parse come back as the model wrote them, for the admin to fix; `check` says so.
+  return translation as NetworkAllowlistTranslation;
 }

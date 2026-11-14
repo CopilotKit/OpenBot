@@ -5,6 +5,8 @@ import { cleanup, render, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
 import { WaitingForYou } from "@/components/approvals/waiting";
+import { approvalInboxResponse } from "./approvals-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -26,7 +28,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** A pending request as `GET /api/approvals` returns it. */
+/** A pending request as the inbox the screens read holds it. */
 const request = (
   id: string,
   toolCallId: string,
@@ -53,10 +55,10 @@ const request = (
 });
 
 function serving() {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(path, {
         enabled: false,
         rules: [],
         teamRules: [],
@@ -74,10 +76,12 @@ function serving() {
           }),
         ],
       });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: [{ id: "assistant", name: "General Assistant" }],
-      });
+      if (approvals) return approvals;
+    }
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: "assistant", name: "General Assistant" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }

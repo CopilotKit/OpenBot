@@ -1,4 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { updatePerson } from "@/lib/api/generated/people/people";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
 import { clearSkin } from "@/skins/store";
 import { authKeys } from "./queries";
@@ -32,11 +34,13 @@ export function signOutMutationOptions(queryClient: QueryClient) {
 export function updateProfileNameMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (name: string) =>
-      client("/api/me/profile", "profile", {
-        method: "PATCH",
-        body: { name },
-        fallback: "Your name could not be saved",
-      }),
+      updatePerson(
+        ORGANIZATION_ID,
+        "me",
+        { name },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Your name could not be saved" },
+      ),
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: authKeys.currentUser(),

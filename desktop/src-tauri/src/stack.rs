@@ -1,9 +1,12 @@
 //! Raising the stack: the Compose services.
 //!
-//! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, a one-shot
-//! `migrate`, and the published image's `server` and `worker` under the `openbot` profile. Docker's
-//! restart policy keeps them up. Nothing runs on the host: the person's own browser is on the one
-//! computer, shown in the OpenBot window.
+//! Compose runs all of OpenBot: postgres, the supervisor, `agent-computer`, the Bots, and the
+//! published image's `server` under the `openbot` profile. The server applies its own migrations
+//! when it starts and does the scheduled work itself, which this release's Compose file says on
+//! one line (`SCHEDULED_WORK_MARKER`). An installation whose Compose file is an earlier release's
+//! has no such line, and its one-shot `migrate` and its `worker` are in use: it is run as that
+//! file requires (`selected_services`). Docker's restart policy keeps them up. Nothing runs on the
+//! host: the person's own browser is on the one computer, shown in the OpenBot window.
 //!
 //! [`HOST_PROCESSES`] still names what earlier versions ran on the host, the server, the app, the
 //! worker and a browser of the person's own on their desktop, so a Start or a Stop can find and end
@@ -19,32 +22,167 @@ use serde::{Deserialize, Serialize};
 use crate::engine::Address;
 use crate::problem::Problem;
 
-/// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
-/// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
+/// The services Compose owns in every installation this app runs.
 ///
-/// `server` and `worker` are OpenBot itself, from the published server image: the API, the app it
-/// serves, and the routines sweep. They used to be Bun processes this app started on the host after
-/// downloading Bun and running `bun install`, which on a fresh Windows machine took longer than
-/// everything else in the install put together. Now they are containers like the rest, and the
-/// restart policy that keeps them up is Docker's.
+/// `server` is OpenBot itself, from the published server image: the API, the app it serves, the
+/// database migrations, which it applies when it starts, and the scheduled work (firing routines,
+/// cleaning up unsent attachments, suspending idle computers). It used to be a Bun process this app
+/// started on the host after downloading Bun and running `bun install`, which on a fresh Windows
+/// machine took longer than everything else in the install put together. Now it is a container
+/// like the rest, and the restart policy that keeps it up is Docker's.
 ///
 /// No `supervisor`, and none of the bundled Bots. This app runs the personal edition (see
 /// `env::compose`): every Bot shares the one `agent-computer`, and its Personal Assistant runs inside
 /// the server. The supervisor is still stopped on Stop (`stop_computers`), for the
 /// computers an installation that predates this made for each Bot.
-const SERVICES: [&str; 4] = ["postgres", "agent-computer", "server", "worker"];
+const SERVICES: [&str; 3] = ["postgres", "agent-computer", "server"];
 
-/// The Compose profile `server` and `worker` sit behind, so `scripts/start.sh`, whose server is a
-/// host process, never starts a second one. Named on every command rather than only on `up`, so
-/// `down` stops them and `config` describes them.
+/// The routines sweep as a service of its own, which releases up to 1.0.3 run beside `server`.
+/// Raised, stopped and restarted with the server in an installation whose Compose file is one of
+/// theirs, and never named in any other (`installation_uses`).
+const WORKER: &str = "worker";
+
+/// The one-shot migration service the same releases run. Never raised by name: `server`
+/// depends on it there, so `up` runs it to completion first. Named only to list and pull its image.
+const MIGRATE: &str = "migrate";
+
+/// The Compose profile `server` sits behind (and `worker`, where a file defines it), so a plain
+/// `docker compose up` in a source checkout never starts a second one. Named on every command
+/// rather than only on `up`, so `down` stops them and `config` describes them.
 const OPENBOT_PROFILE: &str = "openbot";
 
-pub fn selected_services(harness: bool) -> Vec<&'static str> {
+/// The line a release's `docker-compose.yml` carries, at the top level, when its server applies
+/// its own migrations and does the scheduled work itself. Compose ignores a top-level `x-` field.
+///
+/// A positive statement by the file, read as text. This release's file still defines `worker` and
+/// `migrate`, so that an app from the release before reads it as current, and starts neither: what
+/// a file defines no longer says what it uses. A file from a release up to 1.0.3 cannot carry the
+/// line, and nothing else somebody edits in a file changes the answer.
+const SCHEDULED_WORK_MARKER: &str = "x-openbot-scheduled-work: server";
+
+/// Whether `text`, a Compose file, says its server does the scheduled work: the marker, on a line
+/// of its own at column 0, with nothing after it but a comment.
+fn server_does_the_scheduled_work(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.split('#').next().unwrap_or(line).trim_end() == SCHEDULED_WORK_MARKER)
+}
+
+/// Whether the installation laid out in `folder` runs `service` (`worker` or `migrate`) as a
+/// service of its own: its Compose file defines it and does not say the server does that work.
+///
+/// The file on disk decides, not this app's release: an installation being updated still has the
+/// previous release's `docker-compose.yml` while this app backs its database up, and again after an
+/// update that rolled back. There the worker is raised with the server and `migrate` is what
+/// `server` waits on. A file with the marker is never asked for either, though it may define them.
+/// Compose refuses a command that names a service its file does not define. A file that cannot be
+/// read uses nothing.
+fn installation_uses(folder: &Path, service: &str) -> bool {
+    std::fs::read_to_string(folder.join("docker-compose.yml")).is_ok_and(|text| {
+        !server_does_the_scheduled_work(&text)
+            && compose_service_names(&text)
+                .iter()
+                .any(|name| name == service)
+    })
+}
+
+/// The services Start raises for the installation in `root`: [`SERVICES`], the `worker` its own
+/// Compose file uses, if it does (`installation_uses`), and the Bot the person picked.
+pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
+    if installation_uses(root, WORKER) {
+        services.push(WORKER);
+    }
     if harness {
         services.push("agent-harness");
     }
     services
+}
+
+/// [`selected_services`] and the one-shot `migrate`, where the file uses it: every service whose
+/// image the installation needs on the computer before Start.
+fn services_with_images(folder: &Path, harness: bool) -> Vec<&'static str> {
+    let mut services = selected_services(folder, harness);
+    if installation_uses(folder, MIGRATE) {
+        services.push(MIGRATE);
+    }
+    services
+}
+
+/**
+Remove this installation's containers for `migrate` and `worker` once its Compose file no longer
+uses them (`installation_uses`), and say which services had one.
+
+An update from a release that ran them leaves their containers behind when the stack was not taken
+down under the old file first. Nothing this app does under the new file touches them: it never
+names either service, and where the file does not define one, Compose calls its container an orphan
+and only warns. So the previous release's routines sweep would keep running beside a server that
+now does that work itself.
+
+Found by the labels Compose put on them: this installation's own project (`project`) and one of
+these two services, so no container of another project, and nothing the supervisor made, can match.
+`--remove-orphans` would also take every other container of the project this file does not name.
+Removed without `--volumes`: no volume is touched, and neither service ever had one. A service the
+file uses is never looked for, so a previous release's own worker and migrate containers are never
+removed while its file is the one installed. An installation with no Compose file is left alone.
+*/
+fn remove_retired_containers(engine: &Address, root: &Path) -> Result<Vec<&'static str>, String> {
+    if !root.join("docker-compose.yml").is_file() {
+        return Ok(Vec::new());
+    }
+    let retired: Vec<&'static str> = [MIGRATE, WORKER]
+        .into_iter()
+        .filter(|service| !installation_uses(root, service))
+        .collect();
+    if retired.is_empty() {
+        return Ok(retired);
+    }
+    let project = project(engine, root).map_err(|problem| problem.said)?;
+    let mut removed = Vec::new();
+    for service in retired {
+        let listed = engine
+            .command()
+            .current_dir(root)
+            .args(["ps", "--all", "--quiet"])
+            .arg("--filter")
+            .arg(format!("label=com.docker.compose.project={project}"))
+            .arg("--filter")
+            .arg(format!("label=com.docker.compose.service={service}"))
+            .output()
+            .map_err(|error| format!("could not list this installation's containers: {error}"))?;
+        if !listed.status.success() {
+            return Err(format!(
+                "could not list this installation's containers: {}",
+                command_said(&listed.stderr)
+            ));
+        }
+        let ids: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        let output = engine
+            .command()
+            .current_dir(root)
+            .args(["rm", "--force"])
+            .args(&ids)
+            .output()
+            .map_err(|error| {
+                format!("could not remove the earlier {service} container: {error}")
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "could not remove the earlier {service} container: {}",
+                command_said(&output.stderr)
+            ));
+        }
+        log::info!(
+            "[compose] removed the {service} container an earlier release left; this release's server does that work"
+        );
+        removed.push(service);
+    }
+    Ok(removed)
 }
 
 /// What earlier versions ran on the host rather than in a container, by the name each was recorded
@@ -97,7 +235,7 @@ pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> 
 }
 
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
-    let project = project(engine, root).unwrap_or_else(|_| DESKTOP_PROJECT.to_owned());
+    let project = project(engine, root).unwrap_or_else(|_| desktop_project());
     let mut command = engine.command();
     command.current_dir(root).args(["compose"]).envs(secrets);
     command.env("COMPOSE_PROJECT_NAME", &project);
@@ -922,11 +1060,11 @@ fn compose_start_command(
             }
         }
     }
+    let podman_ports = macos_podman
+        .then(|| macos_podman_ports(root, &files))
+        .flatten();
     for (file, contents) in [
-        (
-            MACOS_PODMAN_PORTS_FILE,
-            macos_podman.then_some(MACOS_PODMAN_PORTS),
-        ),
+        (MACOS_PODMAN_PORTS_FILE, podman_ports.as_deref()),
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
     ] {
         if let Some(contents) = contents {
@@ -949,6 +1087,133 @@ fn compose_start_command(
         }
     }
     Ok(command)
+}
+
+/// The services a Compose file defines: the keys one level under its top-level `services:`.
+///
+/// Read as text, not parsed: the installation's files are the ones OpenBot ships, block-style with
+/// two-space indentation, and a file this cannot read simply contributes no names.
+fn compose_service_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            inside = line.trim_end() == "services:";
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("  ") else {
+            continue;
+        };
+        if rest.starts_with(' ') {
+            continue;
+        }
+        // The key alone, whether its value is the block under it or on its own line (`server: {}`).
+        let key = rest.split('#').next().unwrap_or(rest);
+        if let Some((name, _)) = key.split_once(':') {
+            names.push(name.trim().trim_matches(['"', '\'']).to_owned());
+        }
+    }
+    names
+}
+
+/// The Compose profile of the services `docker-compose.yml` keeps for one release and starts
+/// never: `agent-bot` and `agent-langgraph`, defined only so the app from the release before can
+/// merge its own port overlay onto the file. This app publishes no port for them.
+const OLDER_APPS_PROFILE: &str = "for-older-apps";
+
+/// The services a Compose file puts behind `profile`, read as text like [`compose_service_names`]:
+/// a `profiles:` line directly under the service, naming the profile.
+fn compose_services_behind(text: &str, profile: &str) -> Vec<String> {
+    let names = compose_service_names(text);
+    let mut behind = Vec::new();
+    let mut service: Option<&str> = None;
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("  ") else {
+            if !line.trim().is_empty() {
+                service = None;
+            }
+            continue;
+        };
+        if !rest.starts_with(' ') {
+            let key = rest.split('#').next().unwrap_or(rest).trim_end();
+            service = key
+                .strip_suffix(':')
+                .map(|name| name.trim_matches(['"', '\'']))
+                .filter(|name| names.iter().any(|known| known == name));
+            continue;
+        }
+        let named = rest.strip_prefix("  profiles:").is_some_and(|value| {
+            value
+                .split(['[', ']', ',', '"', '\'', ' '])
+                .any(|p| p == profile)
+        });
+        if let (true, Some(name)) = (named, service) {
+            behind.push(name.to_owned());
+        }
+    }
+    behind
+}
+
+/// The Mac Podman port overlay for this installation: [`MACOS_PODMAN_PORTS`] with only the services
+/// its own Compose files define, or nothing when they define none of them.
+///
+/// The overlay names every service any release has published a port for. Compose refuses a project
+/// in which a file names a service that has no image ("has neither an image nor a build context
+/// specified"), and that refusal fails every command given the overlay. An installation being
+/// updated still has the previous release's `docker-compose.yml` while this app backs its database
+/// up, and again if the update is rolled back, so the overlay follows the file that is there.
+///
+/// A service the file keeps only for an older app ([`OLDER_APPS_PROFILE`]) gets no ports: it is
+/// never started, and the two names are real services in an earlier release's file.
+fn macos_podman_ports(root: &Path, files: &[String]) -> Option<String> {
+    let texts: Vec<String> = files
+        .iter()
+        .filter_map(|file| std::fs::read_to_string(root.join(file)).ok())
+        .collect();
+    let mut defined: std::collections::HashSet<String> = texts
+        .iter()
+        .flat_map(|text| compose_service_names(text))
+        .collect();
+    for text in &texts {
+        for kept in compose_services_behind(text, OLDER_APPS_PROFILE) {
+            defined.remove(&kept);
+        }
+    }
+    let (header, services) = MACOS_PODMAN_PORTS.split_once("services:\n")?;
+    // A block is a service's own line and what is indented under it; a comment line above a
+    // service belongs to the block it introduces.
+    let mut blocks: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in services.lines() {
+        let service = line
+            .strip_prefix("  ")
+            .filter(|rest| !rest.starts_with(' ') && !rest.starts_with('#'))
+            .and_then(|rest| rest.trim_end().strip_suffix(':'));
+        if let Some(name) = service {
+            let mut lines = std::mem::take(&mut pending);
+            lines.push(line);
+            blocks.push((name, lines));
+        } else if line.starts_with("  #") {
+            pending.push(line);
+        } else if let Some((_, lines)) = blocks.last_mut() {
+            lines.push(line);
+        }
+    }
+    let kept: Vec<&str> = blocks
+        .iter()
+        .filter(|(name, _)| defined.contains(*name))
+        .flat_map(|(_, lines)| lines.iter().copied())
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    Some(format!("{header}services:\n{}\n", kept.join("\n")))
 }
 
 fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
@@ -1030,7 +1295,7 @@ pub fn installation_images_in(
 pub fn standalone_compose_command(compose: &Path, root: &Path, secrets: &Secrets) -> Command {
     let mut command = crate::quiet::command(compose);
     command.current_dir(root).envs(secrets);
-    command.env("COMPOSE_PROJECT_NAME", DESKTOP_PROJECT);
+    command.env("COMPOSE_PROJECT_NAME", desktop_project());
     command
 }
 
@@ -1041,8 +1306,8 @@ pub fn installation_images_by(
     release: &Path,
     harness: bool,
 ) -> Result<Vec<String>, Problem> {
-    let mut requested = selected_services(harness);
-    requested.push("migrate");
+    // The release's own file says which services it has: this one may not be the installed one.
+    let requested = services_with_images(release, harness);
     if release != root {
         // Compose reads the release's file from where it runs, and `.env` from there too, so the
         // installation's own settings are named explicitly.
@@ -1084,7 +1349,8 @@ pub fn installation_images_by(
     Ok(images.into_iter().collect())
 }
 
-/// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
+/// Pull the selected stack before `up`, including service dependencies and, where the
+/// installation's Compose file uses one, the one-shot migration.
 /// Keep this separate from `up`: image transfer must not include container startup or migrations.
 /// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
 /// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
@@ -1098,8 +1364,7 @@ pub fn pull(
     let Some(json_progress) = crate::pull_metrics::compose_pull_progress(engine) else {
         return Ok(());
     };
-    let mut requested = selected_services(harness);
-    requested.push("migrate");
+    let requested = services_with_images(root, harness);
     let mut command = compose_command(engine, root, secrets);
     if json_progress {
         command.args(["--progress", "json"]);
@@ -1347,7 +1612,15 @@ fn up_now(
      * names so older Compose will read the file at all. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
-    let requested = selected_services(harness);
+    let requested = selected_services(root, harness);
+    // Before anything is raised: a routines sweep an earlier release left must not run beside a
+    // server that does that work itself.
+    remove_retired_containers(engine, root).map_err(|detail| {
+        crate::problem::Problem::with(
+            "OpenBot couldn't clear what an earlier version left running. Try again.",
+            detail,
+        )
+    })?;
     let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
@@ -1508,9 +1781,18 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
          * Named unconditionally rather than only when a harness was picked: this has to stop what an
          * earlier run started, and whether that run picked one is not something a Stop can know.
          *
-         * `openbot` for the same reason: `server` and `worker` sit behind it, and a Stop that left them
-         * running would leave the app answering a window that says OpenBot is stopped.
+         * `openbot` for the same reason: `server` sits behind it, with `worker` where the file
+         * defines one, and a Stop that left them running would leave the app answering a window
+         * that says OpenBot is stopped.
+         *
+         * A `worker` or `migrate` container an earlier release left, under a file that no
+         * longer uses the service, is removed first: where the file does not define it, it is not
+         * Compose's to take down, and while one is attached the project's network stays. A
+         * failure there is logged and the rest is still stopped.
          */
+        if let Err(error) = remove_retired_containers(engine, root) {
+            log::warn!("[compose down] {error}");
+        }
         let output = compose_command(engine, root, &Secrets::new())
             .args([
                 "-f",
@@ -3302,11 +3584,16 @@ pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
 }
 
 /**
-Restart OpenBot itself, the server and the worker, and leave everything else running.
+Restart OpenBot itself and leave everything else running: the server, and the worker where the
+installation's Compose file uses one.
 
 What the Status window's Restart did to the host processes, now done by the engine that runs them:
 the database and the Bots stay up, so nothing is lost and it takes seconds. The profile is named
-because both services sit behind it, and Compose refuses to restart a service it cannot see.
+because the services sit behind it, and Compose refuses to restart a service it cannot see, as it
+refuses one its file does not define.
+
+Never the `worker` of a file that says its server does the scheduled work: nothing in that release
+starts it, so there is none to restart.
 */
 pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
     crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
@@ -3314,7 +3601,8 @@ pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
 
 fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root, &Secrets::new())
-        .args(["--profile", OPENBOT_PROFILE, "restart", "server", "worker"])
+        .args(["--profile", OPENBOT_PROFILE, "restart", "server"])
+        .args(installation_uses(root, WORKER).then_some(WORKER))
         .output()
         .map_err(|error| format!("could not restart OpenBot: {error}"))?;
     if output.status.success() {
@@ -3358,6 +3646,67 @@ pub const PROJECT_FILE: &str = ".openbot-project.json";
 /// tell which containers are the app's.
 pub const DESKTOP_PROJECT: &str = "openbot-desktop";
 
+/**
+Names another Compose project for a new installation in place of `DESKTOP_PROJECT`.
+
+For a second OpenBot Desktop run on one computer beside an installed one, such as a build being
+tested: with its own `HOME` it has its own folder, but on the same engine `DESKTOP_PROJECT` is the
+installed OpenBot's project, so the second one would take the installed one's containers, ports,
+database and Bots' computers as its own. Unset, empty, or not a name Compose accepts, it is ignored.
+An installation that already recorded its project keeps it (see `project`).
+
+Naming a project other than `DESKTOP_PROJECT` also gives the app an identifier of its own
+(`identifier_for`), so the second app has its own single-instance lock and its own folders for
+everything it keeps (which installation it last opened among them), and never opens, starts or
+stops the installed one's.
+*/
+pub const PROJECT_VARIABLE: &str = "OPENBOT_DESKTOP_PROJECT";
+
+/// The project `PROJECT_VARIABLE` names, when it names one other than `DESKTOP_PROJECT`: this app is
+/// then a second OpenBot beside an installed one.
+pub fn side_by_side_project() -> Option<String> {
+    side_by_side_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn side_by_side_named(named: Option<&str>) -> Option<String> {
+    let project = desktop_project_named(named);
+    (project != DESKTOP_PROJECT).then_some(project)
+}
+
+/**
+The identifier this run of the app goes by: `built`, the one in `tauri.conf.json`, or, beside an
+installed OpenBot (`side_by_side_project`), `built` followed by the project.
+
+Everything the app keeps per installation hangs off its identifier: the single-instance lock, which
+otherwise hands a second app's launch to the first and exits, and the folders Tauri gives the app
+(Application Support and Logs on a Mac, `%APPDATA%` and `%LOCALAPPDATA%` on Windows), which hold the
+record of the installation it last opened. With the built identifier, a second app opened the
+first one's folder and its Quit stopped the first one's back end.
+*/
+pub fn identifier_for(built: &str) -> String {
+    identifier_named(built, side_by_side_project().as_deref())
+}
+
+fn identifier_named(built: &str, project: Option<&str>) -> String {
+    match project {
+        Some(project) => format!("{built}.{project}"),
+        None => built.to_owned(),
+    }
+}
+
+/// The project a new installation runs as: `DESKTOP_PROJECT`, or the one `PROJECT_VARIABLE` names.
+pub fn desktop_project() -> String {
+    desktop_project_named(std::env::var(PROJECT_VARIABLE).ok().as_deref())
+}
+
+fn desktop_project_named(named: Option<&str>) -> String {
+    named
+        .map(str::trim)
+        .filter(|name| compose_project_name(name))
+        .unwrap_or(DESKTOP_PROJECT)
+        .to_owned()
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedProject {
     project: String,
@@ -3388,7 +3737,7 @@ Every Compose command for the installation is given it (see `compose_command`), 
 Stop, the cleanup at Quit, status and Start fresh all name the same project, and none of them can
 name one that is not the installation's own.
 
-A new installation runs as `DESKTOP_PROJECT`. One made by an earlier app ran as its folder's name
+A new installation runs as `DESKTOP_PROJECT`, or as the project `PROJECT_VARIABLE` names. One made by an earlier app ran as its folder's name
 (`project_name`), and keeps it ONLY when the engine holds containers of that project that Compose
 ran from this very folder: Compose labels each container with the folder it ran from, which is
 the one thing a folder-named project cannot fake. Any other answer is `DESKTOP_PROJECT`. A tester's
@@ -3416,11 +3765,12 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
     if let Some(saved) = saved_project(root) {
         return Ok(saved);
     }
+    let new = desktop_project();
     // No folder, no installation: nothing to decide for, and nowhere to record it.
     if !root.is_dir() {
-        return Ok(DESKTOP_PROJECT.to_owned());
+        return Ok(new);
     }
-    let chosen = if legacy != DESKTOP_PROJECT && compose_project_name(legacy) {
+    let chosen = if legacy != DESKTOP_PROJECT && legacy != new && compose_project_name(legacy) {
         let running = legacy_containers(engine, root, legacy)?;
         if running.here {
             legacy.to_owned()
@@ -3432,10 +3782,10 @@ pub fn project_choosing(engine: &Address, root: &Path, legacy: &str) -> Result<S
             }
             legacy.to_owned()
         } else {
-            DESKTOP_PROJECT.to_owned()
+            new
         }
     } else {
-        DESKTOP_PROJECT.to_owned()
+        new
     };
     crate::preparation::write_checkpoint(
         root,
@@ -3588,10 +3938,12 @@ fn canonical(folder: &Path) -> PathBuf {
 /// installation has to say: `None` leaves it what earlier apps always ran with.
 ///
 /// `DESKTOP_PROJECT`'s own, so a new installation's `<namespace>-computer-…`, `-profile-…` and
-/// `-workspace-…` cannot be a source checkout's either. A legacy installation keeps the default its
-/// Bots' computers and volumes were made under, or it would lose them.
+/// `-workspace-…` cannot be a source checkout's either, and the project `PROJECT_VARIABLE` names
+/// its own, so a second OpenBot beside an installed one never stops or reuses the installed one's.
+/// A legacy installation keeps the default its Bots' computers and volumes were made under, or it
+/// would lose them.
 pub fn computer_namespace_for(project: &str) -> Option<&str> {
-    (project == DESKTOP_PROJECT).then_some(DESKTOP_PROJECT)
+    (project == DESKTOP_PROJECT || project == desktop_project()).then_some(project)
 }
 
 /**
@@ -4465,6 +4817,30 @@ mod tests {
     use super::*;
 
     use crate::test_support::temp_root;
+
+    /// A release whose server and computer are one image: its image list names the same reference
+    /// for both, and Compose answers `config --images` with a line for every service, so that
+    /// reference comes back once for each service on it. Install is handed it once, which is what
+    /// it then sizes, pulls and looks for on the computer.
+    #[cfg(unix)]
+    #[test]
+    fn an_image_two_services_run_is_one_image_to_install() {
+        let root = temp_root("stack-one-image-two-services");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "x-openbot-scheduled-work: server\nservices:\n  postgres: {}\n  agent-computer: {}\n  server: {}\n",
+        )
+        .unwrap();
+        let one = "ghcr.io/copilotkit/openbot@sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        // Compose, as far as this asks of it: the lines it prints for these three services.
+        let script = format!("printf '%s\\n' pgvector/pgvector:pg17 {one} {one}");
+        let mut compose = Command::new("sh");
+        compose.args(["-c", script.as_str(), "compose"]);
+        let images = installation_images_by(compose, &root, &root, false).unwrap();
+        assert_eq!(images, [one, "pgvector/pgvector:pg17"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
@@ -6466,6 +6842,119 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    // An engine with the containers `.fixture-containers` lists, one `id<TAB>project<TAB>service`
+    // a line. `ps` filters by label as an engine does, `rm` removes, and Compose answers whatever
+    // it is asked. Every command is in the record above.
+    if scenario == "installed-services" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let listed = || -> Vec<(String, String, String)> {
+            std::fs::read_to_string(".fixture-containers").unwrap_or_default().lines().map(|line| {
+                let mut fields = line.split('\t').map(str::to_string);
+                (fields.next().unwrap(), fields.next().unwrap(), fields.next().unwrap())
+            }).collect()
+        };
+        match actual.first().map(String::as_str) {
+            Some("ps") => {
+                let wanted: Vec<&str> = actual.windows(2)
+                    .filter(|pair| pair[0] == "--filter")
+                    .map(|pair| pair[1].as_str())
+                    .collect();
+                for (id, project, service) in listed() {
+                    let labels = [
+                        format!("label=com.docker.compose.project={project}"),
+                        format!("label=com.docker.compose.service={service}"),
+                    ];
+                    if wanted.iter().all(|filter| labels.iter().any(|label| label == filter)) {
+                        println!("{id}");
+                    }
+                }
+            }
+            Some("rm") => {
+                assert_eq!(actual[1], "--force", "{actual:?}");
+                let remaining: String = listed().into_iter()
+                    .filter(|(id, _, _)| !actual[2..].contains(id))
+                    .map(|(id, project, service)| format!("{id}\t{project}\t{service}\n"))
+                    .collect();
+                std::fs::write(".fixture-containers", remaining).unwrap();
+            }
+            Some("compose") if actual == ["compose", "pull", "--help"] => {
+                println!("      --policy string   Apply pull policy (\"missing\"|\"always\")");
+            }
+            // Compose's own container bookkeeping, where `.fixture-compose-containers` asks for it.
+            // `up` makes a container for each service it is given, and for `migrate` when the
+            // file's `server` waits on one. `down` takes the containers of the services the file
+            // defines and leaves any other: that is what an orphan is. With
+            // `.fixture-this-release-does-not-start`, a file whose `server` waits on no `migrate`
+            // fails its `up`.
+            Some("compose")
+                if std::path::Path::new(".fixture-compose-containers").exists()
+                    && actual.iter().any(|arg| arg == "up" || arg == "down") =>
+            {
+                let file = std::fs::read_to_string("docker-compose.yml").unwrap();
+                let mut inside = false;
+                let mut defined: Vec<String> = Vec::new();
+                for line in file.lines() {
+                    if !line.starts_with(' ') && !line.trim().is_empty() && !line.starts_with('#') {
+                        inside = line.trim_end() == "services:";
+                    } else if inside && line.starts_with("  ") && !line.starts_with("   ") && !line.starts_with("  #") {
+                        if let Some((name, _)) = line.trim().split_once(':') { defined.push(name.to_string()); }
+                    }
+                }
+                let mut containers = listed();
+                if actual.iter().any(|arg| arg == "down") {
+                    containers.retain(|(_, project, service)| project != "openbot-desktop" || !defined.contains(service));
+                } else {
+                    let at = actual.iter().position(|arg| arg == "up").unwrap();
+                    let mut raised: Vec<String> = actual[at + 1..].iter()
+                        .filter(|arg| !arg.starts_with('-') && *arg != "never")
+                        .cloned()
+                        .collect();
+                    for service in &raised {
+                        if !defined.contains(service) {
+                            eprintln!("no such service: {service}");
+                            std::process::exit(1);
+                        }
+                    }
+                    let waits_on_migrate = file.contains("      migrate:\n        condition: service_completed_successfully");
+                    if !waits_on_migrate
+                        && std::path::Path::new(".fixture-this-release-does-not-start").exists()
+                    {
+                        eprintln!("Container openbot-desktop-server-1 Error dependency failed to start");
+                        std::process::exit(1);
+                    }
+                    if waits_on_migrate && raised.iter().any(|name| name == "server") {
+                        raised.push("migrate".to_string());
+                    }
+                    for service in raised {
+                        if !containers.iter().any(|(_, project, made)| project == "openbot-desktop" && *made == service) {
+                            containers.push((format!("{service}-1"), "openbot-desktop".to_string(), service));
+                        }
+                    }
+                }
+                let kept: String = containers.into_iter()
+                    .map(|(id, project, service)| format!("{id}\t{project}\t{service}\n"))
+                    .collect();
+                std::fs::write(".fixture-containers", kept).unwrap();
+            }
+            Some("compose") if actual.iter().any(|arg| arg == "--images") => println!("fixture/image:1"),
+            Some("compose") if actual.iter().any(|arg| arg == "config") => {
+                println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}");
+            }
+            Some("compose") => {}
+            _ => panic!("unexpected command: {actual:?}"),
+        }
+        return;
+    }
+    // No other scenario's engine holds a `migrate` or `worker` container for Start to remove.
+    {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual.len() == 7
+            && actual[..3] == ["ps", "--all", "--quiet"]
+            && actual[6].starts_with("label=com.docker.compose.service=")
+        {
+            return;
+        }
+    }
     if scenario == "postgres-volume" {
         let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
         let (file, failure) = if actual == ["compose", "config", "--format", "json"] {
@@ -8466,16 +8955,26 @@ fn main() {
     /// The personal edition: one computer, no supervisor, and no bundled Bot, whatever the model.
     #[test]
     fn the_personal_edition_raises_one_computer_and_no_bundled_bot() {
-        for service in ["supervisor", "agent-bot", "agent-langgraph"] {
-            assert!(!SERVICES.contains(&service), "{service} is started");
-            assert!(
-                !selected_services(true).contains(&service),
-                "{service} is started"
-            );
+        let root = temp_root("personal-edition-services");
+        std::fs::create_dir_all(&root).unwrap();
+        for compose in [
+            THIS_RELEASES_COMPOSE,
+            RELEASED_COMPOSE_1_0_2,
+            RELEASED_COMPOSE_1_0_3,
+        ] {
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            for service in ["supervisor", "agent-bot", "agent-langgraph"] {
+                assert!(!SERVICES.contains(&service), "{service} is started");
+                assert!(
+                    !selected_services(&root, true).contains(&service),
+                    "{service} is started"
+                );
+            }
+            assert!(SERVICES.contains(&"agent-computer"));
+            assert!(!selected_services(&root, false).contains(&"agent-harness"));
+            assert!(selected_services(&root, true).contains(&"agent-harness"));
         }
-        assert!(SERVICES.contains(&"agent-computer"));
-        assert!(!selected_services(false).contains(&"agent-harness"));
-        assert!(selected_services(true).contains(&"agent-harness"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Stop has to name both profiles, or what sits behind them keeps running: the one Bot the
@@ -8945,6 +9444,195 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The Compose file release 1.0.2 installed, which an installation still has while a newer app
+    /// updates it and after an update that rolled back.
+    const RELEASED_COMPOSE_1_0_2: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml");
+
+    /// And the one 1.0.3 installed, the latest release that runs `worker` and `migrate`. The two
+    /// files are the same today; each is the release's own, so the tests below hold for both.
+    const RELEASED_COMPOSE_1_0_3: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml");
+
+    /// Every release an installation may be on when this app updates it or puts it back, by name.
+    const RELEASED_COMPOSES: [(&str, &str); 2] = [
+        ("1.0.2", RELEASED_COMPOSE_1_0_2),
+        ("1.0.3", RELEASED_COMPOSE_1_0_3),
+    ];
+
+    fn overlay_services(overlay: &str) -> Vec<String> {
+        compose_service_names(overlay)
+    }
+
+    /// Updating 1.0.2 on a Mac with Podman failed, and the fall-back start failed too (1.0.3's file
+    /// is read the same way): the overlay
+    /// named a service the installed Compose file did not define, and Compose refused every command
+    /// with "service ... has neither an image nor a build context specified". The overlay names
+    /// only what the installation's own file defines, whichever release wrote that file.
+    #[test]
+    fn the_mac_podman_overlay_names_only_services_the_installation_uses() {
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("compose-ports-installed");
+            std::fs::create_dir_all(&root).unwrap();
+            let files = ["docker-compose.yml".to_owned()];
+
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            let released = macos_podman_ports(&root, &files).unwrap();
+            let defined = compose_service_names(compose);
+            for service in overlay_services(&released) {
+                assert!(defined.contains(&service), "{service} is not in {release}");
+            }
+            assert_eq!(
+                overlay_services(&released),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-bot",
+                    "agent-langgraph",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+            assert!(released.contains("${BOT_PORT:-4200}:4200"), "{released}");
+
+            // And this release's own file, once the update has put it in place.
+            let current = include_str!("../../../docker-compose.yml");
+            std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+            let updated = macos_podman_ports(&root, &files).unwrap();
+            assert_eq!(
+                overlay_services(&updated),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-langgraph-agui",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+
+            // A service a person's own override file defines counts as defined.
+            std::fs::write(
+                root.join("docker-compose.yml"),
+                "services:\n  postgres:\n    image: x\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("docker-compose.override.yml"),
+                "services:\n  server: # theirs\n    image: y\n",
+            )
+            .unwrap();
+            let both = [
+                "docker-compose.yml".to_owned(),
+                "docker-compose.override.yml".to_owned(),
+            ];
+            assert_eq!(
+                overlay_services(&macos_podman_ports(&root, &both).unwrap()),
+                ["postgres", "server"]
+            );
+
+            // Nothing to override is no overlay at all, not an empty `services:`.
+            std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+            assert_eq!(macos_podman_ports(&root, &files), None);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// This release's Compose file defines `agent-bot` and `agent-langgraph` for one release, so
+    /// the 1.0.2 and 1.0.3 apps can merge their own port overlay onto it (each names both; the
+    /// fixtures are `macos-podman-ports.yml` at those tags). This app starts neither and publishes
+    /// no port for either: not in the services it brings up, nor in either overlay it writes.
+    #[test]
+    fn this_app_names_neither_service_kept_for_an_older_app() {
+        let kept = ["agent-bot", "agent-langgraph"];
+        for older in [
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.2.yml"),
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.3.yml"),
+        ] {
+            for service in kept {
+                assert!(overlay_services(older).contains(&service.to_owned()));
+            }
+        }
+        let current = include_str!("../../../docker-compose.yml");
+        assert_eq!(compose_services_behind(current, OLDER_APPS_PROFILE), kept);
+        // In 1.0.2's file and 1.0.3's both are services it runs, and they keep their ports there.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(
+                compose_services_behind(compose, OLDER_APPS_PROFILE).is_empty(),
+                "{release}"
+            );
+        }
+        assert!(compose_services_behind(current, "openbot").contains(&"server".to_owned()));
+
+        let root = temp_root("compose-kept-for-older-apps");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+        std::fs::write(root.join(".env"), "PICKED_HARNESS_HOST_PORT=4302\n").unwrap();
+        let ports = macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap();
+        let harness = harness_port_overlay(&root, true).unwrap().unwrap();
+        for service in kept {
+            assert!(!SERVICES.contains(&service), "{service} is started");
+            assert!(
+                !selected_services(&root, true).contains(&service),
+                "{service} is started"
+            );
+            for overlay in [&ports, &harness] {
+                assert!(
+                    !overlay_services(overlay).contains(&service.to_owned()),
+                    "{service} is given ports: {overlay}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The same, read by real Compose: with the overlay this app writes, 1.0.2's file is a valid
+    /// project, and with every service named it is the refusal the update met.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn compose_accepts_the_mac_podman_overlay_over_the_1_0_2_compose_file() {
+        let root = temp_root("compose-ports-1-0-2");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        std::fs::write(root.join(".env"), "BOT_PORT=4200\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: &str| {
+            std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), overlay).unwrap();
+            Command::new(&docker)
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"))
+                .args([
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ])
+                .args(["config", "--quiet"])
+                .output()
+                .unwrap()
+        };
+        let every_service = config(MACOS_PODMAN_PORTS);
+        assert!(!every_service.status.success());
+        assert!(
+            String::from_utf8_lossy(&every_service.stderr)
+                .contains("has neither an image nor a build context specified"),
+            "{}",
+            String::from_utf8_lossy(&every_service.stderr)
+        );
+        let installed =
+            config(&macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap());
+        assert!(
+            installed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
     /// This only reads configuration; it never contacts a container engine or registry.
     #[test]
@@ -8954,7 +9642,11 @@ fn main() {
         std::fs::create_dir_all(&root).unwrap();
         let source = include_str!("../../../docker-compose.yml");
         std::fs::write(root.join("docker-compose.yml"), source).unwrap();
-        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(
+            root.join(MACOS_PODMAN_PORTS_FILE),
+            macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap(),
+        )
+        .unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
         let docker =
             std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
@@ -8996,9 +9688,11 @@ fn main() {
             let mut published = 0;
             for (_, service) in before["services"].as_object_mut().unwrap() {
                 if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
-                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    // Each published port is on both loopbacks; the server publishes two.
+                    let both = ports.len();
+                    assert_eq!(both % 2, 0, "the released port pattern must exercise dual loopback");
                     ports.retain(|port| port["host_ip"] == "127.0.0.1");
-                    assert_eq!(ports.len(), 1);
+                    assert_eq!(ports.len(), both / 2);
                     published += 1;
                 }
             }
@@ -9021,7 +9715,8 @@ fn main() {
         let path = PathFixture::with_fake_engine("macos-podman-start");
         let [_, podman] = computer_stop_addresses(&path);
         let (root, record) = computer_stop_root(&path, "podman-start", "{}");
-        let original = "services: {}\n";
+        let original = RELEASED_COMPOSE_1_0_2;
+        std::fs::write(root.join("docker-compose.yml"), original).unwrap();
         let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
         std::fs::write(root.join(".env"), settings).unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
@@ -9106,7 +9801,7 @@ fn main() {
         std::fs::write(root.join(".fixture-refusals"), "2").unwrap();
         let began = std::time::Instant::now();
         let services = up(&docker, &root, false, &Secrets::new()).unwrap();
-        assert_eq!(services, selected_services(false));
+        assert_eq!(services, selected_services(&root, false));
         assert_eq!(tries(), 3);
         assert!(began.elapsed() >= std::time::Duration::from_secs(3));
 
@@ -9219,7 +9914,7 @@ fn main() {
         // Refused, refreshed once with the database image and never a pull, then mounted at once.
         reset();
         let services = up_retrying(&docker, &root, false, &Secrets::new(), &zero, "macos").unwrap();
-        assert_eq!(services, selected_services(false));
+        assert_eq!(services, selected_services(&root, false));
         assert_eq!(read(".fixture-up-tries").len(), 2);
         let refresh = read(".fixture-refresh");
         assert_eq!(refresh.lines().count(), 1, "{refresh}");
@@ -9266,8 +9961,521 @@ fn main() {
     #[test]
     fn migrate_is_not_raised_as_a_service() {
         // Raised alongside the others it exits immediately, and Compose reports a service that will
-        // not stay up. It is run to completion instead, by `migrate`.
-        assert!(!SERVICES.contains(&"migrate"));
+        // not stay up. Where a release's file defines it, `server` depends on it, so `up` runs it
+        // to completion first.
+        assert!(!SERVICES.contains(&MIGRATE));
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("migrate-not-raised");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                !selected_services(&root, true).contains(&MIGRATE),
+                "{release}"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// This release's own Compose file, which an installation has once it is on this release.
+    const THIS_RELEASES_COMPOSE: &str = include_str!("../../../docker-compose.yml");
+
+    /// What tells this release's file from an earlier one's is one line the file itself carries,
+    /// at the top level, once. It is read as text, so no Compose has to resolve the file first, and
+    /// it is not what the file defines: this release's file defines `worker` and `migrate` too.
+    #[test]
+    fn this_releases_compose_file_says_once_that_its_server_does_the_scheduled_work() {
+        let marked: Vec<&str> = THIS_RELEASES_COMPOSE
+            .lines()
+            .filter(|line| line.contains("x-openbot-scheduled-work"))
+            .collect();
+        assert_eq!(marked, [SCHEDULED_WORK_MARKER]);
+        assert_eq!(SCHEDULED_WORK_MARKER, "x-openbot-scheduled-work: server");
+        assert!(server_does_the_scheduled_work(THIS_RELEASES_COMPOSE));
+        let defined = compose_service_names(THIS_RELEASES_COMPOSE);
+        for service in [WORKER, MIGRATE] {
+            assert!(defined.iter().any(|name| name == service), "{service}");
+        }
+
+        // 1.0.2's file and 1.0.3's have no such line, and are read as using both.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(!server_does_the_scheduled_work(compose), "{release}");
+        }
+        // Only the line itself counts: not a comment about it, a nested key, or another value.
+        for other in [
+            "# x-openbot-scheduled-work: server\nservices: {}\n",
+            "services:\n  x-openbot-scheduled-work: server\n",
+            "x-openbot-scheduled-work: worker\nservices: {}\n",
+        ] {
+            assert!(!server_does_the_scheduled_work(other), "{other}");
+        }
+        assert!(server_does_the_scheduled_work(
+            "x-openbot-scheduled-work: server # the server sweeps\nservices: {}\n"
+        ));
+
+        let root = temp_root("scheduled-work-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        for (release, compose) in RELEASED_COMPOSES {
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                installation_uses(&root, WORKER) && installation_uses(&root, MIGRATE),
+                "{release}"
+            );
+        }
+        // A later release's file, with neither service and no line, uses neither.
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
+        assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An installation in the fake engine's folder with `compose` as its Compose file and
+    /// `containers` on its engine (`id<TAB>project<TAB>service` a line), and where the engine
+    /// records what it is asked.
+    fn installed_services_root(
+        path: &PathFixture,
+        label: &str,
+        compose: &str,
+        containers: &str,
+    ) -> (PathBuf, PathBuf) {
+        let (root, record) = computer_stop_root(path, label, "{}");
+        std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+        std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+        (root, record)
+    }
+
+    /// Every engine command Desktop builds for an installation: its image list, its pull, Start,
+    /// Restart and Stop. Returned as the engine recorded them, one a line.
+    fn every_command_for(engine: &Address, root: &Path, record: &Path) -> String {
+        let secrets = Secrets::new();
+        installation_images(engine, root, true, &secrets).unwrap();
+        pull(engine, root, true, &secrets, |_| {}).unwrap();
+        up(engine, root, true, &secrets).unwrap();
+        restart_openbot(engine, root).unwrap();
+        down(engine, root).unwrap();
+        std::fs::read_to_string(record).unwrap()
+    }
+
+    /// The commands in `log` that end with `suffix`, without the folder each ran in.
+    fn commands_ending(log: &str, suffix: &str) -> Vec<String> {
+        log.lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command.to_string())
+            .filter(|command| command.ends_with(suffix))
+            .collect()
+    }
+
+    /// This release's server applies its own migrations and does the scheduled work itself, and
+    /// its Compose file says so on one line. It still defines `migrate` and `worker`, for an app
+    /// from the release before to read, and nothing in this release starts them: Desktop names
+    /// neither anywhere, not to list images, pull, start, restart or stop.
+    #[test]
+    fn this_releases_compose_file_is_never_asked_for_migrate_or_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::this_releases_compose_file_is_never_asked_for_migrate_or_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) =
+            installed_services_root(&path, "this-release", THIS_RELEASES_COMPOSE, "");
+        assert_eq!(
+            selected_services(&root, false),
+            ["postgres", "agent-computer", "server"]
+        );
+
+        let log = every_command_for(&docker, &root, &record);
+        let compose: Vec<&str> = log
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command)
+            .filter(|command| command.starts_with("compose "))
+            .collect();
+        assert!(compose.len() >= 5, "{log}");
+        for command in &compose {
+            // Nor either service kept behind the profile for older apps.
+            for word in command.split(' ') {
+                assert!(
+                    !["migrate", "worker", "agent-bot", "agent-langgraph"].contains(&word),
+                    "{command}"
+                );
+            }
+        }
+        assert_eq!(
+            commands_ending(&log, "postgres agent-computer server agent-harness"),
+            [
+                "compose --profile harness config --images postgres agent-computer server agent-harness",
+                "compose --profile harness pull --policy missing --include-deps postgres agent-computer server agent-harness",
+                "compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness",
+            ],
+            "{log}"
+        );
+        assert_eq!(
+            commands_ending(&log, "restart server"),
+            ["compose --profile openbot restart server"],
+            "{log}"
+        );
+        // Nothing of an earlier release's is on the engine, so nothing is removed.
+        assert!(!log.contains("\trm "), "{log}");
+    }
+
+    /// An installation still has release 1.0.2's or 1.0.3's Compose file while a newer app updates it, and
+    /// again after an update that rolled back. That file defines `migrate` and `worker`, and the
+    /// installation is run as it requires: the worker is raised, restarted and stopped with the
+    /// server, `migrate` runs as the dependency `up` completes before `server`, both images are
+    /// listed and pulled, and neither container is removed.
+    #[test]
+    fn the_previous_releases_compose_file_still_runs_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::the_previous_releases_compose_file_still_runs_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers =
+                "migrate-1\topenbot-desktop\tmigrate\nworker-1\topenbot-desktop\tworker\n";
+            let (root, record) = installed_services_root(
+                &path,
+                &format!("previous-release-{release}"),
+                compose,
+                containers,
+            );
+            // `server` waits on `migrate` in that file, which is how `up` runs it.
+            assert!(compose.contains(
+            "    depends_on:\n      migrate:\n        condition: service_completed_successfully"
+        ));
+            assert_eq!(
+                selected_services(&root, false),
+                ["postgres", "agent-computer", "server", "worker"]
+            );
+
+            let log = every_command_for(&docker, &root, &record);
+            assert_eq!(
+            commands_ending(&log, "postgres agent-computer server worker agent-harness migrate"),
+            [
+                "compose --profile harness config --images postgres agent-computer server worker agent-harness migrate",
+                "compose --profile harness pull --policy missing --include-deps postgres agent-computer server worker agent-harness migrate",
+            ],
+            "{log}"
+        );
+            assert_eq!(
+            commands_ending(&log, "postgres agent-computer server worker agent-harness"),
+            ["compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness"],
+            "{log}"
+        );
+            assert_eq!(
+                commands_ending(&log, "restart server worker"),
+                ["compose --profile openbot restart server worker"],
+                "{log}"
+            );
+            assert!(
+                log.contains(
+                    "\tcompose -f docker-compose.yml --profile harness --profile openbot down\n"
+                ),
+                "{log}"
+            );
+            // Its `migrate` and `worker` containers are Compose's own under this file: never looked
+            // for, never removed.
+            assert!(!log.contains("\tps --all --quiet "), "{log}");
+            assert!(!log.contains("\trm "), "{log}");
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                containers
+            );
+        }
+    }
+
+    /// The update's own steps (`upgrade::Steps`) through the functions Start and Stop use, on the
+    /// fake engine: Stop is `down`, the new release is this release's Compose file, installing asks
+    /// for its image list, and Start is `up`. With `dies_starting`, the app stops the moment the new
+    /// release has started, as a crash or a forced quit would. There is no database to dump here.
+    struct UpdateTo<'a> {
+        engine: &'a Address,
+        root: &'a Path,
+        dies_starting: bool,
+    }
+
+    impl crate::upgrade::Steps for UpdateTo<'_> {
+        fn stop(&mut self) -> Result<(), Problem> {
+            down(self.engine, self.root).map_err(Problem::from)
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(false)
+        }
+        fn back_up(&mut self, _to: &Path) -> Result<(), Problem> {
+            unreachable!("there is no database to back up")
+        }
+        fn lay_out(&mut self) -> Result<(), Problem> {
+            std::fs::write(self.root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+            Ok(())
+        }
+        fn install(&mut self) -> Result<(), Problem> {
+            installation_images(self.engine, self.root, false, &Secrets::new()).map(|_| ())
+        }
+        fn start(&mut self) -> Result<(), Problem> {
+            up(self.engine, self.root, false, &Secrets::new())?;
+            if self.dies_starting && !installation_uses(self.root, WORKER) {
+                panic!("the app stopped while the update was starting");
+            }
+            Ok(())
+        }
+        fn restore(&mut self, _from: &Path) -> Result<(), Problem> {
+            unreachable!("there is no dump to restore")
+        }
+    }
+
+    /// An installation laid out as an earlier release (`compose`, 1.0.2's file or 1.0.3's) and
+    /// running, on an engine that keeps containers the way Compose does: `up` under that file has
+    /// made its `migrate` and `worker` beside the rest.
+    fn running_earlier_release(
+        path: &PathFixture,
+        docker: &Address,
+        label: &str,
+        compose: &str,
+    ) -> (PathBuf, PathBuf) {
+        let (root, record) = installed_services_root(path, label, compose, "");
+        std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
+        up(docker, &root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            fixture_services(&root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        std::fs::remove_file(&record).unwrap();
+        (root, record)
+    }
+
+    /// The services this installation has a container for on the fake engine.
+    fn fixture_services(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join(".fixture-containers"))
+            .unwrap()
+            .lines()
+            .map(|line| line.rsplit('\t').next().unwrap().to_string())
+            .collect()
+    }
+
+    /// What the engine was asked, without the folder each command ran in.
+    fn engine_commands(record: &Path) -> Vec<String> {
+        std::fs::read_to_string(record)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command.to_string())
+            .collect()
+    }
+
+    /// What must hold once an update from an earlier release (`compose`, 1.0.2's file or 1.0.3's)
+    /// has been undone: the installed Compose file is that release's again, byte for byte; the previous version was started as that file requires, with
+    /// its `worker` named and its `migrate` raised by that `up`; its image list still asks for
+    /// both; and nothing looked for, or removed, a `worker` or `migrate` container once that file
+    /// was back, or at any point removed one.
+    fn assert_back_on_earlier_release(docker: &Address, root: &Path, record: &Path, compose: &str) {
+        assert_eq!(
+            std::fs::read(root.join("docker-compose.yml")).unwrap(),
+            compose.as_bytes()
+        );
+        assert!(!crate::upgrade::interrupted(root));
+        let commands = engine_commands(record);
+        let listing = format!("{commands:#?}");
+        let previous_start =
+            "compose up -d --no-build --pull never postgres agent-computer server worker";
+        assert_eq!(
+            commands.last().map(String::as_str),
+            Some(previous_start),
+            "{listing}"
+        );
+        // The update's own Stop, under this release's file, is the last to look for left-overs;
+        // the previous version's Start, under its own file, does not.
+        let last_down = commands
+            .iter()
+            .rposition(|command| command.ends_with(" down"))
+            .unwrap();
+        assert!(
+            !commands[last_down..]
+                .iter()
+                .any(|command| command.starts_with("ps --all --quiet")),
+            "{listing}"
+        );
+        assert!(
+            !commands.iter().any(|command| command.starts_with("rm ")),
+            "{listing}"
+        );
+        // Its `migrate` ran as the dependency that `up` completes, and its `worker` is running.
+        assert_eq!(
+            fixture_services(root),
+            ["postgres", "agent-computer", "server", "worker", "migrate"]
+        );
+        // And what Install would ask for now is that release's list, `migrate` and `worker` included.
+        std::fs::remove_file(record).unwrap();
+        installation_images(docker, root, false, &Secrets::new()).unwrap();
+        assert_eq!(
+            engine_commands(record),
+            ["compose config --images postgres agent-computer server worker migrate"]
+        );
+    }
+
+    /// An update from 1.0.2 or 1.0.3 whose new version does not start is undone: that release's
+    /// Compose file goes back and it is started again. The failure comes after this release's file, which uses
+    /// neither `migrate` nor `worker`, is in place.
+    #[test]
+    fn an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-fails-{release}"),
+                compose,
+            );
+            std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: false,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
+
+            // The new version was tried under its own file: asked for no `migrate` or `worker`.
+            let commands = engine_commands(&record);
+            assert!(
+                commands.contains(
+                    &"compose config --images postgres agent-computer server".to_string()
+                ) && commands.contains(
+                    &"compose up -d --no-build --pull never postgres agent-computer server"
+                        .to_string()
+                ),
+                "{commands:#?}"
+            );
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
+    }
+
+    /// The same, for an update the app stopped part way: the new version had started when the app
+    /// died, and the next Start puts the earlier release back first (`upgrade::recover`) and
+    /// starts it.
+    #[test]
+    fn an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker(
+    ) {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-interrupted-{release}"),
+                compose,
+            );
+
+            let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut steps = UpdateTo {
+                    engine: &docker,
+                    root: &root,
+                    dies_starting: true,
+                };
+                crate::upgrade::run(&root, &mut steps)
+            }));
+            assert!(died.is_err(), "the app was to stop part way");
+            // Left as the app left it: this release's file in place and running, the earlier one's
+            // set aside.
+            assert!(crate::upgrade::interrupted(&root));
+            assert_eq!(
+                std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+                THIS_RELEASES_COMPOSE
+            );
+            assert_eq!(
+                fixture_services(&root),
+                ["postgres", "agent-computer", "server"]
+            );
+
+            // The next Start.
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: false,
+            };
+            assert!(crate::upgrade::recover(&root, &mut steps).unwrap());
+            crate::upgrade::Steps::start(&mut steps).unwrap();
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
+    }
+
+    /// The update from 1.0.2 or 1.0.3: once this release's Compose file is in place, the `worker`
+    /// and `migrate` containers that release made belong to no service, and Compose leaves such a container
+    /// running. Start removes them before it raises anything, and only them: found by this
+    /// installation's project and those two services, removed without touching a volume. A
+    /// `worker` of another Compose project and this installation's other containers stay.
+    #[test]
+    fn the_update_removes_the_worker_and_migrate_containers_the_previous_release_left() {
+        if crate::test_support::isolated_process(
+            "stack::tests::the_update_removes_the_worker_and_migrate_containers_the_previous_release_left",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers = "migrate-1\topenbot-desktop\tmigrate\n\
+                          worker-1\topenbot-desktop\tworker\n\
+                          server-1\topenbot-desktop\tserver\n\
+                          postgres-1\topenbot-desktop\tpostgres\n\
+                          elsewhere-worker-1\tanother-project\tworker\n";
+            // The earlier release is installed and running, and the update lays this release's file
+            // over it.
+            let (root, record) =
+                installed_services_root(&path, &format!("updated-{release}"), compose, containers);
+            std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+
+            let services = up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(services, ["postgres", "agent-computer", "server"]);
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                "server-1\topenbot-desktop\tserver\n\
+             postgres-1\topenbot-desktop\tpostgres\n\
+             elsewhere-worker-1\tanother-project\tworker\n"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            let commands: Vec<&str> = log
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(_, command)| command)
+                .collect();
+            assert_eq!(
+            commands,
+            [
+                "ps --all --quiet --filter label=com.docker.compose.project=openbot-desktop --filter label=com.docker.compose.service=migrate",
+                "rm --force migrate-1",
+                "ps --all --quiet --filter label=com.docker.compose.project=openbot-desktop --filter label=com.docker.compose.service=worker",
+                "rm --force worker-1",
+                "compose up -d --no-build --pull never postgres agent-computer server",
+            ],
+            "{log}"
+        );
+            assert!(
+                !log.contains("--volumes") && !log.contains("--remove-orphans"),
+                "{log}"
+            );
+
+            // Stop finds none left, and the next Start removes nothing.
+            std::fs::remove_file(&record).unwrap();
+            down(&docker, &root).unwrap();
+            up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert!(!std::fs::read_to_string(&record).unwrap().contains("\trm "));
+        }
     }
 
     #[test]
@@ -9913,6 +11121,77 @@ fn main() {
                 Some(DESKTOP_PROJECT.to_owned())
             )
         );
+    }
+
+    #[test]
+    fn a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot() {
+        const TEST: &str = "stack::tests::a_new_folder_runs_as_the_project_the_variable_names_beside_an_installed_openbot";
+        if crate::test_support::isolated_process(TEST) {
+            return;
+        }
+        let side = "openbot-side-by-side";
+        std::env::set_var(PROJECT_VARIABLE, side);
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let docker = Address::new(crate::engine::Engine::Docker, None);
+        let (installed, _) = project_choice_root(&path, "installed");
+        let (root, _) = project_choice_root(&path, "side");
+        // The installed OpenBot is running, as `DESKTOP_PROJECT`, from its own folder.
+        std::fs::write(
+            root.join(".fixture-containers"),
+            compose_container_row("c-installed", "server", DESKTOP_PROJECT, &installed),
+        )
+        .unwrap();
+        assert_eq!(project(&docker, &root).unwrap(), side);
+        assert_eq!(saved_project(&root).as_deref(), Some(side));
+        // Its Bots' computers are its own too: Quit stops these, and only these.
+        assert_eq!(
+            compose_names(&docker, &root),
+            (Some(side.to_owned()), Some(side.to_owned()))
+        );
+    }
+
+    #[test]
+    fn only_another_project_gives_the_app_an_identifier_of_its_own() {
+        const BUILT: &str = "ai.copilotkit.openbot.desktop";
+        for unchanged in [None, Some(""), Some("Not A Name"), Some(DESKTOP_PROJECT)] {
+            assert_eq!(side_by_side_named(unchanged), None, "{unchanged:?}");
+            assert_eq!(
+                identifier_named(BUILT, side_by_side_named(unchanged).as_deref()),
+                BUILT
+            );
+        }
+        let side = side_by_side_named(Some("openbot-test2"));
+        assert_eq!(side.as_deref(), Some("openbot-test2"));
+        assert_eq!(
+            identifier_named(BUILT, side.as_deref()),
+            "ai.copilotkit.openbot.desktop.openbot-test2"
+        );
+    }
+
+    #[test]
+    fn the_project_variable_is_ignored_unless_compose_accepts_the_name() {
+        assert_eq!(desktop_project_named(None), DESKTOP_PROJECT);
+        for ignored in [
+            "",
+            "  ",
+            "Upper",
+            "-leading",
+            "_leading",
+            "two words",
+            "a/b",
+            "dot.ted",
+        ] {
+            assert_eq!(
+                desktop_project_named(Some(ignored)),
+                DESKTOP_PROJECT,
+                "{ignored:?}"
+            );
+        }
+        assert_eq!(
+            desktop_project_named(Some(" openbot-dev \n")),
+            "openbot-dev"
+        );
+        assert_eq!(desktop_project_named(Some("openbot_2")), "openbot_2");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import type { Message } from "@ag-ui/core";
+import { EventType, type Message } from "@ag-ui/core";
 import {
   type Attachment,
   CopilotChatConfigurationProvider,
@@ -44,6 +44,7 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
+  leftAnswers,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -76,6 +77,12 @@ import { offerItsOwnTools } from "@/lib/copilot/bot-offer";
 import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
+import {
+  askRunLiveness,
+  RUN_ENDED_UNHEARD,
+  RUN_UNREACHABLE,
+  watchQuietRun,
+} from "@/lib/copilot/quiet-run";
 import {
   repairUnansweredToolCalls,
   unansweredToolCalls,
@@ -115,6 +122,12 @@ import { newId } from "../../lib/new-id";
  * next message sent.
  */
 const JOIN_DEADLINE_MS = 1500;
+
+/**
+ * How long the runtime is given to say whether a turn the roster reports can still be heard, before
+ * the join is ended. Shorter than a quiet run's ask: the conversation shows nothing while it waits.
+ */
+const JOIN_LIVENESS_MS = 5_000;
 
 /**
  * Whether the roster says a turn is running in this conversation now: one this tab started from a
@@ -681,6 +694,16 @@ export function ChannelChat({
            * once the thread's run is over, so a roster that is late to clear cannot hold it open.
            */
           answering: () => lastRun.running() || rosterSaysWorking(channel.id),
+          /*
+           * A turn the replay has carried is being heard. One only the roster knows of is checked
+           * with the server, which is asked the way a quiet run is: when it cannot answer, nothing
+           * is coming down this join, and keeping it kept the conversation shut for good.
+           */
+          reachable: async () =>
+            lastRun.running() ||
+            (await askRunLiveness(channel.id, {
+              answerMs: JOIN_LIVENESS_MS,
+            })) !== "unreachable",
           onAnswering: () => {
             if (current) {
               setRestoring(false);
@@ -1267,7 +1290,11 @@ export function ChannelChat({
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
-    const repaired = repairUnansweredToolCalls(target.messages);
+    const repaired = repairUnansweredToolCalls(
+      target.messages,
+      undefined,
+      leftAnswers(queryClient.getQueryData(approvalInboxOptions().queryKey)),
+    );
     if (repaired !== target.messages) {
       target.setMessages(repaired as typeof target.messages);
     }
@@ -1303,9 +1330,55 @@ export function ChannelChat({
        * says so under the turn rather than looping.
        */
       for (let carriedOn = false; ; carriedOn = true) {
-        await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
-          whileObserved(target, () => copilotkit.runAgent({ agent: target })),
+        /*
+         * A RUN THAT GOES QUIET IS ASKED ABOUT, and ended here only on the runtime's answer: no run
+         * going, or no answer (`quiet-run.ts`). Its events reach this browser by a service that can
+         * stall, and a run the server gave up then looked like one still thinking: "Running" and
+         * Stop, for good. A browser step taken between this turn's runs is quiet of its own, so the
+         * watch covers one run at a time.
+         */
+        const quiet = watchQuietRun({
+          ask: () => askRunLiveness(channel.id),
+        });
+        const hearing = target.subscribe({
+          onEvent: ({ event }) => {
+            // Between the server's runs the turn is this browser's (a step it takes, a card the
+            // person answers), and quiet there is not a run gone missing.
+            if (
+              event.type === EventType.RUN_FINISHED ||
+              event.type === EventType.RUN_ERROR
+            )
+              quiet.rest();
+            else quiet.heard();
+          },
+        });
+        const run = withVoiceContext(
+          copilotkit,
+          target.agentId,
+          voiceHistory,
+          () =>
+            whileObserved(target, () => copilotkit.runAgent({ agent: target })),
         );
+        const ended = await Promise.race([
+          run.then(() => "ran" as const),
+          quiet.over,
+        ]).finally(() => {
+          quiet.stop();
+          hearing.unsubscribe();
+        });
+        if (ended !== "ran") {
+          // The run is let go of here; whatever it does later is not this turn's any more.
+          run.catch(() => undefined);
+          void target.detachActiveRun().catch(() => undefined);
+          awaitingReply.current = false;
+          // What the thread holds is what was saved: read back when the runtime can be asked.
+          if (ended === "over") {
+            const whole = await readBackFromThread(target, existingMessageIds);
+            if (whole) reportReadBack(target);
+          }
+          setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+          break;
+        }
         if (!streamBroke.current || turnFailure.current !== null) break;
         streamBroke.current = false;
         awaitingReply.current = false;

@@ -10,12 +10,14 @@ import {
 import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
-import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { RoutineRoutePage } from "@/components/routines/routine-page";
+import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { cronFrom, scheduleSentence } from "@/lib/routines/form";
 import type { RoutineRecord, RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -42,12 +44,12 @@ afterEach(() => {
 function routine(overrides: Partial<RoutineRecord>): RoutineRecord {
   return {
     id: "routine-1",
-    agentId: "lead-desk",
+    botId: "lead-desk",
     schedule: "Weekdays at 09:00",
     timezone: "Europe/Madrid",
     instruction: "Send me a summary of yesterday's new leads",
     title: "Morning leads",
-    channel: {
+    conversation: {
       id: "conversation-1",
       name: "Lead Desk",
       title: "Leads",
@@ -56,27 +58,26 @@ function routine(overrides: Partial<RoutineRecord>): RoutineRecord {
     enabled: true,
     nextRunAt: "2099-01-01T08:00:00.000Z",
     lastRun: null,
+    goalId: null,
+    createdAt: "2026-11-01T09:00:00.000Z",
     ...overrides,
   };
 }
 
-/** `/api/routines` and `/api/agents` in the shapes the server sends them. */
+/** The routines and the Bots list in the shapes the server sends them. */
 function draw(element: React.ReactNode, page: RoutinesPage) {
-  global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path.startsWith("/api/routines")) return Response.json(page);
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     // The same list draws goals and check-ins; none here.
-    if (path === "/api/responsibilities")
-      return Response.json({ responsibilities: [] });
-    if (path === "/api/proactive/settings")
-      return Response.json({ settings: [], allowed: true });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: path.includes("hidden=true")
-          ? []
-          : [{ id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" }],
-      });
-    return Response.json({});
+    const schedules = answerScheduleLists(input, init, page);
+    if (schedules) return schedules;
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" },
+        ],
+        hidden: [],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -89,12 +90,9 @@ function draw(element: React.ReactNode, page: RoutinesPage) {
   );
 }
 
-const SWEEP = { lastSweptAt: new Date().toISOString(), working: true };
-
 test("Connections > Routines says what Routines is and leads to the Routines page", async () => {
   const view = draw(<RoutinesConnectionPage />, {
     routines: [routine({}), routine({ id: "routine-2", enabled: false })],
-    sweep: SWEEP,
   });
   expect(
     await view.findByText(
@@ -119,7 +117,7 @@ async function newRoutineHref(view: ReturnType<typeof draw>) {
 }
 
 test("an empty Routines page offers New routine, and a Bot's own page starts it for that Bot", async () => {
-  const empty = { routines: [], sweep: SWEEP };
+  const empty = { routines: [] };
   const page = draw(<RoutinesList />, empty);
   expect(await newRoutineHref(page)).toBe("/routines/new");
   cleanup();
@@ -133,7 +131,6 @@ test("an empty Routines page offers New routine, and a Bot's own page starts it 
 test("the Routines page says which Bot each routine belongs to", async () => {
   const view = draw(<RoutinesList />, {
     routines: [routine({})],
-    sweep: SWEEP,
   });
   // On the row, by name, and the row links to its page.
   const row = (await view.findByText(/^Lead Desk · /)).closest(
@@ -144,7 +141,6 @@ test("the Routines page says which Bot each routine belongs to", async () => {
   // On its page, as the way to that Bot's routines.
   const details = draw(<RoutineRoutePage routineId={routine({}).id} />, {
     routines: [routine({})],
-    sweep: SWEEP,
   });
   const bot = await details.findByRole("link", { name: /Lead Desk/ });
   expect(bot.getAttribute("href")).toBe("/bots/lead-desk/routines");
@@ -153,7 +149,7 @@ test("the Routines page says which Bot each routine belongs to", async () => {
 test("the clock beside the message box opens New routine for this Bot, posting here", async () => {
   const view = draw(
     <RoutineComposerButton agentId="lead-desk" channelId="conversation-1" />,
-    { routines: [], sweep: SWEEP },
+    { routines: [] },
   );
   const clock = await view.findByRole("button", { name: "Set up a routine" });
   expect(clock.getAttribute("href")).toBe(

@@ -70,8 +70,8 @@ Requirements for the clone path:
 Fresh managed OpenAI clone setup needs a CopilotKit sign-in and an OPENAI_API_KEY model credential.
 The setup helper writes the project runtime key and Learning container assignment.
 
-`scripts/start.sh` fills the local secrets it owns: COMPUTER_TOKEN and WORKER_SHARED_SECRET have dev
-defaults, and MANAGED_AGENT_TOKEN plus AGENT_TOOL_TOKEN are generated and written back into `.env`.
+`scripts/start.sh` fills the local secrets it owns: COMPUTER_TOKEN has a dev default, and
+MANAGED_AGENT_TOKEN plus AGENT_TOOL_TOKEN are generated and written back into `.env`.
 Everything else in `.env.example` is either already correct, optional, or generated. Do not walk the
 person through every blank line.
 
@@ -137,12 +137,12 @@ Then:
 
   bash scripts/start.sh
 
-It starts Docker services, applies migrations, starts the API on 3001 and the routine worker from
-the published OpenBot server image (at the tag in backend-images.env), starts the app from the clone
-on 3010, and waits for each service to answer its own health route. Open http://localhost:3010. The
+It starts Docker services, starts the API on 3001 from the published OpenBot server image (at the
+tag in backend-images.env), which applies its own migrations as it starts and fires routines itself,
+starts the app from the clone on 3010, and waits for each service to answer its own health route. Open http://localhost:3010. The
 server's log is `docker compose logs server`.
 
-`bash scripts/stop.sh` takes down the app, worker, API server, Docker services, and each Bot's
+`bash scripts/stop.sh` takes down the app, API server, Docker services, and each Bot's
 computer. Pass `--keep-computers` only when they deliberately want browser sessions left signed in.
 Nothing is deleted either way: the database, files and browser profiles are volumes.
 

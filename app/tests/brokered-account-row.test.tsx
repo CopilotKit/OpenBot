@@ -33,6 +33,7 @@ import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
+import { answerBotsList } from "./bots-api";
 
 /**
  * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
@@ -660,7 +661,8 @@ function installDeployment(deployment: Deployment): Server {
       state.probe = undefined;
       return json({ ok: true });
     }
-    if (path.startsWith("/api/agents")) return json({ agents: [] });
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
     if (path.startsWith("/api/plugins")) {
       return json(
         pluginsPage(state.composioConfigured, state.authScheme, state.title),

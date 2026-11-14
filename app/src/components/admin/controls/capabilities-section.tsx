@@ -160,7 +160,7 @@ function OverridesDialog({
   const setCapability = useMutation(setCapabilityMutationOptions(queryClient));
   const scopes: { kind: "role" | "group"; id: string; label: string }[] = [
     { kind: "role", id: "admin", label: "Admins" },
-    { kind: "role", id: "user", label: "Members" },
+    { kind: "role", id: "member", label: "Members" },
     ...data.groups.map((group) => ({
       kind: "group" as const,
       id: group,
@@ -206,7 +206,7 @@ function OverridesDialog({
             ? data.capabilities.map((capability) => {
                 const stored =
                   scope.kind === "role"
-                    ? capability.roles[scope.id as "admin" | "user"]
+                    ? capability.roles[scope.id as "admin" | "member"]
                     : capability.groups[scope.id];
                 const value: Tri =
                   stored === undefined ? "inherit" : stored ? "on" : "off";

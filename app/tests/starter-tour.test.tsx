@@ -20,6 +20,13 @@ import {
   STARTER_SUGGESTIONS,
 } from "@/components/starter-tour/suggestions";
 import { authKeys } from "@/lib/auth/queries";
+import {
+  ME_PATH,
+  meResponse,
+  PREFERENCES_PATH,
+  preferencesResponse,
+} from "./accounts-api";
+import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -43,8 +50,8 @@ function server(initial: Preferences = {}, available = true) {
   const state = { userId: "first", failSave: false, patches: [] as unknown[] };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path.endsWith("/api/me"))
-      return Response.json({
+    if (path.endsWith(ME_PATH))
+      return meResponse({
         user: {
           id: state.userId,
           email: "person@example.com",
@@ -52,7 +59,7 @@ function server(initial: Preferences = {}, available = true) {
           onboarding: { completedAt: "2026-01-01", step: 3 },
         },
       });
-    if (path.endsWith("/api/settings/preferences")) {
+    if (path.endsWith(PREFERENCES_PATH)) {
       if (init?.method === "PATCH") {
         const patch = JSON.parse(String(init.body));
         state.patches.push(patch);
@@ -63,16 +70,14 @@ function server(initial: Preferences = {}, available = true) {
           );
         users[state.userId] = { ...users[state.userId], ...patch };
       }
-      return Response.json({ preferences: users[state.userId] });
+      return preferencesResponse({ preferences: users[state.userId] });
     }
-    if (path.endsWith("/api/capabilities"))
+    if (path.endsWith(DEPLOYMENT_PATH))
       return Response.json({ generativeUi: available });
-    if (path.endsWith("/api/setup"))
+    if (path.endsWith(SETUP_CHECKLIST_PATH))
       return Response.json({
-        checklist: {
-          audience: "admin",
-          rows: [{ id: "computer", ready: available }],
-        },
+        audience: "admin",
+        rows: [{ id: "computer", ready: available }],
       });
     throw new Error(`Unexpected HTTP request: ${path}`);
   }) as typeof fetch;

@@ -28,6 +28,18 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
+import { ME_PATH, meResponse, PREFERENCES_PATH } from "./accounts-api";
+import {
+  DEPLOYMENT_PATH,
+  MY_CAPABILITIES_PATH,
+  SETUP_CHECKLIST_PATH,
+} from "./admin-settings-api";
+import { answerBotsList, botPath } from "./bots-api";
+import {
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
@@ -112,8 +124,8 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/me")
-        return NativeResponse.json({
+      if (url.pathname === ME_PATH)
+        return meResponse({
           user: {
             id: "person",
             name: "Sam",
@@ -122,16 +134,14 @@ beforeAll(() => {
             onboarding: null,
           },
         });
-      if (url.pathname === "/api/settings/preferences")
-        return NativeResponse.json({ preferences });
-      if (url.pathname === "/api/capabilities")
+      if (url.pathname === PREFERENCES_PATH)
+        return NativeResponse.json(preferences);
+      if (url.pathname === DEPLOYMENT_PATH)
         return NativeResponse.json({ generativeUi: true });
-      if (url.pathname === "/api/setup")
+      if (url.pathname === SETUP_CHECKLIST_PATH)
         return NativeResponse.json({
-          checklist: {
-            audience: "admin",
-            rows: [{ id: "computer", ready: true }],
-          },
+          audience: "admin",
+          rows: [{ id: "computer", ready: true }],
         });
       if (url.pathname === "/api/channels" && method === "GET")
         return NativeResponse.json({ channels: [], nextCursor: null });
@@ -152,7 +162,7 @@ beforeAll(() => {
           reason: "fixture override",
         });
       }
-      if (url.pathname === "/api/models")
+      if (catalogueView(url) === "offered")
         return NativeResponse.json({
           provider: "openai",
           source: "openai",
@@ -168,13 +178,14 @@ beforeAll(() => {
             },
           ],
         });
-      if (url.pathname.endsWith("/model")) {
+      if (modelChoiceConversation(url.pathname)) {
         if (method === "PUT") {
           await modelSaveGate;
           if (failModel)
-            return NativeResponse.json(
-              { error: "Model save failed. Try again." },
-              { status: 500 },
+            return problemResponse(
+              500,
+              "INTERNAL_SERVER_ERROR",
+              "Model save failed. Try again.",
             );
           saved = JSON.parse(String(init?.body));
         }
@@ -192,10 +203,10 @@ beforeAll(() => {
           preferences = {};
         return new NativeResponse(null, { status: 204 });
       }
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({
           tools: [],
@@ -205,7 +216,7 @@ beforeAll(() => {
         return NativeResponse.json({ components: [] });
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

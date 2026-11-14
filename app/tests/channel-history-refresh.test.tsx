@@ -17,6 +17,8 @@ import {
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { generativeUiProviderOptions, OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { answerBotsList, botPath } from "./bots-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
 const ActivityRequestSchema = z.object({
@@ -92,18 +94,18 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === "/api/plugins/for/refresh-bot")
         return NativeResponse.json({ skills: [], tools: [] });
       // What the Bot's runs are offered is read from these, as the server answers them.
-      if (url.pathname === "/api/agents/refresh-bot")
+      if (url.pathname === botPath("refresh-bot"))
         return NativeResponse.json({
-          agent: { id: "refresh-bot", visibility: "public", canManage: true },
+          bot: { id: "refresh-bot", visibility: "public", canManage: true },
         });
       if (url.pathname === "/api/components/for-agent/refresh-bot")
         return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

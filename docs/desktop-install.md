@@ -214,7 +214,7 @@ fill a gap. Three rules hold that boundary:
   Docker's code signature instead.
 - **A small installer, a downloaded deployment.** The installer is the app and the bundled CLI.
   The deployment is `docker-compose.yml`, out of the release's source tarball at a tag, laid out
-  under the installation folder; everything else, server, app, worker, computer and tenant package,
+  under the installation folder; everything else, server, app, computer and tenant package,
   runs from the images that release's `container-images.json` names by digest
   (`src-tauri/src/deployment.rs`). Nothing runs on the host: the person's own browser runs on the
   one computer and is shown in the OpenBot window, as hosted OpenBot shows it.

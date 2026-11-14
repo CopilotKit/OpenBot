@@ -69,7 +69,7 @@ pub enum Action {
 }
 
 impl Action {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Action::Status => "status",
             Action::Start => "start",
@@ -2971,8 +2971,56 @@ pub fn run(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<Report, Failure> {
-    let (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    let (mut code, mut bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    if action == Action::Start {
+        for wait in START_REFUSED_WAITS {
+            if !engine_refused_start(code, &bytes) {
+                break;
+            }
+            log::warn!(
+                "[local start] the engine refused to start the backend's node (exit 125); asking again in {}s",
+                wait.as_secs()
+            );
+            if !waited_uncancelled(wait, cancel) {
+                return Err(Failure::Cancelled);
+            }
+            (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+        }
+    }
     normalize(action, code, &bytes)
+}
+
+/**
+How long `local start` waits before it is asked again, after the engine refused to start the back
+end's node: twice at most, so a start that keeps being refused fails within about half a minute.
+
+Windows G: OpenBot quit, opened again within seconds, and its `local start` failed in 0.3 s, the
+CLI's `podman start` of the node exiting 125, the engine's own error before anything ran. The window
+said "Setup stopped partway through with an error. Retry.", and Retry started it at once.
+*/
+const START_REFUSED_WAITS: [Duration; 2] = [Duration::from_secs(3), Duration::from_secs(8)];
+
+/// The CLI's `local start` failed because the engine would not start the node: its `start` exited
+/// 125. The CLI keeps the engine's words to itself, so this is the one sign there is.
+fn engine_refused_start(code: i32, stdout: &[u8]) -> bool {
+    code == 1
+        && serde_json::from_slice::<Value>(stdout).is_ok_and(|wire| {
+            wire.pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|said| said.starts_with("Local start failed (exit 125)"))
+        })
+}
+
+/// Waits `wait` unless the call is cancelled first; false when it was.
+fn waited_uncancelled(wait: Duration, cancel: &Cancel) -> bool {
+    let until = Instant::now() + wait;
+    while Instant::now() < until {
+        if cancel.requested() {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !cancel.requested()
 }
 
 /// `local setup` in `installation`, the folder the stack is created for.
@@ -4364,13 +4412,14 @@ fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
 /**
 The stack `local setup` in `installation` resumes, when it has images still to pull: the one the CLI
 recorded for that folder (`appPaths`, which it keeps as the folder's real path), with its release,
-and not already set up. `None` for a first setup, which has no node to download into yet.
+and not already set up, with the step it stopped at when it says one (`failedStep`). `None` for a
+first setup, which has no node to download into yet.
 */
 fn stack_set_up_in(
     cli: &PinnedCli,
     installation: &std::path::Path,
     cancel: &Cancel,
-) -> Result<Option<(StackId, String)>, Failure> {
+) -> Result<Option<(StackId, String, Option<String>)>, Failure> {
     let (code, bytes) = match execute(
         cli,
         &LIST_ARGUMENTS,
@@ -4412,7 +4461,11 @@ fn stack_set_up_in(
             let finished = saved.get("step").and_then(Value::as_str) == Some("ready")
                 && saved.get("failedStep").is_none_or(Value::is_null)
                 && saved.get("update").is_none_or(Value::is_null);
-            (!finished).then_some((id, release))
+            let failed_step = saved
+                .get("failedStep")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            (!finished).then_some((id, release, failed_step))
         }))
 }
 
@@ -4812,7 +4865,7 @@ fn setup_downloading(
 ) -> Result<Report, Failure> {
     let downloaded = match cli_images_of(cli) {
         Some(images) => match stack_set_up_in(cli, installation, cancel)? {
-            Some((stack, release)) => download_images(
+            Some((stack, release, _)) => download_images(
                 &images,
                 &setup_arguments(accepted),
                 &stack,
@@ -4824,11 +4877,22 @@ fn setup_downloading(
             // A first setup: its node does not exist until the CLI makes it, so its download is
             // followed while the CLI pulls (`local_images::follow_new_stack`).
             None => {
-                return setup_followed(
+                let first = setup_followed(
                     cli,
                     installation,
                     accepted,
                     limits.1,
+                    cancel,
+                    &images,
+                    attempt,
+                    images_limits,
+                )?;
+                return resumed_once_if_download_stopped(
+                    first,
+                    cli,
+                    installation,
+                    accepted,
+                    limits,
                     cancel,
                     &images,
                     attempt,
@@ -4838,6 +4902,62 @@ fn setup_downloading(
         },
         None => false,
     };
+    let limits = if downloaded { limits.0 } else { limits.1 };
+    setup(cli, installation, accepted, limits, cancel)
+}
+
+/// The steps the CLI's own progress calls downloading the release's images.
+const DOWNLOAD_STEPS: [&str; 3] = [
+    "image-download",
+    "system-image-download",
+    "system-image-tag",
+];
+
+/**
+A first setup that stopped in its image download, resumed once, as Retry resumes it.
+
+The CLI pulls a first setup's images itself, into the node it has just made, each pull failing for
+good the first time containerd cannot connect: 30 s for the mirror, then 30 s for the registry
+(containerd 1.7 `remotes/docker/config/hosts.go`). On the EC2 Mac pass, the first setup after a
+Podman machine was resized stopped there, every pull at 60.5 s, 2 times out of 2, and a Retry a
+minute later finished. Retry finds the stack the CLI recorded, with its node, so OpenBot downloads
+its images first (`local_images::download`, which waits out a line that stalls) and the CLI finds
+them present. So a setup that stopped in its download does the same, once, before it is reported.
+Any other failure, or one with no stack on record, is reported as the CLI said it.
+*/
+#[allow(clippy::too_many_arguments)]
+fn resumed_once_if_download_stopped(
+    first: Report,
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images: &crate::local_images::CliImages,
+    attempt: &str,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    if first.outcome != Outcome::Failed || first.reason != Some(Reason::LocalCommandFailed) {
+        return Ok(first);
+    }
+    let Some((stack, release, Some(step))) = stack_set_up_in(cli, installation, cancel)? else {
+        return Ok(first);
+    };
+    if !DOWNLOAD_STEPS.contains(&step.as_str()) {
+        return Ok(first);
+    }
+    log::warn!(
+        "[local setup] a first setup stopped at {step}; downloading its images and resuming it once"
+    );
+    let downloaded = download_images(
+        images,
+        &setup_arguments(accepted),
+        &stack,
+        Some(&release),
+        attempt,
+        cancel,
+        images_limits,
+    )?;
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
 }
@@ -8174,6 +8294,17 @@ fn main() {
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // One answer per call, in turn, the last one again once they run out: `code\nbody`
+        // blocks separated by a line of `---`.
+        "sequence" => {
+            let asked: usize = std::fs::read_to_string(dir.join("calls")).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+            std::fs::write(dir.join("calls"), (asked + 1).to_string()).unwrap();
+            let answers: Vec<&str> = body.split("\n---\n").collect();
+            let (code, said) = answers[asked.min(answers.len() - 1)].split_once('\n').unwrap();
+            print!("{said}");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(code.parse().unwrap());
+        }
         // A valid machine response can precede the CLI's bounded telemetry flush.
         "flush" => {
             print!("{body}");
@@ -8293,6 +8424,138 @@ fn main() {{
         }
     }
 
+    /**
+    THE EC2 MAC PASS, FINDING B: a first setup that stopped in its image download is resumed once.
+
+    After "Resize my Podman", the first setup made its node and then every image pull failed at
+    60.5 s, containerd's 30 s to connect to the mirror and 30 s to the registry, and the person saw
+    "Local image-download failed (exit 1)". One Retry finished it. Here a stand-in CLI answers as
+    that CLI did: no stack for the folder, then a setup that fails at `image-download` and leaves
+    the stack on record with that step, then a setup that completes. The person's one setup now
+    completes, by resuming the stack once as Retry does.
+    */
+    #[test]
+    fn a_first_setup_that_stopped_in_its_download_is_resumed_once() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_first_setup_that_stopped_in_its_download_is_resumed_once",
+        ) {
+            return;
+        }
+        let root = temp_root("first-setup-download-resumed");
+        std::fs::create_dir_all(&root).unwrap();
+        // Answers by command, in turn: `<command>-<n>` beside the program, the exit code on its
+        // first line and what it prints after. Every argument list is written to `copilotkit-argv`.
+        let source = root.join("copilotkit.rs");
+        std::fs::write(
+            &source,
+            r#"
+use std::io::Write;
+fn main() {
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("copilotkit-argv")).unwrap();
+    writeln!(log, "{}", args.join(" ")).unwrap();
+    let command = if args.iter().any(|a| a == "list") { "list" } else if args.iter().any(|a| a == "setup") { "setup" } else { "other" };
+    let counter = dir.join(format!("{command}-count"));
+    let turn = std::fs::read_to_string(&counter).ok().and_then(|n| n.trim().parse::<u32>().ok()).unwrap_or(0) + 1;
+    std::fs::write(&counter, turn.to_string()).unwrap();
+    let answer = std::fs::read_to_string(dir.join(format!("{command}-{turn}"))).unwrap_or_else(|_| "1\n".to_string());
+    let (code, body) = answer.split_once('\n').unwrap();
+    print!("{body}");
+    std::io::stdout().flush().unwrap();
+    std::process::exit(code.parse().unwrap());
+}
+"#,
+        )
+        .unwrap();
+        let program = root.join(format!("copilotkit{}", std::env::consts::EXE_SUFFIX));
+        compile_fixture(&source, &program);
+        // An engine that answers nothing: no node is seen, and nothing is downloaded by OpenBot.
+        let engine_source = root.join("docker.rs");
+        std::fs::write(&engine_source, "fn main() { std::process::exit(1); }\n").unwrap();
+        compile_fixture(
+            &engine_source,
+            &root.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+        );
+        let entry = root.join("index.js");
+        std::fs::write(
+            &entry,
+            include_str!("../test-fixtures/local-images/cli-48a3863-excerpt.txt"),
+        )
+        .unwrap();
+        let cli = PinnedCli {
+            program,
+            entry: Some(entry),
+            sha256: String::new(),
+        };
+        let images = cli_images_of(&cli).expect("the bundle is read");
+        std::env::set_var("PATH", &root);
+        use_engine(&crate::engine::Address::new(
+            crate::engine::Engine::Docker,
+            None,
+        ));
+        let installation = root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let answer = |name: &str, code: i32, body: Value| {
+            std::fs::write(root.join(name), format!("{code}\n{body}")).unwrap();
+        };
+        // No stack for the folder yet: a first setup.
+        answer("list-1", 0, listing(json!([])));
+        // The setup the EC2 Mac saw: the node made, then every pull failed.
+        answer(
+            "setup-1",
+            1,
+            json!({
+                "version": 1,
+                "command": "local setup",
+                "status": "failed",
+                "error": {
+                    "code": "LOCAL_COMMAND_FAILED",
+                    "message": "Local image-download failed (exit 1). Run `copilotkit local status` and retry the failed step."
+                },
+                "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+                "diagnostics": []
+            }),
+        );
+        // The stack the CLI recorded for the folder, stopped at that step.
+        let mut recorded = listed_stack("local-abc123");
+        recorded["installedRelease"] = json!(images.release);
+        recorded["step"] = json!("cluster");
+        recorded["failedStep"] = json!("image-download");
+        recorded["appPaths"] = json!([{
+            "path": installation.canonicalize().unwrap(),
+            "missing": false
+        }]);
+        answer("list-2", 0, listing(json!([recorded])));
+        let mut completed = envelope();
+        completed["command"] = json!("local setup");
+        answer("setup-2", 0, completed);
+
+        let limits = Limits::for_setup();
+        let report = setup_with(
+            &cli,
+            "first-setup-download-resumed",
+            &installation,
+            None,
+            (limits, limits),
+            &Cancel::default(),
+            crate::local_images::Limits::standard(),
+        )
+        .expect("a report");
+        let ran: Vec<String> = std::fs::read_to_string(root.join("copilotkit-argv"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                ["list", "setup"]
+                    .into_iter()
+                    .find(|command| line.split(' ').any(|word| word == *command))
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert_eq!(report.outcome, Outcome::Completed, "ran {ran:?}");
+        assert_eq!(ran, ["list", "setup", "list", "setup"]);
+    }
+
     fn compiled() -> &'static Path {
         static BINARY: OnceLock<PathBuf> = OnceLock::new();
         BINARY.get_or_init(|| {
@@ -8400,6 +8663,13 @@ fn main() {{
 
         fn argv(&self) -> Option<String> {
             std::fs::read_to_string(self.root.join("argv")).ok()
+        }
+
+        /// How many times a `sequence` scenario was called.
+        fn calls(&self) -> usize {
+            std::fs::read_to_string(self.root.join("calls"))
+                .map(|n| n.trim().parse().unwrap())
+                .unwrap_or(0)
         }
 
         /// The folder the program ran in, resolved: Windows reports the temporary folder by its
@@ -8781,6 +9051,77 @@ fn main() {{
             fixture.grandchild_stops(),
             "grandchild outlived the timeout"
         );
+    }
+
+    /// `local start` as the CLI reports the engine refusing to start the back end's node: its
+    /// `podman start` (or `docker start`) exited 125.
+    fn start_refused_by_engine() -> String {
+        let mut refused: Value = serde_json::from_str(&start_failed()).unwrap();
+        refused["error"]["message"] = json!(
+            "Local start failed (exit 125). Run `copilotkit local status` and retry the failed step."
+        );
+        refused.to_string()
+    }
+
+    /**
+    Windows G: OpenBot quit, and opened again a few seconds later. `local start` failed in 0.3 s,
+    the engine refusing the node's start with exit 125, and the window said "Setup stopped partway
+    through with an error. Retry." Retry, a minute later, started it at once. The start is now asked
+    again, twice at most and within seconds, before its failure is the answer.
+    */
+    #[test]
+    fn a_start_the_engine_refuses_is_asked_again_before_it_fails() {
+        let refused = start_refused_by_engine();
+        let fixture = Fixture::new(
+            "local-eval-start-refused-once",
+            &format!("sequence\n1\n{refused}\n---\n0\n{}", start_completed()),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Completed);
+        assert_eq!(fixture.calls(), 2);
+
+        // Refused every time: the failure, after the third ask, within the ceiling.
+        let fixture = Fixture::new(
+            "local-eval-start-refused-always",
+            &format!("sequence\n1\n{refused}"),
+        );
+        let started = Instant::now();
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        assert_eq!(fixture.calls(), 3);
+        assert!(started.elapsed() < Duration::from_secs(30));
+
+        // Any other failure is the answer at once, as before.
+        let fixture = Fixture::new(
+            "local-eval-start-failed-otherwise",
+            &format!(
+                "sequence\n1\n{}\n---\n0\n{}",
+                start_failed(),
+                start_completed()
+            ),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(fixture.calls(), 1);
     }
 
     #[test]

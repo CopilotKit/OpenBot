@@ -250,6 +250,112 @@ test("a computer that is off, watched from the side panel, says it starts when t
   expect(view.queryByText(/can't show the screen/i)).toBeNull();
 });
 
+/** A server that keeps a computer off until it is asked to start it, and counts the asking. */
+function serveComputerThatStartsWhenAsked() {
+  const asked = { times: 0 };
+  const state = () => (asked.times > 0 ? "starting" : "absent");
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      asked.times += 1;
+      return Response.json({ botId: "sales", state: "starting" });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: state() });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: state() });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  return asked;
+}
+
+test("opening the screen beside a conversation starts a computer that is off, once", async () => {
+  const asked = serveComputerThatStartsWhenAsked();
+
+  const view = renderWithQueries(
+    <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+  );
+
+  expect(
+    await view.findByText(
+      "Starting Sales's computer. The first start takes about a minute.",
+    ),
+  ).toBeDefined();
+  // Many more polls: it was asked for once, and is never called off while it comes up.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+  expect(asked.times).toBe(1);
+  expect(view.queryByText(/is off/)).toBeNull();
+});
+
+test("a card in a turn does not start a computer that is off: the Bot's action does", async () => {
+  const asked = serveComputerThatStartsWhenAsked();
+
+  const view = renderWithQueries(
+    <ComputerView
+      active
+      computerId="sales"
+      intervalMs={10}
+      name="Sales"
+      toolCallId="call-1"
+    />,
+  );
+
+  await view.findByText(/^Starting Sales's computer/);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(asked.times).toBe(0);
+});
+
+test("a server with no way to start a computer leaves the screen as it was: off, never starting, no problem", async () => {
+  let asked = 0;
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  console.warn = (...args: unknown[]) => void errors.push(args);
+  globalThis.fetch = (async (input) => {
+    const path = String(input);
+    if (path.endsWith("/wake")) {
+      asked += 1;
+      // Slow enough that whatever the screen says while it waits is seen.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return Response.json({ error: "Not found." }, { status: 404 });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const view = renderWithQueries(
+      <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+    );
+    const off = "Sales's computer is off. It starts when the Bot next uses it.";
+    await view.findByText(off);
+    // While the call is out, once it is refused, and for many polls after: off, and nothing else.
+    for (let pass = 0; pass < 30; pass++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(view.getByText(off)).toBeDefined();
+      expect(view.queryByText(/^Starting/)).toBeNull();
+      expect(view.queryByText(/can't show the screen/i)).toBeNull();
+    }
+    expect(asked).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+});
+
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
   HTMLCanvasElement.prototype.getContext = (() => ({
     drawImage: () => undefined,
@@ -309,10 +415,17 @@ test("a computer that was off and then fails is not called off for ever", async 
   expect(view.queryByText(/is off/)).toBeNull();
 });
 
-test("a computer that goes to sleep stops showing its last frame", async () => {
+test("a computer that goes to sleep stops showing its last frame, and is not started again", async () => {
   let shots = 0;
+  let asked = 0;
   serve({
-    "/status": () => Response.json({ botId: "sales", state: "absent" }),
+    "/wake": () => {
+      asked += 1;
+      return Response.json({ botId: "sales", state: "starting" });
+    },
+    // Up while its first frame is taken, as a computer that can be photographed is.
+    "/status": () =>
+      Response.json({ botId: "sales", state: shots < 2 ? "ready" : "absent" }),
     "/screenshot": () =>
       shots++ === 0
         ? frame()
@@ -332,4 +445,9 @@ test("a computer that goes to sleep stops showing its last frame", async () => {
     ).toBeDefined();
     expect(view.queryByAltText("What the Bot is looking at")).toBeNull();
   });
+  // Nobody opened anything: the screen was already open when the computer went off.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(asked).toBe(0);
 });

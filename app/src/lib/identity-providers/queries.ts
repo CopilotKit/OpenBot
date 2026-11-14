@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { listIdentityProviders } from "@/lib/api/generated/identity-providers/identity-providers";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 
 /**
  * An identity provider a company registered, rather than one this deployment was configured with.
@@ -32,7 +33,7 @@ export const identityProviderKeys = {
 /**
  * The registered providers.
  *
- * Read from our own admin route, not Better Auth's `GET /sso/providers`. That one answers with the
+ * Read from the API's `identity-providers`, not Better Auth's `GET /sso/providers`. That one answers with the
  * providers the person asking registered themselves, so two administrators saw two different
  * deployments and the second one to open this screen found it empty and registered a provider that
  * already existed. What is registered is a fact about the deployment.
@@ -43,9 +44,25 @@ export const identityProviderKeys = {
 export function identityProviderListQueryOptions() {
   return queryOptions({
     queryKey: identityProviderKeys.list(),
-    queryFn: (): Promise<IdentityProvider[]> =>
-      client("/api/admin/identity-providers", "providers", {
-        fallback: "Could not load identity providers",
-      }),
+    queryFn: async ({ signal }): Promise<IdentityProvider[]> => {
+      const providers: IdentityProvider[] = [];
+      let cursor: string | undefined;
+      // Every page: an organization registers a handful, and the screen lists them all.
+      do {
+        const page = await listIdentityProviders(
+          ORGANIZATION_ID,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: "Could not load identity providers" },
+        );
+        providers.push(
+          ...page.identityProviders.map(({ id, ...provider }) => ({
+            providerId: id,
+            ...provider,
+          })),
+        );
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return providers;
+    },
   });
 }

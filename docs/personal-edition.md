@@ -23,14 +23,14 @@ because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
 Your own browser, the one **Teach a Bot** records in, runs on that one computer and shows in the
-page, as in OpenBot Desktop (see [OpenBot Desktop](#openbot-desktop)). The server, the routine worker
+page, as in OpenBot Desktop (see [OpenBot Desktop](#openbot-desktop)). The server
 and the computer run from the published OpenBot images; the app runs from the checkout.
 
 ## OpenBot Desktop
 
 OpenBot Desktop installs the personal edition: it writes `OPENBOT_EDITION=personal` and the settings
 below into its deployment's `.env` on every Start (`desktop/src-tauri/src/env.rs`). It runs
-PostgreSQL, the one computer, the server and the worker, and no supervisor and no bundled Bot
+PostgreSQL, the one computer and the server, and no supervisor and no bundled Bot
 containers.
 
 The server's container is given the supervisor by name in `docker-compose.yml` unless

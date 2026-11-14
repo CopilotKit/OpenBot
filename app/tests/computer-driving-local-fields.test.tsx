@@ -1,16 +1,22 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { useState } from "react";
 import {
   type BotBrowserApiState,
   botBrowserApiPaths,
 } from "@openbot/shared/bot-browser";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { BotRecordPanel } from "@/components/computer/bot-browser";
 import { LiveScreen } from "@/components/computer/live-screen";
 import { queryClient } from "@/query-client";
+import {
+  ME_PATH,
+  meResponse,
+  PREFERENCES_PATH,
+  preferencesResponse,
+} from "./accounts-api";
 
 /**
  * This page's own fields while a person drives a Bot's browser.
@@ -70,12 +76,12 @@ beforeAll(() => {
     if (url.includes("/control"))
       return Response.json({ holder: "human", transitioning: false });
     // A person who has already answered whether to narrate, so Record starts at once rather than asking.
-    if (url === "/api/me")
-      return Response.json({
+    if (url === ME_PATH)
+      return meResponse({
         user: { id: "me", email: "me@example.com", role: "user" },
       });
-    if (url === "/api/settings/preferences")
-      return Response.json({
+    if (url === PREFERENCES_PATH)
+      return preferencesResponse({
         preferences: {
           messageListEmphasis: "thread",
           selfHostBannerDismissed: false,
@@ -222,9 +228,9 @@ test("naming a task and pressing Record starts a recording", async () => {
   );
 
   await waitFor(() =>
-    expect(
-      requests.some((request) => request.url === "/api/settings/preferences"),
-    ).toBe(true),
+    expect(requests.some((request) => request.url === PREFERENCES_PATH)).toBe(
+      true,
+    ),
   );
   await user.click(view.getByLabelText("Task name"));
   await user.keyboard("Find an invoice");

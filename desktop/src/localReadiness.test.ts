@@ -127,7 +127,7 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
   });
   expect(rows.runtime).toEqual({
     state: "blocked",
-    said: "The software OpenBot runs on isn't running.",
+    said: "OpenBot can't reach the software it runs on.",
     action: "retry",
   });
   expect(rows.intelligence.state).toBe("blocked");

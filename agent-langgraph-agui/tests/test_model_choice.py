@@ -614,6 +614,42 @@ async def test_a_compatible_endpoint_gets_reasoning_effort_on_chat_completions(m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["low", None])
+async def test_a_responses_model_behind_a_base_url_is_called_on_the_responses_api(monkeypatch, effort):
+    # FOUND IN THE LIVE CHECK, whose model requests go through a recorder at OPENAI_BASE_URL. Told
+    # to run on gpt-5.6-terra, the harness sent it to Chat Completions because an address was set,
+    # and OpenAI refused every run that offered a tool: "Function tools with reasoning_effort are
+    # not supported for gpt-5.6-terra in /v1/chat/completions." The person read "Your model
+    # provider is having problems right now."
+    choice = {"model": "gpt-5.6-terra", **({"reasoningEffort": effort} if effort else {})}
+    with fake_provider() as (base, bodies):
+        monkeypatch.setenv("OPENAI_API_KEY", "synthetic-proxied-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", f"{base}/v1")
+        monkeypatch.setenv("BOT_PROVIDER", "openai")
+        finished(await run(run_body(model=choice, tools=["lookup"])))
+
+    [body] = bodies
+    assert "input" in body and "messages" not in body, "the Responses API, not Chat Completions"
+    assert body["model"] == "gpt-5.6-terra"
+    assert [tool["name"] for tool in body["tools"]] == ["lookup"]
+    assert body.get("reasoning") == ({"effort": effort} if effort else None)
+    assert "reasoning_effort" not in body
+
+
+@pytest.mark.asyncio
+async def test_an_operator_who_chose_chat_completions_keeps_it_behind_a_base_url(monkeypatch):
+    with fake_provider() as (base, bodies):
+        monkeypatch.setenv("OPENAI_API_KEY", "synthetic-proxied-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", f"{base}/v1")
+        monkeypatch.setenv("BOT_PROVIDER", "openai")
+        monkeypatch.setenv("COPILOTKIT_OPENAI_API", "chat")
+        finished(await run(run_body(model={"model": "gpt-5.6-terra"})))
+
+    [body] = bodies
+    assert "messages" in body
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("effort", ["xhigh", "low", None])
 async def test_anthropic_gets_output_config_effort(monkeypatch, effort):
     choice = {"model": "claude-opus-5-5", **({"reasoningEffort": effort} if effort else {})}

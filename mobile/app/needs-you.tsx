@@ -1,7 +1,14 @@
 import { Redirect } from "expo-router";
 import { useCallback } from "react";
 import { Text } from "react-native";
-import { api, type Bot, type BotTask, type CheckInItem } from "../src/api";
+import {
+  api,
+  type BotTask,
+  type CheckInItem,
+  everyBot,
+  everyPage,
+  ORGANIZATION,
+} from "../src/api";
 import { authClient } from "../src/auth";
 import {
   hideItem,
@@ -22,7 +29,8 @@ export default function NeedsYouScreen() {
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
   const loadItems = useCallback(
-    () => api<{ suggestions: CheckInItem[] }>("/api/proactive/suggestions"),
+    () =>
+      everyPage<CheckInItem>(`${ORGANIZATION}/check-in-items`, "checkInItems"),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
@@ -31,13 +39,13 @@ export default function NeedsYouScreen() {
     [],
   );
   const tasks = useLoad(loadTasks, Boolean(session));
-  const loadBots = useCallback(() => api<{ agents: Bot[] }>("/api/agents"), []);
+  const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const nameOf = (agentId: string) =>
-    bots.data?.agents.find((bot) => bot.id === agentId)?.name ?? "A Bot";
+    bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
   const waiting = waitingTasks(tasks.data?.tasks ?? []);
-  const found = items.data?.suggestions ?? [];
+  const found = items.data ?? [];
 
   return (
     <Screen
@@ -55,7 +63,7 @@ export default function NeedsYouScreen() {
         <ItemCard
           key={item.id}
           item={item}
-          botName={nameOf(item.agentId)}
+          botName={nameOf(item.botId)}
           busy={action.busy}
           onStart={() => {
             void action.run(`start:${item.id}`, async () => {

@@ -28,7 +28,9 @@ function composeServices() {
           profiles?: string[];
           image?: string;
           build?: { context: string; dockerfile: string };
+          entrypoint?: string[];
           command?: string[];
+          working_dir?: string;
           env_file?: Array<{ path: string; required: boolean }>;
           environment?: Record<string, string>;
           depends_on?: Record<string, { condition: string }>;
@@ -255,6 +257,11 @@ function runComposeConfig(
     services: Record<
       string,
       {
+        image?: string;
+        entrypoint?: string[] | null;
+        command?: string[] | null;
+        working_dir?: string;
+        healthcheck?: { disable?: boolean; test?: string[] };
         environment: Record<string, string>;
         extra_hosts?: string[];
         volumes?: Array<{ type: string; source: string; target: string }>;
@@ -446,6 +453,37 @@ test("runs no SPIRE", () => {
   }
 });
 
+/**
+ * The managed Bot is the LangGraph harness. agent-bot, a proof of concept that wrote the protocol by
+ * hand, and the TypeScript agent-langgraph were retired; the fintech example's Risk Analyst is
+ * registered at MANAGED_AGENT_AG_UI_URL, so the address the server is given must name a service
+ * this file starts, built from a harness this repository has, on the port its image listens on.
+ */
+test("runs the LangGraph harness as the managed Bot, and neither retired Bot", () => {
+  const services = composeServices();
+  // Both names are still in the file for one release, behind a profile nothing turns on, so an app
+  // from the release before can read it (tests/older-apps.test.ts). Neither is run: with every
+  // profile anything asks for, Compose brings up neither, and neither is built from this tree.
+  const run = Object.keys(runComposeConfig({}).services);
+  for (const retired of ["agent-bot", "agent-langgraph"]) {
+    expect(run).not.toContain(retired);
+    expect(services[retired]?.profiles).toEqual(["for-older-apps"]);
+    expect(services[retired]?.build).toBeUndefined();
+  }
+  const address = new URL(
+    runComposeConfig({
+      MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",
+    }).services.server.environment.MANAGED_AGENT_AG_UI_URL ?? "",
+  );
+  const managed = services[address.hostname];
+  expect(managed?.build?.dockerfile).toBe("agent-langgraph-agui/Dockerfile");
+  const dockerfile = readFileSync(
+    join(import.meta.dir, "..", "agent-langgraph-agui", "Dockerfile"),
+    "utf8",
+  );
+  expect(address.port).toBe(/^EXPOSE (\d+)$/m.exec(dockerfile)?.[1]);
+});
+
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();
 
@@ -467,8 +505,7 @@ test("publishes every service on a settable port with the documented default", (
     ["POSTGRES_PORT", "5432", "5432"],
     ["COMPUTER_PORT", "4100", "4100"],
     ["SUPERVISOR_PORT", "4500", "4300"],
-    ["BOT_PORT", "4200", "4200"],
-    ["LANGGRAPH_PORT", "4201", "4201"],
+    ["LANGGRAPH_PORT", "4201", "4206"],
     ["SERVER_PORT", "3001", "3001"],
   ] as const;
 
@@ -501,7 +538,6 @@ test("publishes every service that holds a secret on loopback only", () => {
     "POSTGRES_PORT",
     "SUPERVISOR_PORT",
     "COMPUTER_PORT",
-    "BOT_PORT",
     "LANGGRAPH_PORT",
     "PICKED_HARNESS_PORT",
     "APP_PORT",
@@ -566,7 +602,7 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
       OPENAI_API_KEY: "synthetic-openai-key",
       ...environment,
     });
-    for (const service of ["agent-bot", "agent-langgraph", "agent-harness"]) {
+    for (const service of ["agent-langgraph-agui", "agent-harness"]) {
       expect(config.services[service].environment.OPENAI_BASE_URL).toBe(
         expected,
       );
@@ -574,7 +610,7 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
   });
 }
 
-test("passes every other provider's key and endpoint into the framework Bot and the picked harness", () => {
+test("passes every other provider's key and endpoint into the managed Bot and the picked harness", () => {
   const config = runComposeConfig({
     ANTHROPIC_API_KEY: "sk-ant-synthetic",
     ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
@@ -584,7 +620,7 @@ test("passes every other provider's key and endpoint into the framework Bot and 
 
   // A service either receives the variable or it does not; reading the file's text cannot tell
   // the difference, because any one service declaring it would satisfy a raw `toContain`.
-  for (const service of ["agent-langgraph", "agent-harness"]) {
+  for (const service of ["agent-langgraph-agui", "agent-harness"]) {
     expect(config.services[service].environment).toMatchObject({
       ANTHROPIC_API_KEY: "sk-ant-synthetic",
       ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
@@ -669,28 +705,22 @@ test("mounts the ChatGPT token store directory into the picked harness", () => {
 });
 
 /**
- * The server, the worker, the migrations, the computer and the supervisor are pulled, never built:
- * the published OpenBot images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG.
- * Each image is still overridable, which is how OpenBot Desktop pins a release's digests.
+ * The server, the computer and the supervisor are pulled, never built: the published OpenBot
+ * images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG. The server and the
+ * computer are one image, `openbot`, started with a command each; the supervisor is its own. Each
+ * is still overridable by its own setting, which is how OpenBot Desktop pins a release's digests.
  */
-test("runs the server, worker, migrations, computer and supervisor from the published images", () => {
+test("runs the server and the computer from the one published image, and the supervisor from its own", () => {
   const services = composeServices();
   const images = {
-    migrate: "openbot-server",
-    server: "openbot-server",
-    worker: "openbot-server",
-    "agent-computer": "openbot-agent-computer",
-    supervisor: "openbot-supervisor",
+    server: ["openbot", "SERVER_IMAGE"],
+    "agent-computer": ["openbot", "COMPUTER_IMAGE"],
+    supervisor: ["openbot-supervisor", "SUPERVISOR_IMAGE"],
   } as const;
-  const variables = {
-    "openbot-server": "SERVER_IMAGE",
-    "openbot-agent-computer": "COMPUTER_IMAGE",
-    "openbot-supervisor": "SUPERVISOR_IMAGE",
-  } as const;
-  for (const [name, image] of Object.entries(images)) {
+  for (const [name, [image, variable]] of Object.entries(images)) {
     expect(services[name].build).toBeUndefined();
     expect(services[name].image).toBe(
-      `\${${variables[image]}:-ghcr.io/copilotkit/${image}:\${OPENBOT_BACKEND_TAG:-see-backend-images.env}}`,
+      `\${${variable}:-ghcr.io/copilotkit/${image}:\${OPENBOT_BACKEND_TAG:-see-backend-images.env}}`,
     );
     expect(services[name].pull_policy).toBe(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
@@ -708,15 +738,241 @@ test("runs the server, worker, migrations, computer and supervisor from the publ
   expect(pinned).toMatch(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/);
   const config = runComposeConfig({ OPENBOT_BACKEND_TAG: pinned ?? "" });
   expect(config.services["agent-computer"].image).toBe(
-    `ghcr.io/copilotkit/openbot-agent-computer:${pinned}`,
+    `ghcr.io/copilotkit/openbot:${pinned}`,
+  );
+  expect(config.services.server.image).toBe(
+    config.services["agent-computer"].image,
   );
 });
 
-test("runs the server migrator after PostgreSQL becomes healthy", () => {
+/**
+ * The OpenBot image started with no command is the whole of OpenBot in one container: a server, a
+ * computer beside it and the process that minds them. So every service on it names the executable
+ * for the one part it is, as its entrypoint, which is what drops the image's own. Read from what
+ * Compose itself resolves, with a release's one pinned image under both settings.
+ */
+test("starts each service on the OpenBot image as its own part of it, never as the whole image", () => {
+  const pinned = `ghcr.io/copilotkit/openbot@sha256:${"1".repeat(64)}`;
+  const { services } = runComposeConfig({
+    SERVER_IMAGE: pinned,
+    COMPUTER_IMAGE: pinned,
+  });
+  expect(services.server.image).toBe(pinned);
+  expect(services["agent-computer"].image).toBe(pinned);
+  expect(services.supervisor.environment?.COMPUTER_IMAGE).toBe(pinned);
+
+  expect(services.server.entrypoint).toEqual(["/app/bin/openbot", "server"]);
+  expect(services.server.command ?? null).toBeNull();
+  expect(services.server.working_dir).toBe("/app/server");
+  expect(services["agent-computer"].entrypoint).toEqual([
+    "/app/bin/openbot-computer",
+  ]);
+  expect(services["agent-computer"].command ?? null).toBeNull();
+  // The image's own PORT is the server's, so the computer is told its own.
+  expect(services["agent-computer"].environment?.PORT).toBe("4100");
+
+  // And each answers for its own health, or says it has none to answer for. The image's own check
+  // asks after a server on its port, so a service left with it that is not the server (the worker
+  // an app from the release before starts) is unhealthy for ever, and `up --wait` fails on it.
+  for (const [name, service] of Object.entries(services)) {
+    if (service.image !== pinned) continue;
+    const check = service.healthcheck;
+    expect({
+      name,
+      own: check?.disable === true || (check?.test?.length ?? 0) > 0,
+    }).toEqual({ name, own: true });
+  }
+
+  // Every other service on that image names an executable too.
+  for (const [name, service] of Object.entries(services)) {
+    if (service.image !== pinned) continue;
+    expect({ name, entrypoint: service.entrypoint?.[0] }).toEqual({
+      name,
+      entrypoint:
+        name === "agent-computer"
+          ? "/app/bin/openbot-computer"
+          : "/app/bin/openbot",
+    });
+  }
+});
+
+/**
+ * A Bot has a shell in its computer, and the image there now carries the server's executable. What
+ * keeps that harmless is that the computer is a container of its own, given only what is written
+ * under it: none of the deployment's `.env`, no database address, no key, no licence.
+ */
+test("gives the computer's container none of the server's settings", () => {
+  const secrets = {
+    KEY_ENCRYPTION_KEY: "sentinel-key-encryption-key",
+    BETTER_AUTH_SECRET: "sentinel-better-auth-secret",
+    COPILOTKIT_LICENSE_TOKEN: "sentinel-licence",
+    CPK_INTELLIGENCE_API_KEY: "sentinel-project-key",
+    INTELLIGENCE_API_KEY: "sentinel-intelligence-key",
+    OPENAI_API_KEY: "sentinel-openai-key",
+    ANTHROPIC_API_KEY: "sentinel-anthropic-key",
+    COMPOSIO_API_KEY: "sentinel-composio-key",
+    SUPERVISOR_TOKEN: "sentinel-supervisor-token",
+    AGENT_TOOL_TOKEN: "sentinel-agent-tool-token",
+    MANAGED_AGENT_TOKEN: "sentinel-managed-agent-token",
+  };
+  const { services } = runComposeConfig(secrets);
+  const computer = JSON.stringify(services["agent-computer"]);
+  for (const [name, value] of Object.entries(secrets)) {
+    expect(computer).not.toContain(name);
+    expect(computer).not.toContain(value);
+  }
+  expect(computer).not.toContain("DATABASE_URL");
+  // The control: the same settings do reach the server.
+  const server = JSON.stringify(services.server);
+  expect(server).toContain("sentinel-key-encryption-key");
+  expect(server).toContain("sentinel-intelligence-key");
+  expect(server).toContain("DATABASE_URL");
+});
+
+/**
+ * The server applies its own migrations when it starts and does its scheduled work itself (firing
+ * routines, cleaning up unsent attachments, suspending idle computers). `migrate` and `worker` are
+ * still defined, for this one release, so an OpenBot Desktop app from the release before reads the
+ * file as current: that app requires a `worker` service and asks for `migrate`'s image by name.
+ * Nothing in this release starts either, so nothing waits on one, both sit behind the profile, and
+ * neither is handed the secret the worker used to present.
+ */
+test("still defines migrate and worker for one release, with nothing that waits on either", () => {
   const services = composeServices();
-  expect(services.migrate.command).toEqual(["bun", "scripts/migrate.ts"]);
-  expect(services.migrate.depends_on?.postgres).toEqual({
-    condition: "service_healthy",
+
+  for (const [name, service] of Object.entries(services)) {
+    const waitsOn = Object.keys(service.depends_on ?? {});
+    expect({ name, waitsOn }).toEqual({
+      name,
+      waitsOn: waitsOn.filter(
+        (other) => other !== "migrate" && other !== "worker",
+      ),
+    });
+    expect(Object.keys(service.environment ?? {})).not.toContain(
+      "WORKER_SHARED_SECRET",
+    );
+  }
+  expect(composeFile()).not.toContain("WORKER_SHARED_SECRET");
+
+  expect(services.worker).toEqual({
+    profiles: ["openbot"],
+    image: services.server.image,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    pull_policy: "${IMAGE_PULL_POLICY:-missing}",
+    entrypoint: ["/app/bin/openbot"],
+    command: ["worker"],
+    working_dir: "/app/server",
+    healthcheck: { disable: true },
+    restart: "unless-stopped",
+    networks: ["data"],
+  });
+  expect(services.migrate).toEqual({
+    profiles: ["openbot"],
+    image: services.server.image,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    pull_policy: "${IMAGE_PULL_POLICY:-missing}",
+    entrypoint: ["/app/bin/openbot"],
+    command: ["migrate"],
+    working_dir: "/app/server",
+    healthcheck: { disable: true },
+    environment: {
+      DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
+    },
+    depends_on: { postgres: { condition: "service_healthy" } },
+    restart: "no",
+    networks: ["data"],
+  });
+});
+
+/**
+ * The managed Bot is built from the checkout, and a built image's tag is one name on the whole
+ * machine. With a single fixed tag, starting one stack moved the tag another stack's Bot was made
+ * from. So the tag carries the stack's Compose project name, however the project got it: `-p`,
+ * `COMPOSE_PROJECT_NAME`, or the directory the file is in. `LANGGRAPH_IMAGE` still names the image
+ * outright, which is how a published one is pinned.
+ */
+test("tags the managed Bot's built image by the stack's project, unless LANGGRAPH_IMAGE names one", () => {
+  const managedBot = (flags: string[], env: Record<string, string>) => {
+    const config = JSON.parse(
+      execFileSync(
+        "docker",
+        [
+          "compose",
+          ...flags,
+          "--env-file",
+          "/dev/null",
+          "config",
+          "--format",
+          "json",
+        ],
+        {
+          cwd: join(import.meta.dir, ".."),
+          env: { PATH: process.env.PATH ?? "", ...env },
+          encoding: "utf8",
+        },
+      ),
+    ) as { name: string; services: Record<string, { image: string }> };
+    return {
+      project: config.name,
+      image: config.services["agent-langgraph-agui"].image,
+    };
+  };
+
+  expect(managedBot(["-p", "one"], {})).toEqual({
+    project: "one",
+    image: "one-agent-langgraph-agui:latest",
+  });
+  expect(managedBot([], { COMPOSE_PROJECT_NAME: "two" })).toEqual({
+    project: "two",
+    image: "two-agent-langgraph-agui:latest",
+  });
+  // Neither set: the project is named after the directory, and so is the tag.
+  const byDirectory = managedBot([], {});
+  expect(byDirectory.project).not.toBe("");
+  expect(byDirectory.image).toBe(
+    `${byDirectory.project}-agent-langgraph-agui:latest`,
+  );
+
+  const published = "ghcr.io/copilotkit/openbot-agent-langgraph-agui:v9.9.9";
+  expect(managedBot(["-p", "one"], { LANGGRAPH_IMAGE: published }).image).toBe(
+    published,
+  );
+});
+
+/**
+ * The server reads no `WORKER_SHARED_SECRET`, so the example files do not offer one to fill in.
+ * `scripts/server-env.ts` hands the server's container every setting they list, so a line here
+ * would also hand it a setting nothing reads.
+ */
+test("the example files list no secret for a worker", () => {
+  for (const example of [".env.example", ".env.personal.example"]) {
+    const text = readFileSync(join(import.meta.dir, "..", example), "utf8");
+    expect({
+      example,
+      listsIt: text.includes("WORKER_SHARED_SECRET"),
+    }).toEqual({ example, listsIt: false });
+  }
+});
+
+/**
+ * What tells this file from an earlier release's, in which `worker` and `migrate` are in use: one
+ * top-level line. OpenBot Desktop, scripts/start.sh and the updater read it as text, so it is at
+ * column 0, once, and Compose (which ignores a top-level `x-` field) still reads the file.
+ */
+test("says on one top-level line that the server does the scheduled work", () => {
+  const marked = composeFile()
+    .split("\n")
+    .filter((line) => line.startsWith("x-openbot-scheduled-work"));
+  expect(marked).toEqual(["x-openbot-scheduled-work: server"]);
+  expect(Object.keys(runComposeConfig({}).services)).toContain("server");
+});
+
+test("starts the server once PostgreSQL is healthy, because it migrates as it starts", () => {
+  const server = composeServices().server;
+
+  expect(server.command).toBeUndefined();
+  expect(server.depends_on).toEqual({
+    postgres: { condition: "service_healthy" },
   });
 });
 
@@ -800,12 +1056,12 @@ test("tells the shared computer which edition it runs in", () => {
   ).toBe("");
 });
 
-test("gives the selected harness the same governed callback as the framework Bot", () => {
+test("gives the selected harness the same governed callback as the managed Bot", () => {
   const config = runComposeConfig({
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of ["agent-harness", "agent-langgraph"] as const) {
+  for (const service of ["agent-harness", "agent-langgraph-agui"] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",
@@ -827,7 +1083,7 @@ test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
   for (const service of [
     "server",
     "agent-harness",
-    "agent-langgraph",
+    "agent-langgraph-agui",
   ] as const) {
     expect(config.services[service].extra_hosts).toContain(
       "host.docker.internal=10.0.2.2",
@@ -836,32 +1092,18 @@ test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
 });
 
 /**
- * OpenBot's own server and worker, started by name.
+ * OpenBot's own server, started by name.
  *
  * A plain `docker compose up -d` starts what it always did; `scripts/start.sh` and an installed
- * OpenBot name the two. The profile is what keeps them out of the plain run; naming the service is
+ * OpenBot name it. The profile is what keeps it out of the plain run; naming the service is
  * still enough to start it.
  */
-test("keeps OpenBot's own server and worker behind a profile", () => {
-  const services = composeServices();
+test("keeps OpenBot's own server behind a profile, restarted by Docker", () => {
+  const server = composeServices().server;
 
-  for (const name of ["server", "worker"]) {
-    expect(services[name].profiles).toEqual(["openbot"]);
-  }
-});
-
-test("runs the server and the worker from the image migrations already use", () => {
-  const services = composeServices();
-
-  for (const name of ["server", "worker"]) {
-    expect(services[name].image).toBe(services.migrate.image);
-    expect(services[name].depends_on?.migrate).toEqual({
-      condition: "service_completed_successfully",
-    });
-    // Restarted by Docker, because nothing on the host is watching them any more.
-    expect(services[name].restart).toBe("unless-stopped");
-  }
-  expect(services.worker.command).toEqual(["bun", "../worker/src/index.ts"]);
+  expect(server.profiles).toEqual(["openbot"]);
+  // Restarted by Docker, because nothing on the host is watching it.
+  expect(server.restart).toBe("unless-stopped");
 });
 
 /**
@@ -908,19 +1150,20 @@ test("gives the server the supervisor unless the deployment empties it", () => {
   expect(none?.AGENT_COMPUTER_URL).toBe("http://agent-computer:4100");
 });
 
-test("puts the server beside the database and the Bots, and the worker beside the database only", () => {
+test("puts the server beside the database and the Bots, and nothing a Bot can reach beside the database", () => {
   const services = composeServices();
 
   expect(services.server.networks).toEqual(["data", "default"]);
-  expect(services.worker.networks).toEqual(["data"]);
-  expect(Object.keys(services.worker.environment ?? {}).sort()).toEqual([
-    "DATABASE_URL",
-    "SERVER_INTERNAL_URL",
-    "WORKER_SHARED_SECRET",
+  const besideTheDatabase = Object.entries(services)
+    .filter(([, service]) => service.networks?.includes("data"))
+    .map(([name]) => name);
+  // `migrate` and `worker` for this one release, on `data` alone, as they always were.
+  expect(besideTheDatabase.sort()).toEqual([
+    "migrate",
+    "postgres",
+    "server",
+    "worker",
   ]);
-  expect(services.worker.environment?.SERVER_INTERNAL_URL).toBe(
-    "http://server:3001",
-  );
 });
 
 test("hands the desktop's host-access token to the server and nothing else", () => {
@@ -937,7 +1180,7 @@ test("hands the desktop's host-access token to the server and nothing else", () 
 
 test("addresses the server's Bots and endpoints from inside the network", () => {
   const withBots = runComposeConfig({
-    MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/ag-ui",
+    MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",
     PICKED_HARNESS_URL: "http://127.0.0.1:4202/run",
     PICKED_HARNESS_CONTAINER_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
@@ -950,7 +1193,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
   expect(withBots.services.server.environment).toMatchObject({
     // How the server reaches an agent the person registered on their own loopback.
     OPENBOT_THIS_MACHINE_HOST: "host.docker.internal",
-    MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
+    MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph-agui:4206/",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
     // The server's own way to the gateway, and the browser's, which is on the host.

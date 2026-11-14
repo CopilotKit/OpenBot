@@ -4,6 +4,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConversationAllowances } from "@/components/approvals/conversation-allowances";
 import { queryClient } from "@/query-client";
+import {
+  approvalInboxResponse,
+  CONVERSATION_GRANTS_PATH,
+  noContentResponse,
+} from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -27,8 +32,8 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/approvals")
-        return Response.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: false,
           requests: [],
           rules: [],
@@ -36,14 +41,16 @@ beforeAll(() => {
           conversationGrants: grants,
           questions: [],
         });
-      const turnedOff = url.pathname.match(
-        /^\/api\/approvals\/conversation-grants\/([^/]+)$/,
-      );
-      if (turnedOff && init?.method === "DELETE") {
-        const id = decodeURIComponent(turnedOff[1] ?? "");
+        if (approvals) return approvals;
+      }
+      if (
+        url.pathname.startsWith(`${CONVERSATION_GRANTS_PATH}/`) &&
+        init?.method === "DELETE"
+      ) {
+        const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
         revoked.push(id);
         grants = grants.filter((grant) => grant.id !== id);
-        return Response.json({ revoked: true });
+        return noContentResponse();
       }
       return Response.json({ error: "not served" }, { status: 404 });
     },

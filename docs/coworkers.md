@@ -92,12 +92,11 @@ Hiding and pinning are personal roster state. Hiding removes the Bot from one pe
 Bots made in the product use:
 
 ```dotenv
-MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui
+MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/
 ```
 
-That is `agent-langgraph`, which runs a real framework and its own tool loop. The proof-of-concept on
-`4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
-rather than something to build a deployment on.
+That is the LangGraph harness, `agent-langgraph-agui`, which runs a real framework and its own tool
+loop.
 
 The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: a Bot made in the
 product with no endpoint of its own then runs inside the server as a built-in Bot on its role

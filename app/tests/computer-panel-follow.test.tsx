@@ -10,6 +10,7 @@ import {
   latestView,
   showComputerView,
 } from "@/lib/computers/panel-view";
+import { ME_PATH, meResponse } from "./accounts-api";
 
 /**
  * The Computer panel following the Bot, and Take control acting on the terminal when the terminal is
@@ -71,8 +72,8 @@ beforeAll(() => {
     if (path.endsWith("/control/take")) holder = "human";
     if (path.endsWith("/control/release")) holder = "bot";
     if (path.includes("/control")) return Response.json(controlState());
-    if (path === "/api/me")
-      return Response.json({ user: { id: "ada", name: "Ada" } });
+    if (path === ME_PATH)
+      return meResponse({ user: { id: "ada", name: "Ada" } });
     return Response.json({ error: "Not here." }, { status: 404 });
   }) as typeof fetch;
 });

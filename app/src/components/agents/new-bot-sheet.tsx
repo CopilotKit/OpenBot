@@ -58,10 +58,8 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { testAgentConnection } from "@/lib/agents/queries";
+import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
   type GiveableApp,
@@ -134,6 +132,18 @@ type Step = (typeof STEPS)[number];
  */
 type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 
+/**
+ * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
+ * fails if the two drift apart.
+ */
+function declaredFramework(id: string): CreateBotRequestHarness | undefined {
+  const known: readonly string[] = Object.values(CreateBotRequestHarness);
+  return id !== "" && known.includes(id)
+    ? (id as CreateBotRequestHarness)
+    : undefined;
+}
+
 /** Framework name used in default custom-agent instructions. */
 function frameworkName(runtime: Runtime): string {
   if (runtime.kind === "builtin") return "Assistant";
@@ -182,22 +192,21 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
@@ -290,6 +299,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
+    const framework = managed ? declaredFramework(chosen.harness) : undefined;
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -306,9 +316,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       }),
       // The framework picked from the list, so the Bot is told what runs it. None for an agent
       // somebody already runs, since nobody said what is behind its address.
-      ...(managed && chosen.harness !== "byo-url"
-        ? { harness: chosen.harness }
-        : {}),
+      ...(framework ? { harness: framework } : {}),
     });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,

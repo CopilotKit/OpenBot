@@ -4,7 +4,7 @@
 //! computers among them (see `stack::running_containers_of`), and k3d names an Intelligence stack's
 //! `k3d-<stack id>-<role>`. Not every `openbot-` container: another project, or a source checkout
 //! called `openbot`, names its own that way. Memory is Docker's own figure for each container,
-//! OpenBot's own server and worker among them, so the total is what the machine is actually spending.
+//! OpenBot's own server among them, so the total is what the machine is actually spending.
 
 use serde::Serialize;
 

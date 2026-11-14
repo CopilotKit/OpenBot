@@ -20,6 +20,7 @@ import { cleanup, render } from "@testing-library/react";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as BotAppRoute } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -122,17 +123,17 @@ function install() {
     authorizesPerAction: false,
   };
   global.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
       if (path === "/api/plugins") return Response.json(page);
       if (path.startsWith("/api/plugins/connections"))
         return Response.json({ connections: [], redirectUri: null });
-      if (path.startsWith("/api/agents"))
-        return Response.json({
-          agents: [
-            { id: BOT, name: "Helper", hidden: false, hasCallbackToken: false },
-          ],
-        });
+      const bots = answerBotsList(path, init, {
+        visible: [
+          { id: BOT, name: "Helper", hidden: false, hasCallbackToken: false },
+        ],
+      });
+      if (bots) return bots;
       return Response.json({ error: "unexpected" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

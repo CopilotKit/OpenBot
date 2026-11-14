@@ -22,6 +22,7 @@ import { consentCopy } from "@/lib/plugins/enablement-notes";
 import type { GrantState } from "@/lib/plugins/grants";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { ME_PATH, meBody } from "./accounts-api";
 
 /**
  * THE GRANT LIST on an app's own page, drawn by `GrantState`, grouped by permission, with the consent
@@ -156,10 +157,12 @@ function install(setup: Setup) {
       authorizeCalls.push(String(init?.body));
       return json({ authorizationUrl: "https://vendor.invalid/consent" });
     }
-    if (path === "/api/me")
-      return json({
-        user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
-      });
+    if (path === ME_PATH)
+      return json(
+        meBody({
+          user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
+        }),
+      );
     if (path === "/api/plugins") return json(page);
     if (path.startsWith("/api/plugins/connections")) {
       return json({

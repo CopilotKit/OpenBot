@@ -149,6 +149,24 @@ export function InlineApproval({
         ) : null}
       </AnimatePresence>
       {pending ? null : fallback}
+      {/*
+        The conversation could not be carried on after this was decided, so the step above never got
+        its result and would say "Send message…" for good. What came of it is said here, from the
+        request itself, which is the one place that still knows.
+      */}
+      {request?.left ? (
+        <p
+          className={
+            request.left.done
+              ? "mt-1 text-muted-foreground text-sm"
+              : "mt-1 text-destructive text-sm"
+          }
+          data-testid="approval-left"
+          role={request.left.done ? "status" : "alert"}
+        >
+          {request.left.message}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -189,9 +207,13 @@ export function PendingApprovals({
   toolCallIds: readonly string[];
 }) {
   const inbox = useQuery(approvalInboxOptions());
+  /*
+   * And one whose conversation could not be carried on after it was decided (`left`): what came of
+   * it is said beside the group too, since the folded line ("Used Slack") says nothing of it.
+   */
   const waiting = new Set(
     (inbox.data?.requests ?? [])
-      .filter((request) => request.status === "pending")
+      .filter((request) => request.status === "pending" || request.left)
       .flatMap((request) =>
         request.action.toolCallId ? [request.action.toolCallId] : [],
       ),

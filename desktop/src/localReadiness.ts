@@ -353,8 +353,10 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "unsupported-engine": blocked(
     "OpenBot can't run on this computer as it's set up.",
   ),
+  // The CLI could not reach Docker's API: stopped, or running and unreachable, which it cannot tell
+  // apart. Retry starts it, or stops and starts one that runs and does not answer.
   "docker-unavailable": blocked(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
     "retry",
   ),
   "port-unavailable": blocked(
@@ -530,7 +532,9 @@ function runtimeRow(
     intelligence !== null && typeof intelligence !== "string"
       ? intelligence.reason
       : null;
-  if (reason === "docker-unavailable") return notRunning;
+  if (reason === "docker-unavailable") {
+    return blocked("OpenBot can't reach the software it runs on.", "retry");
+  }
   if (reason === "unsupported-engine") {
     return blocked("OpenBot can't run on this computer as it's set up.");
   }

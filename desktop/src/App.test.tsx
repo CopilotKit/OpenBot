@@ -49,11 +49,18 @@ const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
+/** What the window told the log as each `run_local_eval` answer reached it. */
+const answerNotes: unknown[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     // Asked every second while a CLI call runs: not a step of the sequence.
     if (command === "local_eval_steps") return Promise.resolve(localSteps);
+    // What the window tells the log when an answer reaches it: not a step either.
+    if (command === "local_eval_answer_landed") {
+      answerNotes.push(args);
+      return Promise.resolve(null);
+    }
     invokeCalls.push({ command, args });
     return invokeHandler(command, args);
   },
@@ -595,31 +602,51 @@ async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 }
 
-test("the first screen is Install, with nothing to choose", async () => {
+test("the first screen offers Self-hosted, shows Cloud and Business greyed, and says what this computer needs and why", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  // Three ways to run OpenBot. This app sets up the first; the other two are there to be seen.
+  const self = view.getByRole("radio", {
+    name: /^Self-hosted/,
+  }) as HTMLInputElement;
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const business = view.getByRole("radio", {
+    name: /^OpenBot for Business/,
+  }) as HTMLInputElement;
+  expect([self.checked, self.disabled]).toEqual([true, false]);
+  expect([cloud.checked, cloud.disabled]).toEqual([false, true]);
+  expect([business.checked, business.disabled]).toEqual([false, true]);
+  // What Self-hosted asks of this computer, and why: every part of OpenBot runs on it.
   expect(
-    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+    view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
-  // Three short paragraphs: what it is, how long setup takes, and production, in that order.
   expect(
     [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
   ).toEqual([
-    "This version of OpenBot is fully self-contained and runs entirely on your computer, including the OpenBot backend.",
-    "Depending on your internet speed, setup can take between 1 and 10 minutes.",
-    "In production, OpenBot for Business runs on your own infrastructure with Kubernetes, or on OpenBot Cloud. Book a demo for early access.",
+    "Self-hosted runs every part of OpenBot on this computer: the app, its server and database, your Bots' memory, and a computer for each Bot to work on.",
+    "Setup takes 1 to 10 minutes, depending on your internet speed.",
   ]);
-  expect(view.getByText("OpenBot for Business").tagName).toBe("STRONG");
-  // The one booking link, never a scheduling page of its own.
+  expect(
+    [...view.container.querySelectorAll(".needs-list li")].map(
+      (item) => item.textContent,
+    ),
+  ).toEqual([
+    "A Mac or a 64-bit Windows PC",
+    "16 GB of memory or more",
+    "4 CPU cores or more",
+    "40 GB of free disk space",
+  ]);
+  // The one booking link, never a scheduling page of its own, still live on the greyed row.
   expect(
     view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
   ).toBe("https://open.bot/business");
   expect(buttons(view)).toEqual(["Install"]);
-  expect(view.queryByRole("radio")).toBeNull();
-  expect(view.queryByText(/hosted/i)).toBeNull();
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
 });
@@ -630,7 +657,7 @@ test("the first screen says nothing about usage data: that is the last screen's 
   );
   withLocalCli({});
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(view.queryByText(/usage/i)).toBeNull();
   expect(view.queryByRole("checkbox")).toBeNull();
   expect(view.queryByRole("link", { name: "What OpenBot sends" })).toBeNull();
@@ -1407,12 +1434,9 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 
 function technicalOn(beats: Beat[]) {
   return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter(
-      // The first screen says the backend runs on this computer too: that is what
-      // self-contained means. Every later screen is held to plain words.
-      (word) =>
-        word.test(text) && !(beat === "welcome" && word.test("backend")),
-    ).map((word) => `${beat}: ${text.match(word)?.[0]}`),
+    TECHNICAL.filter((word) => word.test(text)).map(
+      (word) => `${beat}: ${text.match(word)?.[0]}`,
+    ),
   );
 }
 
@@ -2407,7 +2431,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   const alert = await view.findByRole("alert", { name: "Setup" });
   expect(alert.textContent).toContain("Setup stopped");
   expect(alert.textContent).toContain(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
   );
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Finishing setup" });
@@ -2415,7 +2439,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
   );
   expectPlain(view);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
@@ -2856,7 +2880,7 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   ]);
   expect(
     view.queryByText(
-      "The software OpenBot runs on isn't running. Retry to start it.",
+      "OpenBot can't reach the software it runs on. Retry to start it again.",
     ),
   ).toBeNull();
 });
@@ -3803,7 +3827,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(buttons(view)).toEqual(["Install"]);
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Nothing hosted is started, and nothing local either, until Install.
@@ -3844,7 +3868,7 @@ test("a previously hosted installation of another Bot installs the default Bot",
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );
@@ -4227,7 +4251,7 @@ function useInterruptedShutdownSetup() {
   return { root, notice };
 }
 
-test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
+test("a local Intelligence stack left running at Quit does not hold auto-start, which drops its notice", async () => {
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
@@ -4245,7 +4269,8 @@ test("a local Intelligence stack left running at Quit is shown without holding a
       true,
     ),
   );
-  expect(view.getByRole("alert").textContent).toContain(notice.said);
+  // The Start that ran starts those services as its own, and its Stop stops them.
+  expect(view.queryByText(notice.said)).toBeNull();
 });
 
 test("Stop that fails only for the local Intelligence stack still stops OpenBot", async () => {
@@ -4325,6 +4350,60 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   ).toBe(false);
   expect(view.queryByText(notice)).toBeNull();
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
+});
+
+test("the last quit's notices go once Start runs, and a Start that stops says only why", async () => {
+  // EC2 Mac: OpenBot quit while its engine machine was stopped. The next launch said "That didn't
+  // finish: OpenBot had trouble shutting down last time." over the stopped card, and the card
+  // stayed through Start, which stopped at "Getting OpenBot ready" with the engine down, and
+  // through Retry: a notice about the last run read as the reason this one stopped. With that
+  // one gone, the same card then said the same quit's other notice, about the services it left
+  // running, through Start and Retry until OpenBot opened.
+  const { notice } = useInterruptedShutdownSetup();
+  const leftover =
+    "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.";
+  const engine = { running: false };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") return null;
+    if (command === "last_local_eval_stop_failure")
+      return {
+        said: leftover,
+        detail: "the backend stack did not stop when OpenBot last quit",
+      };
+    if (command === "run_local_eval" && !engine.running) {
+      return {
+        ...localStatus("unknown", "unknown"),
+        outcome: "blocked",
+        stack: null,
+        reason: "docker-unavailable",
+      };
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(view.getByRole("alert").textContent).toContain(notice);
+
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const row = await view.findByRole("listitem", {
+    name: "Getting OpenBot ready",
+  });
+  await waitFor(() =>
+    expect(row.textContent).toContain(
+      "OpenBot can't reach the software it runs on. Retry to start it again.",
+    ),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+  expect(view.queryByText(leftover)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+
+  engine.running = true;
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+  expect(view.queryByText(leftover)).toBeNull();
 });
 
 /*

@@ -115,7 +115,7 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   return queryClient;
 }
 
-/** The roster, and which edition this is, as `/api/capabilities` says it. */
+/** The roster, and which edition this is, as the API's `deployment` says it. */
 function queryClientWithEdition(
   agents: AgentProfile[],
   edition: DeploymentCapabilities["edition"],

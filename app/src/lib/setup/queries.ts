@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { getSetupChecklist } from "@/lib/api/generated/organization-settings/organization-settings";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 
 /**
  * The setup checklist, as the server decided it for the person asking. See
@@ -62,10 +63,11 @@ export const setupKeys = {
 export function setupChecklistQueryOptions() {
   return queryOptions({
     queryKey: setupKeys.checklist(),
-    queryFn: (): Promise<SetupChecklist> =>
-      client("/api/setup", "checklist", {
+    queryFn: ({ signal }): Promise<SetupChecklist> =>
+      getSetupChecklist(ORGANIZATION_ID, {
+        signal,
         fallback: "Couldn't check your setup.",
-      }),
+      }) as Promise<SetupChecklist>,
   });
 }
 

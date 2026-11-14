@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SharedAppNotice } from "../src/components/plugins/shared-app-notice";
+import { ME_PATH, meResponse } from "./accounts-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -28,13 +29,18 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
-      if (url === "/api/me")
-        return Response.json({
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
-      if (url.startsWith("/api/approvals/shared-use/bot/"))
+      if (
+        /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/shared-use$/.test(url)
+      )
         return Response.json({ apps, pending });
-      if (url === "/api/approvals/shared-use" && init?.method === "POST") {
+      if (
+        url === "/api/v2/organizations/default/shared-use-requests" &&
+        init?.method === "POST"
+      ) {
         posted.push(JSON.parse(String(init.body)));
         return Response.json({ id: "r1", created: true });
       }

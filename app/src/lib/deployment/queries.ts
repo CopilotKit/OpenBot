@@ -3,14 +3,15 @@ import {
   queryOptions,
   useQuery,
 } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 
 /**
  * What this deployment can do, as the server is willing to say it.
  *
- * A projection, not the runtime. `/api/capabilities` is reachable before anybody has signed in, so
- * only fields somebody may know unauthenticated appear on it; the Intelligence contract and every
- * deployment secret stay on the server. See server/src/app.ts.
+ * A projection, not the runtime. The API's `deployment` is readable before anybody has signed in,
+ * so only fields somebody may know unauthenticated appear on it; the Intelligence contract and every
+ * deployment secret stay on the server.
  */
 export type DeploymentCapabilities = {
   /**
@@ -40,6 +41,16 @@ export type DeploymentCapabilities = {
   edition: "team" | "personal";
   transcription?: boolean;
   voice?: boolean;
+  /** Whether a Bot can run inside OpenBot, with no address of its own. */
+  builtInBots?: boolean;
+  /**
+   * Whether this OpenBot can give a Bot a computer of its own at all.
+   *
+   * Only where its computers are made one at a time (the supervisor, or a cluster's sandboxes).
+   * Whether the signed-in person may is a different question, answered by the "Isolated Bots"
+   * switch in `myCapabilitiesQueryOptions`.
+   */
+  isolatedBots?: boolean;
 };
 
 export const deploymentKeys = {
@@ -63,25 +74,11 @@ export function deploymentCapabilitiesQueryOptions() {
     queryKey: deploymentKeys.capabilities(),
     // Configuration, not data. It cannot change without the process restarting.
     staleTime: Number.POSITIVE_INFINITY,
-    queryFn: async (): Promise<DeploymentCapabilities> => {
-      /*
-       * The whole body, then one field off it. `/api/capabilities` answers with a bare object rather
-       * than the envelope most endpoints use, which is why this reads the Response itself instead of
-       * naming a key — the same shape the sign-in query uses.
-       */
-      const body = (await (
-        await client("/api/capabilities", {
-          fallback: "Couldn't load what OpenBot can do.",
-        })
-      ).json()) as {
-        generativeUi?: boolean;
-        selfHostBanner?: boolean;
-        localEvaluation?: boolean;
-        edition?: string;
-        transcription?: boolean;
-        voice?: boolean;
-      };
-
+    queryFn: async ({ signal }): Promise<DeploymentCapabilities> => {
+      const body = await getDeployment(ORGANIZATION_ID, {
+        signal,
+        fallback: "Couldn't load what OpenBot can do.",
+      });
       return {
         generativeUi: body.generativeUi === true,
         selfHostBanner: body.selfHostBanner === true,
@@ -89,6 +86,8 @@ export function deploymentCapabilitiesQueryOptions() {
         edition: body.edition === "personal" ? "personal" : "team",
         transcription: body.transcription === true,
         voice: body.voice === true,
+        builtInBots: body.builtInBots === true,
+        isolatedBots: body.isolatedBots === true,
       };
     },
   });

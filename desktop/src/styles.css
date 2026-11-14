@@ -731,6 +731,62 @@ button.text-link.change-provider {
   box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
+/*
+ * The ways to run OpenBot, on the first screen. Self-hosted is the one this app sets up; OpenBot
+ * Cloud and OpenBot for Business are shown so a person knows they exist, greyed and not choosable.
+ * Business's booking link stays live, and keeps the pointer every link has.
+ */
+fieldset.picker.hosting {
+  max-height: none;
+  overflow-y: visible;
+  margin: 4px 0 12px;
+}
+
+/* A shade tighter than the provider list, so the whole first screen fits the window's default size. */
+fieldset.picker.hosting .tile {
+  padding-block: 9px;
+}
+
+fieldset.picker.hosting .tile.chosen {
+  cursor: default;
+}
+
+fieldset.picker.hosting .tile.unavailable,
+fieldset.picker.hosting .tile.unavailable:hover,
+fieldset.picker.hosting .tile.unavailable:active {
+  cursor: not-allowed;
+  background: var(--card);
+}
+
+fieldset.picker.hosting .tile.unavailable .tile-name {
+  color: var(--text-secondary);
+}
+
+fieldset.picker.hosting .tile.unavailable .mark-tile {
+  opacity: 0.45;
+}
+
+/* What Self-hosted asks of this computer: the reason, then the four needs, two to a line. */
+.needs .lede {
+  margin-bottom: 6px;
+}
+
+/* The setup-time line under the needs, a little closer to Install. */
+.needs + .lede {
+  margin-bottom: 16px;
+}
+
+.needs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 2px 16px;
+  margin: 0 0 8px;
+  padding-left: 20px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 22px;
+}
+
 /* A disclosure: options almost nobody should open. */
 details {
   border-top: 1px solid var(--border);
