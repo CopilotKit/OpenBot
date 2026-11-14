@@ -511,6 +511,36 @@ test("switching shows the other organization everywhere: its Bots and conversati
   gone();
 });
 
+test("a switch made in another window is followed as soon as the person comes back to this one, from home", async () => {
+  const app = await open("/channel/org_acme-conversation");
+  await app.view.findByText(CONVERSATIONS[ACME.id] as string);
+  await app.view.findByText("An open conversation");
+  expect((await app.account()).textContent).toContain("Acme");
+
+  // Another window of the same browser switches. The session is one for both, so from now on
+  // every address the session decides answers from Acme Research, this window's included.
+  server.active = RESEARCH.id;
+  // The person comes back to this window, moments after it read the list.
+  window.dispatchEvent(new Event("visibilitychange"));
+
+  // It follows: home, in Acme Research, with nothing of Acme left on the screen or held.
+  await waitFor(() => expect(app.router.state.location.pathname).toBe("/"));
+  await app.view.findByText(BOTS[RESEARCH.id] as string);
+  await app.view.findByText(CONVERSATIONS[RESEARCH.id] as string);
+  await waitFor(async () =>
+    expect((await app.account()).textContent).toContain("Acme Research"),
+  );
+  for (const left of [BOTS[ACME.id], CONVERSATIONS[ACME.id]]) {
+    expect(document.body.textContent).not.toContain(left);
+    expect(everythingCached()).not.toContain(left);
+  }
+  // The conversation that was open is closed, not drawn again in an organization it is not in.
+  expect(document.body.textContent).not.toContain("An open conversation");
+  expect(addressedRequests()).toContain(
+    `GET /api/v2/organizations/${RESEARCH.id}/bots`,
+  );
+});
+
 test("a switch the server refuses leaves the person where they were, told so", async () => {
   const app = await open("/channel/org_acme-conversation");
   const menu = await app.openAccountMenu();

@@ -116,6 +116,45 @@ async function ownOrganizations(
   };
 }
 
+/** How the person is taken off the screen they are on when a switch made elsewhere is followed. */
+let leaveForSwitchElsewhere: (() => Promise<void>) | undefined;
+
+/**
+ * Say how to leave the open screen when the session turns out to be working in another
+ * organization: a switch made in another window. The app's layout takes the person home, as a
+ * switch made here does. Returns how to stop.
+ */
+export function onSwitchedElsewhere(leave: () => Promise<void>): () => void {
+  leaveForSwitchElsewhere = leave;
+  return () => {
+    if (leaveForSwitchElsewhere === leave) leaveForSwitchElsewhere = undefined;
+  };
+}
+
+/**
+ * Follow a switch the person made in another window: this window goes home, then changes over, so
+ * the conversation or Bot open here is never asked for in an organization it is not in.
+ *
+ * After the answer that found it out has been kept, not while it is being read: changing over
+ * takes every screen off the page, and a read that nobody on the page is waiting for is thrown
+ * away, which left the account row naming the organization the window had just left.
+ */
+async function follow(
+  queryClient: QueryClient,
+  from: string,
+  to: string,
+): Promise<void> {
+  await new Promise((kept) => setTimeout(kept, 0));
+  const still = () =>
+    currentOrganizationId() === from &&
+    queryClient.getQueryData<OwnOrganizations | null>(organizationKeys.mine())
+      ?.currentId === to;
+  if (!still()) return;
+  await leaveForSwitchElsewhere?.();
+  // Unless the person switched here meanwhile, or the list has since said otherwise.
+  if (still()) setCurrentOrganization(to);
+}
+
 /**
  * The signed-in person's organizations, or null when nobody is signed in.
  *
@@ -132,12 +171,24 @@ export function ownOrganizationsQueryOptions() {
        * "nobody is signed in": a session that lapsed leaves the app where it was until the person
        * signs in again, which loads the page afresh.
        */
-      if (mine && !signal.aborted) setCurrentOrganization(mine.currentId);
+      if (!mine || signal.aborted) return mine;
+      const known = currentOrganizationId();
+      if (known !== undefined && known !== mine.currentId) {
+        // The session works in another organization than this window does: see `follow`.
+        void follow(queryClient, known, mine.currentId);
+        return mine;
+      }
+      setCurrentOrganization(mine.currentId);
       return mine;
     },
     staleTime: 60_000,
-    // A switch made in another window is noticed when the person comes back to this one.
-    refetchOnWindowFocus: true,
+    /*
+     * A switch made in another window is noticed when the person comes back to this one. Always,
+     * however lately the list was read: the session is one for every window, so until this is
+     * asked the window would go on naming the organization it left while every address the
+     * session decides answered from the other.
+     */
+    refetchOnWindowFocus: "always",
   });
 }
 
