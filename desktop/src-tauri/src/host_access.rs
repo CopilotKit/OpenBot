@@ -85,6 +85,9 @@ struct Inner {
     effect_lock: Mutex<()>,
     /// Held while a dialog is on screen, so the person is shown one at a time. See `prompt_turn`.
     prompt_lock: Mutex<()>,
+    /// The deadline the server set for an operation once its dialog was on screen, by operation.
+    /// See `report_prompt_shown`.
+    shown_deadlines: Mutex<HashMap<String, u128>>,
 }
 
 struct State {
@@ -489,6 +492,7 @@ impl HostAccess {
             instance_label: fresh_id("host-instance"),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -748,6 +752,10 @@ impl Inner {
 
     fn handle_and_post(&self, client: &Client, operation: DesktopOperation) {
         let result = self.handle_operation(&operation);
+        self.shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&operation.operation_id);
         let body = match result {
             Ok(success) => DesktopResult {
                 operation_id: operation.operation_id.clone(),
@@ -808,6 +816,15 @@ impl Inner {
 
     fn operation_expired(&self, operation: &DesktopOperation) -> bool {
         let now = now_millis();
+        let shown_deadline = self
+            .shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&operation.operation_id)
+            .copied();
+        if let Some(deadline) = shown_deadline {
+            return deadline <= now;
+        }
         now.saturating_sub(operation.received_at_ms) > MAX_OPERATION_AGE_MS
             || operation
                 .expires_at
@@ -868,6 +885,7 @@ impl Inner {
                     "Host operation was canceled before the folder was granted.".into(),
                 ));
             }
+            self.report_prompt_shown(operation);
             self.approval.choose_folder(&ChooseFolderPrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
@@ -974,6 +992,7 @@ impl Inner {
         {
             let _turn = self.prompt_turn();
             self.ensure_operation_still_allowed(operation, &grant)?;
+            self.report_prompt_shown(operation);
             self.approval.confirm_write(&WritePrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
@@ -1032,6 +1051,7 @@ impl Inner {
         {
             let _turn = self.prompt_turn();
             self.ensure_operation_still_allowed(operation, &grant)?;
+            self.report_prompt_shown(operation);
             self.approval.confirm_command(&CommandPrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
@@ -1141,6 +1161,52 @@ impl Inner {
     /// sat exactly on top of it, two identical dialogs nobody could tell apart. Each dialog waits
     /// for the one before it, the "didn't run" notice included, and an action that is no longer
     /// wanted by the time its turn comes is never shown (`ensure_operation_still_allowed`).
+    /// Tells the server this operation's dialog is about to be on screen, and keeps to the
+    /// deadline it answers with: the person's two minutes start now, not when the request was
+    /// queued behind another dialog. A server older than this answers 404, and one that has given
+    /// up on the operation answers 404 too; either way the operation keeps the time it had.
+    fn report_prompt_shown(&self, operation: &DesktopOperation) {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Shown {
+            expires_at: u64,
+        }
+        let url = endpoint(&self.config.base_url, "/api/host-access/desktop/shown");
+        let sent = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .and_then(|client| {
+                client
+                    .post(url)
+                    .bearer_auth(&self.config.token)
+                    .json(&serde_json::json!({ "operationId": operation.operation_id }))
+                    .send()
+            });
+        match sent {
+            Ok(response) if response.status().is_success() => match response.json::<Shown>() {
+                Ok(shown) => {
+                    self.shown_deadlines
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .insert(operation.operation_id.clone(), u128::from(shown.expires_at));
+                }
+                Err(error) => log::warn!(
+                    "[host access] operation {} shown, but the deadline could not be read: {error}",
+                    operation.operation_id
+                ),
+            },
+            Ok(response) => log::info!(
+                "[host access] operation {} shown; the server kept its time ({})",
+                operation.operation_id,
+                response.status()
+            ),
+            Err(error) => log::warn!(
+                "[host access] operation {} shown; could not tell the server: {error}",
+                operation.operation_id
+            ),
+        }
+    }
+
     fn prompt_turn(&self) -> std::sync::MutexGuard<'_, ()> {
         self.prompt_lock
             .lock()
@@ -2404,10 +2470,14 @@ mod tests {
                                 .unwrap();
                             let mut reader = BufReader::new(stream.try_clone().unwrap());
                             let mut content_length = 0_usize;
+                            let mut request_line = String::new();
                             loop {
                                 let mut line = String::new();
                                 reader.read_line(&mut line).unwrap();
                                 let trimmed = line.trim_end();
+                                if request_line.is_empty() {
+                                    request_line = trimmed.to_string();
+                                }
                                 if trimmed.is_empty() {
                                     break;
                                 }
@@ -2420,6 +2490,16 @@ mod tests {
                             }
                             let mut body = vec![0_u8; content_length];
                             reader.read_exact(&mut body).unwrap();
+                            // Answered as a server without the route: these tests are about
+                            // results, and `ShownServer` is about this one.
+                            if request_line.contains("/desktop/shown") {
+                                stream
+                                    .write_all(
+                                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}",
+                                    )
+                                    .unwrap();
+                                continue;
+                            }
                             worker_bodies
                                 .lock()
                                 .unwrap()
@@ -2806,6 +2886,7 @@ mod tests {
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -2920,6 +3001,7 @@ mod tests {
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -3042,6 +3124,7 @@ mod tests {
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -3190,6 +3273,7 @@ mod tests {
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -3271,6 +3355,201 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// A server that answers `/desktop/shown` with `status` and `body`, and records each request's
+    /// path and body in order.
+    struct ShownServer {
+        base_url: String,
+        seen: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    impl ShownServer {
+        fn start(status: u16, body: String) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let worker_seen = seen.clone();
+            thread::spawn(move || {
+                for stream in listener.incoming().take(8) {
+                    let Ok(mut stream) = stream else { return };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut request_line = String::new();
+                    reader.read_line(&mut request_line).unwrap();
+                    let path = request_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or_default()
+                        .to_string();
+                    let mut content_length = 0_usize;
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        let trimmed = line.trim_end();
+                        if trimmed.is_empty() {
+                            break;
+                        }
+                        if let Some((name, value)) = trimmed.split_once(':') {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                content_length = value.trim().parse().unwrap();
+                            }
+                        }
+                    }
+                    let mut request_body = vec![0_u8; content_length];
+                    reader.read_exact(&mut request_body).unwrap();
+                    worker_seen
+                        .lock()
+                        .unwrap()
+                        .push((path, String::from_utf8(request_body).unwrap()));
+                    let reason = if status == 200 { "OK" } else { "Not Found" };
+                    let response = format!(
+                        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                }
+            });
+            Self { base_url, seen }
+        }
+    }
+
+    fn shown_inner(base_url: &str, approval: Arc<dyn HostApprovalUi>) -> Inner {
+        Inner {
+            config: HostAccessConfig::new(
+                base_url,
+                "token",
+                Address::new(Engine::Docker, None),
+                DEFAULT_IMAGE,
+                vec![],
+            ),
+            approval,
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::from([(
+                    "grant".into(),
+                    LocalGrant {
+                        id: "grant".into(),
+                        bot_id: "bot-a".into(),
+                        actor_id: "actor".into(),
+                        bot_name: Some("Research Bot".into()),
+                        root: temp_root("host-access-shown"),
+                        revoked: false,
+                    },
+                )]),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashMap::new(),
+            }),
+        }
+    }
+
+    fn shown_command(id: &str, expires_at: u64) -> DesktopOperation {
+        DesktopOperation {
+            operation_id: id.into(),
+            kind: HostOperationKind::RunCommand,
+            bot_id: "bot-a".into(),
+            actor_id: "actor".into(),
+            bot_name: None,
+            grant_id: Some("grant".into()),
+            target_operation_id: None,
+            relative_path: None,
+            content: None,
+            command: Some("ls -la".into()),
+            writable: Some(false),
+            command_policy: None,
+            expires_at: Some(expires_at),
+            received_at_ms: now_millis(),
+        }
+    }
+
+    /// Records what the server had been told by the time the dialog went up, then is declined.
+    struct SeesServerOnAsk {
+        seen: Arc<Mutex<Vec<(String, String)>>>,
+        seen_on_ask: Mutex<Option<Vec<(String, String)>>>,
+    }
+
+    impl HostApprovalUi for SeesServerOnAsk {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            unreachable!("only commands are asked about here")
+        }
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            unreachable!("only commands are asked about here")
+        }
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            *self.seen_on_ask.lock().unwrap() = Some(self.seen.lock().unwrap().clone());
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
+        }
+    }
+
+    /*
+     * FOUND ON A MAC: one dialog at a time meant a command asked for while an unanswered dialog was
+     * on screen waited behind it, its two minutes running, and appeared with almost none left. The
+     * server is told as the dialog goes up, so the person's two minutes start then.
+     */
+    #[test]
+    fn the_server_is_told_as_a_dialog_goes_on_screen() {
+        let server = ShownServer::start(404, r#"{"error":"old server"}"#.into());
+        let approval = Arc::new(SeesServerOnAsk {
+            seen: server.seen.clone(),
+            seen_on_ask: Mutex::new(None),
+        });
+        let inner = shown_inner(&server.base_url, approval.clone());
+        let deadline = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        let refused = inner
+            .handle_operation(&shown_command("op-shown", deadline))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            public_error_message(&refused, &inner.config),
+            "Declined in OpenBot Desktop."
+        );
+        let told = approval.seen_on_ask.lock().unwrap().clone().unwrap();
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(told[0].0, "/api/host-access/desktop/shown");
+        let body: serde_json::Value = serde_json::from_str(&told[0].1).unwrap();
+        assert_eq!(body["operationId"], "op-shown");
+    }
+
+    #[test]
+    fn a_shown_dialog_keeps_to_the_servers_new_deadline_and_an_old_server_changes_nothing() {
+        let soon = || u64::try_from(now_millis()).unwrap() + 50;
+        let later = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        // A server that restarted the time: the operation keeps to the new deadline.
+        let server = ShownServer::start(200, format!(r#"{{"expiresAt":{later}}}"#));
+        let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-new-time", soon());
+        inner.report_prompt_shown(&operation);
+        thread::sleep(Duration::from_millis(120));
+        assert!(!inner.operation_expired(&operation));
+
+        // A server without the route, or one that gave up on it: the time it had stands.
+        let server = ShownServer::start(404, r#"{"error":"not waiting"}"#.into());
+        let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-old-server", soon());
+        inner.report_prompt_shown(&operation);
+        thread::sleep(Duration::from_millis(120));
+        assert!(inner.operation_expired(&operation));
+
+        // A server nobody answers for: the same, and nothing breaks.
+        let inner = shown_inner("http://127.0.0.1:9", Arc::new(DenyAllApprovalUi));
+        let operation = shown_command("op-no-server", soon());
+        inner.report_prompt_shown(&operation);
+        thread::sleep(Duration::from_millis(120));
+        assert!(inner.operation_expired(&operation));
+    }
+
     #[test]
     fn grant_binding_refuses_wrong_bot_or_actor() {
         let config = HostAccessConfig::new(
@@ -3286,6 +3565,7 @@ mod tests {
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
+            shown_deadlines: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 stopped: false,
                 thread: None,
@@ -3473,6 +3753,7 @@ mod live {
                 instance_label: fresh_id("host-live"),
                 effect_lock: Mutex::new(()),
                 prompt_lock: Mutex::new(()),
+                shown_deadlines: Mutex::new(HashMap::new()),
                 state: Mutex::new(State {
                     stopped: false,
                     thread: None,
