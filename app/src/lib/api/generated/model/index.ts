@@ -56,6 +56,7 @@ export * from "./appNotFoundResponse";
 export * from "./appOAuthClientRequest";
 export * from "./appOwnerGrants";
 export * from "./appPage";
+export * from "./appProblem";
 export * from "./appRemovalForbiddenResponse";
 export * from "./approveAppAccessRequestHeaders";
 export * from "./approveBotAppHeaders";

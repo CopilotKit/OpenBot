@@ -689,6 +689,19 @@ components:
         pattern: \S
       example: github
   schemas:
+    AppProblem:
+      description: >-
+        A refusal about an app: the common problem, plus the app it names
+        when the app asked for is already here (APP_ALREADY_ADDED), so a
+        client can open it.
+      allOf:
+        - $ref: './common.yaml#/components/schemas/Problem'
+        - type: object
+          properties:
+            appId:
+              type: string
+              minLength: 1
+              description: The app already here.
     SharedAccountApproval:
       type: object
       additionalProperties: false
@@ -1496,7 +1509,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: './common.yaml#/components/schemas/Problem'
+            $ref: '#/components/schemas/AppProblem'
           examples:
             alreadyAdded:
               value:

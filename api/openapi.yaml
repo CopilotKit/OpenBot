@@ -8726,10 +8726,6 @@ components:
         capability:
           type: string
           description: The switch an administrator can turn on for this person, when the refusal is for want of one (isolatedComputers).
-        appId:
-          type: string
-          minLength: 1
-          description: The app the refusal is about, when it names one that is already here (APP_ALREADY_ADDED), so a client can open it.
         problems:
           type: array
           description: 'What is wrong, item by item, when a refusal has more than one reason: each entry names the item and says what is wrong with it.'
@@ -9348,6 +9344,16 @@ components:
         mapping:
           directory: '#/components/schemas/AddAppFromDirectory'
           address: '#/components/schemas/AddAppByAddress'
+    AppProblem:
+      description: 'A refusal about an app: the common problem, plus the app it names when the app asked for is already here (APP_ALREADY_ADDED), so a client can open it.'
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            appId:
+              type: string
+              minLength: 1
+              description: The app already here.
     ReplaceAppRequest:
       type: object
       additionalProperties: false
@@ -12444,7 +12450,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/AppProblem'
           examples:
             alreadyAdded:
               value:

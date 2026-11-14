@@ -100,7 +100,19 @@ function operationsOf(pathItem) {
   ]);
 }
 
-/** Every error response is application/problem+json, and nothing else, with the shared Problem schema. */
+/**
+ * Whether a schema is the shared Problem, or a problem type of its own that extends it: `allOf` whose
+ * first member is the shared Problem, adding the extension members its refusals carry (RFC 9457
+ * §3.2), such as the app a refusal about an app names.
+ */
+function isProblemSchema(ctx, schema) {
+  if (schema?.$ref === PROBLEM_SCHEMA) return true;
+  if (typeof schema?.$ref !== "string") return false;
+  const extended = resolved(ctx, schema);
+  return extended?.allOf?.[0]?.$ref === PROBLEM_SCHEMA;
+}
+
+/** Every error response is application/problem+json, and nothing else, with the shared Problem schema or one that extends it. */
 function ProblemDetailsErrors() {
   return {
     PathItem: {
@@ -117,10 +129,10 @@ function ProblemDetailsErrors() {
             if (
               types.length !== 1 ||
               types[0] !== PROBLEM_JSON ||
-              schema?.$ref !== PROBLEM_SCHEMA
+              !isProblemSchema(ctx, schema)
             ) {
               ctx.report({
-                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA} (RFC 9457, as Intelligence's v2 API).`,
+                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA} or one that extends it with allOf (RFC 9457, as Intelligence's v2 API).`,
                 location: ctx.location.child([method, "responses", status]),
               });
             }

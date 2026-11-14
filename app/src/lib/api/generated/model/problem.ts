@@ -29,11 +29,6 @@ export interface Problem {
   traceId: string;
   /** The switch an administrator can turn on for this person, when the refusal is for want of one (isolatedComputers). */
   capability?: string;
-  /**
-   * The app the refusal is about, when it names one that is already here (APP_ALREADY_ADDED), so a client can open it.
-   * @minLength 1
-   */
-  appId?: string;
   /** What is wrong, item by item, when a refusal has more than one reason: each entry names the item and says what is wrong with it. */
   problems?: ProblemProblemsItem[];
 }

@@ -101,3 +101,38 @@ test("a collision names what Intelligence owns", () => {
     messages.some((text) => text.includes("Intelligence's /api/v2/runtime")),
   ).toBe(true);
 });
+
+test("an error may be a problem type that extends the shared Problem, and nothing looser", () => {
+  const extended = spec();
+  extended.components.schemas.WidgetProblem = {
+    allOf: [
+      { $ref: "#/components/schemas/Problem" },
+      { type: "object", properties: { widgetId: { type: "string" } } },
+    ],
+  };
+  const notFound = (schema: unknown) => ({
+    description: "Not found.",
+    content: { "application/problem+json": { schema } },
+  });
+  extended.paths[`${BOTS}/{botId}`].get.responses["404"] = notFound({
+    $ref: "#/components/schemas/WidgetProblem",
+  });
+  expect(
+    lint(extended).filter(
+      (problem) => problem.ruleId === "openbot/problem-details-errors",
+    ),
+  ).toEqual([]);
+
+  // A schema of its own that does not start from the shared Problem is not problem details.
+  const loose = spec();
+  loose.components.schemas.WidgetProblem = {
+    type: "object",
+    properties: { widgetId: { type: "string" } },
+  };
+  loose.paths[`${BOTS}/{botId}`].get.responses["404"] = notFound({
+    $ref: "#/components/schemas/WidgetProblem",
+  });
+  expect(lint(loose).map((problem) => problem.ruleId)).toContain(
+    "openbot/problem-details-errors",
+  );
+});
