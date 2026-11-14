@@ -90,6 +90,35 @@ struct Inner {
     shown_deadlines: Mutex<HashMap<String, u128>>,
 }
 
+/// What the server said when told a dialog is on screen.
+#[derive(Debug, PartialEq, Eq)]
+enum ShownOutcome {
+    /// It restarted the operation's time, to this deadline (milliseconds since the epoch).
+    Restarted(u64),
+    /// It kept the operation's time: a server without the route, or one no longer waiting.
+    Kept(String),
+    /// It did not answer.
+    NoAnswer(String),
+    /// It answered with something that is not a deadline.
+    Unreadable(String),
+}
+
+/// The Desktop log's line for a dialog going on screen and what the server said.
+fn shown_log_line(operation_id: &str, outcome: &ShownOutcome, now_ms: u128) -> String {
+    let said = match outcome {
+        ShownOutcome::Restarted(expires_at) => format!(
+            "new deadline in {} s",
+            u128::from(*expires_at).saturating_sub(now_ms) / 1000
+        ),
+        ShownOutcome::Kept(status) => format!("it kept its own time ({status})"),
+        ShownOutcome::NoAnswer(error) => format!("no answer ({error})"),
+        ShownOutcome::Unreadable(error) => format!("its answer could not be read ({error})"),
+    };
+    format!(
+        "[host access] operation {operation_id} shown; asked the server to restart its wait: {said}"
+    )
+}
+
 /// The server being told a dialog is on screen, and the deadline it answers. See
 /// `Inner::report_prompt_shown`.
 struct PromptShown {
@@ -1194,7 +1223,6 @@ impl Inner {
         let deadline = thread::Builder::new()
             .name("openbot-host-shown".into())
             .spawn(move || {
-                let operation_id = worker_operation_id;
                 let sent = Client::builder()
                     .timeout(Duration::from_secs(5))
                     .build()
@@ -1202,30 +1230,31 @@ impl Inner {
                         client
                             .post(url)
                             .bearer_auth(token)
-                            .json(&serde_json::json!({ "operationId": operation_id }))
+                            .json(&serde_json::json!({ "operationId": worker_operation_id }))
                             .send()
                     });
-                match sent {
+                let outcome = match sent {
                     Ok(response) if response.status().is_success() => {
                         match response.json::<Shown>() {
-                            Ok(shown) => Some(shown.expires_at),
-                            Err(error) => {
-                                log::warn!("[host access] operation {operation_id} shown, but the deadline could not be read: {error}");
-                                None
-                            }
+                            Ok(shown) => ShownOutcome::Restarted(shown.expires_at),
+                            Err(error) => ShownOutcome::Unreadable(error.to_string()),
                         }
                     }
-                    Ok(response) => {
-                        log::info!(
-                            "[host access] operation {operation_id} shown; the server kept its time ({})",
-                            response.status()
-                        );
+                    Ok(response) => ShownOutcome::Kept(response.status().to_string()),
+                    Err(error) => ShownOutcome::NoAnswer(error.to_string()),
+                };
+                let line = shown_log_line(&worker_operation_id, &outcome, now_millis());
+                match outcome {
+                    ShownOutcome::Restarted(expires_at) => {
+                        log::info!("{line}");
+                        Some(expires_at)
+                    }
+                    ShownOutcome::Kept(_) => {
+                        log::info!("{line}");
                         None
                     }
-                    Err(error) => {
-                        log::warn!(
-                            "[host access] operation {operation_id} shown; could not tell the server: {error}"
-                        );
+                    ShownOutcome::NoAnswer(_) | ShownOutcome::Unreadable(_) => {
+                        log::warn!("{line}");
                         None
                     }
                 }
@@ -3615,6 +3644,26 @@ mod tests {
         inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
         thread::sleep(Duration::from_millis(120));
         assert!(inner.operation_expired(&operation));
+    }
+
+    /// The Desktop log says a dialog went up, and what the server answered, in every case.
+    #[test]
+    fn the_desktop_log_says_what_the_server_answered_when_a_dialog_went_up() {
+        let now = 1_000_000_u128;
+        assert_eq!(
+            shown_log_line("op-1", &ShownOutcome::Restarted(1_120_000), now),
+            "[host access] operation op-1 shown; asked the server to restart its wait: new deadline in 120 s"
+        );
+        assert_eq!(
+            shown_log_line("op-1", &ShownOutcome::Kept("404 Not Found".into()), now),
+            "[host access] operation op-1 shown; asked the server to restart its wait: it kept its own time (404 Not Found)"
+        );
+        assert!(shown_log_line(
+            "op-1",
+            &ShownOutcome::NoAnswer("connection refused".into()),
+            now
+        )
+        .ends_with("asked the server to restart its wait: no answer (connection refused)"));
     }
 
     #[test]
