@@ -28,7 +28,9 @@ function composeServices() {
           profiles?: string[];
           image?: string;
           build?: { context: string; dockerfile: string };
+          entrypoint?: string[];
           command?: string[];
+          working_dir?: string;
           env_file?: Array<{ path: string; required: boolean }>;
           environment?: Record<string, string>;
           depends_on?: Record<string, { condition: string }>;
@@ -255,6 +257,11 @@ function runComposeConfig(
     services: Record<
       string,
       {
+        image?: string;
+        entrypoint?: string[] | null;
+        command?: string[] | null;
+        working_dir?: string;
+        healthcheck?: { disable?: boolean; test?: string[] };
         environment: Record<string, string>;
         extra_hosts?: string[];
         volumes?: Array<{ type: string; source: string; target: string }>;
@@ -698,26 +705,22 @@ test("mounts the ChatGPT token store directory into the picked harness", () => {
 });
 
 /**
- * The server, the computer and the supervisor are pulled, never built:
- * the published OpenBot images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG.
- * Each image is still overridable, which is how OpenBot Desktop pins a release's digests.
+ * The server, the computer and the supervisor are pulled, never built: the published OpenBot
+ * images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG. The server and the
+ * computer are one image, `openbot`, started with a command each; the supervisor is its own. Each
+ * is still overridable by its own setting, which is how OpenBot Desktop pins a release's digests.
  */
-test("runs the server, computer and supervisor from the published images", () => {
+test("runs the server and the computer from the one published image, and the supervisor from its own", () => {
   const services = composeServices();
   const images = {
-    server: "openbot-server",
-    "agent-computer": "openbot-agent-computer",
-    supervisor: "openbot-supervisor",
+    server: ["openbot", "SERVER_IMAGE"],
+    "agent-computer": ["openbot", "COMPUTER_IMAGE"],
+    supervisor: ["openbot-supervisor", "SUPERVISOR_IMAGE"],
   } as const;
-  const variables = {
-    "openbot-server": "SERVER_IMAGE",
-    "openbot-agent-computer": "COMPUTER_IMAGE",
-    "openbot-supervisor": "SUPERVISOR_IMAGE",
-  } as const;
-  for (const [name, image] of Object.entries(images)) {
+  for (const [name, [image, variable]] of Object.entries(images)) {
     expect(services[name].build).toBeUndefined();
     expect(services[name].image).toBe(
-      `\${${variables[image]}:-ghcr.io/copilotkit/${image}:\${OPENBOT_BACKEND_TAG:-see-backend-images.env}}`,
+      `\${${variable}:-ghcr.io/copilotkit/${image}:\${OPENBOT_BACKEND_TAG:-see-backend-images.env}}`,
     );
     expect(services[name].pull_policy).toBe(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
@@ -735,8 +738,95 @@ test("runs the server, computer and supervisor from the published images", () =>
   expect(pinned).toMatch(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/);
   const config = runComposeConfig({ OPENBOT_BACKEND_TAG: pinned ?? "" });
   expect(config.services["agent-computer"].image).toBe(
-    `ghcr.io/copilotkit/openbot-agent-computer:${pinned}`,
+    `ghcr.io/copilotkit/openbot:${pinned}`,
   );
+  expect(config.services.server.image).toBe(
+    config.services["agent-computer"].image,
+  );
+});
+
+/**
+ * The OpenBot image started with no command is the whole of OpenBot in one container: a server, a
+ * computer beside it and the process that minds them. So every service on it names the executable
+ * for the one part it is, as its entrypoint, which is what drops the image's own. Read from what
+ * Compose itself resolves, with a release's one pinned image under both settings.
+ */
+test("starts each service on the OpenBot image as its own part of it, never as the whole image", () => {
+  const pinned = `ghcr.io/copilotkit/openbot@sha256:${"1".repeat(64)}`;
+  const { services } = runComposeConfig({
+    SERVER_IMAGE: pinned,
+    COMPUTER_IMAGE: pinned,
+  });
+  expect(services.server.image).toBe(pinned);
+  expect(services["agent-computer"].image).toBe(pinned);
+  expect(services.supervisor.environment?.COMPUTER_IMAGE).toBe(pinned);
+
+  expect(services.server.entrypoint).toEqual(["/app/bin/openbot", "server"]);
+  expect(services.server.command ?? null).toBeNull();
+  expect(services.server.working_dir).toBe("/app/server");
+  expect(services["agent-computer"].entrypoint).toEqual([
+    "/app/bin/openbot-computer",
+  ]);
+  expect(services["agent-computer"].command ?? null).toBeNull();
+  // The image's own PORT is the server's, so the computer is told its own.
+  expect(services["agent-computer"].environment?.PORT).toBe("4100");
+
+  // And each answers for its own health, or says it has none to answer for. The image's own check
+  // asks after a server on its port, so a service left with it that is not the server (the worker
+  // an app from the release before starts) is unhealthy for ever, and `up --wait` fails on it.
+  for (const [name, service] of Object.entries(services)) {
+    if (service.image !== pinned) continue;
+    const check = service.healthcheck;
+    expect({
+      name,
+      own: check?.disable === true || (check?.test?.length ?? 0) > 0,
+    }).toEqual({ name, own: true });
+  }
+
+  // Every other service on that image names an executable too.
+  for (const [name, service] of Object.entries(services)) {
+    if (service.image !== pinned) continue;
+    expect({ name, entrypoint: service.entrypoint?.[0] }).toEqual({
+      name,
+      entrypoint:
+        name === "agent-computer"
+          ? "/app/bin/openbot-computer"
+          : "/app/bin/openbot",
+    });
+  }
+});
+
+/**
+ * A Bot has a shell in its computer, and the image there now carries the server's executable. What
+ * keeps that harmless is that the computer is a container of its own, given only what is written
+ * under it: none of the deployment's `.env`, no database address, no key, no licence.
+ */
+test("gives the computer's container none of the server's settings", () => {
+  const secrets = {
+    KEY_ENCRYPTION_KEY: "sentinel-key-encryption-key",
+    BETTER_AUTH_SECRET: "sentinel-better-auth-secret",
+    COPILOTKIT_LICENSE_TOKEN: "sentinel-licence",
+    CPK_INTELLIGENCE_API_KEY: "sentinel-project-key",
+    INTELLIGENCE_API_KEY: "sentinel-intelligence-key",
+    OPENAI_API_KEY: "sentinel-openai-key",
+    ANTHROPIC_API_KEY: "sentinel-anthropic-key",
+    COMPOSIO_API_KEY: "sentinel-composio-key",
+    SUPERVISOR_TOKEN: "sentinel-supervisor-token",
+    AGENT_TOOL_TOKEN: "sentinel-agent-tool-token",
+    MANAGED_AGENT_TOKEN: "sentinel-managed-agent-token",
+  };
+  const { services } = runComposeConfig(secrets);
+  const computer = JSON.stringify(services["agent-computer"]);
+  for (const [name, value] of Object.entries(secrets)) {
+    expect(computer).not.toContain(name);
+    expect(computer).not.toContain(value);
+  }
+  expect(computer).not.toContain("DATABASE_URL");
+  // The control: the same settings do reach the server.
+  const server = JSON.stringify(services.server);
+  expect(server).toContain("sentinel-key-encryption-key");
+  expect(server).toContain("sentinel-intelligence-key");
+  expect(server).toContain("DATABASE_URL");
 });
 
 /**
@@ -769,7 +859,10 @@ test("still defines migrate and worker for one release, with nothing that waits 
     image: services.server.image,
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
     pull_policy: "${IMAGE_PULL_POLICY:-missing}",
-    command: ["bun", "../worker/src/index.ts"],
+    entrypoint: ["/app/bin/openbot"],
+    command: ["worker"],
+    working_dir: "/app/server",
+    healthcheck: { disable: true },
     restart: "unless-stopped",
     networks: ["data"],
   });
@@ -778,7 +871,10 @@ test("still defines migrate and worker for one release, with nothing that waits 
     image: services.server.image,
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
     pull_policy: "${IMAGE_PULL_POLICY:-missing}",
-    command: ["bun", "scripts/migrate.ts"],
+    entrypoint: ["/app/bin/openbot"],
+    command: ["migrate"],
+    working_dir: "/app/server",
+    healthcheck: { disable: true },
     environment: {
       DATABASE_URL: "postgres://openbot:openbot@postgres:5432/openbot",
     },

@@ -18,6 +18,10 @@ type Frame = { uri: string; width: number; height: number };
 const path = (botId: string, rest: string) =>
   `/api/computers/${encodeURIComponent(botId)}${rest}`;
 
+/** The Bot's screen, live: the API's `computers/{botId}/screen` socket (api/asyncapi.yaml). */
+const screenSocketPath = (botId: string) =>
+  `/api/v2/organizations/default/computers/${encodeURIComponent(botId)}/screen`;
+
 /**
  * The live screen: frames from the same authenticated stream the web view uses, with a screenshot
  * poll until the stream delivers (or when it cannot connect).
@@ -34,7 +38,7 @@ function useLiveFrame(botId: string, enabled: boolean) {
     void (async () => {
       const cookie = await authClient.getCookie();
       if (closed) return;
-      const url = `${serverUrl.replace(/^http/, "ws")}${path(botId, "/stream")}`;
+      const url = `${serverUrl.replace(/^http/, "ws")}${screenSocketPath(botId)}`;
       // React Native's WebSocket accepts headers, which is how the session cookie reaches the upgrade.
       const Native = WebSocket as unknown as new (
         url: string,

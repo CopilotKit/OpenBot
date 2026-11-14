@@ -35,6 +35,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -174,7 +175,9 @@ class ServerSocket {
 /** Announce `event` to every roster socket, as the server's channel events route does. */
 function announce(event: Record<string, unknown>) {
   for (const socket of ServerSocket.opened)
-    if (socket.url.includes("/api/channels/events"))
+    if (
+      socket.url.endsWith("/api/v2/organizations/default/conversation-events")
+    )
       socket.onmessage?.({ data: JSON.stringify(event) });
 }
 
@@ -400,7 +403,7 @@ async function serve(url: URL, request: Request): Promise<Response> {
     });
   if (path === "/api/components/showRecord/decision")
     return NativeResponse.json({ allowed: true });
-  if (path === "/api/admin/enterprise/me")
+  if (path === MY_CAPABILITIES_PATH)
     return NativeResponse.json({ capabilities: {}, enforced: false });
   if (path.endsWith("/info"))
     return NativeResponse.json({

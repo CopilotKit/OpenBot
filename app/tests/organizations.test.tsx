@@ -96,6 +96,8 @@ let server: {
   createRefusal: { status: number; code: string; detail: string } | null;
 };
 let requests: string[] = [];
+/** Where the app asks what this deployment offers (the API's getDeployment). */
+const DEPLOYMENT = "/api/v2/organizations/default/deployment";
 
 function problem(status: number, code: string, detail: string): Response {
   return new Response(JSON.stringify({ status, code, detail, title: code }), {
@@ -130,7 +132,7 @@ async function answer(
   const path = url.pathname;
   requests.push(`${method} ${path}`);
 
-  if (path === "/api/capabilities")
+  if (path === DEPLOYMENT)
     return Response.json({
       generativeUi: true,
       selfHostBanner: false,
@@ -270,9 +272,16 @@ afterAll(async () => {
   setCurrentOrganization("default");
 });
 
-/** The requests the app addressed to an organization, in order. */
+/**
+ * The requests the app addressed to an organization, in order. What the deployment itself offers is
+ * not one of them: it is asked before anybody has signed in, of the organization every install has.
+ */
 const addressedRequests = () =>
-  requests.filter((request) => request.includes("/api/v2/organizations/"));
+  requests.filter(
+    (request) =>
+      request.includes("/api/v2/organizations/") &&
+      request !== `GET ${DEPLOYMENT}`,
+  );
 
 /** The home screen, as far as this test needs it: the Bots of the organization the app works in. */
 function Home() {

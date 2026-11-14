@@ -21,6 +21,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -210,7 +211,7 @@ beforeAll(() => {
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ skills: [], tools: [] });

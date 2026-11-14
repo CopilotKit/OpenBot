@@ -26,6 +26,7 @@ import {
   PREFERENCES_PATH,
   preferencesResponse,
 } from "./accounts-api";
+import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -71,14 +72,12 @@ function server(initial: Preferences = {}, available = true) {
       }
       return preferencesResponse({ preferences: users[state.userId] });
     }
-    if (path.endsWith("/api/capabilities"))
+    if (path.endsWith(DEPLOYMENT_PATH))
       return Response.json({ generativeUi: available });
-    if (path.endsWith("/api/setup"))
+    if (path.endsWith(SETUP_CHECKLIST_PATH))
       return Response.json({
-        checklist: {
-          audience: "admin",
-          rows: [{ id: "computer", ready: available }],
-        },
+        audience: "admin",
+        rows: [{ id: "computer", ready: available }],
       });
     throw new Error(`Unexpected HTTP request: ${path}`);
   }) as typeof fetch;

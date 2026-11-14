@@ -15,6 +15,7 @@ import type {
   SetupRow,
 } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
+import { CHECK_SETUP_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -30,7 +31,7 @@ afterAll(async () => {
 
 const originalFetch = globalThis.fetch;
 let answer: () => Response;
-/** What `POST /api/setup/check` does before the read it causes; nothing by default. */
+/** What the API's `setup-checklist/check` does before the read it causes; nothing by default. */
 let onCheck: (() => void) | null;
 let requests: { path: string; method: string }[];
 const defaults = queryClient.getDefaultOptions();
@@ -48,7 +49,7 @@ beforeEach(() => {
       const path = String(input);
       const method = init?.method ?? "GET";
       requests.push({ path, method });
-      if (path === "/api/setup/check") onCheck?.();
+      if (path === CHECK_SETUP_PATH) onCheck?.();
       return answer();
     },
     { preconnect: originalFetch.preconnect },
@@ -132,7 +133,7 @@ const MEMBER: Checklist = {
 };
 
 function serving(checklist: Checklist) {
-  answer = () => Response.json({ checklist });
+  answer = () => Response.json(checklist);
 }
 
 function draw() {
@@ -266,7 +267,7 @@ test("while the answer is on its way, the checklist draws nothing", async () => 
   globalThis.fetch = Object.assign(
     async () => {
       await held;
-      return Response.json({ checklist: ADMIN });
+      return Response.json(ADMIN);
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -297,7 +298,7 @@ test("Check again asks the server to check again, and draws its answer", async (
   fireEvent.click(view.getByRole("button", { name: "Check again" }));
 
   expect(await view.findByText("Everything is set up.")).not.toBeNull();
-  expect(requests).toContainEqual({ path: "/api/setup/check", method: "POST" });
+  expect(requests).toContainEqual({ path: CHECK_SETUP_PATH, method: "POST" });
 });
 
 test("a key nobody has checked reads Not checked, never Ready", async () => {

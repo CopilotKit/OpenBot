@@ -57,6 +57,7 @@ import {
   meBody,
   PREFERENCES_PATH,
 } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 
 /*
@@ -443,7 +444,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       linkedAccountProviders: [],
       nextCursor: null,
     },
-    "/api/capabilities": {},
+    [DEPLOYMENT_PATH]: {},
     [PREFERENCES_PATH]: {},
   };
   globalThis.fetch = Object.assign(

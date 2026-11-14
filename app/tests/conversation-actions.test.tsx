@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConversationActions } from "@/components/channels/conversation-actions";
 import type { ChannelSummary } from "@/lib/channels/queries";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -53,8 +54,7 @@ function serving(
   requests.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
-    if (String(input) === "/api/capabilities")
-      return Response.json({ edition });
+    if (String(input) === DEPLOYMENT_PATH) return Response.json({ edition });
     requests.push(`${method} ${String(input)}`);
     if (method === "GET") return Response.json({ channels, nextCursor: null });
     return new Response(null, { status: 204 });

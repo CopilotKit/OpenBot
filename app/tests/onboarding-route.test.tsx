@@ -35,6 +35,7 @@ import {
   ONBOARDING_COMPLETE_PATH,
   personBody,
 } from "./accounts-api";
+import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -100,12 +101,12 @@ let completed: boolean;
 let completeFail: boolean;
 let named: string | null;
 let localEvaluation: boolean;
-/** What `GET /api/setup` answers. */
+/** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
 /** Ask before making changes, as `GET /api/approvals` says it, and every change asked for. */
 let askFirst: boolean;
 let askFirstChanges: unknown[];
-/** Whether `/api/capabilities` answers, and how many times it was asked. */
+/** Whether the API's `deployment` answers, and how many times it was asked. */
 let capabilitiesFail: boolean;
 let capabilitiesAsked: number;
 const defaults = queryClient.getDefaultOptions();
@@ -178,7 +179,7 @@ beforeEach(() => {
           onboarding: { step: saved, completedAt: null },
         });
       }
-      if (path === "/api/capabilities") {
+      if (path === DEPLOYMENT_PATH) {
         capabilitiesAsked += 1;
         return capabilitiesFail
           ? Response.json({ error: "down" }, { status: 503 })
@@ -186,7 +187,7 @@ beforeEach(() => {
       }
       const bots = answerBotsList(path, init, { visible: [BOT] });
       if (bots) return bots;
-      if (path === "/api/setup") return Response.json({ checklist });
+      if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
       if (path === "/api/approvals")
         return Response.json({ enabled: askFirst, rules: [], pending: [] });
       if (path === "/api/approvals/preferences" && method === "PATCH") {

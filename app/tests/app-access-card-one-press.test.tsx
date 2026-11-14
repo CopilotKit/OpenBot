@@ -24,6 +24,7 @@ import { AppAccessCard } from "@/components/channels/app-access-card";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
@@ -61,7 +62,7 @@ beforeAll(() => {
 /*
  * EMPTIED BEFORE EACH CASE, NOT ONLY AFTER. The app's one query client is a module, and `bun test`
  * runs every file in one process, so it reaches this file holding whatever an earlier file left on
- * it. A cached `/api/capabilities` answer never goes stale, and a team one drew the card as the team
+ * it. A cached `deployment` answer never goes stale, and a team one drew the card as the team
  * edition: an admin's "Turn on and give it", never Connect.
  */
 beforeEach(() => queryClient.clear());
@@ -120,8 +121,7 @@ function serving(before: AppAccess, signIn: Promise<void>) {
     const url = String(input);
     const method = init?.method ?? "GET";
     if (method !== "GET") writes.push(`${method} ${url}`);
-    if (url === "/api/capabilities")
-      return Response.json({ edition: "personal" });
+    if (url === DEPLOYMENT_PATH) return Response.json({ edition: "personal" });
     if (url === ME_PATH)
       return meResponse({
         user: { id: "usr_me", role: "admin", name: "Me" },

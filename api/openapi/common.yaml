@@ -1,0 +1,925 @@
+# OpenBot's REST API: the root of the spec, and the conventions every area shares (info, servers,
+# tags, security schemes and OAuth scopes, problem details, paging, Idempotency-Key, shared headers
+# and responses). Each area's operations and the components only it uses live in their own file
+# beside this one; `paths` below points at them.
+#
+# `bun run api:bundle` joins them into api/openapi.yaml, the file every client and check reads.
+# Never edit api/openapi.yaml by hand. See api/README.md.
+#
+# Parallel branches append to the tags, the scopes and the paths here, so git merges this file with
+# its union driver (.gitattributes): both sides' new lines are kept. A component listed here as a
+# $ref into an area file is listed only to keep the bundle's order; a new one needs no line here.
+openapi: 3.1.1
+info:
+  title: OpenBot API
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: >-
+    The one API every OpenBot client uses: the web app, Desktop, mobile, the
+    Recorder and the CLI. It follows the conventions of CopilotKit
+    Intelligence's v2 API so both read as one API, and OpenBot's resources sit
+    beside Intelligence's under the same organization address
+    (/api/v2/organizations/{organizationId}/...). Errors are RFC 9457 problem
+    details (application/problem+json), lists page with an opaque cursor and a
+    limit, and every write takes an Idempotency-Key.
+
+
+    An OpenBot install holds one or more organizations, and a person may be a
+    member of several. Every install has the organization `default`, which is
+    where everybody starts. organizationId is an organization's id or its
+    slug, and the caller must be a member of it: an organization the caller
+    is not in answers exactly as one that does not exist.
+
+
+    This file is the single source of truth: the clients, the server's types,
+    the docs and the contract tests are all generated from it or checked
+    against it. A change that breaks an existing client fails the pull request.
+servers:
+  - url: http://127.0.0.1:3001
+    description: An OpenBot server on this machine (the default local port).
+tags:
+  - { name: Bots, description: "The Bots a person can see: their own, those shared with them, the ones an administrator assigned them, and the ones that come with OpenBot." }
+  - { name: Reactions, description: "The reactions a Bot leaves on a person's message in place of a line of its own, when the message only needs an acknowledgement." }
+  - { name: Audit events, description: "The audit trail: what people and Bots did in the organization, and what its policy refused, newest first. Only an administrator can read it. It is read-only: events are written by what they record, never through the API." }
+  - { name: People, description: "The people in the organization: who they are, what they may do, and what is theirs alone (their standing instructions, preferences and first-run onboarding). An administrator sees everybody; anybody else sees themselves, as me." }
+  - { name: Linked accounts, description: "A person's accounts at other services, such as Slack and GitHub, that OpenBot knows are theirs, so a Bot answering there knows who it is talking to." }
+  - { name: Identity providers, description: "The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them." }
+  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, inside the organization, on the API only, and only a person signed in to OpenBot can make or manage one." }
+  - { name: Sessions, description: "Where a person is signed in to OpenBot, so they can see each browser and device and sign one out." }
+  - { name: Organization settings, description: "What an administrator sets for everybody, and what this OpenBot offers: sign-in, recording, idle computers, allowlists, the setup checklist, and which models Bots ran on." }
+  - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
+  - { name: Network policies, description: "Where Bot computers may connect, for the organization and for a directory group." }
+  - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
+  - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
+  - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
+  - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
+  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
+  - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
+  - { name: Notification settings, description: "How a person hears from their Bots while they're away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all." }
+  - { name: Routines, description: "A person's routines: what a Bot does for them on a schedule, in a conversation they share. A routine belongs to the person who made it and answers only them." }
+  - { name: Check-ins, description: "A Bot's check-ins: quiet looks through what a person connected, the items a check-in raised for them, and an administrator's numbers for how check-ins are going." }
+  - { name: Goals, description: "A person's goals: an outcome a Bot works toward, run on request, on a routine's schedule or when an outside event arrives through one of the goal's triggers." }
+  - { name: Follow-ups, description: "Work a Bot scheduled for itself to come back to later in a conversation." }
+  - { name: Organizations, description: "The organizations the caller is a member of, and each one's members. An organization keeps its own Bots and conversations, apart from every other's." }
+paths:
+  /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
+  /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
+  /api/v2/organizations/{organizationId}/bots/{botId}: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}' }
+  /api/v2/organizations/{organizationId}/audit-events: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events' }
+  /api/v2/organizations/{organizationId}/audit-events/export: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1export' }
+  /api/v2/organizations/{organizationId}/audit-events/vocabulary: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1vocabulary' }
+  /api/v2/organizations/{organizationId}/audit-events/ask: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1ask' }
+  /api/v2/organizations/{organizationId}/people: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people' }
+  /api/v2/organizations/{organizationId}/people/{personId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/revoke-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1revoke-access' }
+  /api/v2/organizations/{organizationId}/people/{personId}/restore-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1restore-access' }
+  /api/v2/organizations/{organizationId}/people/{personId}/onboarding/advance: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1advance' }
+  /api/v2/organizations/{organizationId}/people/{personId}/onboarding/complete: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1complete' }
+  /api/v2/organizations/{organizationId}/people/{personId}/instructions: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1instructions' }
+  /api/v2/organizations/{organizationId}/people/{personId}/preferences: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1preferences' }
+  /api/v2/organizations/{organizationId}/people/{personId}/api-keys: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1api-keys' }
+  /api/v2/organizations/{organizationId}/people/{personId}/api-keys/{apiKeyId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1api-keys~1{apiKeyId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sessions: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sessions' }
+  /api/v2/organizations/{organizationId}/people/{personId}/sessions/{sessionId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sessions~1{sessionId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1linked-accounts' }
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts/link: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1linked-accounts~1link' }
+  /api/v2/organizations/{organizationId}/people/{personId}/linked-accounts/{linkedAccountId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1linked-accounts~1{linkedAccountId}' }
+  /api/v2/organizations/{organizationId}/linked-account-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1linked-account-providers' }
+  /api/v2/organizations/{organizationId}/identity-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers' }
+  /api/v2/organizations/{organizationId}/identity-providers/{identityProviderId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers~1{identityProviderId}' }
+  /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
+  /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
+  /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
+  /api/v2/organizations/{organizationId}/capabilities: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities' }
+  /api/v2/organizations/{organizationId}/capabilities/{capabilityId}: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1{capabilityId}' }
+  /api/v2/organizations/{organizationId}/capabilities/batch-update: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1batch-update' }
+  /api/v2/organizations/{organizationId}/capabilities/translate: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1translate' }
+  /api/v2/organizations/{organizationId}/capabilities/preview: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1capabilities~1preview' }
+  /api/v2/organizations/{organizationId}/people/{personId}/capabilities: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1capabilities' }
+  /api/v2/organizations/{organizationId}/people/{personId}/stop-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1stop-computers' }
+  /api/v2/organizations/{organizationId}/network-policies: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1network-policies' }
+  /api/v2/organizations/{organizationId}/network-policies/{networkPolicyId}: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1network-policies~1{networkPolicyId}' }
+  /api/v2/organizations/{organizationId}/network-policies/translate: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1network-policies~1translate' }
+  /api/v2/organizations/{organizationId}/network-policies/replay: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1network-policies~1replay' }
+  /api/v2/organizations/{organizationId}/model-usage: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-usage' }
+  /api/v2/organizations/{organizationId}/computer-actions: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computer-actions' }
+  /api/v2/organizations/{organizationId}/setup-checklist: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist' }
+  /api/v2/organizations/{organizationId}/setup-checklist/check: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist~1check' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/join-tokens: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1join-tokens' }
+  /api/v2/organizations/{organizationId}/credentials: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials' }
+  /api/v2/organizations/{organizationId}/credentials/{credentialId}/revoke: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials~1{credentialId}~1revoke' }
+  /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
+  /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
+  /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1link-chat' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1verify-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1confirm-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1{destinationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/deliveries: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1deliveries' }
+  /api/v2/organizations/{organizationId}/people/{personId}/notification-settings: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1notification-settings' }
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
+  /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
+  /api/v2/organizations/{organizationId}/routines: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines' }
+  /api/v2/organizations/{organizationId}/routines/{routineId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}' }
+  /api/v2/organizations/{organizationId}/routines/{routineId}/pause: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1pause' }
+  /api/v2/organizations/{organizationId}/routines/{routineId}/resume: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1resume' }
+  /api/v2/organizations/{organizationId}/routines/{routineId}/run: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1run' }
+  /api/v2/organizations/{organizationId}/routines/{routineId}/runs: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1routines~1{routineId}~1runs' }
+  /api/v2/organizations/{organizationId}/check-ins: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-ins' }
+  /api/v2/organizations/{organizationId}/check-ins/{checkInId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-ins~1{checkInId}' }
+  /api/v2/organizations/{organizationId}/check-ins/{checkInId}/run: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-ins~1{checkInId}~1run' }
+  /api/v2/organizations/{organizationId}/check-in-items: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items' }
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/start: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1start' }
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/dismiss: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1dismiss' }
+  /api/v2/organizations/{organizationId}/check-in-usage: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-usage' }
+  /api/v2/organizations/{organizationId}/goals: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/pause: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1pause' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/resume: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1resume' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/complete: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1complete' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/run: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1run' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/runs: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1runs' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers~1{goalTriggerId}' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/enable: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers~1{goalTriggerId}~1enable' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/disable: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers~1{goalTriggerId}~1disable' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/secret: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers~1{goalTriggerId}~1secret' }
+  /api/v2/organizations/{organizationId}/goals/{goalId}/triggers/{goalTriggerId}/replace-secret: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals~1{goalId}~1triggers~1{goalTriggerId}~1replace-secret' }
+  /api/v2/organizations/{organizationId}/github-event-sources: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources' }
+  /api/v2/organizations/{organizationId}/github-event-sources/{githubEventSourceId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources~1{githubEventSourceId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1follow-ups~1{followUpId}~1cancel' }
+  /api/v2/people/me/organizations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1organizations' }
+  /api/v2/organizations/{organizationId}/members: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members' }
+components:
+  securitySchemes:
+    webSession:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+      description: >-
+        The web app's server-side session, so no token ever reaches the
+        browser. Served over HTTPS the cookie is
+        __Secure-better-auth.session_token. A single-user install signs its
+        one person in without a cookie.
+    appOAuth:
+      type: oauth2
+      description: >-
+        Desktop, mobile and the CLI. OAuth 2.1 authorization code with PKCE
+        (RFC 7636, S256 only); the access token is sent as a bearer token. The
+        server does not accept it yet.
+      flows:
+        authorizationCode:
+          authorizationUrl: /api/auth/oauth2/authorize
+          tokenUrl: /api/auth/oauth2/token
+          refreshUrl: /api/auth/oauth2/token
+          scopes:
+            conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
+            computers:read: Watch the signed-in person's Bots' screens and terminals.
+            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
+            bots:read: Read the Bots the signed-in person can see.
+            bots:write: Create, change and delete the signed-in person's Bots.
+            reactions:read: Read the reactions Bots left on the signed-in person's messages.
+            audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
+            people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
+            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, and for an administrator anybody's role and access.
+            linked-accounts:read: Read the signed-in person's linked accounts, and which services can be linked.
+            linked-accounts:write: Link and unlink the signed-in person's accounts at other services.
+            identity-providers:read: Read the organization's identity providers, when the signed-in person is an administrator.
+            identity-providers:write: Remove the organization's identity providers, when the signed-in person is an administrator.
+            settings:read: Read the organization's settings, when the signed-in person is an administrator.
+            settings:write: Change the organization's settings and stop idle computers, when the signed-in person is an administrator.
+            capabilities:read: Read the permission switches, and describe and preview changes to them, when the signed-in person is an administrator.
+            capabilities:write: Change the permission switches, when the signed-in person is an administrator.
+            network-policies:read: Read where Bot computers may connect, and describe and test a policy, when the signed-in person is an administrator.
+            network-policies:write: Set and remove where Bot computers may connect, when the signed-in person is an administrator.
+            model-usage:read: Read which models Bots ran on, when the signed-in person is an administrator.
+            computer-actions:read: Read the actions recorded on Bot computers, when the signed-in person is an administrator.
+            setup-checklist:read: Read the setup checklist, and check it again.
+            credentials:read: Read which credentials the vault keeps and where the Bots' model key is filed, never a secret, when the signed-in person is an administrator.
+            credentials:write: Add credentials to the vault and revoke them, when the signed-in person is an administrator.
+            model-catalogue:read: Read the models Bots can run on.
+            model-choices:read: Read the model the signed-in person chose for each of their conversations.
+            model-choices:write: Choose the model the signed-in person's conversations answer on.
+            devices:read: Read the phones the signed-in person registered for push notifications.
+            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
+            notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
+            notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
+            routines:read: Read the signed-in person's routines and their runs.
+            routines:write: Create, pause, resume, run and delete the signed-in person's routines.
+            check-ins:read: Read the signed-in person's check-ins and the items they raised, and for an administrator how check-ins are going.
+            check-ins:write: Turn the signed-in person's check-ins on and off, change and run them, and start or hide the items they raised.
+            goals:read: Read the signed-in person's goals, their runs, their triggers and their GitHub event sources. Reading a trigger's secret needs goals:write.
+            goals:write: Create, change, pause, resume, complete, run and delete the signed-in person's goals, their triggers and their GitHub event sources.
+            organizations:read: Read the organizations the signed-in person is a member of, and their members.
+            organizations:write: Create organizations and add members to them, where the signed-in person may.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: OpenBot API key
+      description: >-
+        Automation. An API key acts as the person who created it, inside one
+        organization. The server does not accept it yet.
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      description: >-
+        The organization, by its id or its slug. Every install has one
+        addressed as `default`.
+      schema:
+        type: string
+        minLength: 1
+      example: default
+    PersonId:
+      name: personId
+      in: path
+      required: true
+      description: >-
+        The person: me for the caller, or a person's id. A person's own
+        things (their instructions, preferences, API keys, sessions and
+        linked accounts) answer only the person themselves, by either.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: me
+    ApiKeyId: { $ref: './accounts.yaml#/components/parameters/ApiKeyId' }
+    SessionId: { $ref: './accounts.yaml#/components/parameters/SessionId' }
+    LinkedAccountId: { $ref: './accounts.yaml#/components/parameters/LinkedAccountId' }
+    IdentityProviderId: { $ref: './accounts.yaml#/components/parameters/IdentityProviderId' }
+    CapabilityIdParameter: { $ref: './admin-settings.yaml#/components/parameters/CapabilityIdParameter' }
+    NetworkPolicyId: { $ref: './admin-settings.yaml#/components/parameters/NetworkPolicyId' }
+    BotId: { $ref: './bots.yaml#/components/parameters/BotId' }
+    Limit:
+      name: limit
+      in: query
+      description: Most items in one page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      description: >-
+        Opaque continuation from the previous page's nextCursor, bound to the
+        organization and the filters that made it. The server only ever issues
+        cursors written in URL-safe base64 (letters, digits, - and _, no
+        padding) and refuses anything else, so the pattern says so. A cursor
+        that fits the pattern can still be refused: one this list never gave
+        out, or one made for another organization or other filters.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 4096
+        pattern: ^[A-Za-z0-9_-]+$
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Generated by the caller for each write it means to make once. Reuse the
+        same key and the same request for 24 hours after an uncertain response;
+        the same key with a different request is a conflict.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    AuditEventTypes: { $ref: './audit-events.yaml#/components/parameters/AuditEventTypes' }
+    AuditExcludedEventTypes: { $ref: './audit-events.yaml#/components/parameters/AuditExcludedEventTypes' }
+    AuditExcludedCalls: { $ref: './audit-events.yaml#/components/parameters/AuditExcludedCalls' }
+    AuditActor: { $ref: './audit-events.yaml#/components/parameters/AuditActor' }
+    AuditInitiatorKinds: { $ref: './audit-events.yaml#/components/parameters/AuditInitiatorKinds' }
+    AuditTargetTypes: { $ref: './audit-events.yaml#/components/parameters/AuditTargetTypes' }
+    AuditTargetId: { $ref: './audit-events.yaml#/components/parameters/AuditTargetId' }
+    AuditBots: { $ref: './audit-events.yaml#/components/parameters/AuditBots' }
+    AuditApps: { $ref: './audit-events.yaml#/components/parameters/AuditApps' }
+    AuditTools: { $ref: './audit-events.yaml#/components/parameters/AuditTools' }
+    AuditEffect: { $ref: './audit-events.yaml#/components/parameters/AuditEffect' }
+    AuditIntents: { $ref: './audit-events.yaml#/components/parameters/AuditIntents' }
+    AuditRule: { $ref: './audit-events.yaml#/components/parameters/AuditRule' }
+    AuditFrom: { $ref: './audit-events.yaml#/components/parameters/AuditFrom' }
+    AuditTo: { $ref: './audit-events.yaml#/components/parameters/AuditTo' }
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      description: The conversation's id.
+      schema:
+        type: string
+        minLength: 1
+        pattern: \S
+      example: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+    CredentialId: { $ref: './model-connections.yaml#/components/parameters/CredentialId' }
+    ModelCatalogueView: { $ref: './model-connections.yaml#/components/parameters/ModelCatalogueView' }
+  headers:
+    PrivateNoStore:
+      description: A Bot is private to the caller.
+      schema:
+        type: string
+        const: private, no-store
+  schemas:
+    BotVisibility: { $ref: './bots.yaml#/components/schemas/BotVisibility' }
+    Bot: { $ref: './bots.yaml#/components/schemas/Bot' }
+    BotPage: { $ref: './bots.yaml#/components/schemas/BotPage' }
+    Reaction: { $ref: './conversations.yaml#/components/schemas/Reaction' }
+    ReactionPage: { $ref: './conversations.yaml#/components/schemas/ReactionPage' }
+    BotResponse: { $ref: './bots.yaml#/components/schemas/BotResponse' }
+    SharedApp: { $ref: './bots.yaml#/components/schemas/SharedApp' }
+    SharedAppsAfterChange: { $ref: './bots.yaml#/components/schemas/SharedAppsAfterChange' }
+    UpdateBotResponse: { $ref: './bots.yaml#/components/schemas/UpdateBotResponse' }
+    BotKey: { $ref: './bots.yaml#/components/schemas/BotKey' }
+    BotFields: { $ref: './bots.yaml#/components/schemas/BotFields' }
+    CreateBotRequest: { $ref: './bots.yaml#/components/schemas/CreateBotRequest' }
+    UpdateBotRequest: { $ref: './bots.yaml#/components/schemas/UpdateBotRequest' }
+    AuditFilterText: { $ref: './audit-events.yaml#/components/schemas/AuditFilterText' }
+    AuditEffect: { $ref: './audit-events.yaml#/components/schemas/AuditEffect' }
+    AuditIntent: { $ref: './audit-events.yaml#/components/schemas/AuditIntent' }
+    AuditEvent:
+      type: object
+      description: >-
+        One thing that happened, as the trail recorded it. Secrets are
+        redacted from the payload before it is written.
+      required:
+        - id
+        - actorUserId
+        - initiatorKind
+        - initiatorId
+        - eventType
+        - targetType
+        - targetId
+        - payload
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The event's id.
+        actorUserId:
+          type: [string, 'null']
+          description: >-
+            The person whose authority it ran on, by user id. Null when it ran
+            on nobody's, such as the deployment acting at start-up.
+        initiatorKind:
+          type: string
+          description: >-
+            What started it: person, deployment, routine, responsibility,
+            memory or handoff. Read back as it was written, so an event from a
+            later release may name another.
+        initiatorId:
+          type: [string, 'null']
+          description: >-
+            Which routine, responsibility, memory or Bot started it. Null when
+            a person or the deployment did.
+        eventType:
+          type: string
+          description: What happened, such as computer.action_refused.
+        targetType:
+          type: string
+          description: The kind of thing it happened to, such as agent or computer.
+        targetId:
+          type: [string, 'null']
+          description: The thing it happened to, by id. Null when it names none.
+        payload:
+          type: object
+          additionalProperties: true
+          description: What the event recorded. Its fields depend on eventType.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it happened.
+    AuditEventPage: { $ref: './audit-events.yaml#/components/schemas/AuditEventPage' }
+    AuditVocabulary: { $ref: './audit-events.yaml#/components/schemas/AuditVocabulary' }
+    AuditQuestion: { $ref: './audit-events.yaml#/components/schemas/AuditQuestion' }
+    AuditFilters: { $ref: './audit-events.yaml#/components/schemas/AuditFilters' }
+    AuditFilterLabels: { $ref: './audit-events.yaml#/components/schemas/AuditFilterLabels' }
+    AuditAnswer: { $ref: './audit-events.yaml#/components/schemas/AuditAnswer' }
+    PersonRole:
+      type: string
+      enum: [owner, admin, member]
+      description: >-
+        The person's role as a member of the organization. An owner or an
+        admin governs it: its people, its sign-in and its policy. A member
+        uses it. The owner is whoever created the organization; `default`
+        has admins and no owner.
+    AssignableRole: { $ref: './accounts.yaml#/components/schemas/AssignableRole' }
+    OnboardingStatus: { $ref: './accounts.yaml#/components/schemas/OnboardingStatus' }
+    Person: { $ref: './accounts.yaml#/components/schemas/Person' }
+    PersonPage: { $ref: './accounts.yaml#/components/schemas/PersonPage' }
+    PersonResponse: { $ref: './accounts.yaml#/components/schemas/PersonResponse' }
+    GetPersonResponse: { $ref: './accounts.yaml#/components/schemas/GetPersonResponse' }
+    UpdatePersonRequest: { $ref: './accounts.yaml#/components/schemas/UpdatePersonRequest' }
+    AdvanceOnboardingRequest: { $ref: './accounts.yaml#/components/schemas/AdvanceOnboardingRequest' }
+    OnboardingResponse: { $ref: './accounts.yaml#/components/schemas/OnboardingResponse' }
+    StandingInstructions: { $ref: './accounts.yaml#/components/schemas/StandingInstructions' }
+    MessageListEmphasis: { $ref: './accounts.yaml#/components/schemas/MessageListEmphasis' }
+    OnOff: { $ref: './accounts.yaml#/components/schemas/OnOff' }
+    SkinId: { $ref: './accounts.yaml#/components/schemas/SkinId' }
+    Preferences: { $ref: './accounts.yaml#/components/schemas/Preferences' }
+    UpdatePreferencesRequest: { $ref: './accounts.yaml#/components/schemas/UpdatePreferencesRequest' }
+    ApiKey: { $ref: './accounts.yaml#/components/schemas/ApiKey' }
+    ApiKeyPage: { $ref: './accounts.yaml#/components/schemas/ApiKeyPage' }
+    CreateApiKeyRequest: { $ref: './accounts.yaml#/components/schemas/CreateApiKeyRequest' }
+    CreatedApiKey: { $ref: './accounts.yaml#/components/schemas/CreatedApiKey' }
+    Session: { $ref: './accounts.yaml#/components/schemas/Session' }
+    SessionPage: { $ref: './accounts.yaml#/components/schemas/SessionPage' }
+    LinkedAccountProviderId: { $ref: './accounts.yaml#/components/schemas/LinkedAccountProviderId' }
+    LinkedAccount: { $ref: './accounts.yaml#/components/schemas/LinkedAccount' }
+    LinkedAccountPage: { $ref: './accounts.yaml#/components/schemas/LinkedAccountPage' }
+    LinkedAccountProvider: { $ref: './accounts.yaml#/components/schemas/LinkedAccountProvider' }
+    LinkedAccountProviderPage: { $ref: './accounts.yaml#/components/schemas/LinkedAccountProviderPage' }
+    LinkAccountRequest: { $ref: './accounts.yaml#/components/schemas/LinkAccountRequest' }
+    SlackLinkCode: { $ref: './accounts.yaml#/components/schemas/SlackLinkCode' }
+    GitHubAuthorization: { $ref: './accounts.yaml#/components/schemas/GitHubAuthorization' }
+    AccountLinkStart: { $ref: './accounts.yaml#/components/schemas/AccountLinkStart' }
+    IdentityProviderProtocol: { $ref: './accounts.yaml#/components/schemas/IdentityProviderProtocol' }
+    IdentityProvider: { $ref: './accounts.yaml#/components/schemas/IdentityProvider' }
+    IdentityProviderPage: { $ref: './accounts.yaml#/components/schemas/IdentityProviderPage' }
+    IdentityProviderResponse: { $ref: './accounts.yaml#/components/schemas/IdentityProviderResponse' }
+    IdentityProviderText: { $ref: './accounts.yaml#/components/schemas/IdentityProviderText' }
+    IdentityProviderAddress: { $ref: './accounts.yaml#/components/schemas/IdentityProviderAddress' }
+    SamlIdentityProviderRequest: { $ref: './accounts.yaml#/components/schemas/SamlIdentityProviderRequest' }
+    OidcIdentityProviderRequest: { $ref: './accounts.yaml#/components/schemas/OidcIdentityProviderRequest' }
+    NewIdentityProviderId: { $ref: './accounts.yaml#/components/schemas/NewIdentityProviderId' }
+    IdentityProviderDomains: { $ref: './accounts.yaml#/components/schemas/IdentityProviderDomains' }
+    CreateIdentityProviderRequest: { $ref: './accounts.yaml#/components/schemas/CreateIdentityProviderRequest' }
+    Deployment: { $ref: './admin-settings.yaml#/components/schemas/Deployment' }
+    AllowlistEntry: { $ref: './admin-settings.yaml#/components/schemas/AllowlistEntry' }
+    OrganizationSettingValues: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettingValues' }
+    OrganizationSettings: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettings' }
+    OrganizationSettingsContext: { $ref: './admin-settings.yaml#/components/schemas/OrganizationSettingsContext' }
+    UpdateOrganizationSettingsRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateOrganizationSettingsRequest' }
+    InactiveComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/InactiveComputersStopped' }
+    PersonComputersStopped: { $ref: './admin-settings.yaml#/components/schemas/PersonComputersStopped' }
+    CapabilityId: { $ref: './admin-settings.yaml#/components/schemas/CapabilityId' }
+    Capability: { $ref: './admin-settings.yaml#/components/schemas/Capability' }
+    CapabilityPage: { $ref: './admin-settings.yaml#/components/schemas/CapabilityPage' }
+    SwitchValue: { $ref: './admin-settings.yaml#/components/schemas/SwitchValue' }
+    UpdateCapabilityRequest: { $ref: './admin-settings.yaml#/components/schemas/UpdateCapabilityRequest' }
+    CapabilityChange: { $ref: './admin-settings.yaml#/components/schemas/CapabilityChange' }
+    Authoring: { $ref: './admin-settings.yaml#/components/schemas/Authoring' }
+    CapabilityChangesToPreview: { $ref: './admin-settings.yaml#/components/schemas/CapabilityChangesToPreview' }
+    CapabilityChangeToCheck: { $ref: './admin-settings.yaml#/components/schemas/CapabilityChangeToCheck' }
+    CapabilityChanges: { $ref: './admin-settings.yaml#/components/schemas/CapabilityChanges' }
+    SavedCapabilityChanges: { $ref: './admin-settings.yaml#/components/schemas/SavedCapabilityChanges' }
+    ChangeDescription: { $ref: './admin-settings.yaml#/components/schemas/ChangeDescription' }
+    RuleCheck: { $ref: './admin-settings.yaml#/components/schemas/RuleCheck' }
+    CapabilityTranslation: { $ref: './admin-settings.yaml#/components/schemas/CapabilityTranslation' }
+    WrittenCapabilityChange: { $ref: './admin-settings.yaml#/components/schemas/WrittenCapabilityChange' }
+    CapabilityAnswer: { $ref: './admin-settings.yaml#/components/schemas/CapabilityAnswer' }
+    CapabilityPreview: { $ref: './admin-settings.yaml#/components/schemas/CapabilityPreview' }
+    PersonCapabilities: { $ref: './admin-settings.yaml#/components/schemas/PersonCapabilities' }
+    NetworkMode: { $ref: './admin-settings.yaml#/components/schemas/NetworkMode' }
+    EgressRule: { $ref: './admin-settings.yaml#/components/schemas/EgressRule' }
+    WrittenEgressRule: { $ref: './admin-settings.yaml#/components/schemas/WrittenEgressRule' }
+    NetworkPolicy: { $ref: './admin-settings.yaml#/components/schemas/NetworkPolicy' }
+    NetworkPolicyPage: { $ref: './admin-settings.yaml#/components/schemas/NetworkPolicyPage' }
+    NetworkPolicyInput: { $ref: './admin-settings.yaml#/components/schemas/NetworkPolicyInput' }
+    NetworkPolicyCandidate: { $ref: './admin-settings.yaml#/components/schemas/NetworkPolicyCandidate' }
+    NetworkTranslation: { $ref: './admin-settings.yaml#/components/schemas/NetworkTranslation' }
+    NetworkReplayReport: { $ref: './admin-settings.yaml#/components/schemas/NetworkReplayReport' }
+    ModelUsage: { $ref: './admin-settings.yaml#/components/schemas/ModelUsage' }
+    ComputerAction: { $ref: './admin-settings.yaml#/components/schemas/ComputerAction' }
+    ComputerActionPage: { $ref: './admin-settings.yaml#/components/schemas/ComputerActionPage' }
+    SetupChecklist: { $ref: './admin-settings.yaml#/components/schemas/SetupChecklist' }
+    Problem:
+      type: object
+      description: >-
+        RFC 9457 problem details, in the shape CopilotKit Intelligence's v2
+        API uses. status equals the HTTP status; code and type name the same
+        stable error. detail is the sentence a person reads.
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - code
+        - category
+        - retryable
+        - requestId
+        - traceId
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          minLength: 1
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          enum:
+            - validation
+            - auth
+            - permission
+            - not_found
+            - conflict
+            - rate_limit
+            - internal
+            - dependency
+        retryable:
+          type: boolean
+        requestId:
+          type: string
+          minLength: 1
+        traceId:
+          type: string
+          minLength: 1
+        capability:
+          type: string
+          description: >-
+            The switch an administrator can turn on for this person, when the
+            refusal is for want of one (isolatedComputers).
+    ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
+    CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
+    Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
+    CredentialPage: { $ref: './model-connections.yaml#/components/schemas/CredentialPage' }
+    CredentialInput: { $ref: './model-connections.yaml#/components/schemas/CredentialInput' }
+    ModelKey: { $ref: './model-connections.yaml#/components/schemas/ModelKey' }
+    ModelOption: { $ref: './model-connections.yaml#/components/schemas/ModelOption' }
+    ModelCatalogue: { $ref: './model-connections.yaml#/components/schemas/ModelCatalogue' }
+    ModelChoice: { $ref: './model-connections.yaml#/components/schemas/ModelChoice' }
+    ModelChoiceInput: { $ref: './model-connections.yaml#/components/schemas/ModelChoiceInput' }
+  responses:
+    InvalidRequest:
+      description: A parameter is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A Bot id is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidBot: { $ref: './bots.yaml#/components/responses/InvalidBot' }
+    Unauthenticated:
+      description: The caller is not signed in.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/auth-unauthenticated
+                title: Authentication is required.
+                status: 401
+                detail: Authentication required.
+                code: AUTH_UNAUTHENTICATED
+                category: auth
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    Forbidden:
+      description: The caller holds no role in this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noRole:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Authorization required.
+                status: 403
+                detail: Authorization required.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotForbidden: { $ref: './bots.yaml#/components/responses/BotForbidden' }
+    AdminOnly:
+      description: >-
+        The caller is not an administrator of the organization, or holds no
+        role in it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidAuditQuestion: { $ref: './audit-events.yaml#/components/responses/InvalidAuditQuestion' }
+    AuditQuestionNotUnderstood: { $ref: './audit-events.yaml#/components/responses/AuditQuestionNotUnderstood' }
+    ModelFailed:
+      description: The model didn't answer, or didn't answer usefully. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/model-failed
+                title: The model didn't answer.
+                status: 502
+                detail: Couldn't reach the model. Try again.
+                code: MODEL_FAILED
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    ModelNotConfigured:
+      description: The deployment has no model to read a question with.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noModel:
+              value:
+                type: https://open.bot/errors/model-not-configured
+                title: OpenBot has no model to answer with.
+                status: 503
+                detail: OpenBot needs a model key to answer a question. Add one in the Vault, or set the filters yourself.
+                code: MODEL_NOT_CONFIGURED
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotFound:
+      description: The organization does not exist or is not visible to the caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotNotFound: { $ref: './bots.yaml#/components/responses/BotNotFound' }
+    IdempotencyConflict:
+      description: The Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidPerson: { $ref: './accounts.yaml#/components/responses/InvalidPerson' }
+    PersonForbidden:
+      description: >-
+        The caller asked about or changed somebody else without being an
+        administrator, changed somebody else's name, or changed a role
+        without being an administrator.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can see someone else's account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            name:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can change their name.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OwnOnly:
+      description: >-
+        The caller asked about somebody else's own things, which only that
+        person may read or change: an administrator can't either.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see their standing instructions.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SignedInOwnOnly: { $ref: './accounts.yaml#/components/responses/SignedInOwnOnly' }
+    SignedInAdminOnly: { $ref: './accounts.yaml#/components/responses/SignedInAdminOnly' }
+    PersonNotFound:
+      description: >-
+        Nobody with that id has signed in here, or the organization does not
+        exist. Only an administrator is told so: anybody else is refused
+        first.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/person-not-found
+                title: Person not found.
+                status: 404
+                detail: That person is not here.
+                code: PERSON_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    PersonConflict: { $ref: './accounts.yaml#/components/responses/PersonConflict' }
+    ApiKeyNotFound: { $ref: './accounts.yaml#/components/responses/ApiKeyNotFound' }
+    SessionNotFound: { $ref: './accounts.yaml#/components/responses/SessionNotFound' }
+    LinkedAccountNotFound: { $ref: './accounts.yaml#/components/responses/LinkedAccountNotFound' }
+    LinkProviderUnavailable: { $ref: './accounts.yaml#/components/responses/LinkProviderUnavailable' }
+    LinkedAccountsUnavailable: { $ref: './accounts.yaml#/components/responses/LinkedAccountsUnavailable' }
+    IdentityProviderNotFound: { $ref: './accounts.yaml#/components/responses/IdentityProviderNotFound' }
+    IdentityProviderConflict: { $ref: './accounts.yaml#/components/responses/IdentityProviderConflict' }
+    SignInUnavailable: { $ref: './accounts.yaml#/components/responses/SignInUnavailable' }
+    SettingsConflict: { $ref: './admin-settings.yaml#/components/responses/SettingsConflict' }
+    SignOutUnfinished: { $ref: './admin-settings.yaml#/components/responses/SignOutUnfinished' }
+    CapabilityNotFound: { $ref: './admin-settings.yaml#/components/responses/CapabilityNotFound' }
+    InvalidCapabilityChanges: { $ref: './admin-settings.yaml#/components/responses/InvalidCapabilityChanges' }
+    NetworkPolicyNotFound: { $ref: './admin-settings.yaml#/components/responses/NetworkPolicyNotFound' }
+    NoTrailToReplay: { $ref: './admin-settings.yaml#/components/responses/NoTrailToReplay' }
+    ServerError:
+      description: The server could not complete the request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://open.bot/errors/internal-server-error
+                title: Unexpected server error.
+                status: 500
+                detail: Unexpected server error.
+                code: INTERNAL_SERVER_ERROR
+                category: internal
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    UnexpectedError:
+      description: >-
+        Any other status, in the same problem details shape. The statuses
+        listed for an operation are the ones its own rules produce; this
+        covers the rest, such as a proxy in front of the server refusing a
+        request too large to read (413, 414, 431) or a gateway that cannot
+        reach it (502, 503, 504). A client reads detail and retryable from
+        it like any other problem.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: OpenBot isn't available right now.
+                status: 503
+                detail: OpenBot isn't available right now. Try again in a moment.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    ConversationNotFound:
+      description: >-
+        The conversation does not exist, was removed, or the caller is not in
+        it, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/conversation-not-found
+                title: Conversation not found.
+                status: 404
+                detail: Couldn't find that conversation.
+                code: CONVERSATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConversationNotJoinable: { $ref: './conversations.yaml#/components/responses/ConversationNotJoinable' }
+    LiveChannelsUnavailable: { $ref: './conversations.yaml#/components/responses/LiveChannelsUnavailable' }
+    InvalidCredential: { $ref: './model-connections.yaml#/components/responses/InvalidCredential' }
+    CredentialNotFound: { $ref: './model-connections.yaml#/components/responses/CredentialNotFound' }
+    CredentialsUnavailable: { $ref: './model-connections.yaml#/components/responses/CredentialsUnavailable' }
+    ModelKeyNotFound: { $ref: './model-connections.yaml#/components/responses/ModelKeyNotFound' }
+    InvalidModelChoice: { $ref: './model-connections.yaml#/components/responses/InvalidModelChoice' }
+    ModelChoiceForbidden: { $ref: './model-connections.yaml#/components/responses/ModelChoiceForbidden' }
+  examples:
+    ReactionPageLast: { $ref: './conversations.yaml#/components/examples/ReactionPageLast' }
+    AuditEventPageFirst: { $ref: './audit-events.yaml#/components/examples/AuditEventPageFirst' }
+    AuditVocabularyExample: { $ref: './audit-events.yaml#/components/examples/AuditVocabularyExample' }
+    AuditAnswerExample: { $ref: './audit-events.yaml#/components/examples/AuditAnswerExample' }
+    BotPageLast: { $ref: './bots.yaml#/components/examples/BotPageLast' }
+    StarterBot: { $ref: './bots.yaml#/components/examples/StarterBot' }
+    CreatedBot: { $ref: './bots.yaml#/components/examples/CreatedBot' }
+    PublishedBot: { $ref: './bots.yaml#/components/examples/PublishedBot' }
+    PersonPageLast: { $ref: './accounts.yaml#/components/examples/PersonPageLast' }
+    MePerson: { $ref: './accounts.yaml#/components/examples/MePerson' }
+    ChangedPerson: { $ref: './accounts.yaml#/components/examples/ChangedPerson' }
+    RemovedPerson: { $ref: './accounts.yaml#/components/examples/RemovedPerson' }
+    StandingInstructionsExample: { $ref: './accounts.yaml#/components/examples/StandingInstructionsExample' }
+    PreferencesExample: { $ref: './accounts.yaml#/components/examples/PreferencesExample' }
+    ApiKeyPageLast: { $ref: './accounts.yaml#/components/examples/ApiKeyPageLast' }
+    CreatedApiKeyExample: { $ref: './accounts.yaml#/components/examples/CreatedApiKeyExample' }
+    SessionPageLast: { $ref: './accounts.yaml#/components/examples/SessionPageLast' }
+    LinkedAccountPageLast: { $ref: './accounts.yaml#/components/examples/LinkedAccountPageLast' }
+    LinkedAccountProviderPageLast: { $ref: './accounts.yaml#/components/examples/LinkedAccountProviderPageLast' }
+    SlackLinkCodeExample: { $ref: './accounts.yaml#/components/examples/SlackLinkCodeExample' }
+    GitHubLinkExample: { $ref: './accounts.yaml#/components/examples/GitHubLinkExample' }
+    IdentityProviderPageLast: { $ref: './accounts.yaml#/components/examples/IdentityProviderPageLast' }
+    IdentityProviderExample: { $ref: './accounts.yaml#/components/examples/IdentityProviderExample' }
+    DeploymentExample: { $ref: './admin-settings.yaml#/components/examples/DeploymentExample' }
+    OrganizationSettingsExample: { $ref: './admin-settings.yaml#/components/examples/OrganizationSettingsExample' }
+    CapabilityPageExample: { $ref: './admin-settings.yaml#/components/examples/CapabilityPageExample' }
+    CapabilityChangesExample: { $ref: './admin-settings.yaml#/components/examples/CapabilityChangesExample' }
+    NetworkPolicyPageExample: { $ref: './admin-settings.yaml#/components/examples/NetworkPolicyPageExample' }
+    CapabilityExample: { $ref: './admin-settings.yaml#/components/examples/CapabilityExample' }
+    SavedCapabilityChangesExample: { $ref: './admin-settings.yaml#/components/examples/SavedCapabilityChangesExample' }
+    CapabilityTranslationExample: { $ref: './admin-settings.yaml#/components/examples/CapabilityTranslationExample' }
+    CapabilityPreviewExample: { $ref: './admin-settings.yaml#/components/examples/CapabilityPreviewExample' }
+    PersonCapabilitiesExample: { $ref: './admin-settings.yaml#/components/examples/PersonCapabilitiesExample' }
+    PersonComputersStoppedExample: { $ref: './admin-settings.yaml#/components/examples/PersonComputersStoppedExample' }
+    NetworkPolicyExample: { $ref: './admin-settings.yaml#/components/examples/NetworkPolicyExample' }
+    NetworkTranslationExample: { $ref: './admin-settings.yaml#/components/examples/NetworkTranslationExample' }
+    NetworkReplayReportExample: { $ref: './admin-settings.yaml#/components/examples/NetworkReplayReportExample' }
+    ModelUsageExample: { $ref: './admin-settings.yaml#/components/examples/ModelUsageExample' }
+    ComputerActionPageExample: { $ref: './admin-settings.yaml#/components/examples/ComputerActionPageExample' }
+    SetupChecklistExample: { $ref: './admin-settings.yaml#/components/examples/SetupChecklistExample' }
+    ConversationJoinTokenExample: { $ref: './conversations.yaml#/components/examples/ConversationJoinTokenExample' }
+    CredentialExample: { $ref: './model-connections.yaml#/components/examples/CredentialExample' }
+    RevokedCredentialExample: { $ref: './model-connections.yaml#/components/examples/RevokedCredentialExample' }
+    CredentialPageExample: { $ref: './model-connections.yaml#/components/examples/CredentialPageExample' }
+    ModelKeyExample: { $ref: './model-connections.yaml#/components/examples/ModelKeyExample' }
+    ModelCatalogueExample: { $ref: './model-connections.yaml#/components/examples/ModelCatalogueExample' }
+    ModelChoiceExample: { $ref: './model-connections.yaml#/components/examples/ModelChoiceExample' }

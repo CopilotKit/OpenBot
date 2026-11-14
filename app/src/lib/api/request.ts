@@ -41,6 +41,13 @@ const TEXT_ANSWERS = ["text/csv"];
 export { organizationId } from "@/lib/organizations/current";
 
 /**
+ * The organization every install has. What the deployment itself offers (how people sign in, what it
+ * can do) is asked of it, because that is asked before anybody has signed in, when the organization
+ * a person works in is not known yet.
+ */
+export const DEPLOYMENT_ORGANIZATION = "default";
+
+/**
  * A key for one write, so a retry of the same write is recognised as the same one.
  *
  * Not `crypto.randomUUID()`: that exists only in a secure context, and a self-hosted OpenBot opened

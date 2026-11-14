@@ -33,6 +33,7 @@ import {
   ISOLATION_UNAVAILABLE,
 } from "@/lib/agents/isolation";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { BOTS_PATH } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -108,8 +109,8 @@ beforeEach(() => {
           capabilities: { builtInAvailable, isolationAvailable },
         });
       }
-      // The switches as they apply to this person, shaped as `/api/admin/enterprise/me` answers.
-      if (path === "/api/admin/enterprise/me") {
+      // The switches as they apply to this person, shaped as the API's `people/me/capabilities` answers.
+      if (path === MY_CAPABILITIES_PATH) {
         return Response.json({
           capabilities: { isolatedComputers: mayIsolate },
           enforced: true,

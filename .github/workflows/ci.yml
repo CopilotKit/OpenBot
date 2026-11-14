@@ -48,8 +48,11 @@ jobs:
         run: bun desktop/scripts/desktop-version.ts check
 
   # The API contract. api/openapi.yaml is the single source of truth every client is generated from,
-  # so three things are checked about it, each its own step so a red run names which:
+  # so four things are checked about it, each its own step so a red run names which:
   #
+  # - it is what its sources bundle to: each area's operations live in api/openapi/<area>.yaml and the
+  #   shared conventions in api/openapi/common.yaml, so builders editing different areas do not
+  #   collide, and api/openapi.yaml is the bundle of them, checked in so every consumer reads one file;
   # - it keeps OpenBot's API conventions (redocly.yaml, api/redocly/rules.mjs), which are Intelligence
   #   v2's, and takes no address Intelligence already serves (api/intelligence-reserved.yaml);
   # - the client generated from it is the one committed (app/src/lib/api/generated): generated code
@@ -78,6 +81,17 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: The bundled spec matches its sources
+        run: |
+          set -euo pipefail
+          bun run api:bundle
+          changed="$(git status --porcelain -- api/openapi.yaml)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git --no-pager diff -- api/openapi.yaml | head -n 200
+            echo "::error::api/openapi.yaml is not what api/openapi/*.yaml bundle to. Edit the sources, run bun run api:bundle and commit the result."
+            exit 1
+          fi
       - name: Lint the spec
         run: bun run api:lint
       - name: The generated client matches the spec
@@ -176,12 +190,13 @@ jobs:
       # every skin's top-left corner clear of the Mac window's buttons, OpenDots' Bots badge on its
       # icon's corner inside the rail, the version in the account row read whole, and a Bot's orb
       # one color in the sidebar, on its page and at the top of its conversation, which only a
-      # browser's layout, cascade and paint resolve. The
+      # browser's layout, cascade and paint resolve, and the app following the system's light or
+      # dark, which only a browser's `prefers-color-scheme` reports. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: |
           bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/bot-orb-one-color.test.tsx
+          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
       # The desktop setup window's, for the same reason: the AI step's form holding still while the

@@ -181,3 +181,59 @@ describe("a detached connect that never finishes", () => {
     expect(finished).toBe(true);
   });
 });
+
+describe("a join kept for a turn the roster reports", () => {
+  test("is ended when the runtime cannot say the turn is still there", async () => {
+    // The connect never ends by itself: nothing is answering it.
+    const connect = deferred();
+    const deadline = deferred();
+    let detached = 0;
+    let told = 0;
+
+    const joined = joinWithin({
+      connect: connect.promise,
+      deadline: deadline.promise,
+      detach: async () => {
+        detached += 1;
+        connect.resolve();
+      },
+      answering: () => true,
+      reachable: async () => false,
+      onAnswering: () => {
+        told += 1;
+      },
+    });
+
+    deadline.resolve();
+    expect(await joined).toBe("deadline");
+    expect(detached).toBe(1);
+    expect(told).toBe(0);
+  });
+
+  test("is kept to the end of the turn when the runtime answers", async () => {
+    const connect = deferred();
+    const deadline = deferred();
+    let detached = 0;
+    let told = 0;
+
+    const joined = joinWithin({
+      connect: connect.promise,
+      deadline: deadline.promise,
+      detach: async () => {
+        detached += 1;
+      },
+      answering: () => true,
+      reachable: async () => true,
+      onAnswering: () => {
+        told += 1;
+      },
+    });
+
+    deadline.resolve();
+    await settleMicrotasks();
+    expect(told).toBe(1);
+    connect.resolve();
+    expect(await joined).toBe("connected");
+    expect(detached).toBe(0);
+  });
+});

@@ -25,6 +25,12 @@ import type {
   NetworkReplayReport,
 } from "@/lib/enterprise/queries";
 import { queryClient } from "@/query-client";
+import {
+  NETWORK_POLICIES_PATH,
+  overviewResponse,
+  REPLAY_NETWORK_POLICY_PATH,
+  TRANSLATE_NETWORK_POLICY_PATH,
+} from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import recorded from "./fixtures/network-allowlist-recorded.json";
 import { settleReactWork } from "./settle-react-work";
@@ -33,9 +39,8 @@ import { settleReactWork } from "./settle-react-work";
  * Admin, Computers, Network: the allowlist described in a sentence. The model's list lands in the
  * Allowlist field with its mode, beside an independent reading of what becomes reachable; the list is
  * replayed over recent page visits as it stands; and only Save saves it, with the sentence. The server
- * is faked at the fetch boundary with the shapes its routes answer with: the translation is the one
- * `POST /api/admin/enterprise/network/translate` returns for the answers recorded from the real API
- * (server/tests/network-allowlist-translate.test.ts asserts the same).
+ * is faked at the fetch boundary with the API's answers: the translation is the one the API's
+ * `network-policies/translate` returns for the answers recorded from the real model API.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -121,57 +126,71 @@ function serving() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? "GET";
-    if (path === "/api/admin/enterprise/network" && method === "PUT") {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      saved.push(body);
-      const { authoring: _authoring, ...policy } = body;
-      return Response.json({ saved: policy });
-    }
-    if (path === "/api/admin/enterprise/network/translate") {
+    if (path === TRANSLATE_NETWORK_POLICY_PATH) {
       described.push(JSON.parse(String(init?.body)).text);
       return Response.json(TRANSLATION);
     }
-    if (path === "/api/admin/enterprise/network/replay") {
+    if (path === REPLAY_NETWORK_POLICY_PATH) {
       replayed.push(JSON.parse(String(init?.body)));
-      return Response.json({ report: REPORT });
+      return Response.json(REPORT);
+    }
+    if (path.startsWith(`${NETWORK_POLICIES_PATH}/`) && method === "PUT") {
+      // The policy's scope is its address: organization, or group: and the group's name.
+      const id = decodeURIComponent(
+        path.slice(NETWORK_POLICIES_PATH.length + 1),
+      );
+      const scope =
+        id === "organization"
+          ? { scopeKind: "organization", scopeId: "" }
+          : { scopeKind: "group", scopeId: id.slice("group:".length) };
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      saved.push({ ...scope, ...body });
+      const { authoring: _authoring, ...policy } = body;
+      return Response.json({
+        id,
+        ...scope,
+        ...policy,
+        updatedBy: "dana@acme.test",
+        updatedAt: "2026-11-14T00:00:00.000Z",
+      });
     }
     const bots = answerBotsList(input, init, {
       visible: [{ id: "ops-bot", name: "Ops Bot" }],
     });
     if (bots) return bots;
-    if (path === "/api/admin/enterprise")
-      return Response.json({
-        capabilities: [],
-        settings: {
-          ssoRequired: false,
-          actionRecording: false,
-          inactiveComputerDays: 30,
-          modelAllowlist: { enabled: false, models: [] },
-          mcpAllowlist: { enabled: false, servers: [] },
-          skillSharing: false,
-          proactiveDailyRuns: 24,
-          modelSelection: false,
-        },
-        groups: [],
-        network: [IN_FORCE],
-        defaultDestinations: [
-          "github.com",
-          "githubusercontent.com",
-          "ghcr.io",
-          "registry.npmjs.org",
-          "pypi.org",
-        ],
-        mcpServers: [],
-        builtInModel: "openai/gpt-5.6-terra",
-        scim: {
-          configured: false,
-          connectionId: "directory",
-          baseUrl: null,
-          rotating: false,
-        },
-        otel: { configured: false },
-        actionRecordRetentionDays: 90,
-      });
+    const overview = overviewResponse(path, {
+      capabilities: [],
+      settings: {
+        ssoRequired: false,
+        actionRecording: false,
+        inactiveComputerDays: 30,
+        modelAllowlist: { enabled: false, models: [] },
+        mcpAllowlist: { enabled: false, servers: [] },
+        skillSharing: false,
+        proactiveDailyRuns: 24,
+        modelSelection: false,
+      },
+      groups: [],
+      network: [IN_FORCE],
+      defaultDestinations: [
+        "github.com",
+        "githubusercontent.com",
+        "ghcr.io",
+        "registry.npmjs.org",
+        "pypi.org",
+      ],
+      mcpServers: [],
+      builtInModel: "openai/gpt-5.6-terra",
+      scim: {
+        configured: false,
+        connectionId: "directory",
+        baseUrl: null,
+        rotating: false,
+      },
+      otel: { configured: false },
+      actionRecordRetentionDays: 90,
+    });
+    if (overview) return overview;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }

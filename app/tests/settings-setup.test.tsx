@@ -23,6 +23,11 @@ import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as SetupRoute } from "@/routes/_authed/settings/setup";
 import { ME_PATH, meResponse } from "./accounts-api";
+import {
+  CHECK_SETUP_PATH,
+  DEPLOYMENT_PATH,
+  SETUP_CHECKLIST_PATH,
+} from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -64,7 +69,7 @@ let localEvaluation: boolean;
 let rechecked: number;
 /** Every path asked for, to say what a member's sidebar never reads. */
 let requested: string[];
-/** What `GET /api/setup` answers. */
+/** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
 const defaults = queryClient.getDefaultOptions();
 
@@ -93,13 +98,12 @@ beforeEach(() => {
             role,
           },
         });
-      if (path === "/api/capabilities")
-        return Response.json({ localEvaluation });
-      if (path === "/api/setup/check" && init?.method === "POST") {
+      if (path === DEPLOYMENT_PATH) return Response.json({ localEvaluation });
+      if (path === CHECK_SETUP_PATH && init?.method === "POST") {
         rechecked += 1;
-        return Response.json({ checklist: CHECKLIST });
+        return Response.json(CHECKLIST);
       }
-      if (path === "/api/setup") return Response.json({ checklist });
+      if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
       return Response.json({});
     },
     { preconnect: originalFetch.preconnect },
@@ -294,7 +298,7 @@ test("the sidebar never offers Setup to a member", async () => {
   await waitFor(() => expect(queryClient.isFetching()).toBe(0));
   expect(view.queryByRole("link", { name: /^Setup/ })).toBeNull();
   // Nor is the checklist asked for: there is nothing in it a member could fix.
-  expect(requested).not.toContain("/api/setup");
+  expect(requested).not.toContain(SETUP_CHECKLIST_PATH);
   expect(view.container.querySelector('[data-sidebar="menu-badge"]')).toBe(
     null,
   );

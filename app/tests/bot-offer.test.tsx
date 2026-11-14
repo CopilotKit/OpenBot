@@ -18,6 +18,7 @@ import {
 import { computerToolsOffered } from "@/lib/copilot/computer-available";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -69,7 +70,7 @@ function ordinaryAnswer(path: string): Response {
   if (path === `/api/components/for-agent/${BOT}`)
     return Response.json({ components: [RECORD] });
   if (path === botPath(BOT)) return Response.json({ bot: PROFILE });
-  if (path === "/api/admin/enterprise/me")
+  if (path === MY_CAPABILITIES_PATH)
     return Response.json({ capabilities: {}, enforced: false });
   if (path === `/api/plugins/for/${BOT}`)
     return Response.json({ skills: [], tools: [] });

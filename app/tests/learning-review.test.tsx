@@ -25,6 +25,7 @@ import {
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 
 /**
  * What Settings → Learning drew: the review and the learned skills. Both are sections of Settings →
@@ -108,7 +109,7 @@ beforeEach(() => {
       const url = String(path);
       const method = init?.method ?? "GET";
       if (url === "/api/settings/learning/review") return Response.json(review);
-      if (url === "/api/capabilities")
+      if (url === DEPLOYMENT_PATH)
         return Response.json({ edition: "personal" });
       if (url === "/api/settings/learning")
         return Response.json({

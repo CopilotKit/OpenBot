@@ -28,10 +28,11 @@ export default function Home() {
   }, [session?.user.id]);
   const loadOptions = useCallback(
     () =>
+      // The API's `deployment`, which answers before anybody has signed in.
       api<{
         authProviders?: ("google" | "microsoft" | "okta")[];
         ssoConfigured?: boolean;
-      }>("/api/capabilities"),
+      }>("/api/v2/organizations/default/deployment"),
     [],
   );
   const options = useLoad(loadOptions, !session);
