@@ -1,0 +1,2138 @@
+# Bot grants: what each Bot may use (the app actions, skills and other Bots it was given), each app
+# as it stands on a Bot for the person asking, a Bot owner giving their own apps, the apps a person
+# could give, and requests to an administrator for an app.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Bot grants]
+      operationId: listBotGrants
+      summary: List what a Bot may use
+      description: >-
+        Return one page of everything a Bot was given: each action of an app,
+        each skill, and each other Bot it may hand work to. An action carries
+        what it does while its app offers it. One the app no longer lists is
+        kept but not offered, and its action is null. Reading the list also
+        gives the Bot what OpenBot gives every Bot, such as Routines. Anybody
+        who can use the Bot may list them. Grants come in order of their id. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      parameters:
+        - name: kind
+          in: query
+          description: Only grants of this kind.
+          schema:
+            $ref: '#/components/schemas/BotGrantKind'
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of what the Bot may use.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotGrantPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotGrantPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/batch-update:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Bot grants]
+      operationId: batchUpdateBotGrants
+      summary: Change a Bot's actions in one app at once
+      description: >-
+        Turn several of one app's actions on and off for a Bot as one change,
+        or none of them: one that can't be made refuses them all, and problems
+        says which. Each action is checked as replaceBotGrant and
+        deleteBotGrant check it, and an action turned on must be one the app
+        offers now. The audit trail records the change once, with the
+        sentence it was chosen from when it was described in English
+        (translateBotGrants). An administrator may turn actions on and off. A
+        Bot's owner may only turn on actions of their own app.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotGrantChanges'
+            examples:
+              described:
+                value:
+                  appId: notion
+                  add: [notion/notion-search, notion/notion-fetch]
+                  remove: [notion/notion-update-page]
+                  authoring:
+                    source: english
+                    text: It can read Notion but not change it.
+      responses:
+        '200':
+          description: The change, saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotGrantChangesSaved'
+              examples:
+                saved:
+                  $ref: '#/components/examples/BotGrantChangesSavedExample'
+        '400':
+          $ref: '#/components/responses/InvalidBotGrantChanges'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotGrantForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/translate:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Bot grants]
+      operationId: translateBotGrants
+      summary: Choose a Bot's actions in one app from a description
+      description: >-
+        Turn a description in English of what a Bot may do in one app into an
+        exact set of that app's actions. OpenBot's model chooses them, they
+        are checked against what the app offers now, and a second call that
+        never sees the description says what the set lets the Bot do. Nothing
+        is saved: batchUpdateBotGrants saves the set. The audit trail records
+        the description and what it became. Only an administrator may ask.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotGrantDescription'
+            examples:
+              readOnly:
+                value:
+                  appId: notion
+                  text: It can read Notion but not change it.
+      responses:
+        '200':
+          description: The actions chosen, and what they let the Bot do.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotGrantTranslation'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotGrantTranslationExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotGrantConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/ModelFailed'
+        '503':
+          $ref: './common.yaml#/components/responses/ModelNotConfigured'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/replay:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Bot grants]
+      operationId: replayBotGrants
+      summary: Test a Bot's actions in one app against its recent calls
+      description: >-
+        Say what a set of one app's actions would change for a Bot against
+        what it has now, and what that would have meant for its recent calls
+        to the app: actions it used that the set takes away, and actions it
+        was refused that the set gives. Nothing is saved. report is null where
+        OpenBot keeps no audit trail it can read. Only an administrator may
+        ask.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotGrantCandidate'
+            examples:
+              readOnly:
+                value:
+                  appId: notion
+                  grants: [notion/notion-search, notion/notion-fetch]
+      responses:
+        '200':
+          description: What the set would change, and what it would have meant.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotGrantReplay'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotGrantReplayExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotGrantConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/{grantId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+      - name: grantId
+        in: path
+        required: true
+        description: >-
+          The grant: action:<app id>:<action name> for one action of an app,
+          skill:<slug> for a skill, or bot:<Bot id> for another Bot this Bot
+          may hand work to. Percent-encode it in the path.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: ^(action:[^:]+:|skill:|bot:)\S
+        example: action:notion:notion-search
+    put:
+      tags: [Bot grants]
+      operationId: replaceBotGrant
+      summary: Give a Bot an action, a skill or another Bot
+      description: >-
+        Give a Bot one thing to use, or keep what it has. An administrator may
+        give a Bot an action of an app OpenBot has added, even one the app no
+        longer lists, any skill, or another Bot to hand work to. A Bot's owner
+        may give it their own skill, or one action their own app offers now
+        when the app is open to owners; that action runs on the account of
+        whoever asks. For an action of an app with one shared account,
+        approval says who may have the Bot use that account. Without it, an
+        administrator's grant approves the people who can use the Bot now,
+        unless an administrator already chose. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotGrantInput'
+            examples:
+              plain:
+                value: {}
+      responses:
+        '200':
+          description: The grant, as the Bot has it now.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotGrant'
+              examples:
+                action:
+                  $ref: '#/components/examples/BotGrantExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotGrantForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Bot grants]
+      operationId: deleteBotGrant
+      summary: Take something from a Bot
+      description: >-
+        Take one action, skill or Bot from a Bot. An administrator may take
+        any of them, including one whose app or skill is gone. A Bot's owner
+        may take their own skill from it, and takes back the actions they gave
+        with takeBackBotApp. Routines can't be taken. In OpenBot Personal
+        neither can an app's actions or another Bot, since every Bot has them.
+        Recorded on the audit trail. A grant the Bot doesn't have is not
+        found.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The Bot no longer has it.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotGrantForbidden'
+        '404':
+          $ref: '#/components/responses/BotGrantNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Bot grants]
+      operationId: listBotApps
+      summary: List a Bot's apps
+      description: >-
+        Return one page of the apps a Bot was given, each as it stands for the
+        person asking: ready to use, waiting on their own account, waiting on
+        an administrator, or turned off, with the next step and whose it is.
+        An app removed after its actions were given is listed as turned off.
+        Anybody who can use the Bot may list them. Apps come in order of their
+        title, and by id among apps with the same title. A missing cursor
+        starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the Bot's apps.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAppPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotAppPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Bot grants]
+      operationId: getBotApp
+      summary: Read one app as a Bot has it
+      description: >-
+        Return one app as it stands for the person asking on this Bot, whether
+        or not the Bot was given it, so a client can say it is turned off or
+        not given and offer the step that fixes it. The app's name is read
+        too, as well as its id. Anybody who can use the Bot may read it.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The app, for the person asking on this Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotApp'
+              examples:
+                notConnected:
+                  $ref: '#/components/examples/BotAppExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/give:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Bot grants]
+      operationId: giveBotApp
+      summary: Give your own app to a Bot you own
+      description: >-
+        Give a Bot you own one of your apps: the actions that only read, or
+        every action of Routines. They run on the account of whoever asks the
+        Bot. The app must be turned on and open to owners, and an
+        administrator must not have turned this off for you. A Bot that
+        already has the app gets nothing more, and given is empty. Recorded on
+        the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The actions given.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAppGiven'
+              examples:
+                given:
+                  $ref: '#/components/examples/BotAppGivenExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotGrantForbidden'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotAppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/take-back:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Bot grants]
+      operationId: takeBackBotApp
+      summary: Take back an app you gave a Bot you own
+      description: >-
+        Take back what you gave a Bot you own in one app. Anything an
+        administrator gave it stays. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The actions taken back.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAppTakenBack'
+              examples:
+                takenBack:
+                  $ref: '#/components/examples/BotAppTakenBackExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotGrantForbidden'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/approve:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Bot grants]
+      operationId: approveBotApp
+      summary: Turn an app on and give it to a Bot
+      description: >-
+        Do in one step what approving a request for this app on this Bot would
+        do: turn the app on if it is off, give the Bot the actions that only
+        read, or confirm the app's shared account is connected. The audit
+        trail reads as a request filed and approved by the same
+        administrator. When it can't be done here, nothing is left waiting
+        and the answer says what is missing. Only an administrator may do it.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What changed, and the request it was recorded as.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessApproval'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AppAccessApprovalExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotAppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: './common.yaml#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Bot grants]
+      operationId: listGiveableApps
+      summary: List the apps a person could give their own Bots
+      description: >-
+        Return one page of the apps a person could give Bots they own: turned
+        on, open to owners, and connected by them where the app runs on each
+        person's own account. Empty when an administrator turned this off for
+        them. Only the person themselves may list them. Apps come in order of
+        their title, and by id among apps with the same title. A missing
+        cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of apps the person could give.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GiveableAppPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/GiveableAppPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [App access requests]
+      operationId: listAppAccessRequests
+      summary: List requests for apps
+      description: >-
+        Return one page of the requests waiting for an administrator: all of
+        them for an administrator, and only their own for anybody else. appId
+        narrows them to one app. Newest first, and by id among requests made
+        at the same moment. A missing cursor starts at the first page and
+        nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [app-access-requests:read]
+        - apiKey: []
+      parameters:
+        - name: appId
+          in: query
+          description: Only requests for this app.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of waiting requests.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessRequestPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/AppAccessRequestPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [App access requests]
+      operationId: createAppAccessRequest
+      summary: Ask an administrator for an app
+      description: >-
+        Ask an administrator to make an app usable on a Bot. OpenBot decides
+        what is asked for from the app's state: turning it on, giving it to
+        the Bot, or connecting its shared account. Asking again answers the
+        same request while it is waiting. A person may have 20 requests
+        waiting at once. Recorded on the audit trail. Anybody who
+        can use the Bot may ask.
+      security:
+        - webSession: []
+        - appOAuth: [app-access-requests:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccessRequestInput'
+            examples:
+              notion:
+                value:
+                  botId: research-assistant
+                  appId: notion
+      responses:
+        '200':
+          description: The request, filed now or already waiting.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessRequest'
+              examples:
+                filed:
+                  $ref: '#/components/examples/AppAccessRequestExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotAppConflict'
+        '429':
+          $ref: '#/components/responses/TooManyPendingRequests'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    delete:
+      tags: [App access requests]
+      operationId: deleteAppAccessRequest
+      summary: Withdraw a request for an app
+      description: >-
+        Withdraw your own request while it is waiting. Somebody else's request
+        is not found, like one that doesn't exist, and one already answered is
+        a conflict. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [app-access-requests:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The request was withdrawn.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    post:
+      tags: [App access requests]
+      operationId: approveAppAccessRequest
+      summary: Approve a request for an app
+      description: >-
+        Do what a request asks: turn the app on, give the Bot its actions, or
+        confirm the app's shared account is connected. actions names the
+        actions to give. Without it the Bot gets only the actions that only
+        read. The request is answered before anything changes, so a second
+        answer loses. A change that can't be made puts the request back to
+        wait, and the answer says what is missing. Recorded on the audit
+        trail. Only an administrator may approve.
+      security:
+        - webSession: []
+        - appOAuth: [app-access-requests:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccessApprovalInput'
+            examples:
+              readOnly:
+                value: {}
+      responses:
+        '200':
+          description: What changed, and the request, answered.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessApproval'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AppAccessApprovalExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: './common.yaml#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    post:
+      tags: [App access requests]
+      operationId: dismissAppAccessRequest
+      summary: Dismiss a request for an app
+      description: >-
+        Close a waiting request without changing anything else. Recorded on
+        the audit trail. Only an administrator may dismiss one.
+      security:
+        - webSession: []
+        - appOAuth: [app-access-requests:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The request, dismissed.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessRequest'
+              examples:
+                dismissed:
+                  $ref: '#/components/examples/DismissedAppAccessRequestExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  schemas:
+    BotGrantKind:
+      type: string
+      description: >-
+        What a grant gives a Bot: one action of an app, a skill, or another
+        Bot it may hand work to.
+      enum: [action, skill, bot]
+    BotGrant:
+      type: object
+      description: One thing a Bot may use.
+      required: [id, kind, ref, action, skill]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: >-
+            The grant's address: action:<app id>:<action name>, skill:<slug> or
+            bot:<Bot id>.
+        kind:
+          $ref: '#/components/schemas/BotGrantKind'
+        ref:
+          type: string
+          minLength: 1
+          description: >-
+            What it names: an action as <app id>/<action name>, a skill's slug,
+            or a Bot's id.
+        action:
+          description: >-
+            The action, while its app offers it. Null for a skill or a Bot, and
+            for an action the app no longer lists, which is kept but not
+            offered.
+          oneOf:
+            - $ref: '#/components/schemas/BotGrantAction'
+            - type: 'null'
+        skill:
+          description: The skill, for a skill that exists. Null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/BotGrantSkill'
+            - type: 'null'
+    BotGrantAction:
+      type: object
+      description: One action of an app, as the Bot is offered it.
+      required: [appId, name, description, destructive, read]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        destructive:
+          type: boolean
+          description: The app warns that it destroys something. OpenBot always asks first.
+        read:
+          type: boolean
+          description: It only reads. Anything else is treated as a change.
+    BotGrantSkill:
+      type: object
+      description: A skill, as the Bot's / menu offers it.
+      required: [slug, title, summary]
+      properties:
+        slug:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        summary:
+          type: string
+    BotGrantPage:
+      type: object
+      required: [grants, nextCursor]
+      properties:
+        grants:
+          type: array
+          description: In order of their id.
+          items:
+            $ref: '#/components/schemas/BotGrant'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    BotGrantInput:
+      type: object
+      additionalProperties: false
+      description: >-
+        What a grant may carry. Only an administrator's grant of an action of
+        an app with one shared account reads it.
+      properties:
+        approval:
+          $ref: './common.yaml#/components/schemas/SharedAccountApproval'
+    BotGrantChanges:
+      type: object
+      additionalProperties: false
+      description: >-
+        One app's actions to turn on and off for a Bot. Each action is
+        written <app id>/<action name>, and every one must be the app's. An
+        action can't be in both lists, and at least one list must name one.
+      required: [appId, add, remove]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        add:
+          type: array
+          maxItems: 2000
+          description: The actions to turn on. Repeats count once.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: \S
+        remove:
+          type: array
+          maxItems: 2000
+          description: The actions to turn off. Repeats count once.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: \S
+        authoring:
+          type: object
+          additionalProperties: false
+          description: >-
+            The description the actions were chosen from
+            (translateBotGrants), recorded with the change.
+          required: [source, text]
+          properties:
+            source:
+              type: string
+              enum: [english]
+            text:
+              type: string
+              minLength: 1
+              maxLength: 2000
+              pattern: ^[^\x00]*\S[^\x00]*$
+        approval:
+          $ref: './common.yaml#/components/schemas/SharedAccountApproval'
+    BotGrantChangesSaved:
+      type: object
+      required: [added, removed]
+      properties:
+        added:
+          type: array
+          description: The actions turned on, once each.
+          items:
+            type: string
+        removed:
+          type: array
+          description: The actions turned off, once each.
+          items:
+            type: string
+    BotGrantDescription:
+      type: object
+      additionalProperties: false
+      required: [appId, text]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: >-
+            What the Bot may do in the app, in a sentence or two, at most 1,000
+            characters once trimmed.
+    BotGrantCheck:
+      type: object
+      description: >-
+        Whether every action named is one the app offers now, and what is
+        wrong with each one that isn't.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+        problems:
+          type: array
+          items:
+            type: object
+            required: [action, message]
+            properties:
+              action:
+                type: string
+              message:
+                type: string
+    BotGrantTranslation:
+      type: object
+      required: [actions, grants, otherApps, summary, explanation, check, warning]
+      properties:
+        actions:
+          type: array
+          description: The action names the model chose, as it wrote them.
+          items:
+            type: string
+        grants:
+          type: array
+          description: >-
+            The chosen actions the app offers, written <app id>/<action name>.
+            Saveable with batchUpdateBotGrants when check.ok is true.
+          items:
+            type: string
+        otherApps:
+          type: array
+          description: Other apps the description names, which this set doesn't touch.
+          items:
+            type: string
+        summary:
+          type: [string, 'null']
+          description: What the set lets the Bot do, in one sentence. Null when it doesn't check.
+        explanation:
+          type: [string, 'null']
+          description: >-
+            What the set lets the Bot do, read from the set alone by a call
+            that never saw the description. Null when it doesn't check.
+        check:
+          $ref: '#/components/schemas/BotGrantCheck'
+        warning:
+          type: [string, 'null']
+          description: Set when the set destroys things, or gives nothing at all.
+    BotGrantCandidate:
+      type: object
+      additionalProperties: false
+      required: [appId, grants]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        grants:
+          type: array
+          maxItems: 2000
+          description: >-
+            Every action of the app the Bot would have, written <app
+            id>/<action name> or by the action's name alone.
+          items:
+            type: string
+            maxLength: 300
+    BotGrantActionChange:
+      type: object
+      description: One action a change turns on or off.
+      required: [ref, name, effect, destructive]
+      properties:
+        ref:
+          type: string
+        name:
+          type: string
+        effect:
+          type: string
+          enum: [read, write]
+        destructive:
+          type: boolean
+    BotGrantReplayedAction:
+      type: object
+      description: An action the replay names, with how often the Bot called it.
+      required: [ref, name, effect, destructive, calls, lastCalled]
+      properties:
+        ref:
+          type: string
+        name:
+          type: string
+        effect:
+          type: string
+          enum: [read, write]
+        destructive:
+          type: boolean
+        calls:
+          type: integer
+          minimum: 0
+        lastCalled:
+          type: string
+          format: date-time
+    BotGrantReplayReport:
+      type: object
+      description: What the change would have meant for the Bot's recent calls to the app.
+      required:
+        - calls
+        - runs
+        - since
+        - removedUsed
+        - callsLost
+        - refusedGiven
+        - callsGained
+        - addedUnusedWrites
+        - addedUnusedReads
+      properties:
+        calls:
+          type: integer
+          minimum: 0
+          description: The Bot's calls to this app on the audit trail, each counted once.
+        runs:
+          type: integer
+          minimum: 0
+          description: Runs it was offered tools in.
+        since:
+          type: [string, 'null']
+          format: date-time
+          description: The oldest row replayed, or null with nothing to replay.
+        removedUsed:
+          type: array
+          description: Actions the change takes away that the Bot called, most called first.
+          items:
+            $ref: '#/components/schemas/BotGrantReplayedAction'
+        callsLost:
+          type: integer
+          minimum: 0
+        refusedGiven:
+          type: array
+          description: Actions the Bot was refused for not having, that the change gives it.
+          items:
+            $ref: '#/components/schemas/BotGrantReplayedAction'
+        callsGained:
+          type: integer
+          minimum: 0
+        addedUnusedWrites:
+          type: array
+          description: Changes the change gives that the Bot never called or tried.
+          items:
+            type: object
+            required: [ref, name, destructive]
+            properties:
+              ref:
+                type: string
+              name:
+                type: string
+              destructive:
+                type: boolean
+        addedUnusedReads:
+          type: integer
+          minimum: 0
+          description: Reads the change gives that the Bot never called or tried.
+    BotGrantReplay:
+      type: object
+      required: [check, warning, changes, report]
+      properties:
+        check:
+          $ref: '#/components/schemas/BotGrantCheck'
+        warning:
+          type: [string, 'null']
+        changes:
+          type: object
+          description: Against what the Bot has now.
+          required: [added, removed]
+          properties:
+            added:
+              type: array
+              items:
+                $ref: '#/components/schemas/BotGrantActionChange'
+            removed:
+              type: array
+              items:
+                $ref: '#/components/schemas/BotGrantActionChange'
+        report:
+          description: Null where OpenBot keeps no audit trail it can read.
+          oneOf:
+            - $ref: '#/components/schemas/BotGrantReplayReport'
+            - type: 'null'
+    AppAccessRequestKind:
+      type: string
+      description: >-
+        What an administrator is asked for: to turn the app on, to give it to
+        the Bot, or to connect its shared account.
+      enum: [enable, grant, connect_shared]
+    BotApp:
+      type: object
+      description: >-
+        One app as it stands for the person asking, on one Bot. state is
+        OpenBot's: a client draws it and never works it out from the other
+        fields.
+      required:
+        - id
+        - title
+        - logo
+        - source
+        - account
+        - connect
+        - state
+        - unavailable
+        - accountHolder
+        - asksFirst
+        - granted
+        - ownerGrants
+        - givenByOwner
+        - needsConnect
+        - connectedAt
+        - requestKind
+        - pendingRequest
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: The app's id, or the one turning it on would give it.
+        title:
+          type: string
+          description: The app's own name, such as Gmail.
+        logo:
+          type: [string, 'null']
+        source:
+          type: string
+          description: >-
+            Where the app comes from: OpenBot's catalogue, a server added by
+            its address, or the directory of apps OpenBot can add.
+          enum: [catalogue, address, directory]
+        account:
+          type: string
+          description: >-
+            Whose account the app's actions use: each person's own, one shared
+            account an administrator connects, or no person's.
+          enum: [personal, shared, deployment]
+        connect:
+          description: >-
+            How the person's account is connected: OpenBot's own sign-in, the
+            directory's sign-in, a key, or nothing to connect.
+          oneOf:
+            - type: string
+              enum: [oauth, consent, key]
+            - type: 'null'
+        state:
+          type: string
+          description: >-
+            ready: usable now. not_connected and reconnect: waiting on an
+            account the person connects (see accountHolder).
+            shared_not_connected: waiting on the shared account.
+            shared_not_approved: an administrator hasn't approved who may use
+            the shared account through this Bot. disabled: turned off (see
+            unavailable). not_granted: the Bot wasn't given it.
+            owner_grantable: the same, and the person may give it themselves.
+          enum:
+            - ready
+            - not_connected
+            - reconnect
+            - shared_not_connected
+            - shared_not_approved
+            - disabled
+            - not_granted
+            - owner_grantable
+        unavailable:
+          description: >-
+            Why the app is turned off, when state is disabled: nobody turned it
+            on, the directory isn't set up here, OpenBot can't read how it
+            connects, or it is missing the OAuth client or the key an
+            administrator adds. Null otherwise.
+          oneOf:
+            - type: string
+              enum:
+                - absent
+                - directory_unavailable
+                - scheme_unreadable
+                - oauth_client_missing
+                - token_missing
+            - type: 'null'
+        accountHolder:
+          description: >-
+            Whose own account the actions use for this person: theirs, or on
+            somebody else's shared Bot the owner's, which only the owner can
+            reconnect. Null where no person's own account is used.
+          oneOf:
+            - type: string
+              enum: [you, owner]
+            - type: 'null'
+        asksFirst:
+          type: boolean
+          description: >-
+            The first use on the person's own account through somebody else's
+            shared Bot asks them first. state is still ready.
+        granted:
+          type: boolean
+          description: The Bot was given at least one of the app's actions.
+        ownerGrants:
+          type: string
+          description: >-
+            Who may give the app to a Bot: any Bot's owner, or only an
+            administrator.
+          enum: [any, admin]
+        givenByOwner:
+          type: boolean
+          description: Everything the Bot has of the app was given by its owner, who may take it back.
+        needsConnect:
+          type: boolean
+          description: >-
+            When state is owner_grantable, giving the app starts with
+            connecting the person's own account. False otherwise.
+        connectedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the account the app uses for this person was connected, or null.
+        requestKind:
+          description: >-
+            What a request would ask an administrator for in this state
+            (createAppAccessRequest), or null where the next step is the
+            person's own.
+          oneOf:
+            - $ref: '#/components/schemas/AppAccessRequestKind'
+            - type: 'null'
+        pendingRequest:
+          description: The person's own waiting request of that kind, or null.
+          oneOf:
+            - $ref: '#/components/schemas/BotAppPendingRequest'
+            - type: 'null'
+    BotAppPendingRequest:
+      type: object
+      required: [id, kind, createdAt]
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/AppAccessRequestKind'
+        createdAt:
+          type: string
+          format: date-time
+    BotAppPage:
+      type: object
+      required: [apps, nextCursor]
+      properties:
+        apps:
+          type: array
+          description: By title, and by id among apps with the same title.
+          items:
+            $ref: '#/components/schemas/BotApp'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    BotAppGiven:
+      type: object
+      required: [given]
+      properties:
+        given:
+          type: array
+          description: >-
+            The actions given, written <app id>/<action name>. Empty when the
+            Bot already had the app.
+          items:
+            type: string
+    BotAppTakenBack:
+      type: object
+      required: [takenBack]
+      properties:
+        takenBack:
+          type: array
+          description: The actions taken back, written <app id>/<action name>.
+          items:
+            type: string
+    GiveableApp:
+      type: object
+      description: An app a person could give Bots they own.
+      required: [id, title, logo, account]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        logo:
+          type: [string, 'null']
+        account:
+          type: string
+          description: Whose account the app's actions use.
+          enum: [personal, shared, deployment]
+    GiveableAppPage:
+      type: object
+      required: [apps, nextCursor]
+      properties:
+        apps:
+          type: array
+          description: By title, and by id among apps with the same title.
+          items:
+            $ref: '#/components/schemas/GiveableApp'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    AppAccessRequest:
+      type: object
+      description: >-
+        A person's request to an administrator about one app, as the person
+        and the administrator both read it.
+      required:
+        - id
+        - appId
+        - appTitle
+        - kind
+        - status
+        - botId
+        - botName
+        - requestedBy
+        - requesterEmail
+        - requesterName
+        - createdAt
+        - resolvedAt
+        - resolvedBy
+      properties:
+        id:
+          type: string
+          minLength: 1
+        appId:
+          type: string
+          minLength: 1
+        appTitle:
+          type: string
+        kind:
+          $ref: '#/components/schemas/AppAccessRequestKind'
+        status:
+          type: string
+          description: >-
+            Read only: waiting, approved, dismissed, or withdrawn by the
+            person who asked. Answering a request is approveAppAccessRequest
+            or dismissAppAccessRequest.
+          enum: [pending, approved, dismissed, cancelled]
+        botId:
+          type: [string, 'null']
+          description: The Bot it is for, or null for a request about the app alone.
+        botName:
+          type: [string, 'null']
+        requestedBy:
+          type: string
+          description: The id of the person who asked.
+        requesterEmail:
+          type: [string, 'null']
+        requesterName:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: [string, 'null']
+          format: date-time
+        resolvedBy:
+          type: [string, 'null']
+          description: The id of the person who answered or withdrew it.
+    AppAccessRequestPage:
+      type: object
+      required: [appAccessRequests, nextCursor]
+      properties:
+        appAccessRequests:
+          type: array
+          description: Newest first, and by id among requests made at the same moment.
+          items:
+            $ref: '#/components/schemas/AppAccessRequest'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    AppAccessRequestInput:
+      type: object
+      additionalProperties: false
+      required: [botId, appId]
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        appId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The app's id, or its name.
+    AppAccessApprovalInput:
+      type: object
+      additionalProperties: false
+      properties:
+        actions:
+          type: array
+          maxItems: 2000
+          description: >-
+            The actions to give the Bot, written <app id>/<action name>. Left
+            out, the Bot gets only the actions that only read.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+            pattern: \S
+    AppAccessApproval:
+      type: object
+      required: [appAccessRequest, enabled, granted]
+      properties:
+        appAccessRequest:
+          $ref: '#/components/schemas/AppAccessRequest'
+        enabled:
+          type: boolean
+          description: The app was turned on.
+        granted:
+          type: array
+          description: The actions given to the Bot, written <app id>/<action name>.
+          items:
+            type: string
+  responses:
+    BotOrAppNotFound:
+      description: >-
+        The Bot isn't one the caller can use, OpenBot has no app by that id or
+        name, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            bot:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: There is no such Bot.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            app:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: OpenBot has no app called asana.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotGrantNotFound:
+      description: >-
+        The Bot isn't one the caller can use, the Bot doesn't have that, or the
+        organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            bot:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: There is no such Bot.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            grant:
+              value:
+                type: https://open.bot/errors/bot-grant-not-found
+                title: Grant not found.
+                status: 404
+                detail: This Bot doesn't have that.
+                code: BOT_GRANT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotGrantForbidden:
+      description: >-
+        The caller may not give the Bot this or take it away: only an
+        administrator may, the Bot or the skill isn't theirs, the app isn't
+        open to owners, an administrator turned giving apps off for them, or
+        it is something every Bot always has.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            adminOnly:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can choose which Bots use a tool.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            notYourBot:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: You can only give apps to Bots you own.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            alwaysOn:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Routines are always on, for every Bot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            turnedOff:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: An admin hasn't turned this on for you.
+                status: 403
+                detail: An admin has turned off "Give apps to their own Bots" for you, so that wasn't done.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: ownerApps
+    InvalidBotGrantChanges:
+      description: >-
+        The change is malformed, names an action of another app, turns one
+        action both on and off, changes nothing, or turns on an action the app
+        doesn't offer now. problems says which.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: There's nothing to change.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            notOffered:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: notion/notion-archive isn't an action this app offers now.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotGrantConflict:
+      description: >-
+        The app lists no actions yet, or the Idempotency-Key was used for a
+        different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noActions:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Notion lists no actions yet. Refresh its tools, then try again.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotAppConflict:
+      description: >-
+        The app's state doesn't allow it: there is nothing to give or to ask
+        an administrator for, or the app needs something only an
+        administrator can add. Or the Idempotency-Key was used for a different
+        request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            ready:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Notion is ready to use. There's nothing to ask an admin for.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noReads:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Notion has nothing a Bot can only read with. Ask an admin to choose what this Bot can do with it.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TooManyPendingRequests:
+      description: The person already has as many requests waiting as they may.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            cap:
+              value:
+                type: https://open.bot/errors/too-many-pending-requests
+                title: Too many requests are waiting.
+                status: 429
+                detail: You already have 20 requests waiting for an admin. Withdraw one, or wait for an answer, then ask again.
+                code: TOO_MANY_PENDING_REQUESTS
+                category: rate_limit
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAccessRequestNotFound:
+      description: >-
+        No request has that id, it is somebody else's, or the organization
+        does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/app-access-request-not-found
+                title: Access request not found.
+                status: 404
+                detail: There is no such request.
+                code: APP_ACCESS_REQUEST_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAccessRequestConflict:
+      description: >-
+        The request was already answered, what it asks for needs something
+        only an administrator can add first, or the Idempotency-Key was used
+        for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            answered:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: That request has already been answered.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            needsKey:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Exa Search (API key) needs the token it is reached with. Add it on its page under Apps, then approve this request again.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    BotGrantPageExample:
+      summary: Two Notion actions, another Bot to hand work to, and a skill.
+      value:
+        grants:
+          - id: action:notion:notion-fetch
+            kind: action
+            ref: notion/notion-fetch
+            action:
+              appId: notion
+              name: notion-fetch
+              description: Read a Notion page or database.
+              destructive: false
+              read: true
+            skill: null
+          - id: action:notion:notion-search
+            kind: action
+            ref: notion/notion-search
+            action:
+              appId: notion
+              name: notion-search
+              description: Search the Notion workspace.
+              destructive: false
+              read: true
+            skill: null
+          - id: bot:writer
+            kind: bot
+            ref: writer
+            action: null
+            skill: null
+          - id: skill:weekly-report
+            kind: skill
+            ref: weekly-report
+            action: null
+            skill:
+              slug: weekly-report
+              title: Weekly report
+              summary: Sums up the week's work.
+        nextCursor: null
+    BotGrantExample:
+      summary: One Notion action, given.
+      value:
+        id: action:notion:notion-search
+        kind: action
+        ref: notion/notion-search
+        action:
+          appId: notion
+          name: notion-search
+          description: Search the Notion workspace.
+          destructive: false
+          read: true
+        skill: null
+    BotGrantChangesSavedExample:
+      summary: Two reads turned on and a change turned off.
+      value:
+        added: [notion/notion-search, notion/notion-fetch]
+        removed: [notion/notion-update-page]
+    BotGrantTranslationExample:
+      summary: Notion's reads, chosen from a sentence.
+      value:
+        actions: [notion-search, notion-fetch]
+        grants: [notion/notion-search, notion/notion-fetch]
+        otherApps: []
+        summary: Reads Notion, but can't change it.
+        explanation: The Bot can search Notion and read its pages and databases. It can't create, change or move anything.
+        check:
+          ok: true
+        warning: null
+    BotGrantReplayExample:
+      summary: Taking away a change the Bot used twice.
+      value:
+        check:
+          ok: true
+        warning: null
+        changes:
+          added: []
+          removed:
+            - ref: notion/notion-update-page
+              name: notion-update-page
+              effect: write
+              destructive: false
+        report:
+          calls: 14
+          runs: 9
+          since: '2026-11-01T09:00:00.000Z'
+          removedUsed:
+            - ref: notion/notion-update-page
+              name: notion-update-page
+              effect: write
+              destructive: false
+              calls: 2
+              lastCalled: '2026-11-12T15:30:00.000Z'
+          callsLost: 2
+          refusedGiven: []
+          callsGained: 0
+          addedUnusedWrites: []
+          addedUnusedReads: 0
+    BotAppPageExample:
+      summary: Notion on the person's own account, and Routines.
+      value:
+        apps:
+          - id: notion
+            title: Notion
+            logo: null
+            source: catalogue
+            account: personal
+            connect: oauth
+            state: ready
+            unavailable: null
+            accountHolder: you
+            asksFirst: false
+            granted: true
+            ownerGrants: any
+            givenByOwner: true
+            needsConnect: false
+            connectedAt: '2026-11-10T08:15:00.000Z'
+            requestKind: null
+            pendingRequest: null
+          - id: routines
+            title: Routines
+            logo: null
+            source: catalogue
+            account: deployment
+            connect: null
+            state: ready
+            unavailable: null
+            accountHolder: null
+            asksFirst: false
+            granted: true
+            ownerGrants: any
+            givenByOwner: false
+            needsConnect: false
+            connectedAt: null
+            requestKind: null
+            pendingRequest: null
+        nextCursor: null
+    BotAppExample:
+      summary: Notion, given to the Bot and not yet connected by this person.
+      value:
+        id: notion
+        title: Notion
+        logo: null
+        source: catalogue
+        account: personal
+        connect: oauth
+        state: not_connected
+        unavailable: null
+        accountHolder: you
+        asksFirst: false
+        granted: true
+        ownerGrants: any
+        givenByOwner: false
+        needsConnect: false
+        connectedAt: null
+        requestKind: null
+        pendingRequest: null
+    BotAppGivenExample:
+      summary: Notion's reads, given.
+      value:
+        given: [notion/notion-fetch, notion/notion-search]
+    BotAppTakenBackExample:
+      summary: Notion's reads, taken back.
+      value:
+        takenBack: [notion/notion-fetch, notion/notion-search]
+    GiveableAppPageExample:
+      summary: Two apps the person could give their Bots.
+      value:
+        apps:
+          - id: notion
+            title: Notion
+            logo: null
+            account: personal
+          - id: routines
+            title: Routines
+            logo: null
+            account: deployment
+        nextCursor: null
+    AppAccessRequestExample:
+      summary: A request to give Notion to a Bot.
+      value:
+        id: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+        appId: notion
+        appTitle: Notion
+        kind: grant
+        status: pending
+        botId: research-assistant
+        botName: Research Assistant
+        requestedBy: user_2b7c
+        requesterEmail: dana@example.com
+        requesterName: Dana Reyes
+        createdAt: '2026-11-14T09:00:00.000Z'
+        resolvedAt: null
+        resolvedBy: null
+    DismissedAppAccessRequestExample:
+      summary: The same request, dismissed.
+      value:
+        id: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+        appId: notion
+        appTitle: Notion
+        kind: grant
+        status: dismissed
+        botId: research-assistant
+        botName: Research Assistant
+        requestedBy: user_2b7c
+        requesterEmail: dana@example.com
+        requesterName: Dana Reyes
+        createdAt: '2026-11-14T09:00:00.000Z'
+        resolvedAt: '2026-11-14T10:00:00.000Z'
+        resolvedBy: user_9a1d
+    AppAccessRequestPageExample:
+      summary: One request waiting.
+      value:
+        appAccessRequests:
+          - id: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+            appId: notion
+            appTitle: Notion
+            kind: grant
+            status: pending
+            botId: research-assistant
+            botName: Research Assistant
+            requestedBy: user_2b7c
+            requesterEmail: dana@example.com
+            requesterName: Dana Reyes
+            createdAt: '2026-11-14T09:00:00.000Z'
+            resolvedAt: null
+            resolvedBy: null
+        nextCursor: null
+    AppAccessApprovalExample:
+      summary: Notion's reads, given to the Bot.
+      value:
+        appAccessRequest:
+          id: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+          appId: notion
+          appTitle: Notion
+          kind: grant
+          status: approved
+          botId: research-assistant
+          botName: Research Assistant
+          requestedBy: user_2b7c
+          requesterEmail: dana@example.com
+          requesterName: Dana Reyes
+          createdAt: '2026-11-14T09:00:00.000Z'
+          resolvedAt: '2026-11-14T10:00:00.000Z'
+          resolvedBy: user_9a1d
+        enabled: false
+        granted: [notion/notion-fetch, notion/notion-search]
