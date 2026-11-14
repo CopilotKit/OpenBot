@@ -200,10 +200,24 @@ export function runLocalEval(
     attempt,
     action,
     stack,
-  }).catch((rejection: unknown) => {
-    throw failure(rejection);
-  });
+  })
+    .finally(() => answerLanded(attempt, action))
+    .catch((rejection: unknown) => {
+      throw failure(rejection);
+    });
   return { attempt, report };
+}
+
+/**
+ * Tells the log when a `run_local_eval` answer reached this window, by this window's clock, so a
+ * stalled Start says whether the answer or the next call was held (`local_eval_answer_landed`).
+ */
+function answerLanded(attempt: string, action: LocalAction): void {
+  invoke("local_eval_answer_landed", {
+    attempt,
+    action,
+    landedAtMs: Date.now(),
+  }).catch(() => {});
 }
 
 /** Lists recorded stacks, so a stack id comes from the CLI. Cancel it like any other call. */

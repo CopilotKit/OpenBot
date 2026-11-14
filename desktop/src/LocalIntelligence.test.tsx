@@ -20,6 +20,8 @@ let updateStepAsked: unknown[] = [];
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
+/** What the window told the log as each `run_local_eval` answer reached it. */
+const answerNotes: unknown[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
@@ -28,6 +30,11 @@ mock.module("@tauri-apps/api/core", () => ({
     if (command === "wake_engine") return Promise.resolve(null);
     // Asked every second while a CLI call runs: not a step of the sequence.
     if (command === "local_eval_steps") return Promise.resolve(localSteps);
+    // What the window tells the log when an answer reaches it: not a step either.
+    if (command === "local_eval_answer_landed") {
+      answerNotes.push(args);
+      return Promise.resolve(null);
+    }
     // Asking which step an update is in is not a step of the sequence either.
     if (command === "local_eval_update_step") {
       updateStepAsked.push(args);
@@ -50,6 +57,7 @@ afterEach(() => {
   updateStep = null;
   updateStepAsked = [];
   localSteps = null;
+  answerNotes.length = 0;
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -228,6 +236,19 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
     "run_local_eval:status",
     "run_local_eval:status",
   ]);
+  // Each answer that reaches the window is noted for the log, under its own call (`answerLanded`).
+  const asked = invokeCalls
+    .filter((call) => call.command === "run_local_eval")
+    .map((call) => (call.args as { attempt: string }).attempt);
+  await waitFor(() =>
+    expect(
+      answerNotes.map((note) => (note as { attempt: string }).attempt),
+    ).toEqual(asked),
+  );
+  expect(answerNotes[0]).toMatchObject({ action: "status" });
+  expect(typeof (answerNotes[0] as { landedAtMs: unknown }).landedAtMs).toBe(
+    "number",
+  );
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
   ).toMatchObject({ root: "/tmp/openbot" });

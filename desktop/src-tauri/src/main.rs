@@ -8932,14 +8932,19 @@ async fn run_local_eval<R: tauri::Runtime>(
     action: local_eval::Action,
     stack: String,
 ) -> Result<local_eval::Report, local_eval::Failure> {
+    log::info!(
+        "{}",
+        window_call_arrived(action, handed_back().as_ref(), std::time::SystemTime::now())
+    );
     let stack = local_eval::StackId::parse(&stack)?;
     let root = {
         let shell = app.state::<Shell>();
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
+    let asked = attempt.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
-        local_eval_answer(&root, &attempt, action, &stack)
+        local_eval_answer(&root, &asked, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)
@@ -8961,9 +8966,105 @@ async fn run_local_eval<R: tauri::Runtime>(
             log::info!("{line}");
         }
     }
-    let report = report?;
-    learn_dashboards(&app, report.stack.iter());
-    Ok(report)
+    if let Ok(answered) = &report {
+        learn_dashboards(&app, answered.stack.iter());
+    }
+    *handed_back() = Some(HandedBack {
+        attempt,
+        action,
+        at: std::time::SystemTime::now(),
+    });
+    log::info!(
+        "[window ipc] local {} answer handed to the window",
+        action.as_str()
+    );
+    report
+}
+
+/**
+The round trip between the setup window and `run_local_eval`, in the log: when a call arrives, when
+its answer is handed back, and when the window says the answer reached it
+(`local_eval_answer_landed`).
+
+On Windows box D a Start stood still for 11 minutes after `local start` finished, until a click
+on the taskbar, with nothing in the log: the window asks `local status` straight after `local
+start` answers, and that call arrived 11 minutes late. These lines say which hop held it next time:
+the answer reaching the window, or the window's next call reaching here.
+*/
+struct HandedBack {
+    attempt: String,
+    action: local_eval::Action,
+    at: std::time::SystemTime,
+}
+
+static HANDED_BACK: Mutex<Option<HandedBack>> = Mutex::new(None);
+
+fn handed_back() -> std::sync::MutexGuard<'static, Option<HandedBack>> {
+    HANDED_BACK.lock().unwrap_or_else(|held| held.into_inner())
+}
+
+/// Seconds from `earlier` to `later`, negative when the clock says `later` came first.
+fn seconds_from(earlier: std::time::SystemTime, later: std::time::SystemTime) -> f64 {
+    match later.duration_since(earlier) {
+        Ok(after) => after.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    }
+}
+
+fn window_call_arrived(
+    action: local_eval::Action,
+    last: Option<&HandedBack>,
+    now: std::time::SystemTime,
+) -> String {
+    match last {
+        Some(last) => format!(
+            "[window ipc] local {} asked by the window {:.1}s after the local {} answer was handed to it",
+            action.as_str(),
+            seconds_from(last.at, now),
+            last.action.as_str()
+        ),
+        None => format!("[window ipc] local {} asked by the window", action.as_str()),
+    }
+}
+
+fn window_answer_landed(
+    action: local_eval::Action,
+    attempt: &str,
+    last: Option<&HandedBack>,
+    landed: std::time::SystemTime,
+    now: std::time::SystemTime,
+) -> String {
+    let handed = last
+        .filter(|last| last.attempt == attempt)
+        .map(|last| {
+            format!(
+                "{:.1}s after it was handed to it",
+                seconds_from(last.at, landed)
+            )
+        })
+        .unwrap_or_else(|| "after a later call's answer was handed to it".into());
+    format!(
+        "[window ipc] the local {} answer reached the window {handed}; the window's note of it took {:.1}s to arrive",
+        action.as_str(),
+        seconds_from(landed, now)
+    )
+}
+
+/// The setup window's note that a `run_local_eval` answer reached it, at `landed_at_ms` by its
+/// clock (milliseconds since 1970), for the round trip in the log.
+#[tauri::command]
+fn local_eval_answer_landed(attempt: String, action: local_eval::Action, landed_at_ms: u64) {
+    let landed = std::time::UNIX_EPOCH + std::time::Duration::from_millis(landed_at_ms);
+    log::info!(
+        "{}",
+        window_answer_landed(
+            action,
+            &attempt,
+            handed_back().as_ref(),
+            landed,
+            std::time::SystemTime::now()
+        )
+    );
 }
 
 /// The window's wait for the back end to report ready, as the log says it (`logging::WaitLog`):
@@ -11643,6 +11744,7 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             back_end_wait_ended,
+            local_eval_answer_landed,
             start_early_downloads,
             early_downloads_now,
             early_downloads_measured,
@@ -13108,6 +13210,50 @@ mod tests {
         assert!(
             exited.load(std::sync::atomic::Ordering::SeqCst),
             "Quit did not retry after diagnostic failure"
+        );
+    }
+
+    /// The round trip lines say which hop held a stalled Start: box D's `local status` arrived 11
+    /// minutes after `local start` answered.
+    #[test]
+    fn the_log_says_how_long_each_hop_of_a_setup_window_call_took() {
+        let handed = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        let last = HandedBack {
+            attempt: "start-attempt".into(),
+            action: local_eval::Action::Start,
+            at: handed,
+        };
+        assert_eq!(
+            window_call_arrived(
+                local_eval::Action::Status,
+                Some(&last),
+                handed + std::time::Duration::from_secs(658)
+            ),
+            "[window ipc] local status asked by the window 658.0s after the local start answer was handed to it"
+        );
+        assert_eq!(
+            window_call_arrived(local_eval::Action::Status, None, handed),
+            "[window ipc] local status asked by the window"
+        );
+        assert_eq!(
+            window_answer_landed(
+                local_eval::Action::Start,
+                "start-attempt",
+                Some(&last),
+                handed + std::time::Duration::from_millis(400),
+                handed + std::time::Duration::from_secs(658)
+            ),
+            "[window ipc] the local start answer reached the window 0.4s after it was handed to it; the window's note of it took 657.6s to arrive"
+        );
+        assert_eq!(
+            window_answer_landed(
+                local_eval::Action::Start,
+                "another-attempt",
+                Some(&last),
+                handed,
+                handed
+            ),
+            "[window ipc] the local start answer reached the window after a later call's answer was handed to it; the window's note of it took 0.0s to arrive"
         );
     }
 
