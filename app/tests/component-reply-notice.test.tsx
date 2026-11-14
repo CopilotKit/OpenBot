@@ -35,6 +35,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -378,13 +379,13 @@ async function serve(url: URL, request: Request): Promise<Response> {
     return NativeResponse.json({
       lifecycle: { agentId: BOT, paused: false, pausedAt: null, notify },
     });
-  if (path === "/api/agents")
+  const bots = answerBotsList(url, request, {
+    visible: [{ id: BOT, name: "Trip Planner" }],
+  });
+  if (bots) return bots;
+  if (path === botPath(BOT))
     return NativeResponse.json({
-      agents: [{ id: BOT, name: "Trip Planner" }],
-    });
-  if (path === `/api/agents/${BOT}`)
-    return NativeResponse.json({
-      agent: {
+      bot: {
         id: BOT,
         name: "Trip Planner",
         visibility: "public",

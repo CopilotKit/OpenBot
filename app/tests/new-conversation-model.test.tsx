@@ -19,6 +19,7 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import type { ConversationModel, ModelCatalogue } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -38,6 +39,8 @@ const NativeResponse = globalThis.Response;
 const BOT = "terra-bot";
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,
@@ -147,10 +150,10 @@ beforeAll(() => {
       }
       if (url.pathname === "/api/route")
         return NativeResponse.json({ agentId: BOT, reason: "chosen" });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({ tools: [], skills: [] });
       if (url.pathname === `/api/components/for-agent/${BOT}`)

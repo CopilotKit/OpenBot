@@ -10,6 +10,7 @@ mod desktop_page;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
+mod first_paint;
 mod intelligence_bridge;
 mod notice;
 mod outside_links;
@@ -21,7 +22,7 @@ mod test_support;
 use openbot_desktop_lib::{
     acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
-    local_eval_state, logging, own_machine, preparation,
+    local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
     telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
@@ -475,12 +476,19 @@ A relaunch after a restart finds Docker Desktop quit, or OpenBot's Podman machin
 Intelligence CLI call needs the engine. The window's relaunch sequence starts with the CLI, so
 before this, the CLI answered "docker-unavailable" and setup stopped at "Waiting for the back end",
 never reaching Start, which is where the engine used to be woken. Nothing is done while OpenBot's
-own containers are up, or when the engine already answers.
+own containers are up on an engine that answers (`own_containers_up`), or when the engine already
+answers.
 */
 #[tauri::command]
 async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
     let root = stack::root_from(&root);
-    if app.state::<Shell>().containers.lock().unwrap().is_some() {
+    let shell_app = app.clone();
+    let up = tauri::async_runtime::spawn_blocking(move || {
+        own_containers_up(&shell_app.state::<Shell>(), engine::Address::responds)
+    })
+    .await
+    .unwrap_or(false);
+    if up {
         return Ok(());
     }
     let asked = std::time::Instant::now();
@@ -511,6 +519,24 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+Whether `wake_engine` leaves the engine alone because OpenBot's own containers are up on it.
+
+Held containers are up only while their engine answers. OpenBot's Podman machine stopped under a
+running OpenBot leaves this session holding them, and the window's Retry then skipped the engine as
+if they ran: the back end's check said "docker_unavailable" at once, and only Quit and a relaunch
+started the machine. Docker Desktop quit under a running OpenBot is the same.
+*/
+fn own_containers_up(shell: &Shell, answers: impl FnOnce(&engine::Address) -> bool) -> bool {
+    let held = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    held.is_some_and(|address| answers(&address))
 }
 
 /// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
@@ -575,6 +601,16 @@ fn reconnected<R: tauri::Runtime, T>(app: &tauri::AppHandle<R>, checked: &Result
         Ok(_) => report_plain(app, "start-machine", true, engine::engine_ready_line().said),
         Err(problem) => report_plain(app, "start-machine", false, problem.said.clone()),
     }
+}
+
+/// The host ports an installation publishes, recorded for `netavark_rules::orphan_rules`.
+fn remember_own_ports(ports: &openbot_env::Ports) {
+    openbot_desktop_lib::netavark_rules::remember_own_ports(
+        ports
+            .settings()
+            .values()
+            .filter_map(|port| port.parse::<u16>().ok()),
+    );
 }
 
 /// Start's network check, then the back end started again when that check restarted OpenBot's
@@ -940,6 +976,14 @@ fn emit_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>, progress: Progres
 /// has just loaded. Off the main thread, and it waits on nothing.
 #[tauri::command]
 async fn setup_heartbeat(app: tauri::AppHandle, seen: u64, fresh: bool) {
+    // The setup page has painted: "Getting OpenBot ready" comes off the window (`first_paint`).
+    if let Some(up) = first_paint::page_painted() {
+        log::info!(
+            "[window] the setup page painted; the window said {} for {:.1}s",
+            first_paint::HEADING,
+            up.as_secs_f64()
+        );
+    }
     desktop_stall::heartbeat(&app, seen, fresh);
 }
 
@@ -1089,7 +1133,8 @@ fn report_running_row<R: tauri::Runtime>(
 
 /// OpenBot's window in front of whatever is there, at a moment setup needs the person: Docker
 /// Desktop has answered, the system's password prompt has closed, the installation failed or is
-/// done, OpenBot has started. `why` goes in the log.
+/// done, OpenBot has started, a launch the installer started first shows (`forward_at_first_show`).
+/// `why` goes in the log.
 ///
 /// On macOS that means activating the app, not only ordering its window to the front. A window an
 /// inactive app orders front stays behind the active app's. Tauri's `set_focus` does both: tao
@@ -1223,6 +1268,70 @@ fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> 
 #[tauri::command]
 fn bring_setup_to_front(app: tauri::AppHandle, why: String) {
     bring_to_front(&app, &why);
+}
+
+/// The argument OpenBot's installer starts it with, after an in-app update and from the installer's
+/// last page (`OPENBOT_RUN_AFTER_INSTALL` in `windows/hooks.nsh`).
+const STARTED_BY_INSTALLER: &str = "--started-by-installer";
+
+/// Whether OpenBot's installer started this launch, from the program's arguments (the program
+/// first).
+fn started_by_installer(args: &[std::ffi::OsString]) -> bool {
+    args.iter().skip(1).any(|arg| arg == STARTED_BY_INSTALLER)
+}
+
+/**
+The window's first show, for a launch OpenBot's installer started (`started_by_installer`): after an
+in-app update, or from the installer's last page. OpenBot comes in front once (`come_forward`, which
+is `bring_to_front`), so the person sees Starting OpenBot and its progress. On box H (Windows Server
+2022, an in-app update from 1.0.1 to 1.0.2) Windows put the maximised Edge in front as 1.0.1 closed,
+1.0.2 opened behind it, and the person saw only Edge for the four minutes of Starting OpenBot, until
+"[front] OpenBot is showing" at home. That one came forward because it came four and a half minutes
+after the person's last input, the click on Update and restart: past the foreground lock time-out,
+the time after input during which Windows keeps apps from coming forward
+(`SPI_GETFOREGROUNDLOCKTIMEOUT`, 200 seconds by default).
+
+Windows lets a window come to the front only from a process it allows ("SetForegroundWindow
+function", Remarks, Microsoft Learn). The right comes from the updating version, which passes it on
+while its window is still up (`pass_the_foreground_on`), and the installer, which passes it on again
+before it starts OpenBot. Where Windows still refuses, as after an update from a version before
+this or once the person has typed or clicked elsewhere, `bring_to_front` flashes the taskbar button.
+
+Any other launch is left to Windows: from the Start menu or the taskbar it is in front already. Held
+back, as every moment is, while the browser sign-in is open (`held_back`).
+*/
+fn forward_at_first_show(started_by_installer: bool, come_forward: impl FnOnce(&str)) {
+    if started_by_installer {
+        come_forward("the installer started OpenBot");
+    }
+}
+
+/**
+Windows, as the updater is about to start the installer: pass OpenBot's right to set the foreground
+window on to every process, so the installer and the new version it starts may come to the front
+(`forward_at_first_show`). Called while OpenBot's window is still up, just before the updater's
+cleanup takes it down: until then OpenBot holds the foreground, from the person's click on Update and
+restart. Once the window is gone, Windows activates the one behind it, and nothing started after that
+may take the foreground from it by itself.
+
+"A process that can set the foreground window can enable another process to set the foreground
+window by calling AllowSetForegroundWindow", and with `ASFW_ANY` "all processes will be enabled". The
+right lasts until "the user generates input" or another process calls it ("AllowSetForegroundWindow
+function", Microsoft Learn). So if the person types or clicks in another window meanwhile, Windows
+keeps that window in front, as it means to, and the new version flashes its taskbar button instead.
+*/
+#[cfg(windows)]
+fn pass_the_foreground_on() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    // SAFETY: takes no pointers; it only widens which processes may set the foreground window.
+    match unsafe { AllowSetForegroundWindow(ASFW_ANY) } {
+        Ok(()) => log::info!(
+            "[app update] passed the foreground on, for the installer and the new version"
+        ),
+        Err(error) => log::info!(
+            "[app update] could not pass the foreground on ({error}); OpenBot was no longer in front"
+        ),
+    }
 }
 
 /// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
@@ -2736,6 +2845,9 @@ fn stop_before_installer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         // The installer runs either way: the new version's Start finds whatever is left running.
         log::warn!("[app update] stopping OpenBot before the installer: {error}");
     }
+    // While the window is still up and in front: the new version comes forward as it first shows.
+    #[cfg(windows)]
+    pass_the_foreground_on();
     app.cleanup_before_exit();
 }
 
@@ -4243,6 +4355,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
         #[cfg(target_os = "linux")]
         let status = found.status();
+        // The installation's own ports, as its last run recorded them or as they start out, for
+        // the port rules a removed machine of OpenBot's left (`netavark_rules::orphan_rules`).
+        if let Ok(ports) = openbot_env::Ports::read(&root) {
+            remember_own_ports(&ports);
+        }
         network_then_back_end(
             || {
                 let mut said = false;
@@ -4441,6 +4558,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
             root: root.clone(),
             address: found.clone(),
         });
+        // The ports this run publishes are known now: rules a removed machine of OpenBot's left on
+        // them go before Compose publishes them again.
+        remember_own_ports(&ports);
+        acquire::readied_for_backend(Some(&found), || ());
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
         // The migrations ran with that: `migrate` is the dependency Compose completes before it
         // starts `server`, once, and a failed one fails the `up`.
@@ -5208,20 +5329,35 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
     i32::from(!failures.is_empty())
 }
 
-/// The app's identifier, the name of each folder Tauri keeps for it.
+/// The app's identifier as built, the name of each folder Tauri keeps for it. Beside an installed
+/// OpenBot the app goes by another (`side_by_side`).
 const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
+
+/**
+The app's context, under an identifier of its own when it is a second OpenBot beside an installed
+one (`stack::identifier_for`). Set before the app is built, so the single-instance lock and every
+folder Tauri resolves for the app follow it.
+*/
+fn side_by_side<R: tauri::Runtime>(mut context: tauri::Context<R>) -> tauri::Context<R> {
+    let identifier = stack::identifier_for(&context.config().identifier);
+    context.config_mut().identifier = identifier;
+    context
+}
 
 /// Tauri's `app_local_data_dir`, for a process with no app around it: the same folder, found the
 /// way Tauri 2 finds it (`dirs::data_local_dir`, then the identifier).
 fn headless_local_data_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join(APP_IDENTIFIER))
+    dirs::data_local_dir().map(|dir| dir.join(stack::identifier_for(APP_IDENTIFIER)))
 }
 
 /// Tauri's `app_log_dir`, for a process with no app around it: `~/Library/Logs/<identifier>` on a
 /// Mac, `logs` in the local data folder elsewhere, as Tauri 2 finds it.
 fn headless_log_dir() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|home| home.join("Library/Logs").join(APP_IDENTIFIER))
+        dirs::home_dir().map(|home| {
+            home.join("Library/Logs")
+                .join(stack::identifier_for(APP_IDENTIFIER))
+        })
     } else {
         headless_local_data_dir().map(|data| data.join("logs"))
     }
@@ -5298,6 +5434,16 @@ impl uninstall::Computer for ThisComputerAtUninstall {
 
     fn remove_machine(&mut self, name: &str) -> Result<(), String> {
         acquire::remove_machine_named(name)
+    }
+
+    fn stop_containers(&mut self, name: &str) -> Result<(), String> {
+        acquire::stop_all_containers(name)
+    }
+
+    fn clear_port_rules(&mut self, name: &str) -> Result<(), String> {
+        acquire::clear_own_port_rules(name).map(|removed| {
+            log::info!("[uninstall] removed {removed} port rule(s) of {name}");
+        })
     }
 
     fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
@@ -6225,6 +6371,23 @@ fn setup_theme<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::Th
     theme_from_record(std::fs::read_to_string(record).ok().as_deref())
 }
 
+/// The setup screens' colours before any page has painted: OpenBot's own light or dark when its
+/// page has said, the system's otherwise, as the setup page itself follows it (`first_paint`).
+fn setup_palette<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> first_paint::Palette {
+    first_paint::palette(
+        setup_theme(app).map_or_else(first_paint::system_dark, |theme| {
+            theme == tauri::Theme::Dark
+        }),
+    )
+}
+
+/// The setup screens' ground as a window colour.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
+    let (red, green, blue) = palette.ground;
+    tauri::window::Color(red, green, blue, 0xff)
+}
+
 /// Where OpenBot's last light or dark is kept, in the app's own configuration folder.
 const APPEARANCE_FILE: &str = "appearance.json";
 
@@ -6355,6 +6518,18 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             .maximized(place.maximized),
         None => builder,
     };
+    /*
+     * Never a blank grey or white window before the page paints (`first_paint`): on macOS and
+     * Windows the window, and the webview's background under the page, are the setup screens'
+     * ground, in light or dark, from the first frame. On Windows, from its first show until the
+     * setup page paints, "Getting OpenBot ready" covers it too. The cover goes up while `build()`
+     * waits for WebView2, and is put back on top of WebView2's own window after.
+     */
+    let palette = setup_palette(app);
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let builder = builder.background_color(ground_color(palette));
+    let watching = first_paint::watch(palette);
+    let building = std::time::Instant::now();
     let window = builder
         .on_new_window(move |destination, _features| {
             outside_links::new_window(&destination, |to| {
@@ -6364,6 +6539,19 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        first_paint::cover_now(hwnd.0 as isize);
+    }
+    drop(watching);
+    if let Some(after) = first_paint::shown_after_start() {
+        log::info!(
+            "[window] showed {:.1}s after OpenBot started, saying {} until its page paints; WebView2 was ready {:.1}s after that",
+            after.as_secs_f64(),
+            first_paint::HEADING,
+            building.elapsed().as_secs_f64()
+        );
+    }
     // At the level kept from the last launch before anything paints (`zoom`).
     let _ = window.set_zoom(saved_zoom(app));
     fit_main_window_to_screen(app);
@@ -6598,26 +6786,38 @@ pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark
 
 /**
 Windows 11's title bar in the ground of the page under it, or Windows's own colours for `None`.
-
-`Some(dark)` is the setup screens' ground, which OpenBot's own pages share (`--background` in the
-app's styles): the bar, its text and the window's border become one surface with the page instead
-of a white band across its top. Windows 10 has no such attributes and keeps its bar; the calls fail
-there and are ignored.
+See `tint_title_bar_of`.
 */
 #[cfg(target_os = "windows")]
 fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<bool>) {
-    #[link(name = "dwmapi")]
-    extern "system" {
-        fn DwmSetWindowAttribute(
-            window: *mut std::ffi::c_void,
-            attribute: u32,
-            value: *const std::ffi::c_void,
-            size: u32,
-        ) -> i32;
+    if let Ok(hwnd) = window.hwnd() {
+        tint_title_bar_of(hwnd.0 as isize, dark);
     }
-    const BORDER_COLOR: u32 = 34;
-    const CAPTION_COLOR: u32 = 35;
-    const TEXT_COLOR: u32 = 36;
+}
+
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE`: Windows's own dark title bar, on Windows 10 (build 18985 on,
+/// so Windows Server 2022 too) and Windows 11.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const IMMERSIVE_DARK_MODE: u32 = 20;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const BORDER_COLOR: u32 = 34;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const CAPTION_COLOR: u32 = 35;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const TEXT_COLOR: u32 = 36;
+
+/**
+The window attributes, in the order they are set, that give the title bar `dark`'s look.
+
+`Some(dark)`: Windows's own dark or light bar, then (Windows 11) the setup screens' ground, which
+OpenBot's own pages share (`--background` in the app's styles), so the bar, its text and the
+window's border are one surface with the page instead of a band across its top. Windows 10 and
+Windows Server 2022 have no colour attributes; those calls fail there and the dark or light bar is
+what shows. `None`: Windows's own colours, and its dark or light left to the window's theme.
+*/
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn title_bar_attributes(dark: Option<bool>) -> Vec<(u32, u32)> {
     /// `DWMWA_COLOR_DEFAULT`: give the attribute back to Windows.
     const DEFAULT: u32 = 0xFFFF_FFFF;
     // COLORREF is 0x00BBGGRR.
@@ -6629,26 +6829,71 @@ fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<boo
         Some(false) => (colorref(SETUP_BACKGROUND), colorref(SETUP_BACKGROUND_DARK)),
         None => (DEFAULT, DEFAULT),
     };
-    let Ok(hwnd) = window.hwnd() else {
-        return;
+    dark.map(|dark| (IMMERSIVE_DARK_MODE, u32::from(dark)))
+        .into_iter()
+        .chain([
+            (CAPTION_COLOR, caption),
+            (BORDER_COLOR, caption),
+            (TEXT_COLOR, text),
+        ])
+        .collect()
+}
+
+/**
+The title bar of the window `hwnd` in `dark`'s look (`title_bar_attributes`), repainted now.
+
+MEASURED on Windows Server 2022 (box H) in dark: the bar stayed light until the window was resized.
+Windows applies these attributes to the frame only when it next draws it, and nothing here moved or
+resized the window, so the frame is redrawn on the spot (`SWP_FRAMECHANGED`). Called as the main
+window first shows (`first_paint`), for each page it loads, on every theme change, and whenever
+OpenBot's own page reports its light or dark.
+*/
+#[cfg(target_os = "windows")]
+pub(crate) fn tint_title_bar_of(hwnd: isize, dark: Option<bool>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SWP_NOZORDER,
     };
-    let hwnd = hwnd.0;
-    for (attribute, value) in [
-        (CAPTION_COLOR, caption),
-        (BORDER_COLOR, caption),
-        (TEXT_COLOR, text),
-    ] {
-        // SAFETY: `hwnd` is this window's live handle, and `value` is a u32 that outlives the call,
-        // which is the size and type these three attributes take.
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            window: *mut std::ffi::c_void,
+            attribute: u32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+    let window = HWND(hwnd as *mut std::ffi::c_void);
+    for (attribute, value) in title_bar_attributes(dark) {
+        // SAFETY: `window` is a live window handle, and `value` is a u32 that outlives the call,
+        // which is the size and type these attributes take (a BOOL or a COLORREF).
         unsafe {
             DwmSetWindowAttribute(
-                hwnd,
+                window.0,
                 attribute,
                 (&value as *const u32).cast(),
                 std::mem::size_of::<u32>() as u32,
             );
         }
     }
+    // SAFETY: a plain call on a window handle; it neither moves, sizes, reorders nor activates it.
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER
+                | SWP_NOOWNERZORDER
+                | SWP_NOACTIVATE,
+        )
+    };
 }
 
 /// The title text in the title bar. AppKit, so on the main thread.
@@ -6672,7 +6917,8 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden, and onboarding's header, which has no sidebar beside it. The
+itself while the sidebar is hidden, onboarding's header, which has no sidebar beside it, and every
+place a skin marks `data-desktop-drag` (its top bar, its rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
@@ -6683,6 +6929,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     // Bare attributes: only a press on the element itself drags, never on its contents.
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
+    }
+    // A skin draws its own frame, with no sidebar header, and names its own handles: its top bar,
+    // and the rail and sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
+    // value: "deep" drags from anywhere inside but a button or link, bare from the element itself.
+    for (const handle of document.querySelectorAll(`[data-desktop-drag]:not([${DRAG}])`)) {
+      handle.setAttribute(DRAG, handle.dataset.desktopDrag);
     }
     // Onboarding has no sidebar. Its header starts below the window's buttons, and that strip is
     // the header's own, so it drags while Back and the steps inside it stay buttons.
@@ -6865,7 +7117,7 @@ mod app_page_tests {
             .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
-            .build(tauri::generate_context!(test = true))
+            .build(side_by_side(tauri::generate_context!(test = true)))
             .unwrap();
         // As the app's setup does: this context compiles the page's permissions in.
         know_app_page_grants(app.handle());
@@ -7225,6 +7477,144 @@ mod app_page_tests {
         assert_eq!(headless_log_dir(), app.path().app_log_dir().ok());
     }
 
+    /// Box G: a second OpenBot beside an installed one (`stack::PROJECT_VARIABLE`) went by the
+    /// installed one's identifier. Its launch was handed to the installed app by the single-instance
+    /// lock, and with that app quit it opened the installed one's folder from the installed one's
+    /// `last-launched-root.json`, and its Quit stopped the installed one's back end. It goes by an
+    /// identifier of its own now: every folder Tauri gives it, the record of its installation and the
+    /// lock are its own, and it leaves the browsers' Recorder alone. Run in a process of its own, with
+    /// the variable set and a home of its own.
+    #[test]
+    fn a_second_openbot_keeps_its_own_lock_folders_and_installation() {
+        const CHILD: &str = "OPENBOT_TEST_SIDE_BY_SIDE_CHILD";
+        let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
+            let home =
+                std::env::temp_dir().join(format!("openbot-side-by-side-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "app_page_tests::a_second_openbot_keeps_its_own_lock_folders_and_installation",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, &home)
+                // Unique, so the folders it makes where Windows keeps them are this run's alone.
+                .env(
+                    stack::PROJECT_VARIABLE,
+                    format!("openbot-test-{}", std::process::id()),
+                )
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", home.join(".config"))
+                .env("XDG_DATA_HOME", home.join(".local").join("share"))
+                .env(RECORDER_HOST_TEST_HOME, &home)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&home);
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.status.success(), "{said}");
+            assert!(said.contains("1 passed"), "{said}");
+            return;
+        };
+        let project = stack::side_by_side_project().expect("the child names a project");
+        let identifier = format!("{APP_IDENTIFIER}.{project}");
+        let (app, _) = app();
+        // The single-instance lock is keyed by this on every platform (Windows' mutex, a Mac's
+        // socket, Linux's D-Bus name), so a launch of this app is never handed to the installed one.
+        assert_eq!(app.config().identifier, identifier);
+        let folders = [
+            app.path().app_config_dir().unwrap(),
+            app.path().app_data_dir().unwrap(),
+            app.path().app_local_data_dir().unwrap(),
+            app.path().app_cache_dir().unwrap(),
+        ];
+        for folder in &folders {
+            assert_eq!(
+                folder.file_name().and_then(|name| name.to_str()),
+                Some(identifier.as_str()),
+                "{}",
+                folder.display()
+            );
+        }
+        let logs = app.path().app_log_dir().unwrap();
+        assert!(
+            logs.components()
+                .any(|part| part.as_os_str() == std::ffi::OsStr::new(&identifier)),
+            "{}",
+            logs.display()
+        );
+        assert_eq!(
+            headless_local_data_dir(),
+            app.path().app_local_data_dir().ok()
+        );
+        assert_eq!(headless_log_dir(), Some(logs));
+
+        // The installation it last opened is read from its own folder, never the installed one's.
+        let config = app.path().app_config_dir().unwrap();
+        let installed = config.with_file_name(APP_IDENTIFIER);
+        let first = home.join("OpenBot");
+        let second = home.join("second").join("OpenBot");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        // Where Windows keeps them is not under HOME: the installed app's record there is a real one.
+        if !cfg!(windows) {
+            preparation::save_selected_root(&installed, &first).unwrap();
+            assert_eq!(
+                preparation::selected_root(&installed),
+                Some(std::fs::canonicalize(&first).unwrap())
+            );
+        }
+        assert_eq!(last_launched_root(), None);
+        preparation::save_selected_root(&config, &second).unwrap();
+        assert_eq!(
+            last_launched_root(),
+            Some(openbot_desktop_lib::paths::plain(
+                std::fs::canonicalize(&second).unwrap()
+            ))
+        );
+        if cfg!(windows) {
+            for folder in folders {
+                let _ = std::fs::remove_dir_all(folder);
+            }
+        }
+
+        // The browsers' Recorder stays the installed app's: with a Chrome and an Edge here, nothing
+        // is registered and nothing under this home is written.
+        for browser in [
+            home.join("Library/Application Support/Google/Chrome"),
+            home.join("Library/Application Support/Microsoft Edge"),
+            home.join(".config/google-chrome"),
+            home.join(".config/microsoft-edge"),
+        ] {
+            std::fs::create_dir_all(browser).unwrap();
+        }
+        let files = |home: &Path| {
+            let mut found = Vec::new();
+            let mut pending = vec![home.to_path_buf()];
+            while let Some(folder) = pending.pop() {
+                for entry in std::fs::read_dir(folder).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        pending.push(path.clone());
+                    }
+                    found.push(path);
+                }
+            }
+            found.sort();
+            found
+        };
+        let before = files(&home);
+        assert_eq!(
+            install_recorder_host_for_this_user().unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(files(&home), before);
+    }
+
     /// Box I: the uninstaller's stop ran `podman compose` with none of what the app sets up when it
     /// starts. Podman found no Compose provider ("looking up compose provider failed", exit 125),
     /// since OpenBot's `docker-compose.exe` is only in `~\OpenBot\openbot-engine\bin`, and OpenBot's
@@ -7420,10 +7810,11 @@ fn show_status_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Where OpenBot's Settings → This computer lives, in releases that have it.
+/// The address Desktop opens for what OpenBot runs on this computer.
 ///
-/// Not `/settings/computer`: the personal edition's Computers page (the Bots' computers) has that
-/// address, and its guard sends every other edition to General.
+/// That is a section of Settings → Computer (`/settings/computer`) now, and this address is kept
+/// in the app as a redirect to it. Desktop still opens this one because releases before that
+/// change have only this page, and `show_status_in_app` looks for its route file to know.
 const COMPUTER_SETTINGS_PATH: &str = "/settings/this-computer";
 
 /**
@@ -7639,9 +8030,74 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
     // The stamp, not the file name: the log's own scrubbing takes a name that long and mixed for a
     // key.
     log::info!("[logs] saved troubleshooting logs in the log folder, stamped {stamp}");
-    tauri_plugin_opener::reveal_item_in_dir(&saved)
-        .map_err(|error| error.to_string())
-        .inspect_err(|error| log::warn!("[logs] could not show the saved logs: {error}"))
+    reveal_saved_logs(app, saved);
+    Ok(())
+}
+
+/**
+Show the saved logs in Finder or Explorer, on the main thread, and never as a failure of the save:
+the file is in the log folder whether or not the file manager opens on it.
+
+On the main thread because of a crash. On macOS the opener calls NSWorkspace's
+`activateFileViewerSelectingURLs:`, which on its way to failing can present the error in an alert.
+An alert made off the main thread throws an Objective-C exception ("NSWindow should only be
+instantiated on the main thread!"), and an exception unwinding through a Rust thread aborts the app.
+OpenBot Desktop 1.0.2 did exactly that from the menu's own thread, after the gathering had already
+taken seconds. Apple documents the call as safe from any thread, calls the crash a bug (FB22340592)
+and gives this as the workaround. The gathering stays off the main thread; only the reveal moves.
+
+Elsewhere the reveal stays where it was, on the thread that saved: Explorer's and the Linux file
+manager's answers are calls that can wait, and the main thread runs every window.
+*/
+fn reveal_saved_logs<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: PathBuf) {
+    reveal_through(
+        |task| {
+            if cfg!(target_os = "macos") {
+                app.run_on_main_thread(task)
+                    .map_err(|error| error.to_string())
+            } else {
+                task();
+                Ok(())
+            }
+        },
+        saved,
+        reveal_in_file_manager,
+    );
+}
+
+/// The reveal, run by `on_main_thread`: on macOS the app's main thread. A failure, to hand the task
+/// over or to reveal, is a warning in the log and nothing else.
+fn reveal_through<Reveal>(
+    on_main_thread: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+    saved: PathBuf,
+    reveal: Reveal,
+) where
+    Reveal: FnOnce(&Path) -> Result<(), String> + Send + 'static,
+{
+    let handed_over = on_main_thread(Box::new(move || {
+        if let Err(error) = reveal(&saved) {
+            log::warn!("[logs] could not show the saved logs: {error}");
+        }
+    }));
+    if let Err(error) = handed_over {
+        log::warn!("[logs] could not show the saved logs: {error}");
+    }
+}
+
+/// `tauri_plugin_opener::reveal_item_in_dir`. On macOS an Objective-C exception from AppKit is
+/// caught and returned as the error, so even on the main thread a reveal cannot take the app down.
+fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let revealed = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        tauri_plugin_opener::reveal_item_in_dir(path)
+    }))
+    .map_err(|exception| match exception {
+        Some(exception) => format!("the file manager threw {exception}"),
+        None => "the file manager threw an exception".to_owned(),
+    })?;
+    #[cfg(not(target_os = "macos"))]
+    let revealed = tauri_plugin_opener::reveal_item_in_dir(path);
+    revealed.map_err(|error| error.to_string())
 }
 
 fn gather_troubleshooting_logs<R: tauri::Runtime>(
@@ -8580,6 +9036,20 @@ fn local_eval_answer(
         return Ok(local_eval::Report::engine_not_answering());
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
+    if action == local_eval::Action::Status
+        && backend_lost(
+            &report,
+            local_eval_state::read(root, None).as_ref(),
+            stack,
+            || local_eval::cluster_gone(stack),
+        )
+    {
+        log::warn!(
+            "[local eval] {}'s cluster is gone from OpenBot's engine; offering to start fresh",
+            stack.as_str()
+        );
+        report.reason = Some(local_eval::Reason::StackLost);
+    }
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
     if action == local_eval::Action::Status {
@@ -8596,6 +9066,28 @@ fn local_eval_answer(
         }
     }
     Ok(report)
+}
+
+/**
+Whether the backend OpenBot created for this installation is gone, so the window offers to start
+fresh rather than Retry (`local_eval::Reason::StackLost`).
+
+Box I: OpenBot's Podman machine was removed and made again, and the backend's cluster, with
+OpenBot's database, went with the old one. The installation still recorded the stack, so every
+status the CLI ran failed at its ownership check ("status 404"), answered `local_command_failed`
+with no stack, and the window said "Setup stopped partway through with an error. Retry." forever.
+Only for a stack OpenBot created and recorded here, asked about by its own id, and only when the
+engine answers and lists none of its cluster's containers.
+*/
+fn backend_lost(
+    report: &local_eval::Report,
+    recorded: Option<&local_eval_state::State>,
+    asked: &local_eval::StackId,
+    cluster_gone: impl FnOnce() -> Option<bool>,
+) -> bool {
+    local_eval::failed_without_stack(report)
+        && recorded.is_some_and(|state| state.tied_to_openbot() && state.stack_id() == *asked)
+        && cluster_gone() == Some(true)
 }
 
 /**
@@ -8832,6 +9324,62 @@ fn local_eval_steps(attempt: String) -> Option<local_eval::Steps> {
 #[tauri::command]
 fn local_eval_download(attempt: String) -> Option<openbot_desktop_lib::local_images::Download> {
     local_eval::downloading(&attempt)
+}
+
+/// While a setup waits for room on a drive that is short: that drive's shortfall now, or nothing
+/// once there is room (`local_eval::drive_short`).
+#[tauri::command]
+async fn local_eval_room() -> Option<local_eval::Shortfall> {
+    tauri::async_runtime::spawn_blocking(local_eval::drive_short)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// How the Podman machine OpenBot runs on would be made big enough for what local setup found
+/// short, and whether OpenBot can do it for the person (`machine_size::plan_here`). Nothing when
+/// it isn't a Podman machine on a Mac, or a bigger one isn't the answer.
+#[tauri::command]
+async fn podman_machine_plan(short: machine_size::Short) -> Option<machine_size::Plan> {
+    tauri::async_runtime::spawn_blocking(move || machine_size::plan_here(&short))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Why `resize_podman_machine` did not end with a machine ready for setup, said plainly. `resized`
+/// when the machine is bigger and running but never got ready (`machine_size::Stopped::NotReady`):
+/// the window then offers Retry alone, since the steps to resize by hand are already done.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResizeStopped {
+    said: String,
+    resized: bool,
+}
+
+/// The person said yes: stop the Podman machine OpenBot runs on, give it `cpus` CPUs and
+/// `memory_mib` MiB, start it again with the containers that were running in it, and wait until it
+/// answers and reaches a registry (`machine_size::ready_with`). The window then retries the setup.
+/// A failure is said plainly; Podman's own words are in the log.
+#[tauri::command]
+async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), ResizeStopped> {
+    let resized = tauri::async_runtime::spawn_blocking(move || {
+        machine_size::resize_here(machine_size::Size { cpus, memory_mib })
+    })
+    .await
+    .unwrap_or_else(|error| Err(machine_size::Stopped::Refused(error.to_string())));
+    match resized {
+        Ok(()) => Ok(()),
+        Err(machine_size::Stopped::NotReady(_)) => Err(ResizeStopped {
+            said: machine_size::NOT_READY.to_string(),
+            resized: true,
+        }),
+        Err(machine_size::Stopped::Refused(_)) => Err(ResizeStopped {
+            said: "OpenBot couldn't resize your Podman machine. Use the steps below instead."
+                .to_string(),
+            resized: false,
+        }),
+    }
 }
 
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
@@ -9494,7 +10042,11 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    bring_onto_a_screen(&window);
+    // Maximized or full screen, the system placed it and sized it to its screen: moving it or
+    // resizing it here would take it out of that (`onto_a_screen`).
+    if bring_onto_a_screen(&window) == Placing::System {
+        return;
+    }
     let (Some((area, frame)), Ok(scale), Ok(inner)) = (
         screen_room(&window),
         window.scale_factor(),
@@ -9511,16 +10063,40 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Where launch puts the main window, from where it finds it (`onto_a_screen`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Placing {
+    /// Maximized or full screen: where the system put it, on a screen and sized to it. Left as it
+    /// is, neither moved nor resized.
+    System,
+    /// Its title bar on a screen: it stays, fitted into that screen's work area.
+    Stays,
+    /// Off every screen: moved here, onto the primary one.
+    Onto(tauri::LogicalPosition<f64>),
+}
+
 /**
-Where a window at `window` goes so that its title bar is on one of `areas` (each monitor's work
-area, the primary first), or None when it already is. A window put back where it was last time
-(`tauri_plugin_window_state`) can be on a monitor that is no longer there: it goes to the middle of
-the primary one, as far as it fits.
+Where a window at `window`, `maximized` or not (full screen counts), goes so that its title bar is
+on one of `areas` (each monitor's work area, the primary first). A window put back where it was last
+time (`tauri_plugin_window_state`) can be on a monitor that is no longer there: it goes to the
+middle of the primary one, as far as it fits.
+
+A maximized window is where the system put it, on a screen, and stays maximized. Windows hangs a
+maximized window's frame past the screen's edges by its resize border: on a 1920 by 1080 screen its
+outer position is -8,-8, so the top 8 pixels of its title bar are above the work area. Measured as a
+window the person placed, that read as off every screen, and moving it un-maximized it: a window
+maximized when OpenBot was quit from the tray came back at 1000 by 800 in the middle of the screen.
+A maximized window whose screen is gone never gets here: `place_saved_window` builds it on the
+primary one.
 */
 fn onto_a_screen(
     window: tauri::LogicalRect<f64, f64>,
+    maximized: bool,
     areas: &[tauri::LogicalRect<f64, f64>],
-) -> Option<tauri::LogicalPosition<f64>> {
+) -> Placing {
+    if maximized {
+        return Placing::System;
+    }
     // Enough of the title bar to take hold of: 120 by 24 logical pixels of it.
     let reachable = |area: &tauri::LogicalRect<f64, f64>| {
         let left = window.position.x.max(area.position.x);
@@ -9530,23 +10106,32 @@ fn onto_a_screen(
         right - left >= 120.0 && bottom - top >= 24.0
     };
     if areas.iter().any(reachable) {
-        return None;
+        return Placing::Stays;
     }
-    let area = areas.first()?;
-    Some(tauri::LogicalPosition::new(
+    let Some(area) = areas.first() else {
+        return Placing::Stays;
+    };
+    Placing::Onto(tauri::LogicalPosition::new(
         area.position.x + ((area.size.width - window.size.width) / 2.0).max(0.0),
         area.position.y + ((area.size.height - window.size.height) / 2.0).max(0.0),
     ))
 }
 
-/// Move `window` onto a screen that is there, if it was put back somewhere that is not.
-fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+/// Move `window` onto a screen that is there, if it was put back somewhere that is not, and say
+/// where it was put (`onto_a_screen`).
+fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Placing {
+    let maximized =
+        window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false);
     let (Ok(scale), Ok(position), Ok(size)) = (
         window.scale_factor(),
         window.outer_position(),
         window.outer_size(),
     ) else {
-        return;
+        return if maximized {
+            Placing::System
+        } else {
+            Placing::Stays
+        };
     };
     let primary = window.primary_monitor().ok().flatten();
     let mut monitors = window.available_monitors().unwrap_or_default();
@@ -9568,10 +10153,16 @@ fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         position: position.to_logical(scale),
         size: size.to_logical(scale),
     };
-    if let Some(onto) = onto_a_screen(rect, &areas) {
-        log::info!("[window] put back off every screen; moved onto the primary one");
-        let _ = window.set_position(onto);
+    let placing = onto_a_screen(rect, maximized, &areas);
+    match placing {
+        Placing::Onto(onto) => {
+            log::info!("[window] put back off every screen; moved onto the primary one");
+            let _ = window.set_position(onto);
+        }
+        Placing::System => log::info!("[window] put back maximized; left as the system placed it"),
+        Placing::Stays => {}
     }
+    placing
 }
 
 /// Mark this run as needing its connection refreshed, and send the window to setup to do it.
@@ -10052,12 +10643,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
         "status" => show_status_window(app),
-        "logs" => {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                let _ = save_troubleshooting_logs_now(&app, None);
-            });
-        }
+        "logs" => save_troubleshooting_logs_from_menu(app.clone()),
         app_update::MENU_ID => check_for_updates_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
@@ -10070,6 +10656,37 @@ fn chose(app: &tauri::AppHandle, item: &str) {
             }
         }
     }
+}
+
+/// Whether Get Troubleshooting Logs… chosen from a menu is still gathering. See
+/// `save_troubleshooting_logs_from_menu`.
+static GATHERING_LOGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/**
+Get Troubleshooting Logs… from a menu: gathered on a thread of its own, since asking the container
+engine takes seconds, and the file then shown in Finder or Explorer (`reveal_saved_logs`).
+
+Until then both menus say Gathering Logs… and the item can't be chosen again. Before, nothing
+showed for those seconds, and somebody who chose it again started a second gathering.
+*/
+fn save_troubleshooting_logs_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if GATHERING_LOGS.swap(true, SeqCst) {
+        return;
+    }
+    refresh_menus(&app);
+    std::thread::spawn(move || {
+        // Cleared however the gathering ends, a panic included, so the item is never stuck.
+        struct Gathered<R: tauri::Runtime>(tauri::AppHandle<R>);
+        impl<R: tauri::Runtime> Drop for Gathered<R> {
+            fn drop(&mut self) {
+                GATHERING_LOGS.store(false, SeqCst);
+                refresh_menus(&self.0);
+            }
+        }
+        let gathered = Gathered(app);
+        let _ = save_troubleshooting_logs_now(&gathered.0, None);
+    });
 }
 
 /**
@@ -10278,6 +10895,18 @@ fn utc_minute(seconds: u64) -> String {
 /// window's menu alike.
 const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 
+/// The same item while the logs it asked for are being gathered, which can't be chosen.
+const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
+
+/// The troubleshooting item's label, and whether it can be chosen.
+fn troubleshooting_menu_item(gathering: bool) -> (&'static str, bool) {
+    if gathering {
+        (TROUBLESHOOTING_MENU_GATHERING, false)
+    } else {
+        (TROUBLESHOOTING_MENU_LABEL, true)
+    }
+}
+
 /**
 The tray menu and the window's menu bar.
 
@@ -10292,6 +10921,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
+    let (logs_label, logs_enabled) =
+        troubleshooting_menu_item(GATHERING_LOGS.load(std::sync::atomic::Ordering::SeqCst));
     let check_for_updates = || {
         MenuItem::with_id(
             app,
@@ -10348,8 +10979,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "logs",
-            TROUBLESHOOTING_MENU_LABEL,
-            true,
+            logs_label,
+            logs_enabled,
             None::<&str>,
         )?));
         entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
@@ -10405,8 +11036,8 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "logs",
-            TROUBLESHOOTING_MENU_LABEL,
-            true,
+            logs_label,
+            logs_enabled,
             None::<&str>,
         )?));
         entries.push(MenuEntry::Plain(MenuItem::with_id(
@@ -10753,6 +11384,11 @@ fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
 /// One round at a time: the launch's rounds and a Start's may overlap, and both read and write Desktop's note of what
 /// it registered.
 fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
+    // A second OpenBot beside an installed one leaves the browsers' Recorder to the installed one,
+    // whose host manifests would otherwise be pointed at this app.
+    if stack::side_by_side_project().is_some() {
+        return Ok(Vec::new());
+    }
     static ONE_ROUND: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _round = ONE_ROUND
         .lock()
@@ -10878,7 +11514,9 @@ fn main() {
     // The local time's offset from UTC, for the log's first line. Read now, while this is the only
     // thread: on macOS and Linux the time crate refuses to read it once there are others.
     let local_offset = time::UtcOffset::current_local_offset().ok();
-    let context = tauri::generate_context!();
+    // After an in-app update, or from the installer's last page: in front as the window first shows.
+    let from_installer = started_by_installer(&args);
+    let context = side_by_side(tauri::generate_context!());
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
     #[cfg(feature = "shell-updater")]
@@ -10928,6 +11566,9 @@ fn main() {
             start_early_downloads,
             early_downloads_now,
             early_downloads_measured,
+            local_eval_room,
+            podman_machine_plan,
+            resize_podman_machine,
             record_setup_event,
             bring_setup_to_front,
             allow_podman_install,
@@ -11005,6 +11646,31 @@ fn main() {
             let _ = window
                 .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
             let page = window_page(window.app_handle(), payload.url());
+            // "Getting OpenBot ready" covers the main window until the setup page's first
+            // heartbeat (`first_paint`). Any other page sends none, so it goes as that page starts;
+            // and a setup page that loaded but never says it painted is shown after ten seconds.
+            if window.label() == "main" {
+                match (payload.event(), page == WindowPage::Setup) {
+                    (tauri::webview::PageLoadEvent::Started, false) => {
+                        let _ = first_paint::page_painted();
+                    }
+                    (tauri::webview::PageLoadEvent::Finished, true) => {
+                        first_paint::uncover_unless_painted(std::time::Duration::from_secs(10));
+                    }
+                    _ => {}
+                }
+            }
+            // On Windows the webview's default background, which shows before a page paints and
+            // under a page with no background of its own, is the setup screens' ground on the setup
+            // page, as the window was built, and WebView2's own white on every other page.
+            #[cfg(target_os = "windows")]
+            if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                let _ = window.set_background_color(
+                    (page == WindowPage::Setup)
+                        .then(|| ground_color(setup_palette(window.app_handle()))),
+                );
+            }
             match_title_bar(&window.window(), page);
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));
@@ -11062,6 +11728,9 @@ fn main() {
         .setup(move |app| {
             build_main_window(app.handle())?;
             log_launch(app.handle(), local_offset);
+            // The window is built visible, so this is its first show: a launch the installer
+            // started comes forward now, while Starting OpenBot is what it shows.
+            forward_at_first_show(from_installer, |why| bring_to_front(app.handle(), why));
             // Built by `generate_context!`, so the permissions OpenBot's page is granted are
             // compiled in. First, before anything that could trust an app and open it.
             know_app_page_grants(app.handle());
@@ -11706,6 +12375,150 @@ mod runtime_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Saved logs are shown in the file manager only from the task handed to the main thread,
+    /// never on the thread that saved them, and with the file that was saved.
+    #[test]
+    fn saved_logs_are_revealed_only_from_the_main_thread_task() {
+        use std::sync::mpsc;
+        let (reveals, revealed) = mpsc::channel::<(PathBuf, Option<String>)>();
+        let mut handed = None;
+        let saved = PathBuf::from("/logs/openbot-troubleshooting-2026-11-12T10-00-00Z.txt");
+
+        reveal_through(
+            |task| {
+                handed = Some(task);
+                Ok(())
+            },
+            saved.clone(),
+            move |path| {
+                let thread = std::thread::current().name().map(str::to_owned);
+                reveals.send((path.to_owned(), thread)).unwrap();
+                Ok(())
+            },
+        );
+        assert!(
+            revealed.try_recv().is_err(),
+            "revealed on the saving thread"
+        );
+
+        let task = handed.expect("a task for the main thread");
+        std::thread::Builder::new()
+            .name("main-thread-stand-in".into())
+            .spawn(task)
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(
+            revealed.try_iter().collect::<Vec<_>>(),
+            vec![(saved, Some("main-thread-stand-in".to_owned()))]
+        );
+    }
+
+    /// A reveal that fails, or a main thread that can't be reached, is a warning in the log. The
+    /// save itself has already succeeded, and nothing panics.
+    #[test]
+    fn a_reveal_that_fails_is_never_a_crash() {
+        let saved = PathBuf::from("/logs/openbot-troubleshooting.txt");
+        reveal_through(
+            |task| {
+                task();
+                Ok(())
+            },
+            saved.clone(),
+            |_| Err("Finder is not responding".into()),
+        );
+
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = ran.clone();
+        reveal_through(
+            |_task| Err("the event loop has closed".into()),
+            saved,
+            move |_| {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// OpenBot Desktop 1.0.2 aborted when Get Troubleshooting Logs… revealed the file from the
+    /// menu's own thread: macOS's `activateFileViewerSelectingURLs:` can throw off the main
+    /// thread. The opener's reveal is called in one place, which catches AppKit's exceptions, and
+    /// on macOS that place is reached only through `run_on_main_thread`.
+    #[test]
+    fn the_file_manager_reveal_runs_only_on_the_main_thread() {
+        let main = include_str!("main.rs");
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap();
+        let shipped = &main[..tests];
+        let body = |name: &str| {
+            let start = shipped
+                .find(&format!("\nfn {name}"))
+                .unwrap_or_else(|| panic!("fn {name}"));
+            let body = &shipped[start..];
+            &body[..body.find("\n}\n").unwrap()]
+        };
+
+        let call = ["reveal_item", "_in_dir("].concat();
+        let reveal = body("reveal_in_file_manager(");
+        assert_eq!(
+            shipped.matches(&call).count(),
+            2,
+            "{call} outside one place"
+        );
+        assert_eq!(reveal.matches(&call).count(), 2, "{call} outside one place");
+        assert!(reveal.contains("objc2::exception::catch("), "{reveal}");
+        assert!(!shipped.contains(&["reveal_items", "_in_dir"].concat()));
+        assert!(!shipped.contains(&["NS", "Workspace::"].concat()));
+
+        let passed = ["reveal_in_file_manager", ",\n"].concat();
+        assert_eq!(shipped.matches(&passed).count(), 1);
+        let saved = body("reveal_saved_logs<");
+        assert!(saved.contains(&passed), "{saved}");
+        let mac = &saved[saved.find("if cfg!(target_os = \"macos\") {").unwrap()..];
+        let mac = &mac[..mac.find("} else {").unwrap()];
+        assert!(mac.contains("app.run_on_main_thread(task)"), "{saved}");
+
+        let save = body("save_troubleshooting_logs_now<");
+        assert!(save.contains("reveal_saved_logs(app, saved);"), "{save}");
+        assert!(!save.contains(&call), "{save}");
+        assert!(main.contains("\"logs\" => save_troubleshooting_logs_from_menu(app.clone()),"));
+
+        // And no other source file in the shell reveals a file or reaches NSWorkspace.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![dir];
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            } else if path.extension().is_some_and(|ext| ext == "rs")
+                && path.file_name().is_some_and(|name| name != "main.rs")
+            {
+                let source = std::fs::read_to_string(&path).unwrap();
+                for found in ["reveal_item", "reveal_items", "NSWorkspace"] {
+                    assert!(!source.contains(found), "{found} in {}", path.display());
+                }
+            }
+        }
+    }
+
+    /// While the logs chosen from a menu are gathered, the item says so and can't be chosen.
+    #[test]
+    fn the_troubleshooting_item_says_it_is_gathering() {
+        assert_eq!(
+            troubleshooting_menu_item(false),
+            ("Get Troubleshooting Logs…", true)
+        );
+        assert_eq!(troubleshooting_menu_item(true), ("Gathering Logs…", false));
+        let main = include_str!("main.rs");
+        let menus = &main[main.find("fn install_menus").unwrap()..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        assert_eq!(
+            menus
+                .matches("\"logs\",\n            logs_label,\n            logs_enabled,")
+                .count(),
+            2
+        );
+    }
+
     /// The window says "Updating OpenBot" and where an update stopped in plain words; the log
     /// keeps the releases and the CLI's own name for the step.
     #[test]
@@ -14157,6 +14970,62 @@ mod tests {
         assert_eq!(run(Some(Podman), false, false, true), none);
     }
 
+    /// The EC2 Mac pass: OpenBot's Podman machine stopped under a running OpenBot, the window said
+    /// "The software OpenBot runs on isn't running. Retry to start it.", and Retry gave up at once
+    /// on `docker_unavailable`. This session still held OpenBot's containers, so waking the engine
+    /// was skipped as if they were running, and the machine was never started. Only Quit and a
+    /// relaunch, which hold no containers, started it.
+    #[test]
+    fn retry_starts_the_machine_stopped_under_a_running_openbot() {
+        use std::cell::RefCell;
+        let shell = Shell::default();
+        let address = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: PathBuf::from("/fixture/OpenBot"),
+            address: address.clone(),
+        });
+
+        // The machine is stopped: nothing answers on the engine OpenBot's containers ran on.
+        let asked = RefCell::new(Vec::new());
+        let up = own_containers_up(&shell, |on| {
+            asked.borrow_mut().push(on.clone());
+            false
+        });
+        assert!(
+            !up,
+            "containers on an engine that does not answer are not up"
+        );
+        assert_eq!(
+            asked.into_inner().len(),
+            1,
+            "the containers' own engine is asked"
+        );
+
+        // So Retry wakes the engine the installation runs on, which starts OpenBot's machine.
+        let started = RefCell::new(false);
+        wake_saved_engine(
+            Some(engine::Engine::Podman),
+            true,
+            || false,
+            || panic!("a Podman installation never opens Docker Desktop"),
+            || true,
+            || {
+                *started.borrow_mut() = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(started.into_inner(), "OpenBot's machine is started");
+
+        // While the machine answers, a running OpenBot's engine is still left alone.
+        assert!(own_containers_up(&shell, |_| true));
+        // And with no containers held, there is nothing to leave alone.
+        *shell.containers.lock().unwrap() = None;
+        assert!(!own_containers_up(&shell, |_| panic!(
+            "no containers, no engine to ask"
+        )));
+    }
+
     /// Box I, step 7: "Delete the application data" took OpenBot's machine, the installation folder
     /// stayed, and Podman made the person's rootless `mine` its default connection. The relaunch
     /// found nothing answering, did nothing, and the backend's tool, told no engine, judged `mine`:
@@ -14356,6 +15225,52 @@ mod tests {
             error.said,
             "OpenBot couldn't start again after reconnecting to the internet. Try Start again."
         );
+    }
+
+    /// Box I: OpenBot's machine made again, the backend's cluster gone with the old one, and every
+    /// status "local-command-failed, no stack", which the window said as "Setup stopped partway
+    /// through with an error. Retry." for good. It is now said as a lost backend, with Start fresh,
+    /// but only for the stack OpenBot created and recorded here, asked about by its own id, once
+    /// the engine answers without its cluster.
+    #[test]
+    fn a_backend_whose_cluster_is_gone_is_said_lost_only_when_openbot_made_it() {
+        use local_eval::{Licence, Outcome, Readiness, Reason, Report, StackId};
+        let failed = |reason, stack: Option<local_eval::Stack>| Report {
+            outcome: Outcome::Failed,
+            stack,
+            reason,
+            readiness: Readiness::Unknown,
+            licence: Licence::Unknown,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: false,
+            shortfall: None,
+        };
+        let asked = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let recorded = |ownership| local_eval_state::State {
+            stack: "local-1915a7aafba78d6207a561b0".into(),
+            ownership,
+            phase: local_eval_state::Phase::Installed,
+            connected: true,
+        };
+        let created = recorded(local_eval_state::Ownership::Created);
+        let lost = failed(Some(Reason::LocalCommandFailed), None);
+
+        assert!(backend_lost(&lost, Some(&created), &asked, || Some(true)));
+        // The cluster is there, or the engine couldn't say: an ordinary failure, with Retry.
+        assert!(!backend_lost(&lost, Some(&created), &asked, || Some(false)));
+        assert!(!backend_lost(&lost, Some(&created), &asked, || None));
+        // A stack OpenBot found and shares, none recorded, or another one asked about.
+        let shared = recorded(local_eval_state::Ownership::Shared);
+        assert!(!backend_lost(&lost, Some(&shared), &asked, || Some(true)));
+        assert!(!backend_lost(&lost, None, &asked, || Some(true)));
+        let other = StackId::parse("local-0000").unwrap();
+        assert!(!backend_lost(&lost, Some(&created), &other, || Some(true)));
+        // Any other answer: the engine isn't even asked.
+        let unavailable = failed(Some(Reason::DockerUnavailable), None);
+        assert!(!backend_lost(&unavailable, Some(&created), &asked, || {
+            panic!("asked the engine")
+        }));
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
@@ -15197,27 +16112,105 @@ mod tests {
         let left = rect(-1280.0, 0.0, 1280.0, 760.0);
         // Where it was left, on the primary screen or the second one: it stays.
         assert_eq!(
-            onto_a_screen(rect(78.0, 24.0, 1016.0, 992.0), &[primary, left]),
-            None
+            onto_a_screen(rect(78.0, 24.0, 1016.0, 992.0), false, &[primary, left]),
+            Placing::Stays
         );
         assert_eq!(
-            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary, left]),
-            None
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), false, &[primary, left]),
+            Placing::Stays
         );
         // Mostly off the right edge, with its title bar still reachable: it stays.
         assert_eq!(
-            onto_a_screen(rect(1700.0, 100.0, 1016.0, 839.0), &[primary]),
-            None
+            onto_a_screen(rect(1700.0, 100.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Stays
         );
         // The second screen is unplugged: onto the primary one, in the middle.
         assert_eq!(
-            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary]),
-            Some(tauri::LogicalPosition::new(452.0, 96.5))
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Onto(tauri::LogicalPosition::new(452.0, 96.5))
         );
         // Its title bar above the top of every screen: the same.
-        assert!(onto_a_screen(rect(200.0, -500.0, 1016.0, 839.0), &[primary]).is_some());
+        assert!(matches!(
+            onto_a_screen(rect(200.0, -500.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Onto(_)
+        ));
         // No screen known: left as it is.
-        assert_eq!(onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), &[]), None);
+        assert_eq!(
+            onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), false, &[]),
+            Placing::Stays
+        );
+    }
+
+    /// Windows, after tray Quit with the window maximized on a 1920 by 1080 screen: the saved place
+    /// was maximized, and the window was built maximized, its frame at -8,-8 and 1936 by 1056, past
+    /// the work area's edges by the resize border. That read as off every screen, and moving it onto
+    /// the primary one un-maximized it: it came back at 1000 by 800. A maximized window is left as
+    /// the system placed it, neither moved nor resized, on Windows and zoomed on a Mac; a window that
+    /// really is off every screen still comes onto the primary one.
+    #[test]
+    fn a_maximized_window_reopens_maximized_where_the_system_put_it() {
+        let rect = |x: f64, y: f64, width: f64, height: f64| tauri::LogicalRect {
+            position: tauri::LogicalPosition::new(x, y),
+            size: tauri::LogicalSize::new(width, height),
+        };
+        // 1920 by 1080 at 100%, the taskbar's 40 pixels below the work area.
+        let primary = rect(0.0, 0.0, 1920.0, 1040.0);
+        let maximized = rect(-8.0, -8.0, 1936.0, 1056.0);
+        assert_eq!(onto_a_screen(maximized, true, &[primary]), Placing::System);
+        // Maximized on a second screen, left of the primary.
+        let left = rect(-1920.0, 0.0, 1920.0, 1040.0);
+        assert_eq!(
+            onto_a_screen(rect(-1928.0, -8.0, 1936.0, 1056.0), true, &[primary, left]),
+            Placing::System
+        );
+        // Zoomed on a MacBook's 1512 by 982 screen, under the 33-point menu bar, filling the work
+        // area: before, it stayed but launch shrank it to the work area less its margins, which
+        // un-zoomed it.
+        let mac = rect(0.0, 33.0, 1512.0, 949.0);
+        assert_eq!(
+            onto_a_screen(rect(0.0, 33.0, 1512.0, 949.0), true, &[mac]),
+            Placing::System
+        );
+        // Really off every screen: left on a screen to the right that has been unplugged. Onto
+        // the primary one, in the middle.
+        assert_eq!(
+            onto_a_screen(rect(2100.0, 177.0, 1000.0, 800.0), false, &[primary]),
+            Placing::Onto(tauri::LogicalPosition::new(460.0, 120.0))
+        );
+        // The place it was saved at reads back maximized, where it was before it was maximized.
+        let saved = SavedWindow {
+            width: 1000,
+            height: 800,
+            x: -8,
+            y: -8,
+            prev_x: 182,
+            prev_y: 177,
+            maximized: true,
+        };
+        let screen = Screen {
+            position: (0, 0),
+            size: (1920, 1080),
+            work: (0, 0, 1920, 1040),
+            scale: 1.0,
+        };
+        assert_eq!(
+            place_saved_window(saved, &[screen]),
+            Some(Place {
+                x: 182.0,
+                y: 177.0,
+                width: 1000.0,
+                height: 800.0,
+                maximized: true,
+            })
+        );
+        // And launch leaves it alone: no move, no resize, once it is maximized.
+        let main = include_str!("main.rs");
+        let fit = &main[main.find("fn fit_main_window_to_screen<").unwrap()..];
+        let fit = &fit[..fit.find("\n}\n").unwrap()];
+        let left_alone = fit.find("== Placing::System").unwrap();
+        for change in ["set_window_height(", "lift_into_work_area("] {
+            assert!(fit.find(change).unwrap() > left_alone, "{change}");
+        }
     }
 
     /// Another app holds the foreground (the browser, signing in): Windows refuses
@@ -15410,6 +16403,101 @@ mod tests {
         ));
     }
 
+    /// Box H, an in-app update from 1.0.1 to 1.0.2 on Windows Server 2022 with a maximised Edge
+    /// open: Windows put Edge in front as 1.0.1 closed, and 1.0.2 opened behind it. The person saw
+    /// only Edge through the four minutes of Starting OpenBot, until "[front] OpenBot is showing"
+    /// at home. The updating version passes the foreground on before its window goes, the
+    /// installer passes it on again and starts the new version saying so, and the new version
+    /// comes forward once, as its window first shows. Never while the browser sign-in is open.
+    #[test]
+    fn a_launch_the_installer_started_comes_forward_once_as_its_window_first_shows() {
+        if crate::test_support::isolated_process(
+            "tests::a_launch_the_installer_started_comes_forward_once_as_its_window_first_shows",
+        ) {
+            return;
+        }
+        let args = |given: &[&str]| -> Vec<std::ffi::OsString> {
+            std::iter::once("openbot-desktop.exe")
+                .chain(given.iter().copied())
+                .map(std::ffi::OsString::from)
+                .collect()
+        };
+        // The installer's launch, after an update or from its last page. An update hands the old
+        // version's own arguments on (/ARGS), and the installer adds the flag when they lack it.
+        assert!(started_by_installer(&args(&[STARTED_BY_INSTALLER])));
+        assert!(started_by_installer(&args(&[
+            "--kept",
+            STARTED_BY_INSTALLER
+        ])));
+        // The Start menu, sign-in to Windows, a notification's link: Windows' own rules.
+        assert!(!started_by_installer(&args(&[])));
+        assert!(!started_by_installer(&args(&["openbot://open?path=/"])));
+        assert!(!started_by_installer(&[std::ffi::OsString::from(
+            STARTED_BY_INSTALLER
+        )]));
+
+        // Started by the installer: it asks for the front once, and nothing holds it back.
+        let asked = std::cell::RefCell::new(Vec::new());
+        forward_at_first_show(true, |why| {
+            asked.borrow_mut().push((why.to_owned(), held_back(why)))
+        });
+        assert_eq!(
+            *asked.borrow(),
+            [("the installer started OpenBot".to_owned(), false)]
+        );
+        // Any other launch asks nothing.
+        forward_at_first_show(false, |why| {
+            asked.borrow_mut().push((why.to_owned(), held_back(why)))
+        });
+        assert_eq!(asked.borrow().len(), 1);
+        // While the browser sign-in is open it is held back, as every other moment is.
+        let held = while_signing_in(
+            || {
+                let mut held = None;
+                forward_at_first_show(true, |why| held = Some(held_back(why)));
+                held
+            },
+            || {},
+        );
+        assert_eq!(held, Some(true));
+
+        let main = include_str!("main.rs");
+        // In setup, once, as the window is first built, through `bring_to_front`, which asks
+        // `held_back` first.
+        let setup = &main[main.find(".setup(move |app| {\n").unwrap()..];
+        assert!(
+            setup.starts_with(
+                ".setup(move |app| {\n            build_main_window(app.handle())?;\n            log_launch(app.handle(), local_offset);\n"
+            ),
+            "{}",
+            &setup[..400]
+        );
+        let first_show = &setup[setup.find("log_launch(").unwrap()..];
+        let first_show = &first_show[first_show.find('\n').unwrap() + 1..];
+        let first_show = &first_show[..first_show.find("know_app_page_grants").unwrap()];
+        assert!(
+            first_show.contains(
+                "forward_at_first_show(from_installer, |why| bring_to_front(app.handle(), why));"
+            ),
+            "{first_show}"
+        );
+        let launch = &main[main.find("\nfn main() {\n").unwrap()..];
+        let launch = &launch[..launch.find(".setup(move |app| {\n").unwrap()];
+        assert!(launch.contains("let from_installer = started_by_installer(&args);"));
+        // The updating version passes the foreground on while its window is still up: before the
+        // updater's cleanup takes the windows down and Windows activates the one behind.
+        let before = &main[main.find("fn stop_before_installer<").unwrap()..];
+        let before = &before[..before.find("\n}\n").unwrap()];
+        let passed = before
+            .find("pass_the_foreground_on();")
+            .expect("the foreground passed on before the installer starts");
+        assert!(passed < before.find("app.cleanup_before_exit();").unwrap());
+        // The installer starts OpenBot with the flag read here.
+        assert!(include_str!("../windows/hooks.nsh").contains(&format!(
+            "!define OPENBOT_STARTED_BY_INSTALLER \"{STARTED_BY_INSTALLER}\""
+        )));
+    }
+
     /// Windows cascades a window with no position of its own down and right on every launch. On
     /// a 1080p screen with a 48 px taskbar the third launch put a 1016 by 839 window's top at 234,
     /// its bottom at 1073, past the work area's 1032, and the account row behind the taskbar.
@@ -15492,6 +16580,127 @@ mod tests {
         assert!(!body.contains(".show()"), "{body}");
         assert!(body.contains("fit_main_window_to_screen(app)"), "{body}");
         assert!(window.is_visible().unwrap_or(true));
+    }
+
+    /// The Mac pass on 806a8317f, recorded at 30 fps: before the setup page painted, the window
+    /// showed the system's dark grey for up to half a second, then WKWebView's white for a few
+    /// frames, and blank white in light. The main window is built on the setup screens' ground on
+    /// macOS as on Windows, the ground the title bar takes once the setup page loads, so the first
+    /// frame is already OpenBot's own colour in light and in dark.
+    #[test]
+    fn the_main_window_is_built_on_the_setup_ground_on_macos_and_windows() {
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let set = body
+            .find("let builder = builder.background_color(ground_color(palette));")
+            .expect("the main window's builder takes the setup ground");
+        let gate = body[..set].trim_end().lines().last().unwrap().trim();
+        assert_eq!(
+            gate, r#"#[cfg(any(target_os = "macos", target_os = "windows"))]"#,
+            "the setup ground is set on the builder on macOS and Windows"
+        );
+        assert!(body.contains("let palette = setup_palette(app);"), "{body}");
+        assert!(set < body.find(".build()?").unwrap(), "{body}");
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            assert_eq!(ground_color(first_paint::palette(false)), SETUP_BACKGROUND);
+            assert_eq!(
+                ground_color(first_paint::palette(true)),
+                SETUP_BACKGROUND_DARK
+            );
+        }
+    }
+
+    /// Box H (Windows Server 2022) in dark: the title bar stayed light until the window was
+    /// resized. Server 2022 has none of Windows 11's colour attributes, so its bar is Windows's own
+    /// dark or light, which is set with the colours and drawn on the spot, from the window's first
+    /// show and on every change after.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
+        let dark = title_bar_attributes(Some(true));
+        assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        let light = title_bar_attributes(Some(false));
+        assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        // Windows's own colours, and the window's theme left to decide its dark or light.
+        let own = title_bar_attributes(None);
+        assert!(own
+            .iter()
+            .all(|&(attribute, _)| attribute != IMMERSIVE_DARK_MODE));
+        assert!(
+            own.iter().all(|&(_, value)| value == 0xFFFF_FFFF),
+            "{own:?}"
+        );
+
+        let main = include_str!("main.rs");
+        let tint = &main[main.find("pub(crate) fn tint_title_bar_of").unwrap()..];
+        let tint = &tint[..tint.find("\n}\n").unwrap()];
+        let set = tint.find("title_bar_attributes(dark)").expect("{tint}");
+        let redraw = tint
+            .find("SWP_FRAMECHANGED\n")
+            .expect("the frame is redrawn");
+        assert!(set < redraw, "{tint}");
+        for flag in ["SWP_NOMOVE", "SWP_NOSIZE", "SWP_NOZORDER", "SWP_NOACTIVATE"] {
+            assert!(tint[redraw..].contains(flag), "{flag}: {tint}");
+        }
+        let body = |name: &str| {
+            let from = &main[main.find(name).unwrap_or_else(|| panic!("{name}"))..];
+            &from[..from.find("\n}\n").unwrap()]
+        };
+        let window = body("fn tint_title_bar<R: tauri::Runtime>");
+        assert!(
+            window.contains("tint_title_bar_of(hwnd.0 as isize, dark)"),
+            "{window}"
+        );
+        // A theme change from the system: the window's ThemeChanged event redraws the bar on every
+        // page but OpenBot's own, which reports its own theme (below).
+        let changed = &main[main
+            .find("tauri::WindowEvent::ThemeChanged(_) => {")
+            .unwrap()..];
+        let changed = &changed[..changed.find("\n            }\n").unwrap()];
+        assert!(
+            changed.contains("match_title_bar(window, window_page(app, &url));"),
+            "{changed}"
+        );
+        let matched = body("fn match_title_bar<R: tauri::Runtime>");
+        let windows = &matched[matched.find("#[cfg(target_os = \"windows\")]").unwrap()..];
+        assert!(windows.contains("WindowPage::Setup => {"), "{windows}");
+        assert!(
+            windows.contains("tint_title_bar(window, Some(dark));"),
+            "{windows}"
+        );
+        assert!(
+            windows.contains(
+                "WindowPage::LocalApp | WindowPage::Other => tint_title_bar(window, None)"
+            ),
+            "{windows}"
+        );
+        // A theme change from OpenBot's own page, through `desktop_page::appearance`.
+        let reported = body("pub(crate) fn page_appearance<R: tauri::Runtime>");
+        assert!(
+            reported.contains("tint_title_bar(window, Some(dark));"),
+            "{reported}"
+        );
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("crate::page_appearance(&window, dark);"),
+            "{command}"
+        );
+        // As the main window first shows, before `build()` returns.
+        let first_paint = include_str!("first_paint.rs");
+        let shown = &first_paint[first_paint
+            .find("unsafe extern \"system\" fn shown")
+            .unwrap()..];
+        let shown = &shown[..shown.find("\n    }\n").unwrap()];
+        assert!(
+            shown.contains("crate::tint_title_bar_of(window.0 as isize, Some(dark));"),
+            "{shown}"
+        );
     }
 
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.

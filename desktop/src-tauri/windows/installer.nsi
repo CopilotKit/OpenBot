@@ -19,6 +19,16 @@
 ; that left nothing on screen for minutes. No hook could change the page, and no setting changes
 ; what it runs. Uninstalling from Windows' Apps runs the uninstaller on its own and is unchanged, so
 ; the person can still delete the data there.
+;
+; And every OpenBot this installer starts, after an in-app update and from the last page, is started
+; by OPENBOT_RUN_AFTER_INSTALL (windows/hooks.nsh), so it comes to the front as its window first
+; shows rather than behind the window Windows put in front when the old version closed. From the
+; last page the installer stays until OpenBot's window is up (OPENBOT_STAY_UNTIL_OPEN).
+;
+; And no ExecWait puts its command on the page: each one is said to the details list only, while
+; the plain line before it stays on the status line (installingWebview2 in installer-english.nsh).
+; The Install section's own lines, each folder and file it makes with its path, go to the details
+; list too, under one plain line, "Copying OpenBot's files."
 ; <<< OpenBot
 Unicode true
 ManifestDPIAware true
@@ -387,14 +397,28 @@ Function PageLeaveReinstall
 
     ${If} $WixMode = 1
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
+      ; >>> OpenBot
+      ; Every ExecWait says "Execute: <the command>" on the page's status line while it waits, so
+      ; each one says it to the details list only, as OPENBOT_UNINSTALL_OLD_VERSION does.
+      SetDetailsPrint listonly
+      ; <<< OpenBot
       ExecWait '$R1' $0
+      ; >>> OpenBot
+      SetDetailsPrint both
+      ; <<< OpenBot
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
+      ; >>> OpenBot
+      SetDetailsPrint listonly
+      ; <<< OpenBot
       ExecWait '$R1' $0
+      ; >>> OpenBot
+      SetDetailsPrint both
+      ; <<< OpenBot
     ${EndIf}
 
     BringToFront
@@ -454,6 +478,14 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_FINISH
 
 Function RunMainBinary
+  ; >>> OpenBot
+  ; Started as every OpenBot the installer starts: free to come to the front, and told the
+  ; installer started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh). Then this page stays on
+  ; screen, saying OpenBot is opening, until OpenBot's window is up (OPENBOT_STAY_UNTIL_OPEN).
+  !insertmacro OPENBOT_RUN_AFTER_INSTALL ""
+  !insertmacro OPENBOT_STAY_UNTIL_OPEN
+  Return
+  ; <<< OpenBot
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
 FunctionEnd
 
@@ -597,6 +629,30 @@ Section WebView2
     ; Skip if updating
     ${If} $UpdateMode <> 1
       !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
+        ; >>> OpenBot
+        ; Box H: NSISdl's own download box covered the page with "Downloading
+        ; MicrosoftEdgeWebview2Setup.exe" and "Connecting ...". The same download from the same
+        ; address, quietly (download_quiet), under the plain line, with the bar moving; Tauri's own
+        ; lines after this block are not reached.
+        ; A bootstrapper left from an earlier run is deleted under the plain line, never as "Delete
+        ; file: C:\Users\<person>\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe".
+        DetailPrint "$(webview2Downloading)"
+        SetDetailsPrint listonly
+        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        SetDetailsPrint both
+        !insertmacro OPENBOT_PROGRESS_MOVING 1
+        NSISdl::download_quiet "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Pop $0
+        !insertmacro OPENBOT_PROGRESS_MOVING 0
+        ${If} $0 == "success"
+          DetailPrint "$(webview2DownloadSuccess)"
+        ${Else}
+          DetailPrint "$(webview2DownloadError)"
+          Abort "$(webview2AbortError)"
+        ${EndIf}
+        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Goto install_webview2
+        ; <<< OpenBot
         Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
         DetailPrint "$(webview2Downloading)"
         NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
@@ -632,7 +688,19 @@ Section WebView2
       install_webview2:
         DetailPrint "$(installingWebview2)"
         ; $6 holds the path to the webview2 installer
+        ; >>> OpenBot
+        ; Box H: while Microsoft's WebView2 Runtime installed, the status line said "Execute:
+        ; C:\Users\ADMINI~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe /silent /install" in
+        ; place of the plain line above, for as long as it took. Said to the details list only, so
+        ; the plain line stays, and the bar moves while it waits.
+        !insertmacro OPENBOT_PROGRESS_MOVING 1
+        SetDetailsPrint listonly
+        ; <<< OpenBot
         ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+        ; >>> OpenBot
+        SetDetailsPrint both
+        !insertmacro OPENBOT_PROGRESS_MOVING 0
+        ; <<< OpenBot
         ${If} $1 = 0
           DetailPrint "$(webview2InstallSuccess)"
         ${Else}
@@ -658,7 +726,15 @@ Section WebView2
           ${If} $R1 != ""
             ; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:docs/updater/user_manual.md
             ; Modified from "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView\ModifyPath"
+            ; >>> OpenBot
+            !insertmacro OPENBOT_PROGRESS_MOVING 1
+            SetDetailsPrint listonly
+            ; <<< OpenBot
             ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
+            ; >>> OpenBot
+            SetDetailsPrint both
+            !insertmacro OPENBOT_PROGRESS_MOVING 0
+            ; <<< OpenBot
             ${If} $1 = 0
               DetailPrint "$(webview2InstallSuccess)"
             ${Else}
@@ -673,7 +749,18 @@ Section WebView2
 SectionEnd
 
 Section Install
+  ; >>> OpenBot
+  ; Every folder and file this section makes is said on the Installing page's status line, path and
+  ; all: "Output folder: C:\Users\<person>\AppData\Local\OpenBot", then "Create folder: ...\cli-bundle\..."
+  ; and "Extract: ..." for each of OpenBot's files, then "Created uninstaller: ..." and "Create
+  ; shortcut: ...". A person read noise and their own user folder. They are said to the details list
+  ; only, and the status line says one plain line while the files are copied.
+  SetDetailsPrint listonly
+  ; <<< OpenBot
   SetOutPath $INSTDIR
+  ; >>> OpenBot
+  SetDetailsPrint both
+  ; <<< OpenBot
 
   !ifmacrodef NSIS_HOOK_PREINSTALL
     !insertmacro NSIS_HOOK_PREINSTALL
@@ -681,6 +768,10 @@ Section Install
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
+  ; >>> OpenBot
+  DetailPrint "Copying OpenBot's files."
+  SetDetailsPrint listonly
+  ; <<< OpenBot
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
 
@@ -744,7 +835,21 @@ Section Install
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
 
+  ; >>> OpenBot
+  ; FileFunc's GetSize says "Size:190 Kb  Files:1  Folders:" on the status line, whatever it was set
+  ; to, and sets it back to "both" when it ends, so the lines after it were said there too: "Create
+  ; shortcut: C:\Users\<person>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\OpenBot.lnk".
+  ; The uninstaller's size in KB, as GetSize gives it, read quietly instead, and GetSize skipped.
+  FileOpen $0 "$INSTDIR\uninstall.exe" r
+  FileSeek $0 0 END $1
+  FileClose $0
+  IntOp $0 $1 / 1024
+  Goto openbot_uninstaller_sized
+  ; <<< OpenBot
   ${GetSize} "$INSTDIR" "/M=uninstall.exe /S=0K /G=0" $0 $1 $2
+  ; >>> OpenBot
+  openbot_uninstaller_sized:
+  ; <<< OpenBot
   IntOp $0 $0 + ${ESTIMATEDSIZE}
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD SHCTX "${UNINSTKEY}" "EstimatedSize" "$0"
@@ -767,6 +872,9 @@ Section Install
     Call CreateOrUpdateDesktopShortcut
   ${EndIf}
 
+  ; >>> OpenBot
+  SetDetailsPrint both
+  ; <<< OpenBot
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL
   !endif
@@ -785,6 +893,13 @@ Function .onInstSuccess
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
       ${GetOptions} $CMDLINE "/ARGS" $R0
+      ; >>> OpenBot
+      ; After an in-app update: the new version, free to come to the front, and told the installer
+      ; started it (OPENBOT_RUN_AFTER_INSTALL in windows/hooks.nsh), with the arguments the updater
+      ; handed on.
+      !insertmacro OPENBOT_RUN_AFTER_INSTALL "$R0"
+      Return
+      ; <<< OpenBot
       nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
     ${EndIf}
   ${EndIf}

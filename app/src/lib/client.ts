@@ -57,6 +57,60 @@ export function tryClient(
   return send(path, options);
 }
 
+/** The server answered, and said no. `status` tells a refusal (4xx) from a server that broke (5xx). */
+export class ClientError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ClientError";
+    this.status = status;
+  }
+}
+
+/**
+ * The error a refusal becomes, carrying the server's own sentence.
+ *
+ * The server's message is the useful one: it names the field or the permission that failed. Today's
+ * routes put it in `error`; the API's problem details (RFC 9457) put it in `detail`. The fallback is
+ * only for the cases where it sent neither, or sent something that is not JSON.
+ */
+async function refusal(
+  response: Response,
+  fallback: string | undefined,
+): Promise<ClientError> {
+  const message = await response
+    .json()
+    .then((body: { error?: unknown; detail?: unknown }) =>
+      typeof body.error === "string"
+        ? body.error
+        : typeof body.detail === "string"
+          ? body.detail
+          : undefined,
+    )
+    .catch(() => undefined);
+  return new ClientError(
+    message ?? fallback ?? "That request failed.",
+    response.status,
+  );
+}
+
+/**
+ * A request the generated API client has already shaped: its method, headers and serialised body.
+ *
+ * For `lib/api/request.ts` only, which is how every operation in api/openapi.yaml reaches the server.
+ * It adds what every request here carries, the session cookie, and turns a refusal into the same
+ * `ClientError` with the same sentence `client` gives, so a screen cannot tell which one it called.
+ */
+export async function clientRequest(
+  path: string,
+  init: RequestInit,
+  fallback?: string,
+): Promise<Response> {
+  const response = await fetch(path, { ...init, credentials: "include" });
+  if (!response.ok) throw await refusal(response, fallback);
+  return response;
+}
+
 /**
  * A request that throws when the server says no, carrying the server's own message.
  *
@@ -84,17 +138,7 @@ export async function client<T>(
 
   const response = await send(path, options);
 
-  if (!response.ok) {
-    /*
-     * The server's message is the useful one: it names the field or the permission that failed. The
-     * fallback is only for the cases where it sent none, or sent something that is not JSON.
-     */
-    const message = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => undefined);
-    throw new Error(message ?? options.fallback ?? "That request failed.");
-  }
+  if (!response.ok) throw await refusal(response, options.fallback);
 
   if (key === undefined) return response;
 

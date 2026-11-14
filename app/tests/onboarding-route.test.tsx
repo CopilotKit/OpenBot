@@ -28,6 +28,7 @@ import userEvent from "@testing-library/user-event";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Book a call opens the OpenBot for Business page, with its booking calendar, never CopilotKit's generic one. */
@@ -172,8 +173,8 @@ beforeEach(() => {
           ? Response.json({ error: "down" }, { status: 503 })
           : Response.json({ localEvaluation });
       }
-      if (path.startsWith("/api/agents"))
-        return Response.json({ agents: [BOT] });
+      const bots = answerBotsList(path, init, { visible: [BOT] });
+      if (bots) return bots;
       if (path === "/api/setup") return Response.json({ checklist });
       if (path === "/api/approvals")
         return Response.json({ enabled: askFirst, rules: [], pending: [] });

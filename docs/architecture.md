@@ -16,18 +16,15 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | `app`                    | 3010                       | React/Vite interface for channels, Bot chat, live screen, settings, and admin pages.                                                        |
 | `server`                 | 3001                       | API, CopilotKit runtime, auth, roles, tenant package, coworkers, channels, policy, audit, credentials, plugins, components, and connectors. |
 | `agent-computer`         | 4100                       | Chromium, `/workspace`, browser profile, screenshots, snapshots, and file tools.                                                            |
-| `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                                                                     |
-| `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
+| `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                                                             |
 | `agent-harness`          | 4202                       | The Bot framework harness chosen during setup, one of the `agent-<framework>` images, behind the `harness` compose profile.                 |
 | `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
 | PostgreSQL               | 5432                       | Product data, audit rows, credentials, policy, grants, channels, components, and the work queue.                                           |
 | CopilotKit Intelligence  | external                   | Durable threads, memory, Learning, and realtime gateway. OpenBot Desktop runs a local one through its bundled CopilotKit CLI, on k3d.      |
 
-`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys; neither Bot service starts for the personal edition, whose Bot runs inside the server) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
+`scripts/start.sh` starts PostgreSQL, `agent-computer`, the managed Bot `agent-langgraph-agui` (not for the personal edition, whose Bot runs inside the server) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server` and the routines worker (the local stand-in for the routines CronJob) as Compose services, and `app` on the host. Every one of those but the Bots and `app` runs from the published OpenBot images, at the tag in `backend-images.env`.
 
-The compose file also defines `server` and `worker` from the server image, behind the `openbot` profile so a plain `docker compose up` never starts a second server beside the one `start.sh` runs. OpenBot Desktop runs those two with PostgreSQL and one `agent-computer` (and `agent-harness` when a harness was picked), and starts no supervisor and none of the bundled Bots.
-
-The compose file also defines optional SPIRE services. `start.sh` does not start them.
+`server` and `worker` run from the server image, behind the `openbot` profile, so a plain `docker compose up` starts what it always did and `start.sh` names them. OpenBot Desktop runs those two with PostgreSQL and one `agent-computer` (and `agent-harness` when a harness was picked), and starts no supervisor and none of the bundled Bots.
 
 Several API replicas can share one database. What one changes reaches the others through PostgreSQL `LISTEN`/`NOTIFY`: `channel_activity` (a conversation's new message or name, for the people watching it), `action_policy_changed` (a saved action policy), `enterprise_settings_changed` (the enterprise controls), and `openbot_work_offered` (work was queued, so a sweep starts now instead of at its next poll). A notification is never the record: the listener re-reads the row or the queue, and a missed one is covered by a re-read on reconnect or the next poll.
 
@@ -117,7 +114,7 @@ Each row therefore also names what caused it:
 | `memory`         | the memory source's id | Memory read a connected app to import facts, as the source's owner. |
 | `handoff`        | the Bot that handed on | Another Bot asked for this, on the person's behalf.     |
 
-The Audit screen filters on it, and **Nobody watching** is `routine`, `handoff`, `responsibility` and
+The Activity page filters on it, and **Nobody watching** is `routine`, `handoff`, `responsibility` and
 `memory` together, which is
 the question of what ran on somebody's authority while they were away. `deployment` is deliberately
 outside that filter: a boundary held at start-up is not work done on anybody's behalf.
@@ -141,7 +138,7 @@ model supplies any arguments, and the gateway writes that run's initiator on eve
 
 ### Taking the trail out
 
-The Audit screen's **Export CSV** downloads the current filter as
+The Activity page's **Export CSV** downloads the current filter as
 `GET /api/admin/audit-events?format=csv`: the same filtered query as the table, walked page by
 page up to 5,000 rows and returned as RFC 4180 CSV with the redacted payload as one JSON column.
 An export that hits the cap holds the newest 5,000 and answers with `X-Audit-Export-Truncated`
@@ -339,7 +336,7 @@ Whether a person can use an app through a Bot is answered once, on the server, f
 
 ### Writing a skill in a conversation
 
-A skill can be written from the composer as well as from `/capabilities/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
+A skill can be written from the composer as well as from `/skills`. The deployment ships a skill called `skill-creator` whose instruction is how to interview somebody about the skill they want; a Bot holding it is also offered four tools the app registers — `list_skills`, `read_skill`, `list_skill_tools`, and `save_skill`, which suspends the run on a card showing the command, the title and the whole instruction. Nothing is written until the person presses the button.
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 

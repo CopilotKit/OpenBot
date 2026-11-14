@@ -3,6 +3,7 @@ import {
   useCopilotKit,
   useFrontendTool as useSDKFrontendTool,
 } from "@copilotkit/react-core/v2";
+import { withFinishedAt } from "@openbot/shared/computer-control";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
@@ -119,13 +120,16 @@ export function useFrontendTool<T extends Record<string, unknown>>(
            * to the computer.
            */
           if (!tool.name.startsWith("computer_")) return gated(args, context);
-          return inStepOrder(
-            {
-              computerId: botOf(context.agent),
-              messages: context.agent?.messages,
-              toolCallId: context.toolCall?.id,
-            },
-            () => gated(args, context),
+          // When it finished, kept in the answer for Activity (`withFinishedAt`), whichever way it ran.
+          return withFinishedAt(
+            await inStepOrder(
+              {
+                computerId: botOf(context.agent),
+                messages: context.agent?.messages,
+                toolCallId: context.toolCall?.id,
+              },
+              () => gated(args, context),
+            ),
           );
         }
       : undefined,

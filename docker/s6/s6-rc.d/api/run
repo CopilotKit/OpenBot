@@ -1,6 +1,0 @@
-#!/command/with-contenv sh
-# The API, and the app it serves. Started after the browser so a Bot's first action does not race a
-# computer that is still coming up.
-cd /app/server
-export HOME=/home/apiuser
-exec s6-setuidgid apiuser /usr/local/bin/bun src/index.ts

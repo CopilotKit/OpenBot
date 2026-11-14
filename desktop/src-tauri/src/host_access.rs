@@ -117,10 +117,16 @@ struct RunningContainer {
 #[derive(Debug)]
 pub enum HostAccessError {
     InvalidConfig(String),
+    /// The container engine or the container failed. The message is the engine's own, which can
+    /// name a host path, so it is written to this computer's log and never sent: what the server is
+    /// told is `engine_failure_message`'s reading of it.
     Runtime(String),
     Http(String),
     Denied(String),
     Io(String),
+    /// What went wrong inside the sandbox, already worded for the Bot: what failed and what to do.
+    /// Sent as it is, so it names only paths inside the sandbox and never the engine's output.
+    Sandbox(String),
 }
 
 impl std::fmt::Display for HostAccessError {
@@ -130,7 +136,8 @@ impl std::fmt::Display for HostAccessError {
             | HostAccessError::Runtime(message)
             | HostAccessError::Http(message)
             | HostAccessError::Denied(message)
-            | HostAccessError::Io(message) => f.write_str(message),
+            | HostAccessError::Io(message)
+            | HostAccessError::Sandbox(message) => f.write_str(message),
         }
     }
 }
@@ -696,19 +703,32 @@ impl Inner {
                 error: None,
             },
             Err(error) => {
-                // What the server is told, not the error itself: that can carry a path or the
-                // output of a command a Bot ran.
-                log::warn!(
-                    "[host access] operation {} failed: {}",
-                    operation.operation_id,
-                    public_error_message(&error)
-                );
+                // The server is told `said`, never the error itself, which can carry a host path.
+                // This computer's log keeps the engine's own words too, the home folder written as
+                // `~` (see `logging`): without them a sandbox that fails on one person's machine
+                // leaves nothing to go on. No variant carries what a Bot's command printed.
+                let said = public_error_message(&error, &self.config);
+                match &error {
+                    HostAccessError::Runtime(raw) | HostAccessError::InvalidConfig(raw) => {
+                        log::warn!(
+                            "[host access] operation {} failed on {:?} {} ({}): {raw}. Told: {said}",
+                            operation.operation_id,
+                            self.config.engine.engine,
+                            self.engine_version(),
+                            std::env::consts::ARCH,
+                        )
+                    }
+                    _ => log::warn!(
+                        "[host access] operation {} failed: {said}",
+                        operation.operation_id
+                    ),
+                }
                 DesktopResult {
                     operation_id: operation.operation_id.clone(),
                     ok: false,
                     result: None,
                     grant: None,
-                    error: Some(public_error_message(&error)),
+                    error: Some(said),
                 }
             }
         };
@@ -838,7 +858,8 @@ impl Inner {
             shell_quote(container_path(&relative))
         );
         self.ensure_operation_still_allowed(operation, &grant)?;
-        self.run_container(&operation.operation_id, &grant, false, &script)
+        let ran = self.run_container(&operation.operation_id, &grant, false, &script)?;
+        self.finished(ran, "Listing the folder")
             .map(OperationSuccess::output)
     }
 
@@ -855,8 +876,8 @@ impl Inner {
         let relative = host_relative(&grant.root, &path)?;
         let script = format!("cat -- {}", shell_quote(container_path(&relative)));
         self.ensure_operation_still_allowed(operation, &grant)?;
-        self.run_container(&operation.operation_id, &grant, false, &script)
-            .map(OperationSuccess::output)
+        let ran = self.run_container(&operation.operation_id, &grant, false, &script)?;
+        read_answer(ran, &self.config).map(OperationSuccess::output)
     }
 
     fn write_file(&self, operation: &DesktopOperation) -> HostAccessResult<OperationSuccess> {
@@ -890,13 +911,14 @@ impl Inner {
             target = shell_quote(target_path),
             backup = shell_quote(backup_path.clone()),
         );
-        self.run_container_with_stdin(
+        let ran = self.run_container_with_stdin(
             &operation.operation_id,
             &grant,
             true,
             &script,
             content.as_bytes(),
         )?;
+        self.finished(ran, "Writing the file")?;
         Ok(OperationSuccess::output(format!(
             "Wrote file. Backup, if the file existed, is .openbot-backups/{backup_name}"
         )))
@@ -941,8 +963,16 @@ impl Inner {
             APPROVED_MOUNT.into()
         };
         let script = format!("cd -- {} && {command}", shell_quote(command_directory));
-        self.run_container(&operation.operation_id, &grant, writable, &script)
-            .map(OperationSuccess::output)
+        let ran = self.run_container(&operation.operation_id, &grant, writable, &script)?;
+        if ran.exit_code != 0 {
+            // The code and nothing of what it printed: that is the person's, not the log's.
+            log::info!(
+                "[host access] operation {} ran a command that exited with code {}",
+                operation.operation_id,
+                ran.exit_code
+            );
+        }
+        command_answer(ran, &self.config, writable).map(OperationSuccess::output)
     }
 
     fn cancel_or_stop(&self, operation: &DesktopOperation) -> HostAccessResult<OperationSuccess> {
@@ -1045,8 +1075,13 @@ impl Inner {
         grant: &LocalGrant,
         writable: bool,
         script: &str,
-    ) -> HostAccessResult<String> {
+    ) -> HostAccessResult<Ran> {
         self.run_container_with_stdin(operation_id, grant, writable, script, &[])
+    }
+
+    /// The text of an operation OpenBot itself ran (a listing, a read, a write), or what stopped it.
+    fn finished(&self, ran: Ran, doing: &str) -> HostAccessResult<String> {
+        operation_answer(ran, &self.config, doing)
     }
 
     fn run_container_with_stdin(
@@ -1056,7 +1091,7 @@ impl Inner {
         writable: bool,
         script: &str,
         stdin: &[u8],
-    ) -> HostAccessResult<String> {
+    ) -> HostAccessResult<Ran> {
         let name = fresh_container_name(operation_id);
         {
             let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
@@ -1117,7 +1152,7 @@ impl Inner {
         result
     }
 
-    fn start_attach_wait(&self, name: &str, stdin: &[u8]) -> HostAccessResult<String> {
+    fn start_attach_wait(&self, name: &str, stdin: &[u8]) -> HostAccessResult<Ran> {
         let mut start = self.config.engine.command();
         start.args(["start", "-a"]);
         if !stdin.is_empty() {
@@ -1127,7 +1162,7 @@ impl Inner {
         start.arg(name);
         start.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = start.spawn().map_err(|error| {
-            HostAccessError::Runtime(format!("Could not start host container: {error}"))
+            HostAccessError::Runtime(format!("Could not run container engine: {error}"))
         })?;
         if !stdin.is_empty() {
             if let Some(mut pipe) = child.stdin.take() {
@@ -1144,9 +1179,11 @@ impl Inner {
             .stderr
             .take()
             .ok_or_else(|| HostAccessError::Runtime("Could not capture host stderr.".into()))?;
+        // Drained to the end, keeping the last `output_limit` bytes. A reader that stopped at the
+        // cap left the command blocked on a full pipe until the timeout stopped it.
         let output_limit = self.config.output_limit;
-        let stdout_reader = thread::spawn(move || read_limited(stdout, output_limit));
-        let stderr_reader = thread::spawn(move || read_limited(stderr, output_limit));
+        let stdout_reader = thread::spawn(move || read_tail(stdout, output_limit));
+        let stderr_reader = thread::spawn(move || read_tail(stderr, output_limit));
         let deadline = Instant::now() + self.config.operation_timeout + Duration::from_secs(2);
         loop {
             if child
@@ -1170,23 +1207,54 @@ impl Inner {
         let status = child.wait().map_err(|error| {
             HostAccessError::Runtime(format!("Could not reap host process: {error}"))
         })?;
-        let mut combined = stdout_reader
+        let (mut combined, stdout_cut) = stdout_reader
             .join()
             .map_err(|_| HostAccessError::Runtime("Host stdout reader panicked.".into()))??;
-        combined.extend(
-            stderr_reader
-                .join()
-                .map_err(|_| HostAccessError::Runtime("Host stderr reader panicked.".into()))??,
-        );
-        let text = limit_output(&combined, self.config.output_limit)?;
-        if !status.success() {
-            let inspect = self.run_engine(["inspect", "-f", "{{.State.ExitCode}}", name])?;
-            let exit = String::from_utf8_lossy(&inspect.stdout).trim().to_string();
+        let (stderr_bytes, stderr_cut) = stderr_reader
+            .join()
+            .map_err(|_| HostAccessError::Runtime("Host stderr reader panicked.".into()))??;
+        combined.extend(stderr_bytes);
+        let (output, combined_cut) = keep_tail(combined, output_limit);
+        let truncated = stdout_cut || stderr_cut || combined_cut;
+        if status.success() {
+            return Ok(Ran {
+                exit_code: 0,
+                oom_killed: false,
+                output,
+                truncated,
+            });
+        }
+        // `start -a` exits non-zero both when the command ran and failed and when the engine never
+        // got it running. Only the container's own state tells the two apart.
+        let inspect = self.run_engine([
+            "inspect",
+            "-f",
+            "{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}",
+            name,
+        ])?;
+        if !inspect.status.success() {
             return Err(HostAccessError::Runtime(format!(
-                "Host operation exited with code {exit}: {text}"
+                "Could not inspect host container: {}",
+                command_said(&inspect.stderr)
             )));
         }
-        Ok(text)
+        let state = String::from_utf8_lossy(&inspect.stdout).trim().to_string();
+        match ContainerEnd::parse(&state) {
+            Some(end) if end.engine_error.is_empty() && end.exit_code != 0 => Ok(Ran {
+                exit_code: end.exit_code,
+                oom_killed: end.oom_killed,
+                output,
+                truncated,
+            }),
+            Some(end) if !end.engine_error.is_empty() => Err(HostAccessError::Runtime(format!(
+                "Could not start host container: {}",
+                end.engine_error
+            ))),
+            _ => Err(HostAccessError::Runtime(format!(
+                "Could not start host container ({state}): {}",
+                command_said(&output)
+            ))),
+        }
     }
 
     fn verify_no_owned_containers(&self) -> HostAccessResult<()> {
@@ -1245,6 +1313,17 @@ impl Inner {
         Ok(())
     }
 
+    /// The engine's server version, for the log line of a failure. Best effort: it is asked only
+    /// after something already failed, and that engine may not answer.
+    fn engine_version(&self) -> String {
+        self.run_engine(["version", "--format", "{{.Server.Version}}"])
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|version| !version.is_empty())
+            .unwrap_or_else(|| "version unknown".into())
+    }
+
     fn ensure_image_exists(&self) -> HostAccessResult<()> {
         let output = self
             .config
@@ -1285,17 +1364,14 @@ fn validate_config(config: &HostAccessConfig) -> HostAccessResult<()> {
     Ok(())
 }
 
-fn public_error_message(error: &HostAccessError) -> String {
+/// What the server, and through it the Bot, is told: what failed and what to do, and never a host
+/// path or the engine's own output.
+fn public_error_message(error: &HostAccessError, config: &HostAccessConfig) -> String {
     match error {
         HostAccessError::InvalidConfig(_) => "Local host access is not configured.".into(),
         HostAccessError::Http(_) => "The desktop lost its host access connection.".into(),
-        HostAccessError::Runtime(message) if message.contains("timed out") => {
-            "The host operation timed out and was stopped.".into()
-        }
-        HostAccessError::Runtime(message) if message.contains("output exceeded") => {
-            "The host operation produced too much output and was stopped.".into()
-        }
-        HostAccessError::Runtime(_) => "The local sandbox could not complete the operation.".into(),
+        HostAccessError::Runtime(message) => engine_failure_message(message, config),
+        HostAccessError::Sandbox(message) => message.clone(),
         HostAccessError::Io(_) => "The local file operation failed.".into(),
         HostAccessError::Denied(message) if message.contains("approved folder") => {
             "The requested path is outside the approved folder.".into()
@@ -1726,33 +1802,292 @@ fn fresh_container_name(operation_id: &str) -> String {
     format!("openbot-host-{safe}-{}", std::process::id())
 }
 
-fn read_limited<R: Read>(mut reader: R, limit: usize) -> HostAccessResult<Vec<u8>> {
+/// How a container that ran to its end went: what it printed (stdout, then stderr, the last
+/// `output_limit` bytes of them) and how it exited.
+#[derive(Debug)]
+struct Ran {
+    exit_code: i64,
+    oom_killed: bool,
+    output: Vec<u8>,
+    /// Whether anything was dropped from the start of `output` to keep it under the limit.
+    truncated: bool,
+}
+
+/// The container's state once `start -a` returned non-zero: `{{.State.ExitCode}}`,
+/// `{{.State.OOMKilled}}` and `{{.State.Error}}`, which Docker and Podman both report.
+struct ContainerEnd {
+    exit_code: i64,
+    oom_killed: bool,
+    engine_error: String,
+}
+
+impl ContainerEnd {
+    fn parse(state: &str) -> Option<Self> {
+        let mut fields = state.splitn(3, '|');
+        let exit_code = fields.next()?.trim().parse::<i64>().ok()?;
+        let oom_killed = fields.next().map(str::trim) == Some("true");
+        let engine_error = fields.next().unwrap_or("").trim().to_string();
+        Some(Self {
+            exit_code,
+            oom_killed,
+            engine_error,
+        })
+    }
+}
+
+/// `timeout`'s own exit status when the time ran out, and a process ended by SIGKILL, which is what
+/// `timeout --kill-after` sends to a command that ignored the first signal.
+const TIMEOUT_EXIT: i64 = 124;
+const KILLED_EXIT: i64 = 137;
+
+/// Read to the end, keeping only the last `limit` bytes. Never stops early: a command whose output
+/// is not read blocks on a full pipe.
+fn read_tail<R: Read>(mut reader: R, limit: usize) -> HostAccessResult<(Vec<u8>, bool)> {
     let mut output = Vec::new();
+    let mut truncated = false;
     let mut buffer = [0_u8; 8192];
     loop {
         let read = reader.read(&mut buffer).map_err(|error| {
             HostAccessError::Runtime(format!("Could not read host output: {error}"))
         })?;
         if read == 0 {
-            return Ok(output);
+            let (kept, cut) = keep_tail(output, limit);
+            return Ok((kept, truncated || cut));
         }
         output.extend_from_slice(&buffer[..read]);
-        if output.len() > limit {
-            return Err(HostAccessError::Runtime(format!(
-                "Host operation output exceeded {limit} bytes."
-            )));
+        // Trimmed in batches rather than on every read, so a long stream is not copied each time.
+        if output.len() > limit.saturating_mul(2).max(limit + buffer.len()) {
+            let excess = output.len() - limit;
+            output.drain(..excess);
+            truncated = true;
         }
     }
 }
 
-fn limit_output(bytes: &[u8], limit: usize) -> HostAccessResult<String> {
-    if bytes.len() > limit {
-        return Err(HostAccessError::Runtime(format!(
-            "Host operation output exceeded {limit} bytes."
+fn keep_tail(mut bytes: Vec<u8>, limit: usize) -> (Vec<u8>, bool) {
+    if bytes.len() <= limit {
+        return (bytes, false);
+    }
+    let excess = bytes.len() - limit;
+    bytes.drain(..excess);
+    (bytes, true)
+}
+
+/// What the sandbox itself stopped, whatever was running in it: too long, or too much memory.
+fn stopped_by_sandbox(ran: &Ran, config: &HostAccessConfig) -> Option<HostAccessError> {
+    if ran.oom_killed {
+        return Some(HostAccessError::Sandbox(format!(
+            "The command used more than the local sandbox's {} of memory, so it was stopped. Work \
+             on less at once, for example read a large file in parts.",
+            config.memory
         )));
     }
-    String::from_utf8(bytes.to_vec())
-        .map_err(|_| HostAccessError::Runtime("Host operation returned non-UTF-8 output.".into()))
+    if ran.exit_code == TIMEOUT_EXIT || ran.exit_code == KILLED_EXIT {
+        return Some(timed_out(config));
+    }
+    None
+}
+
+fn timed_out(config: &HostAccessConfig) -> HostAccessError {
+    HostAccessError::Sandbox(timed_out_sentence(config))
+}
+
+fn timed_out_sentence(config: &HostAccessConfig) -> String {
+    format!(
+        "The command ran for more than {} seconds, so the local sandbox stopped it. Anything it \
+         changed before then stays changed. Split the work into shorter commands.",
+        config.operation_timeout.as_secs()
+    )
+}
+
+/// A listing, read or write OpenBot ran on the Bot's behalf: its output, or the reason it failed,
+/// from the last line the tool printed (it names only paths inside the sandbox).
+fn operation_answer(ran: Ran, config: &HostAccessConfig, doing: &str) -> HostAccessResult<String> {
+    if let Some(stopped) = stopped_by_sandbox(&ran, config) {
+        return Err(stopped);
+    }
+    let text = String::from_utf8_lossy(&ran.output).into_owned();
+    if ran.exit_code == 0 {
+        return Ok(text);
+    }
+    let said = text
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    Err(HostAccessError::Sandbox(if said.is_empty() {
+        format!(
+            "{doing} failed in the local sandbox (exit code {}).",
+            ran.exit_code
+        )
+    } else {
+        format!("{doing} failed in the local sandbox: {said}")
+    }))
+}
+
+/// A file read: its text, or why it cannot be read as text and what to do instead.
+fn read_answer(ran: Ran, config: &HostAccessConfig) -> HostAccessResult<String> {
+    if ran.exit_code == 0 && ran.truncated {
+        return Err(HostAccessError::Sandbox(format!(
+            "The file is larger than {} KB, so it cannot be read whole. Read part of it with a \
+             command instead, such as head -c 60000 on it.",
+            config.output_limit / 1024
+        )));
+    }
+    if ran.exit_code == 0 && std::str::from_utf8(&ran.output).is_err() {
+        return Err(HostAccessError::Sandbox(
+            "The file is not text (a spreadsheet, document, PDF or image, for example), so it \
+             cannot be read as text. Open it with a command instead, such as python3 with openpyxl \
+             for an .xlsx file."
+                .into(),
+        ));
+    }
+    operation_answer(ran, config, "Reading the file")
+}
+
+/// A command the Bot ran. One that exited non-zero still ran: the Bot gets its exit code, what it
+/// printed and, where the cause is the sandbox's, what to do about it. Only a command the sandbox
+/// stopped is an error.
+fn command_answer(ran: Ran, config: &HostAccessConfig, writable: bool) -> HostAccessResult<String> {
+    if let Some(stopped) = stopped_by_sandbox(&ran, config) {
+        return Err(stopped);
+    }
+    let text = String::from_utf8_lossy(&ran.output).into_owned();
+    let mut notes = Vec::new();
+    if ran.truncated {
+        notes.push(format!(
+            "It printed more than {} KB, so only the end is shown.",
+            config.output_limit / 1024
+        ));
+    }
+    if std::str::from_utf8(&ran.output).is_err() {
+        notes.push("Some of what it printed is not text and is shown as \u{FFFD}.".into());
+    }
+    if ran.exit_code == 0 {
+        if notes.is_empty() {
+            return Ok(text);
+        }
+        return Ok(format!("{}\n{text}", notes.join(" ")));
+    }
+    let mut answer = format!("The command exited with code {}.", ran.exit_code);
+    if let Some(hint) = command_hint(ran.exit_code, &text, writable) {
+        answer.push(' ');
+        answer.push_str(&hint);
+    }
+    for note in notes {
+        answer.push(' ');
+        answer.push_str(&note);
+    }
+    if text.trim().is_empty() {
+        answer.push_str(" It printed nothing.");
+    } else {
+        answer.push_str(" What it printed:\n");
+        answer.push_str(&text);
+    }
+    Ok(answer)
+}
+
+/// What to do when a command failed because of how the sandbox is, rather than because of the
+/// command: what the Bot cannot know from the error alone.
+fn command_hint(exit_code: i64, output: &str, writable: bool) -> Option<String> {
+    let lower = output.to_lowercase();
+    if exit_code == 127 || lower.contains("command not found") || lower.contains(": not found") {
+        return Some(
+            "A program it named is not in the local sandbox, and the sandbox has no network, so \
+             nothing can be installed in it. Use a program it has."
+                .into(),
+        );
+    }
+    if lower.contains("no module named") {
+        return Some(
+            "That Python module is not in the local sandbox, and the sandbox has no network, so \
+             nothing can be installed in it. Use a library it has."
+                .into(),
+        );
+    }
+    if lower.contains("read-only file system") && !writable {
+        return Some(
+            "The folder was shared read-only for this command. To change files in it, run the \
+             command again with writable set to true."
+                .into(),
+        );
+    }
+    if lower.contains("no space left on device") {
+        return Some(format!(
+            "Only the folder has room for large files: {WORKSPACE_MOUNT} and /tmp are small and \
+             are emptied after every command. Write large files into the folder, with writable set \
+             to true. The folder is at {APPROVED_MOUNT}."
+        ));
+    }
+    if exit_code == 126 {
+        return Some(
+            "A file it tried to run cannot be run here. Run a script through its interpreter, \
+             such as sh script.sh or python3 script.py."
+                .into(),
+        );
+    }
+    None
+}
+
+/// The server's sentence for a failure of the container engine or the container itself, from the
+/// engine's own words. Those can name a host path, so they stay in this computer's log, and every
+/// sentence here says whether anything ran and what the person can do.
+fn engine_failure_message(raw: &str, config: &HostAccessConfig) -> String {
+    let lower = raw.to_lowercase();
+    let engine = match config.engine.engine {
+        Engine::Docker => "Docker",
+        Engine::Podman => "Podman",
+    };
+    if lower.contains("timed out") {
+        return timed_out_sentence(config);
+    }
+    if lower.contains("sandbox image is unavailable") || lower.contains("no such image") {
+        return "Nothing ran: the local sandbox's software is missing from this computer. \
+                Restarting OpenBot downloads it again; ask the person to restart OpenBot, then try \
+                again."
+            .into();
+    }
+    if lower.contains("could not run container engine")
+        || lower.contains("cannot connect to the docker daemon")
+        || lower.contains("failed to connect to the docker api")
+        || lower.contains("error during connect")
+        || lower.contains("cannot connect to podman")
+        || lower.contains("unable to connect to podman")
+        || lower.contains("connection refused")
+    {
+        return format!(
+            "Nothing ran: {engine}, which runs the local sandbox, is not answering. Ask the \
+             person to restart OpenBot, then try again."
+        );
+    }
+    if lower.contains("mounts denied") || lower.contains("is not shared from the host") {
+        return "Nothing ran: Docker Desktop does not share this folder with containers. The \
+                person can add it in Docker Desktop under Settings, Resources, File sharing, or \
+                choose a folder inside their home folder."
+            .into();
+    }
+    if lower.contains("bind source path does not exist")
+        || (lower.contains("statfs") && lower.contains("no such file"))
+    {
+        return "Nothing ran: the folder is no longer where it was (moved, renamed, or on a drive \
+                that is not connected). Ask the person to choose it again for this Bot."
+            .into();
+    }
+    if lower.contains("unexpected key")
+        || lower.contains("unknown flag")
+        || lower.contains("unknown option")
+        || lower.contains("invalid field")
+        || lower.contains("unknown mount option")
+    {
+        return format!(
+            "Nothing ran: the {engine} on this computer is too old for the local sandbox. Ask \
+             the person to update {engine}, then try again."
+        );
+    }
+    "Nothing ran: the local sandbox could not start the command, and trying again will not help. \
+     Tell the person the reason is in OpenBot's log (Settings, This computer, Open log folder)."
+        .into()
 }
 
 #[cfg(test)]
@@ -2456,18 +2791,344 @@ mod tests {
     }
 
     #[test]
-    fn bounded_reader_rejects_output_above_the_cap() {
-        let data = vec![b'x'; DEFAULT_OUTPUT_LIMIT + 1];
-        assert!(read_limited(std::io::Cursor::new(data), DEFAULT_OUTPUT_LIMIT).is_err());
+    fn output_above_the_cap_keeps_its_end_and_says_so() {
+        let mut data = vec![b'x'; DEFAULT_OUTPUT_LIMIT * 3];
+        data.extend_from_slice(b"the end");
+        let (kept, truncated) =
+            read_tail(std::io::Cursor::new(data), DEFAULT_OUTPUT_LIMIT).unwrap();
+        assert!(truncated);
+        assert_eq!(kept.len(), DEFAULT_OUTPUT_LIMIT);
+        assert!(kept.ends_with(b"the end"));
+        let (kept, truncated) = read_tail(std::io::Cursor::new(b"short".to_vec()), 64).unwrap();
+        assert!(!truncated);
+        assert_eq!(kept, b"short");
     }
 
     #[test]
     fn public_errors_do_not_leak_host_paths_or_engine_stderr() {
+        let config = HostAccessConfig::new(
+            "http://127.0.0.1:3001",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
         let raw = HostAccessError::Runtime("docker: /Users/example/secret failed".into());
-        let said = public_error_message(&raw);
+        let said = public_error_message(&raw, &config);
         assert!(!said.contains("/Users/example"));
         let raw = HostAccessError::Denied("Host path /Users/example/.ssh is unavailable".into());
-        let said = public_error_message(&raw);
+        let said = public_error_message(&raw, &config);
         assert!(!said.contains("/Users/example"));
+    }
+}
+
+/// The folder sandbox on a real engine: what the server, and through it the Bot, is told when a
+/// command fails, for each way one fails. Every case here once answered "The local sandbox could
+/// not complete the operation.", which told the Bot nothing, so it retried or gave up.
+///
+/// Runs Docker, so it is opt-in: `cargo test --lib host_access::live -- --ignored
+/// --test-threads=1`. The image is `ubuntu:24.04` unless `OPENBOT_SANDBOX_TEST_IMAGE` names
+/// another; it has the `timeout` and shell the sandbox runs and no Python, as the computer had none.
+#[cfg(test)]
+mod live {
+    use super::*;
+    use crate::engine::{Address, Engine};
+
+    struct AllowAll;
+
+    impl HostApprovalUi for AllowAll {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            unreachable!("the grant is made by the test")
+        }
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            Ok(())
+        }
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            Ok(())
+        }
+    }
+
+    fn image() -> String {
+        std::env::var("OPENBOT_SANDBOX_TEST_IMAGE").unwrap_or_else(|_| "ubuntu:24.04".into())
+    }
+
+    /// A broker with one grant on a fresh folder, as the desktop holds one after Choose folder.
+    struct Sandbox {
+        inner: Inner,
+        root: PathBuf,
+    }
+
+    impl Sandbox {
+        fn new(configure: impl FnOnce(&mut HostAccessConfig)) -> Self {
+            let pulled = Command::new("docker")
+                .args(["image", "inspect", &image()])
+                .output()
+                .unwrap()
+                .status
+                .success()
+                || Command::new("docker")
+                    .args(["pull", "--quiet", &image()])
+                    .status()
+                    .unwrap()
+                    .success();
+            assert!(pulled, "could not pull {}", image());
+            let root = std::env::temp_dir().join(format!(
+                "openbot-sandbox-live-{}-{}",
+                std::process::id(),
+                now_millis()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            let root = fs::canonicalize(root).unwrap();
+            fs::write(root.join("notes.txt"), "hello\n").unwrap();
+            fs::write(
+                root.join("sheet.xlsx"),
+                [0x50, 0x4b, 0x03, 0x04, 0xff, 0xfe, 0x00],
+            )
+            .unwrap();
+            let mut config = HostAccessConfig::new(
+                "http://127.0.0.1:9",
+                "token",
+                Address::new(Engine::Docker, None),
+                image(),
+                vec![],
+            );
+            configure(&mut config);
+            let mut grants = HashMap::new();
+            grants.insert(
+                "grant-live".to_string(),
+                LocalGrant {
+                    id: "grant-live".into(),
+                    bot_id: "bot-live".into(),
+                    actor_id: "actor-live".into(),
+                    bot_name: Some("Live Bot".into()),
+                    root: root.clone(),
+                    revoked: false,
+                },
+            );
+            let inner = Inner {
+                config,
+                approval: Arc::new(AllowAll),
+                instance_label: fresh_id("host-live"),
+                effect_lock: Mutex::new(()),
+                state: Mutex::new(State {
+                    stopped: false,
+                    thread: None,
+                    grants,
+                    running: HashMap::new(),
+                    completed: HashSet::new(),
+                    canceled_operations: HashSet::new(),
+                    active_by_operation: HashSet::new(),
+                    active_by_bot: HashSet::new(),
+                }),
+            };
+            Self { inner, root }
+        }
+
+        /// What the server would be sent for this operation: `Ok` with the result text, or
+        /// `Err` with the error sentence.
+        fn answer(
+            &self,
+            kind: HostOperationKind,
+            command: Option<&str>,
+            path: Option<&str>,
+            writable: bool,
+        ) -> Result<String, String> {
+            let operation = DesktopOperation {
+                operation_id: fresh_id("op-live"),
+                kind,
+                bot_id: "bot-live".into(),
+                actor_id: "actor-live".into(),
+                bot_name: Some("Live Bot".into()),
+                grant_id: Some("grant-live".into()),
+                target_operation_id: None,
+                relative_path: path.map(str::to_string),
+                content: None,
+                command: command.map(str::to_string),
+                writable: Some(writable),
+                command_policy: None,
+                expires_at: None,
+                received_at_ms: now_millis(),
+            };
+            self.inner
+                .handle_operation(&operation)
+                .map(|success| success.output.unwrap_or_default())
+                .map_err(|error| public_error_message(&error, &self.inner.config))
+        }
+
+        fn run(&self, command: &str) -> Result<String, String> {
+            self.answer(HostOperationKind::RunCommand, Some(command), None, false)
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+            let _ = self.inner.verify_no_owned_containers();
+        }
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_command_that_succeeds_answers_with_what_it_printed() {
+        let sandbox = Sandbox::new(|_| {});
+        assert_eq!(sandbox.run("cat notes.txt"), Ok("hello\n".into()));
+        assert_eq!(
+            sandbox.answer(HostOperationKind::ListFiles, None, None, false),
+            Ok("notes.txt\nsheet.xlsx\n".into())
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_command_that_fails_answers_with_its_exit_code_and_output() {
+        let sandbox = Sandbox::new(|_| {});
+        assert_eq!(
+            sandbox.run("echo working; echo broke >&2; exit 3"),
+            Ok("The command exited with code 3. What it printed:\nworking\nbroke\n".into())
+        );
+        assert_eq!(
+            sandbox.run("exit 1"),
+            Ok("The command exited with code 1. It printed nothing.".into())
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_missing_program_says_nothing_can_be_installed() {
+        let sandbox = Sandbox::new(|_| {});
+        let answer = sandbox.run("python3 -c 'print(1)'").unwrap();
+        assert!(
+            answer.starts_with(
+                "The command exited with code 127. A program it named is not in the local \
+                 sandbox, and the sandbox has no network, so nothing can be installed in it."
+            ),
+            "{answer}"
+        );
+        assert!(answer.contains("python3: not found"), "{answer}");
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_write_to_a_read_only_folder_says_to_ask_for_writable() {
+        let sandbox = Sandbox::new(|_| {});
+        let answer = sandbox.run("echo new > made.txt").unwrap();
+        assert!(
+            answer.starts_with("The command exited with code"),
+            "{answer}"
+        );
+        assert!(
+            answer.contains("run the command again with writable set to true"),
+            "{answer}"
+        );
+        assert_eq!(
+            sandbox.answer(
+                HostOperationKind::RunCommand,
+                Some("echo new > made.txt && cat made.txt"),
+                None,
+                true
+            ),
+            Ok("new\n".into())
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn long_output_keeps_its_end_instead_of_failing() {
+        let sandbox = Sandbox::new(|_| {});
+        let answer = sandbox
+            .run("head -c 200000 /dev/zero | tr '\\0' x; echo; echo the end")
+            .unwrap();
+        assert!(
+            answer.starts_with("It printed more than 64 KB, so only the end is shown.\n"),
+            "{}",
+            &answer[..80]
+        );
+        assert!(answer.ends_with("the end\n"));
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn output_that_is_not_text_is_shown_and_said_to_be_so() {
+        let sandbox = Sandbox::new(|_| {});
+        let answer = sandbox.run("printf 'ok \\377\\376'").unwrap();
+        assert_eq!(
+            answer,
+            "Some of what it printed is not text and is shown as \u{FFFD}.\nok \u{FFFD}\u{FFFD}"
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_binary_file_read_as_text_says_to_open_it_with_a_command() {
+        let sandbox = Sandbox::new(|_| {});
+        let answer = sandbox.answer(HostOperationKind::ReadFile, None, Some("sheet.xlsx"), false);
+        assert_eq!(
+            answer,
+            Err(
+                "The file is not text (a spreadsheet, document, PDF or image, for example), so it \
+                 cannot be read as text. Open it with a command instead, such as python3 with \
+                 openpyxl for an .xlsx file."
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_command_that_runs_too_long_is_stopped_and_says_so() {
+        let sandbox = Sandbox::new(|config| config.operation_timeout = Duration::from_secs(2));
+        assert_eq!(
+            sandbox.run("sleep 20"),
+            Err(
+                "The command ran for more than 2 seconds, so the local sandbox stopped it. \
+                 Anything it changed before then stays changed. Split the work into shorter \
+                 commands."
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_command_that_runs_out_of_memory_is_stopped_and_says_so() {
+        let sandbox = Sandbox::new(|config| config.memory = "32m".into());
+        assert_eq!(
+            sandbox.run("head -c 300m /dev/zero | tail -c 250m > /dev/null"),
+            Err(
+                "The command used more than the local sandbox's 32m of memory, so it was \
+                 stopped. Work on less at once, for example read a large file in parts."
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_missing_image_says_nothing_ran_and_what_to_do() {
+        let sandbox = Sandbox::new(|config| config.image = "openbot-sandbox-live:missing".into());
+        assert_eq!(
+            sandbox.run("true"),
+            Err(
+                "Nothing ran: the local sandbox's software is missing from this computer. \
+                 Restarting OpenBot downloads it again; ask the person to restart OpenBot, then \
+                 try again."
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "runs docker"]
+    fn a_folder_that_is_gone_says_nothing_ran_and_to_choose_it_again() {
+        let sandbox = Sandbox::new(|_| {});
+        fs::remove_dir_all(&sandbox.root).unwrap();
+        assert_eq!(
+            sandbox.run("ls"),
+            Err(
+                "Nothing ran: the folder is no longer where it was (moved, renamed, or on a \
+                 drive that is not connected). Ask the person to choose it again for this Bot."
+                    .into()
+            )
+        );
     }
 }

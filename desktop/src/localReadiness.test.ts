@@ -34,6 +34,7 @@ const reasons: LocalReason[] = [
   "dashboard-unavailable",
   "browser-open-failed",
   "resources-short",
+  "stack-lost",
   "unrecognized",
 ];
 
@@ -65,6 +66,27 @@ function hasText(said: string, slug: string): boolean {
   return said.toLowerCase().includes(slug);
 }
 
+/**
+ * Box I: OpenBot's machine was made again and the backend went with the old one, so every status
+ * failed and the row said "Setup stopped partway through with an error. Retry." for good. A lost
+ * backend says what happened and what to do, honestly, and offers Start fresh instead of Retry.
+ */
+test("a lost backend says the saved data is gone and offers Start fresh", () => {
+  const row = localReadiness({
+    ...base,
+    intelligence: report({
+      outcome: "failed",
+      reason: "stack-lost",
+      stack: null,
+    }),
+  }).intelligence;
+  expect(row).toEqual({
+    state: "blocked",
+    said: "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    action: "start-fresh",
+  });
+});
+
 test("every reason gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const reason of reasons) {
     const rows = localReadiness({
@@ -93,7 +115,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(19);
+  expect(new Set(reasons).size).toBe(20);
   expect(localFailures.length).toBe(18);
 });
 
@@ -201,13 +223,13 @@ test("specific wording and actions", () => {
     action: "retry",
   });
   expect(short({ cpu: true }).said).toBe(
-    "Docker Desktop doesn't have enough CPUs. OpenBot needs 4 free CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop doesn't have enough CPUs. OpenBot needs 4 CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ memory: true }).said).toBe(
     "Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ cpu: true, memory: true, disk: true }).said).toBe(
-    "Docker Desktop doesn't have enough CPUs, memory and free disk space. OpenBot needs 4 free CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop doesn't have enough CPUs, memory and free disk space. OpenBot needs 4 CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(short({ podman: true, disk: true }).said).toBe(
     "OpenBot doesn't have enough free disk space. It needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
@@ -219,18 +241,18 @@ test("specific wording and actions", () => {
     "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
-    short({ cpu: true, cpus: "3.7", memoryGb: "5.2", diskGb: "51" }).said,
+    short({ cpu: true, cpus: "2", memoryGb: "5.2", diskGb: "51" }).said,
   ).toBe(
-    "Docker Desktop has 3.7 free CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop has 2 CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ memory: true, memoryGb: "2.9" }).said).toBe(
     "Docker Desktop has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(
-    short({ cpu: true, disk: true, cpus: "3.5", memoryGb: "6", diskGb: "12" })
+    short({ cpu: true, disk: true, cpus: "2", memoryGb: "6", diskGb: "12" })
       .said,
   ).toBe(
-    "Docker Desktop has 3.5 free CPUs and 12 GB of free disk space. OpenBot needs 4 free CPUs and 40 GB of free disk space. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 2 CPUs and 12 GB of free disk space. OpenBot needs 4 CPUs and 40 GB of free disk space. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   // OpenBot's own check after a start that failed (`local_eval::checked_call`), as it reports
   // each case. A nearly full disk is said as k3s's, beside the 40 GB only when it is below it.

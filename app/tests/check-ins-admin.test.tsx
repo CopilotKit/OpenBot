@@ -20,6 +20,7 @@ import type {
   BotCheckInMetrics,
   CheckInMetrics,
 } from "@/lib/enterprise/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { CheckInsPage } from "@/routes/_authed/admin/proactive";
 import { settleReactWork } from "./settle-react-work";
@@ -151,10 +152,21 @@ function serving() {
   }) as unknown as typeof fetch;
 }
 
+/** The team edition, as a server from before the edition switch reads. */
+function seedTeamEdition() {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: false,
+    edition: "team",
+  });
+}
+
 beforeEach(() => {
   organization = null;
   dailyRuns = 24;
   queryClient.clear();
+  seedTeamEdition();
   serving();
 });
 
@@ -197,7 +209,9 @@ test("each Bot shows how often people started what it raised, and its breakdown 
 
 test("the switch turns check-ins off for the organization, and the limit saves only a whole number from 1 to 1440", async () => {
   const view = await draw();
-  const toggle = await view.findByRole("switch", { name: "Check-ins" });
+  const toggle = await view.findByRole("switch", {
+    name: "Check-ins for everybody",
+  });
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
   await waitFor(() =>

@@ -1,6 +1,11 @@
-# Coworkers
+# Bots
 
-A coworker is a Bot with a durable profile and standing role. The role is sent with every run so the user does not have to restate the job in each channel.
+A Bot has a durable profile and a standing role. The role is sent with every run, so nobody has to
+restate the job in each conversation. What a person sees of this is the Bot's **Setup**; see
+[How OpenBot works](how-openbot-works.md) for the rest of what a Bot has.
+
+In the code and the database a Bot is often a "coworker" or an "agent", and a conversation a
+"channel". Those names stay in the tables and endpoints below.
 
 ## Data model
 
@@ -13,11 +18,11 @@ A coworker is a Bot with a durable profile and standing role. The role is sent w
 | Channel              | `channels`                      | Conversation membership and coworker binding.                                            |
 | Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                                               |
 
-Package-provided agents are public and ownerless. User-created coworkers are owned by the creator.
+Package-provided Bots are public and ownerless. A Bot a person makes is owned by that person.
 
 ## Standing role
 
-Remote coworkers receive a system message derived from their name, title and role description
+A remote Bot receives a system message derived from its name, title and role description
 (`standingRoleMessage` in `server/src/copilot.ts`):
 
 ```text
@@ -37,12 +42,12 @@ When OpenBot knows the framework behind the endpoint, the identity block also na
 The deployment, not the package, then appends the working rules every Bot gets, each in a tag of
 its own (`workingGuidance` in `shared/bot-prompt.ts`): how to work, when to ask, where answers come
 from, how to format an answer, when to use subagents, and how to read the untrusted-content envelope
-its tool results carry. The sources block tells the coworker to say where each answer came from and
-to mark plainly anything it answers from its own knowledge rather than from a source. The asking
-block tells it that, for the apps and tools OpenBot gives it, OpenBot asks the person before a
-delete, send, share, post or payment unless they already allowed that kind of action, and that it
-should ask itself before a tool of its own does something that cannot be undone. Being deployment-wide, none of these can be forgotten
-from the next coworker somebody adds.
+its tool results carry. The sources block tells the Bot to say where each answer came from and to
+mark plainly anything it answers from its own knowledge rather than from a source. The asking block
+tells it that, for the apps and tools OpenBot gives it, OpenBot asks the person before a delete,
+send, share, post or payment unless they already allowed that kind of action, and that it should
+ask itself before a tool of its own does something that cannot be undone. Being deployment-wide,
+none of these can be forgotten from the next Bot somebody adds.
 
 The message is ordinary AG-UI system content, so it works with any AG-UI-compatible backend. Editing the role affects the next run.
 
@@ -53,7 +58,7 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 | `private`  | Owner and administrators.   |
 | `public`   | Everyone in the deployment. |
 
-Filtering happens in server/database queries. Package-provided agents cannot be edited or deleted through the product, except the personal edition's starter Personal Assistant, which its person can edit.
+Filtering happens in server/database queries. Package-provided Bots cannot be edited or deleted through the product, except the personal edition's starter Personal Assistant, which its person can edit.
 
 An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
 (`/api/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
@@ -68,35 +73,36 @@ teammates the owner's account. A Shared app is the governed alternative: one acc
 the deployment, with an administrator approving who may use it through each Bot. See
 [Composio → Shared apps](plugins/composio.md#shared-apps).
 
-## Channels
+## Conversations
 
-Starting a channel creates a new conversation and Intelligence thread. Two channels with the same coworker stay separate.
+Starting a conversation creates a new channel and Intelligence thread. Two conversations with the
+same Bot stay separate.
 
-Each channel routes through a channel-local proxy agent id, pinned to that channel's thread id, then forwards to the coworker runtime id.
+Each conversation routes through a channel-local proxy agent id, pinned to that channel's thread id,
+then forwards to the Bot's runtime id.
 
 ## Deleting and hiding
 
-Deleting is soft. The coworker stops running, but existing channels remain readable for their members and restore as tombstones.
+Deleting is soft. The Bot stops running, but its existing conversations remain readable for their members and restore as tombstones.
 
-Hiding and pinning are personal roster state. Hiding removes the coworker from one user's list without disabling the coworker for anyone else; pinning moves it into the **Pinned** section at the top of `/bots` for that user only. A Team Bot an administrator assigned to a group is always pinned for its members.
+Hiding and pinning are personal roster state. Hiding removes the Bot from one person's list without disabling it for anyone else; pinning moves it into the **Pinned** section at the top of `/bots` for that person only. A Team Bot an administrator assigned to a group is always pinned for its members.
 
 ## Default endpoint
 
-Product-created coworkers use:
+Bots made in the product use:
 
 ```dotenv
-MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui
+MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/
 ```
 
-That is `agent-langgraph`, which runs a real framework and its own tool loop. The proof-of-concept on
-`4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
-rather than something to build a deployment on.
+That is the LangGraph harness, `agent-langgraph-agui`, which runs a real framework and its own tool
+loop.
 
-The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: a product-created
-coworker with no endpoint of its own then runs inside the server as a built-in Bot on its role
-description, and a package agent whose endpoint expands to nothing is omitted
-rather than registered against a missing host. A leftover token with no URL is ignored.
-Package-provided agents otherwise use their own `agents.yaml` configuration.
+The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: a Bot made in the
+product with no endpoint of its own then runs inside the server as a built-in Bot on its role
+description, and a package Bot whose endpoint expands to nothing is omitted rather than registered
+against a missing host. A leftover token with no URL is ignored. Package-provided Bots otherwise use
+their own `agents.yaml` configuration.
 
 ## Register an external AG-UI agent
 
@@ -112,7 +118,7 @@ agents:
     endpoint: http://risk.internal/ag-ui
 ```
 
-In the product, create a coworker from `/bots` and edit it from its page's **Setup**, and set:
+In the product, create a Bot from `/bots` and edit it from its page's **Setup**, and set:
 
 - name;
 - title;
@@ -125,9 +131,10 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 `POST /api/agents/test-connection` checks whether an endpoint answers before saving it.
 
-## Capabilities
+## What a role does not grant
 
-A coworker's role does not grant capabilities. Capabilities are governed separately:
+A Bot's role grants it nothing. What it may use is set separately, on the Bot's page, in Settings
+and, in the team edition, in Admin:
 
 - browser and file actions go through the computer gateway policy;
 - components are published deployment-wide and can be withheld per Bot;

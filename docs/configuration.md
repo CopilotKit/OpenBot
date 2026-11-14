@@ -58,22 +58,22 @@ server starts without a managed Bot, the shipped Risk Analyst coworker is omitte
 created without its own endpoint runs in the server as a built-in Bot on its role description. A
 leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
-at `agent-langgraph` on a laptop.
+at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
 | `PORT`               | `3001`                             | API server port. `SERVER_PORT` names the same port; set either, or both to the same value, or the server refuses to start. |
-| `OPENBOT_EDITION`    | `team`                             | `personal` runs OpenBot for one person with no sign-in, one computer and no Admin. See [personal-edition.md](personal-edition.md). Any value other than `team` or `personal` refuses to start. `personal` also refuses to start with a sign-in provider or `OPENBOT_ORGANIZATION_AUTH_URL` configured, without `OPENBOT_SINGLE_USER=true`, or without one shared computer (`AGENT_COMPUTER_URL`, with no `COMPUTER_SUPERVISOR_URL` or `COMPUTER_SANDBOX_NAMESPACE`). |
+| `OPENBOT_EDITION`    | `team`                             | `personal` runs OpenBot for one person with no sign-in and one computer, who is its admin. See [personal-edition.md](personal-edition.md). Any value other than `team` or `personal` refuses to start. `personal` also refuses to start with a sign-in provider or `OPENBOT_ORGANIZATION_AUTH_URL` configured, without `OPENBOT_SINGLE_USER=true`, or without one shared computer (`AGENT_COMPUTER_URL`, with no `COMPUTER_SUPERVISOR_URL` or `COMPUTER_SANDBOX_NAMESPACE`). |
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY` and `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
-| `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
+| `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from the server's working directory (`/app/server` in its image). |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project, and prefixes the identity a Shared app's account is held under at the vendor. That identity is fixed when the app is made Shared, so changing this later does not move it. |
-| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
+| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and the managed Bot.          |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
 | `COPILOTKIT_OPENAI_API` | unset                          | Which OpenAI API the built-in Bots call behind an `OPENAI_BASE_URL` that is not OpenAI or Azure: `responses` or `chat`. Unset, the model decides. See [OpenAI-compatible endpoints](#openai-compatible-endpoints). |
 | `ROUTER_MODEL`       | `claude-haiku-5-5` / `gpt-6-luna`  | Model that picks which Bot an untagged message from the home page goes to. It runs while the person waits, so it defaults to a light model on the deployment's provider and falls back to the Bots' model when that one is refused. Behind `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` it defaults to the Bots' model, since the endpoint's catalogue is unknown. |
-| `BOT_PROVIDER`       | `openai`                           | Provider the framework Bot (`agent-langgraph`) and the picked harness run on: `openai`, `anthropic`, or `google`. The Python Bots read it too; `agent-bot` does not, it is OpenAI only. The API server reads it for the built-in Bots as well: `anthropic`, `openai` or an empty value (read as `openai`) moves them off the tenant package's `model.yaml` provider, and `google` or an absent variable leaves them on it. |
+| `BOT_PROVIDER`       | `openai`                           | Provider the managed Bot (`agent-langgraph-agui`) and the picked harness run on: `openai`, `anthropic`, or `google`. The other Python Bots read it too. The API server reads it for the built-in Bots as well: `anthropic`, `openai` or an empty value (read as `openai`) moves them off the tenant package's `model.yaml` provider, and `google` or an absent variable leaves them on it. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
@@ -82,12 +82,9 @@ at `agent-langgraph` on a laptop.
 | `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
-| `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
-| `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
-| `BOT_REASONING_EFFORT` | unset (provider default)         | OpenAI and the Responses API only: one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `agent-langgraph` refuses to start on any other value, on a non-`openai` provider, or without the Responses API. |
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it, in milliseconds. A value that is not a whole number of zero or more refuses to start. |
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
-| `OPENBOT_TOOL_URL`   | `http://127.0.0.1:3001/api/agent-tools/call`; Compose passes `http://host.docker.internal:3001/api/agent-tools/call` | Read by the framework Bots (`agent-langgraph` and the Python LangGraph harness): where they call a granted tool back through this server. Set it when the server is not on that address, as when it runs in a container or on another port. |
+| `OPENBOT_TOOL_URL`   | `http://127.0.0.1:3001/api/agent-tools/call`; Compose passes `http://host.docker.internal:3001/api/agent-tools/call` | Read by the framework Bots (the LangGraph harness and the other Python Bots): where they call a granted tool back through this server. Set it when the server is not on that address, as when it runs in a container or on another port. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows, at least `1`; older ones are removed. Unset keeps the trail forever. Any other value refuses to start. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default; the Helm chart generates one | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
@@ -95,6 +92,7 @@ at `agent-langgraph` on a laptop.
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `OPENBOT_PRODUCT_TELEMETRY` | unset (off; on for OpenBot Desktop) | `1` or `true` sends OpenBot's product usage events; `0` turns them off. `DO_NOT_TRACK` or `COPILOTKIT_TELEMETRY_DISABLED` set to `1` or `true` turns them off whatever this says. See [TELEMETRY.md](TELEMETRY.md). |
+| `OPENBOT_ALLOW_LOOPBACK_MCP` | unset                      | `1` lets an MCP server on this machine's loopback address (`http://127.0.0.1:<port>` or `[::1]`) be added by its address, for developing an MCP server against OpenBot and for the end-to-end tests. Leave it unset everywhere people use OpenBot: every other private, local or plain-http address stays refused either way. |
 | `COMPOSIO_API_KEY`   | provisioned during desktop sign-in or local setup when no broker is configured | One project key for the whole deployment. Desktop sign-in saves a provisioned key in native protected storage and supplies it on Start/restart. A key in `.env` or the environment always wins and is never moved. `start.sh` / `bun run setup:composio` uses the existing CLI login; supplied keys and Arcade are preserved. Direct server/container launches still need the prepared key. See [Composio](plugins/composio.md). |
 | `COMPOSIO_<SLUG>_CLIENT_ID`, `COMPOSIO_<SLUG>_CLIENT_SECRET` | unset | This deployment's own OAuth client for one Composio app that connects with a server-to-server grant (`S2S_OAUTH2`), such as `COMPOSIO_SHOPIFY_CLIENT_ID`. Both or neither. Set, the app can be enabled and connected as one shared account; unset, it stays hidden. Read only when the app is enabled; see [rotating the client](#rotating-a-composio-apps-own-client). See [Composio](plugins/composio.md#the-56-that-are-not-offered). |
 | `OPENBOT_INSTALLATION_ID` | a fresh private UUID in `.env.openbot-installation-id` | Stable Composio provisioning identity, persisted before a request. Optional explicit UUID for first setup; later values must match the saved file. Retain it for retries and restarts, and generate a fresh identity for a new installation. It never falls back to `DEPLOYMENT_ID`. |
@@ -173,7 +171,7 @@ copied into every Bot container, and a framework Bot holding it may be running o
 own, so a fixed default there would be no boundary at all. Production deployments must set a real
 `WORKER_SHARED_SECRET`; the Helm chart generates one and gives it to both the server and its routines
 CronJob, unless one is supplied (see
-[the chart's routines sweep](../charts/openbot/README.md#the-routines-sweep)).
+the chart's routines sweep, in the Helm guide that comes with the chart).
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about
@@ -196,14 +194,14 @@ To rotate the secret, do one of these:
   `(OpenBot)` config for the app and replace the client secret. The shared account, its grants and
   every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
   created later carries it.
-- **Turn the app off and on again.** Set the new values, restart, then on the app's Plugins page
+- **Turn the app off and on again.** Set the new values, restart, then on the app's page under Apps
   turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
   and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
   with the new client. Then make the app shared, connect the team account and grant it to Bots again.
 
 An app on its own client connects only as one shared account. Because the credential is this
 deployment's client, a personal account would give anyone who can see the app its full access, so
-**Connect** refuses one and the screens don't offer it. Make the app shared on its Plugins page, and
+**Connect** refuses one and the screens don't offer it. Make the app shared on its page under Apps, and
 an administrator connects it there.
 
 ## The provider spec file
@@ -225,7 +223,7 @@ provider and model each Bot runs:
     }
   },
   "bots": {
-    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-agno": { "provider": "openai", "model": "gpt-5.5" },
     "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" }
   }
 }
@@ -239,7 +237,7 @@ of it:
 3. the provider's `default_model` — what is left when neither says.
 
 Each Bot retains its existing default: for example, `agent-mastra` uses `gpt-4o-mini`, while
-`agent-langgraph` uses `gpt-5.5`. Editing a Bot's row changes that Bot's default without changing
+`agent-agno` uses `gpt-5.5`. Editing a Bot's row changes that Bot's default without changing
 another Bot's choice. The Python LangGraph harness also accepts `BOT_PROVIDER=google_genai` as an
 alias for the spec's `google` provider.
 
@@ -261,14 +259,11 @@ own loader has never heard of, nor against a provider their own loader names whe
 row for it. Either refusal names the key that is wrong, at startup rather than at the first model
 call, in either language.
 
-`agent-bot` is the one Bot that pins its provider: it speaks `/v1/chat/completions` directly and
-has never read `BOT_PROVIDER`, and `bots.agent-bot` supplies only its model.
-
 ## OpenAI-compatible endpoints
 
 `OPENAI_BASE_URL` decides where an OpenAI-shaped request is answered. Unset, that is OpenAI. Set, it is any endpoint speaking the same API: a gateway in front of several providers, a proxy, or a model on hardware you control.
 
-It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, `agent-bot` reads it for the client it constructs, and `agent-langgraph` reads it for `BOT_PROVIDER=openai`.
+It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, and the managed Bot and the other harnesses read it for `BOT_PROVIDER=openai`.
 
 `OPENAI_CONTAINER_BASE_URL` overrides that value inside Compose's containers only (the Bots, and the `server` service when OpenBot itself runs in Compose), for an endpoint the containers reach by a different route than the host does. Unset, the containers use `OPENAI_BASE_URL` like everything else. Compose's `server` service takes `INTELLIGENCE_CONTAINER_API_URL` and `INTELLIGENCE_CONTAINER_GATEWAY_WS_URL` the same way, in place of `INTELLIGENCE_API_URL` and `INTELLIGENCE_GATEWAY_WS_URL`; the browser is still given `INTELLIGENCE_GATEWAY_WS_URL`.
 
@@ -570,7 +565,7 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 
 `OPENBOT_PUBLIC_URL` and `OPENBOT_APP_URL` matter only for a connector each person connects their own account to, such as Google Drive.
 
-`OPENBOT_PUBLIC_URL` builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. With neither, the Plugins page says the deployment cannot complete a consent flow, and no account can be connected.
+`OPENBOT_PUBLIC_URL` builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. With neither, the Apps page says the deployment cannot complete a consent flow, and no account can be connected.
 
 `OPENBOT_APP_URL` is where the callback sends the person afterwards. It is a separate setting because the app and the API are separate addresses: locally the app is Vite on `3010` and the API is `3001`, so a relative redirect would land on the API, which serves no pages. A deployment serving both from one origin can leave it unset.
 
@@ -596,7 +591,7 @@ expired, or whose admin has not granted OpenBot access to the system or to OpenB
 so in those words.
 Marking a server this way needs Microsoft sign-in configured. Adding the same server again without
 `entraScope` keeps the mark; send `"entraScope": null` to reach it on a token again. The server's
-page under Plugins shows the mark and its scope.
+page under Apps shows the mark and its scope.
 
 **Apps can call OpenBot with an Entra token.** An app that signed somebody in with Entra asks for a
 token to `MICROSOFT_OAUTH_API_SCOPE` and sends it as `Authorization: Bearer <token>` on any API or
@@ -665,10 +660,10 @@ zero or more: a deployment that typed `two` and silently got the default would b
 cap.
 
 Which Bots may address which is a grant, not a variable, and no Bot may address any other until one
-is made. It is made on the Bot's own page: open it from **Bots**, choose **Skills and access**, and switch on each Bot under
-**Bots it may ask**. The pair is directional: that list is who this Bot may ask, not who may ask it,
-so letting them ask each other is two switches. Only an administrator may change it; anyone who can
-see the Bot can read it.
+is made. It is made on the Bot's own page: open it from **Bots**, choose **Setup**, and switch on
+each Bot under **Bots it can ask**. The pair is directional: that list is who this Bot may ask, not
+who may ask it, so letting them ask each other is two switches. Only an administrator may change it;
+anyone who can see the Bot can read it. The personal edition does not show this section.
 
 With both caps above at zero the screen says the capability is switched off, because a grant made
 then is a row nothing will read.
@@ -819,7 +814,7 @@ them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 ## OpenTelemetry export
 
 Every audit row is also sent as an OTLP log record over HTTP, so a SIEM or an OpenTelemetry
-Collector receives the same events the **Audit** page shows, as they happen. Each record carries
+Collector receives the same events the **Activity** page shows, as they happen. Each record carries
 `openbot.surface`: `bot`, `identity` or `control_plane`. Export never stops a request: when the
 collector cannot be reached, records are dropped after the SDK's retries, and the row in PostgreSQL
 is still the record.
@@ -866,7 +861,7 @@ is still the record.
 `COMPUTER_SANDBOX` is not the cluster sandbox provider. A Kubernetes deployment can instead run each
 computer as a sandboxed pod, selected by `COMPUTER_SANDBOX_NAMESPACE` with `COMPUTER_SANDBOX_IDLE_AFTER`
 and `COMPUTER_SANDBOX_TEMPLATE_FILE` beside it; those are set by the Helm chart, not by Compose, and
-are covered in [charts/openbot/README.md](../charts/openbot/README.md). The chart sets them for
+are covered in the Helm guide that comes with the chart (`helm show readme`). The chart sets them for
 `computers.mode: sandbox`, from `computers.sandbox.namespace` (the release's namespace by default) and
 `computers.sandbox.idleAfter`. The server's own defaults are `30m` for the idle time, written as
 `30s`, `30m`, `2h` or a plain number of milliseconds, and `/etc/openbot/sandbox-template.json` for the
@@ -898,7 +893,7 @@ To run headless instead, set `COMPUTER_BROWSER_MODE=headless` for Compose and re
 computer or supervisor as applicable:
 
 ```sh
-docker compose up -d --force-recreate agent-computer supervisor
+docker compose --env-file backend-images.env --env-file .env up -d --force-recreate agent-computer supervisor
 ```
 
 Existing supervisor-created computers retain their mode until recreated as described above. The
@@ -914,80 +909,16 @@ computers through your deployment's lifecycle controls while keeping their persi
 headless computer no longer calls itself `HeadlessChrome`: its user agent and client hints report what
 the same browser reports headed.
 
-### Installed Chrome for a local API deployment
+### The person's browser
 
-This source/deployment-checkout option launches a separate installed Google Chrome window for each
-active Bot on macOS or Windows. The existing in-app viewer, browser tools, authentication, and Bot
-access policy still apply. Linux uses a private Xvfb display and the viewer. This is not a packaged
-desktop toggle or a bridge from a hosted API: the API must run on the same machine and reach the
-helper through loopback.
-
-Install [Bun](https://bun.com/docs/installation) and [Google Chrome](https://www.google.com/chrome/)
-in its standard location, then install dependencies from the checkout root:
-
-```sh
-bun install --frozen-lockfile
-bun install --cwd agent-computer --frozen-lockfile
-```
-
-Use the same existing `COMPUTER_TOKEN` for the API and helper. It can be set in the checkout's `.env`
-(Bun loads it) or supplied securely in each process environment; the helper never prints it. Set the
-following API configuration and clear both supervisor selectors, including any inherited process
-environment values, because either selector takes precedence over the shared URL:
-
-```dotenv
-AGENT_COMPUTER_URL=http://127.0.0.1:4101
-COMPUTER_SUPERVISOR_URL=
-COMPUTER_SANDBOX_NAMESPACE=
-```
-
-In the helper's environment, leave `COMPUTER_BROWSER_BACKEND` and `COMPUTER_BROWSER_MODE` unset, or
-set them to `local-chrome` and `headed`. An inherited `managed` or `headless` setting is an error.
-Leave `PORT` unset for 4101, or explicitly choose another port and update the API URL to match. Start:
-
-```sh
-bun scripts/start-local-chrome-computer.ts
-```
-
-Restart the API with the configuration above. Open a Bot's computer and navigate to a website; its
-dedicated Chrome window starts on first use. Use **Take control** in the app before interacting and
-**Hand back** when finished. Closing a viewer does not close the Bot's browser or erase its logins.
-The helper exits with an error for a missing token, a missing browser (neither Chrome nor Microsoft
-Edge installed), or an occupied port instead of silently selecting another browser or port. With
-only Edge installed it starts, and a person's own browser opens in Edge; a Bot's browser still
-needs Chrome. Ctrl-C shuts down its computer process and browsers.
-
-The helper ignores inherited `PROFILES_DIR` and `WORKSPACE_DIR`. Its defaults are:
-
-- macOS: `~/Library/Application Support/OpenBot/local-computer`
-- Windows: `%LOCALAPPDATA%\OpenBot\local-computer`
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/openbot/local-computer`
-
-Set `OPENBOT_LOCAL_COMPUTER_DIR` to an absolute, dedicated app-owned directory to change that root.
-Do not point it at your personal Chrome data. Each Bot uses a separate persistent subdirectory under
-`profiles/`; no existing Chrome session is attached, and no TCP debugging endpoint is exposed.
-Native Chrome retains its process sandbox and OS credential store. File tools remain confined to
-the helper's `workspace/`, and shell execution is refused: use OpenBot's separately approved host
-access tools for host commands. Native Chrome runs with your OS account's network access; this mode
-is not a container or an OS network sandbox. Keep the API's private-host browsing opt-in off unless
-you intentionally need it for your local deployment.
-
-To switch back, stop the helper, restore your prior `AGENT_COMPUTER_URL` and supervisor/sandbox
-selectors, and restart the API. Unset `COMPUTER_BROWSER_BACKEND` (or set `managed`) on the managed
-computer process; choose `headless` or `headed` as before. Local Chrome profiles remain in the local
-data root, separate from managed computer volumes.
-
-#### OpenBot Desktop
-
-OpenBot Desktop does not run this helper. Its person's browser runs on the personal edition's one
-computer and shows inside the OpenBot window, as on hosted OpenBot (see
-[Personal edition](personal-edition.md#openbot-desktop)), so it writes no `OPENBOT_BROWSER_URL`, and
-a Start takes out the `OPENBOT_BROWSER_URL`, `OPENBOT_BROWSER_CONTAINER_URL`, `BROWSER_PORT` and
-`OPENBOT_BROWSER_ABSENT` an earlier version wrote. Earlier versions ran this helper as a host-side
-browser, a separate Chrome or Edge window, with its profile in the data root above; uninstalling
-OpenBot Desktop still removes that data root and the Recorder's native messaging host manifests on
-Windows and from the .deb and .rpm packages. On macOS, and for an AppImage, it stays until removed
-by hand.
+The personal edition's person's browser runs on its one computer and shows inside the page, as on
+hosted OpenBot (see [Personal edition](personal-edition.md#openbot-desktop)). OpenBot Desktop writes
+no `OPENBOT_BROWSER_URL`, and a Start takes out the `OPENBOT_BROWSER_URL`,
+`OPENBOT_BROWSER_CONTAINER_URL`, `BROWSER_PORT` and `OPENBOT_BROWSER_ABSENT` an earlier version
+wrote. Earlier versions ran a host-side browser, a separate Chrome or Edge window, with its profile
+under `OpenBot/local-computer` in the platform's data directory; uninstalling OpenBot Desktop still
+removes that folder and the Recorder's native messaging host manifests on Windows and from the .deb
+and .rpm packages. On macOS, and for an AppImage, it stays until removed by hand.
 
 `agent-computer` also reads:
 
@@ -1195,18 +1126,6 @@ traffic leaves from an address a consumer ISP owns, so a site sees what looks li
 rather than a datacenter. That is why it works, and it is a choice to make knowingly: it changes
 what the Bot appears to be, where Web Bot Auth says what it is. They can be used together.
 
-## Attested identity
-
-When optional SPIRE services are used:
-
-- the supervisor reads `SPIRE_SOCKET`, `SPIRE_AGENT_ID`, `SPIRE_TRUST_DOMAIN`, and `SPIRE_AGENT_SOCKET_VOLUME`;
-- computers read `SPIFFE_ENDPOINT_SOCKET`;
-- Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
-
-A computer fetches its identity and reports it on its own `/health` route. Nothing checks it yet:
-the server does not ask for it, and `scripts/start.sh` and the Helm chart do not start SPIRE. It
-names a computer; it does not yet gate anything.
-
 ## Images
 
 Every service `docker-compose.yml` can build is published by a release, so a machine can run the
@@ -1216,8 +1135,7 @@ stack without a toolchain and without waiting for Chromium to build.
 | ----------------- | ------------------- | ------------------------------------------ |
 | `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot-agent-computer` |
 | `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
-| `agent-bot`       | `BOT_IMAGE`         | `ghcr.io/copilotkit/openbot-agent-bot`      |
-| `agent-langgraph` | `LANGGRAPH_IMAGE`   | `ghcr.io/copilotkit/openbot-agent-langgraph`|
+| `agent-langgraph-agui` | `LANGGRAPH_IMAGE` | `ghcr.io/copilotkit/openbot-agent-langgraph-agui` |
 | `server`, `worker`, `migrate` | `SERVER_IMAGE` | `ghcr.io/copilotkit/openbot-server` |
 
 Unset, each names a local tag and Compose builds it, which is what a checkout of this repository
@@ -1260,8 +1178,7 @@ Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks aga
 | `app`             | 3010                       | `APP_PORT`        |
 | `server`          | 3001                       | `SERVER_PORT`     |
 | `agent-computer`  | 4100                       | `COMPUTER_PORT`   |
-| `agent-bot`       | 4200                       | `BOT_PORT`        |
-| `agent-langgraph` | 4201                       | `LANGGRAPH_PORT`  |
+| `agent-langgraph-agui` | 4201 host / 4206 container | `LANGGRAPH_PORT` |
 | `supervisor`      | 4500 host / 4300 container | `SUPERVISOR_PORT` |
 | PostgreSQL        | 5432                       | `POSTGRES_PORT`   |
 

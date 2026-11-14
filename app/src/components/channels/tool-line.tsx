@@ -21,6 +21,7 @@ export function ToolLine({
   running,
   refused,
   failed,
+  failedLabel,
   notYet,
   byYou,
   bare,
@@ -42,6 +43,11 @@ export function ToolLine({
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /**
+   * What a failed step says in place of "<label>, didn't work", where the label would claim the step
+   * happened: a file that was not saved reads "Didn't save a file", not "Saved a file, didn't work".
+   */
+  failedLabel?: string;
   /**
    * Nothing was done yet, for an ordinary reason: a computer still starting turned the call away
    * before it reached anything. Muted like a success, because nothing went wrong, and labelled so it
@@ -90,7 +96,7 @@ export function ToolLine({
         {refused
           ? `Blocked: ${attempted ?? label}`
           : failed
-            ? `${label}, didn't work`
+            ? (failedLabel ?? `${label}, didn't work`)
             : notYet
               ? `${label}, not done yet`
               : byYou

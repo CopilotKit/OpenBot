@@ -595,31 +595,51 @@ async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 }
 
-test("the first screen is Install, with nothing to choose", async () => {
+test("the first screen offers Self-hosted, shows Cloud and Business greyed, and says what this computer needs and why", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
   withLocalCli({});
   const view = await renderApp();
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  // Three ways to run OpenBot. This app sets up the first; the other two are there to be seen.
+  const self = view.getByRole("radio", {
+    name: /^Self-hosted/,
+  }) as HTMLInputElement;
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const business = view.getByRole("radio", {
+    name: /^OpenBot for Business/,
+  }) as HTMLInputElement;
+  expect([self.checked, self.disabled]).toEqual([true, false]);
+  expect([cloud.checked, cloud.disabled]).toEqual([false, true]);
+  expect([business.checked, business.disabled]).toEqual([false, true]);
+  // What Self-hosted asks of this computer, and why: every part of OpenBot runs on it.
   expect(
-    view.getByRole("heading", { name: "Set up OpenBot (self-contained)" }),
+    view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
-  // Three short paragraphs: what it is, how long setup takes, and production, in that order.
   expect(
     [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
   ).toEqual([
-    "This version of OpenBot is fully self-contained and runs entirely on your computer, including the OpenBot backend.",
-    "Depending on your internet speed, setup can take between 1 and 10 minutes.",
-    "In production, OpenBot for Business runs on your own infrastructure with Kubernetes, or on OpenBot Cloud. Book a demo for early access.",
+    "Self-hosted runs every part of OpenBot on this computer: the app, its server and database, your Bots' memory, and a computer for each Bot to work on.",
+    "Setup takes 1 to 10 minutes, depending on your internet speed.",
   ]);
-  expect(view.getByText("OpenBot for Business").tagName).toBe("STRONG");
-  // The one booking link, never a scheduling page of its own.
+  expect(
+    [...view.container.querySelectorAll(".needs-list li")].map(
+      (item) => item.textContent,
+    ),
+  ).toEqual([
+    "A Mac or a 64-bit Windows PC",
+    "16 GB of memory or more",
+    "4 CPU cores or more",
+    "40 GB of free disk space",
+  ]);
+  // The one booking link, never a scheduling page of its own, still live on the greyed row.
   expect(
     view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
   ).toBe("https://open.bot/business");
   expect(buttons(view)).toEqual(["Install"]);
-  expect(view.queryByRole("radio")).toBeNull();
-  expect(view.queryByText(/hosted/i)).toBeNull();
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
 });
@@ -630,7 +650,7 @@ test("the first screen says nothing about usage data: that is the last screen's 
   );
   withLocalCli({});
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(view.queryByText(/usage/i)).toBeNull();
   expect(view.queryByRole("checkbox")).toBeNull();
   expect(view.queryByRole("link", { name: "What OpenBot sends" })).toBeNull();
@@ -1407,12 +1427,9 @@ function behindNow(view: ReturnType<typeof render>): string | null {
 
 function technicalOn(beats: Beat[]) {
   return beats.flatMap(({ beat, text }) =>
-    TECHNICAL.filter(
-      // The first screen says the backend runs on this computer too: that is what
-      // self-contained means. Every later screen is held to plain words.
-      (word) =>
-        word.test(text) && !(beat === "welcome" && word.test("backend")),
-    ).map((word) => `${beat}: ${text.match(word)?.[0]}`),
+    TECHNICAL.filter((word) => word.test(text)).map(
+      (word) => `${beat}: ${text.match(word)?.[0]}`,
+    ),
   );
 }
 
@@ -3572,6 +3589,10 @@ test("the next Start after Quit tries the update again, and never asks the CLI t
   expect(localActions()).toEqual(["status", "update", "status"]);
 });
 
+/**
+ * With the update on record the CLI refuses `local start`, so the update is tried again, once.
+ * When it stops again the check still fails, and that is not the release the stack had running.
+ */
 test("a backend whose check fails is still not healthy, with an update on record or not", async () => {
   withUnfinishedUpdate("/tmp/local-eval-update-check-fails", [
     pinnedCli.apiCheckFails,
@@ -3585,7 +3606,7 @@ test("a backend whose check fails is still not healthy, with an update on record
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(view.queryByText(KEPT_RELEASE)).toBeNull();
-  expect(localActions()).toEqual(["status"]);
+  expect(localActions()).toEqual(["status", "update", "status"]);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );
@@ -3799,7 +3820,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(buttons(view)).toEqual(["Install"]);
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Nothing hosted is started, and nothing local either, until Install.
@@ -3840,7 +3861,7 @@ test("a previously hosted installation of another Bot installs the default Bot",
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
-  await view.findByRole("heading", { name: "Set up OpenBot (self-contained)" });
+  await view.findByRole("heading", { name: "Set up OpenBot" });
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
     false,
   );
@@ -4038,6 +4059,89 @@ test("a saved sign-in refused after the install sends the person to refresh it",
       .some((alert) => alert.textContent?.includes("has expired")),
   ).toBe(true);
   expect(startsMade()).toHaveLength(2);
+});
+
+/**
+ * Box I, step E: OpenBot's machine was made again, and the backend went with the old one. Start
+ * fresh set the backend up again, then Start was refused, because the new machine had none of
+ * OpenBot's own software: "Finish installing OpenBot's local software…", an ERROR in the log, and
+ * the window went back from Starting OpenBot to Installing OpenBot before it carried on by itself.
+ * Start fresh now installs first, then sets up and starts: one journey forward, Install's rows and
+ * then Starting's, with nothing refused and no going back.
+ */
+test("Start fresh after a lost backend installs OpenBot's software first, then sets up and starts, never going back", async () => {
+  const root = "/tmp/lost-backend";
+  setupConnectedLocalStack(root, localStatus("ready", "valid"));
+  const lost = {
+    ...localStatus("unknown", "unknown"),
+    outcome: "failed",
+    stack: null,
+    reason: "stack-lost",
+  };
+  const installed = deferred<null>();
+  let installedNow = false;
+  let statuses = 0;
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "run_local_eval")
+      return ++statuses === 1 ? lost : previous(command, args);
+    if (command === "prepare_installation") {
+      await installed.promise;
+      installedNow = true;
+      return null;
+    }
+    // As the native side does: the new machine has none of OpenBot's software until Install.
+    if (command === "start_stack" && !installedNow) throw INSTALL_AGAIN;
+    return previous(command, args);
+  };
+  const headings = new Set<string>();
+  const watch = new MutationObserver(() => {
+    for (const heading of document.querySelectorAll("h1"))
+      headings.add(heading.textContent ?? "");
+  });
+  watch.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
+  const view = await renderApp();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start fresh" }),
+  );
+  // Install's rows first, on the screen the person was on.
+  await view.findByText("Preparing this computer");
+  expect(view.getByRole("heading", { name: "Starting OpenBot" })).toBeTruthy();
+  expect(localCliCalls().map((call) => call.command)).toEqual([
+    "run_local_eval",
+  ]);
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  watch.disconnect();
+  expect(
+    invokeCalls
+      .map((call) => call.command)
+      .filter((command) =>
+        [
+          "prepare_installation",
+          "set_up_local_eval",
+          "connect_local_eval",
+          "run_local_eval",
+          "start_stack",
+          "show_openbot",
+        ].includes(command),
+      ),
+  ).toEqual([
+    "run_local_eval",
+    "prepare_installation",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval",
+    "start_stack",
+    "show_openbot",
+  ]);
+  expect([...headings]).not.toContain("Installing OpenBot");
+  expect(view.queryByRole("alert")).toBeNull();
 });
 
 test("a Start refused again straight after its install says so, and does not install round in a loop", async () => {

@@ -12,8 +12,7 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComposioApp } from "@/lib/plugins/queries";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
-import { displayName } from "../../server/src/plugins/app-names";
-import captured from "../../server/tests/fixtures/composio-key-apps.json";
+import captured from "./fixtures/composio-key-apps.json";
 
 /**
  * THE DIRECTORY SAYS WHICH APPS TAKE A KEY, BEFORE ANYBODY PRESSES ADD OR CONNECT.
@@ -24,8 +23,8 @@ import captured from "../../server/tests/fixtures/composio-key-apps.json";
  * to are listed first.
  *
  * The rows are Composio's own catalogue answer, captured read-only on 2026-11-08. Each one's
- * `connection` is the server's verdict for that exact row, which `server/tests/key-only-apps.test.ts`
- * pins against `connectionOf`: HubSpot and Gmail sign in, 1Password and PostHog take a key.
+ * `connection` is the server's verdict for that exact row: HubSpot and Gmail sign in, 1Password,
+ * PostHog, Fireflies and Pipedrive take a key.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -37,19 +36,33 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/**
+ * The name the server gives each captured row, read off its own naming when this fixture was
+ * recorded: 1Password arrives as its brand spells it and not as Composio's "1password".
+ */
+const NAME: Record<string, string> = {
+  hubspot: "HubSpot",
+  gmail: "Gmail",
+  _1password: "1Password",
+  posthog: "PostHog",
+  fireflies: "Fireflies",
+  pipedrive: "Pipedrive",
+};
+
 const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
   hubspot: "consent",
   gmail: "consent",
   _1password: "fields",
   posthog: "fields",
+  fireflies: "fields",
+  pipedrive: "fields",
 };
 
 /** The captured rows, as the directory route answers them: the server's own projection. */
 function directory(): ComposioApp[] {
   return captured.catalogue.map((row) => ({
     slug: row.slug,
-    // The server's own naming, so 1Password arrives as its brand spells it and not "1password".
-    name: displayName(row.slug, row.name),
+    name: NAME[row.slug] ?? row.name,
     description: row.meta.description,
     logo: null,
     categories: [],
@@ -173,6 +186,8 @@ test("apps you sign in to are listed ahead of apps that need a key", async () =>
       "directory-gmail",
       "directory-hubspot",
       "directory-_1password",
+      "directory-fireflies",
+      "directory-pipedrive",
       "directory-posthog",
     ]);
   });

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReachingYou } from "@/components/delivery/reaching-you";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** A Bot's Reaching you page: where this Bot's conversations continue outside OpenBot. */
@@ -81,12 +82,14 @@ function serving(sms = false) {
         nextCursor: null,
       });
     }
-    return Response.json({
-      agents: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
-      ],
-    });
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 

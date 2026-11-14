@@ -33,7 +33,18 @@ import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
-import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
+import { answerBotsList } from "./bots-api";
+
+/**
+ * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
+ * from the published OpenBot images, so its list is written out here as it answers today.
+ */
+const BROKERED_PROBE_OUTCOMES = [
+  "nothing",
+  "answered",
+  "complained",
+  "unreachable",
+] as const;
 
 /**
  * The brokered account row, on both screens that draw it.
@@ -168,11 +179,11 @@ function asDay(iso: string): string {
 }
 
 /** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string): PluginServer {
+function brokeredServer(authScheme: string, title = "Gmail"): PluginServer {
   return {
     authScheme,
     id: APP_KEY,
-    title: "Gmail",
+    title,
     vendor: "Google",
     url: "https://example.invalid/composio",
     summary: "Mail.",
@@ -195,10 +206,11 @@ function brokeredServer(authScheme: string): PluginServer {
 function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
+  title?: string,
 ): PluginsPage {
   return {
     catalogue: [],
-    servers: [brokeredServer(authScheme)],
+    servers: [brokeredServer(authScheme, title)],
     skills: [],
     botsMayCallBack: true,
     redirectUri: null,
@@ -225,6 +237,8 @@ type Deployment = {
   authScheme?: string;
   /** What the app publishes as the things a person types in, for the `API_KEY` schemes. */
   fields?: BrokerField[];
+  /** The app's name on its row. Gmail where it is left off, as every older test here meant. */
+  title?: string;
   /** Where the key comes from, as the server answers it beside the fields. Absent by default. */
   guide?: { steps: string; url: string | null };
   /** Whether a real call was ever made with this key and worked, as this deployment recorded it. */
@@ -647,9 +661,12 @@ function installDeployment(deployment: Deployment): Server {
       state.probe = undefined;
       return json({ ok: true });
     }
-    if (path.startsWith("/api/agents")) return json({ agents: [] });
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
     if (path.startsWith("/api/plugins")) {
-      return json(pluginsPage(state.composioConfigured, state.authScheme));
+      return json(
+        pluginsPage(state.composioConfigured, state.authScheme, state.title),
+      );
     }
     return new Response(null, { status: 404 });
   }) as typeof fetch;
@@ -984,7 +1001,7 @@ test("a key app's dialog explains the key and links to the provider's page for i
 
   const guide = await view.findByTestId("key-guide");
   expect(guide.textContent).toContain(
-    "Gmail doesn't offer a sign-in here, so it connects with a key from your Gmail account.",
+    "OpenBot connects to Gmail with a key from your Gmail account, not a sign-in.",
   );
   expect(guide.textContent).toContain("Connect server");
   const link = view.getByRole("link", { name: /Get a key from Gmail/ });
@@ -994,6 +1011,46 @@ test("a key app's dialog explains the key and links to the provider's page for i
   expect(link.getAttribute("target")).toBe("_blank");
   // The guide sits above the form, which still draws the app's own box.
   expect(await view.findByLabelText("API Key")).toBeTruthy();
+});
+
+/**
+ * THE DIALOG SAYS HOW OPENBOT CONNECTS, AND NEVER THAT THE APP HAS NO SIGN-IN.
+ *
+ * Reported from OpenBot 1.0.2: Connect on Fireflies said "Fireflies doesn't offer a sign-in here",
+ * and Fireflies does offer one, with OAuth, on its own MCP server. Composio publishes only `API_KEY`
+ * for it, so the form is right. The row knows only how OpenBot connects, so that is all the
+ * sentence may say. The field is Fireflies' own, as `server/tests/key-only-apps.test.ts` pins it
+ * from Composio's captured answer.
+ */
+const FIREFLIES_KEY: BrokerField = {
+  name: "generic_api_key",
+  label: "API key",
+  help: "Your Fireflies API key — a secret token that lets OpenBot access your meetings and transcripts. Find it at app.fireflies.ai → Integrations → Fireflies API.",
+  required: true,
+  secret: true,
+};
+
+test("a key app's dialog says OpenBot connects it with a key, not that the app has no sign-in", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [FIREFLIES_KEY],
+    recorded: false,
+    title: "Fireflies",
+  });
+
+  const view = renderAccountScreen(queryClient());
+  await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+
+  const guide = await view.findByTestId("key-guide");
+  expect(guide.textContent).toContain(
+    "OpenBot connects to Fireflies with a key from your Fireflies account, not a sign-in.",
+  );
+  expect(guide.textContent).not.toMatch(/doesn't offer a sign-in/);
+  // And the box is still Fireflies' own, so the connect itself is unchanged.
+  const input = await view.findByLabelText("API key");
+  expect(input.getAttribute("type")).toBe("password");
 });
 
 test("a key app nobody has connected says it will ask for a key, not send you off", async () => {
@@ -1063,7 +1120,7 @@ const REFUSED = "Composio rejected that key: invalid API key for perplexityai.";
  * it — on a page that has to be redrawn before that button is there to press.
  */
 const STRANDED =
-  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Plugins page and try again.";
+  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Apps page and try again.";
 
 test("a key the broker refuses says so inside the dialog, not only behind it", async () => {
   installDeployment({
@@ -1617,8 +1674,7 @@ test("a check that did not come back clean says so, without ruling on the key", 
  * rounds it did: `["nothing", "answered", "complained", "unreachable"]` written out at the assertion,
  * in this file, compared to the `outcome` fields above it — a fifth member on the server's real
  * `BrokeredProbe` passed that, which is exactly the drift the test was added to catch. It now
- * counts against `BROKERED_PROBE_OUTCOMES`, imported from `server/src/plugins/store.ts`, which that
- * module pins to the union in both directions with `satisfies` and a `Decides<…>` witness.
+ * counts against `BROKERED_PROBE_OUTCOMES` at the top of this file, the server's own list.
  *
  * `SERVER_FIELD_SCHEMES` ABOVE IS STILL A COPY AND STILL SHOULD BE, which is not the same case: it
  * earns its copy by carrying a scheme the screen has never heard of, and a disagreement is the one

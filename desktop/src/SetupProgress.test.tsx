@@ -8,6 +8,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 const { INSTALL_BLURB, SetupProgress, plainInstallSteps } = await import(
   "./SetupProgress"
@@ -358,4 +359,50 @@ test("the install blurb names the parts of OpenBot it installs, in two sentences
     /—|agent|Intelligence|back ?end|front ?end/i,
   );
   expect(INSTALL_BLURB).toContain("about 10 minutes");
+});
+
+/**
+ * Behind the AI step on Windows G, a setup not started on a C: too short was a red "Setup stopped"
+ * card with the troubleshooting logs. The background row says it as paused, in the account step's
+ * words, with Try again, and with no time running on.
+ */
+test("the background row says a setup paused for room calmly, with Try again", async () => {
+  const { installingBehind } = await import("./SetupProgress");
+  const said =
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+  let looked = 0;
+  const row = installingBehind({
+    steps: [],
+    installing: false,
+    installed: true,
+    since: Date.now() - 200_000,
+    backEnd: {
+      at: "setup",
+      running: true,
+      stopped: false,
+      ready: false,
+      detail: null,
+      download: null,
+      since: Date.now() - 60_000,
+      held: said,
+      tryAgain: () => {
+        looked += 1;
+      },
+    },
+  });
+  expect(row?.paused).toBe(true);
+  const view = render(
+    <SetupProgress steps={row ? [row] : []} label="Background install" />,
+  );
+  const item = within(
+    view.getByRole("listitem", {
+      name: "Installing OpenBot in the background",
+    }),
+  );
+  expect(item.getByText("Step 3 of 4 · Paused")).toBeTruthy();
+  expect(item.getByText(said)).toBeTruthy();
+  expect(item.queryByText(/elapsed/)).toBeNull();
+  expect(view.container.querySelector(".step-spinner")).toBeNull();
+  await userEvent.click(item.getByRole("button", { name: "Try again" }));
+  expect(looked).toBe(1);
 });

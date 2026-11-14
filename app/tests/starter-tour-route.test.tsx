@@ -28,6 +28,7 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
@@ -35,6 +36,8 @@ const NativeResponse = globalThis.Response;
 const BOT = "picked-harness";
 
 const bot: AgentProfile = {
+  assignedToMe: false,
+  keyFromOpenBot: false,
   avatarSeed: "seed",
   builtIn: true,
   canManage: true,
@@ -190,10 +193,10 @@ beforeAll(() => {
           preferences = {};
         return new NativeResponse(null, { status: 204 });
       }
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
       if (url.pathname === `/api/plugins/for/${BOT}`)
         return NativeResponse.json({
           tools: [],

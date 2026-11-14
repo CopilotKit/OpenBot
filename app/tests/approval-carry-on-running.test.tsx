@@ -12,6 +12,7 @@ import {
 } from "@/lib/approvals";
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -166,13 +167,13 @@ beforeAll(() => {
         decidedAt = new Date().toISOString();
         return NativeResponse.json({ id: "approval-1", status });
       }
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === "/api/plugins/for/maps-bot")
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/agents/maps-bot")
+      if (url.pathname === botPath("maps-bot"))
         return NativeResponse.json({
-          agent: { id: "maps-bot", visibility: "public", canManage: true },
+          bot: { id: "maps-bot", visibility: "public", canManage: true },
         });
       if (url.pathname === "/api/components/for-agent/maps-bot")
         return NativeResponse.json({ components: [] });

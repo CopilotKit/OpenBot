@@ -8,10 +8,11 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { AccessSections } from "@/components/bot-profile/access";
+import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { appAccess } from "./app-access-fixture";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -33,6 +34,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance",
@@ -98,7 +102,8 @@ function serving(held: AppAccess[]) {
           grantable: true,
         },
       });
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
     return Response.json({
       user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
     });
@@ -113,7 +118,12 @@ function draw(agent: AgentProfile) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <AccessSections agent={agent} />,
+      component: () => (
+        <>
+          <AppsSections agent={agent} />
+          <SkillsSections agent={agent} />
+        </>
+      ),
     }),
   });
   return render(
@@ -167,6 +177,6 @@ test("an app an admin gave this Bot is on, and not yours to switch off", async (
 test("somebody else's Bot has no Your apps section", async () => {
   serving([]);
   const view = draw({ ...BOT, mine: false });
-  await view.findByText("What it can use");
+  await view.findByText("Apps it can use");
   expect(view.queryByText("Your apps")).toBeNull();
 });

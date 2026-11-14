@@ -67,6 +67,37 @@ test("a link this deployment cannot make is not offered", () => {
   expect(rows).toEqual([]);
 });
 
+test("a server added by its address is its own tile, named by where it lives", () => {
+  const server = (id: string, signIn: boolean, url: string) =>
+    ({ ...app(id, id, "custom"), url, signIn }) as PluginServer;
+  const rows = connectionRows({
+    ...none,
+    byUrl: [
+      server("deepwiki", false, "https://mcp.deepwiki.com/mcp"),
+      server("fireflies", true, "https://api.fireflies.ai/mcp"),
+      server("notes", true, "https://notes.example.com/mcp"),
+    ],
+    connected: new Set(["notes"]),
+  });
+  expect(
+    rows.map((row) => [
+      row.key,
+      row.state,
+      row.summary,
+      row.noAccount ?? false,
+      row.notConnected ?? false,
+      row.action ?? null,
+    ]),
+  ).toEqual([
+    // Needs no account: on as soon as it is added.
+    ["deepwiki", "connected", "mcp.deepwiki.com", true, false, null],
+    ["notes", "connected", "notes.example.com", false, false, null],
+    // Signs each person in, and this person hasn't: the tile opens its page, which offers Connect
+    // beside the switch that removes it. No press-to-connect, or that switch could not be reached.
+    ["fireflies", "available", "api.fireflies.ai", false, true, null],
+  ]);
+});
+
 test("a link already made is listed even where it can no longer be made, by its handle", () => {
   const rows = connectionRows({ ...none, links: [link("slack")] });
   expect(rows).toEqual([

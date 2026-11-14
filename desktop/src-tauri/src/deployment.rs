@@ -19,11 +19,11 @@ const STAMP: &str = ".openbot-deployment";
 
 /// The release asset that says which images this version runs.
 ///
-/// Kept beside the deployment because the tree does not contain it: `docker-compose.yml` names
-/// `openbot-supervisor:latest` and friends as defaults, which are local build names that exist on a
-/// developer's machine and nowhere else. A desktop install has never built anything, so without
-/// this file Compose asks Docker Hub for images that are not there and reports a denial, which
-/// reads as an authentication problem and is not one.
+/// Kept beside the deployment because the tree does not contain it: `docker-compose.yml` names the
+/// Bots by local build names that exist on a developer's machine and nowhere else, and the server's
+/// images by a tag only a checkout's `backend-images.env` carries. A desktop install has neither, so
+/// without this file Compose asks for images that are not there and reports a denial, which reads
+/// as an authentication problem and is not one.
 const IMAGES: &str = "container-images.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,12 +71,13 @@ pub struct Images {
 ///
 /// A published name on the left, a Compose variable on the right, because the two vocabularies are
 /// different and neither is going to change to suit the other.
-pub const IMAGE_VARIABLES: [(&str, &str); 5] = [
+///
+/// No Bot image: Desktop starts no bundled Bot (a picked harness is pinned on its own), and the
+/// retired `agent-bot` and `agent-langgraph` are no longer published.
+pub const IMAGE_VARIABLES: [(&str, &str); 3] = [
     ("server", "SERVER_IMAGE"),
     ("supervisor", "SUPERVISOR_IMAGE"),
     ("agent-computer", "COMPUTER_IMAGE"),
-    ("agent-bot", "BOT_IMAGE"),
-    ("agent-langgraph", "LANGGRAPH_IMAGE"),
 ];
 
 /// Read the manifest laid down beside the deployment and turn it into Compose variables.
@@ -1342,14 +1343,9 @@ mod tests {
     fn a_manifest_missing_an_image_is_refused_rather_than_filled_in_from_compose() {
         // Compose's defaults are local build names. Falling back to them would run four published
         // images beside one that does not exist, and say nothing about the difference.
-        let missing = pin(&manifest(&[
-            "server",
-            "supervisor",
-            "agent-computer",
-            "agent-bot",
-        ]));
+        let missing = pin(&manifest(&["server", "supervisor"]));
         let error = missing.expect_err("an incomplete manifest is not a deployment");
-        assert!(error.contains("agent-langgraph"), "{error}");
+        assert!(error.contains("agent-computer"), "{error}");
     }
 
     #[test]

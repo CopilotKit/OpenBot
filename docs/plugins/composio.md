@@ -118,9 +118,10 @@ everywhere else here, from "the app advertises nothing".
 COMPOSIO_API_KEY=... bun run composio:smoke -- --user <id> [--call]
 ```
 
-`scripts/composio-smoke.ts` is the one command to run when Composio misbehaves and nothing on screen
-says why. It ships inside the container image, so it is run where the key is — in the deployment,
-not on a laptop — and it answers the question no page can: whether *this* key opens *this* project. A
+`bun run composio:smoke` is the one command to run when Composio misbehaves and nothing on screen
+says why. It is a command of the server image (`openbot composio-smoke`), which the script runs in a
+one-off server container with this checkout's `.env`, and in a deployment it runs where the key is.
+It answers the question no page can: whether *this* key opens *this* project. A
 key with no project behind it, a project with no authorization config for the app, and a person who
 never finished the consent page all leave a product that looks configured and answers nothing.
 
@@ -486,7 +487,7 @@ them, and an enable that finds them gone is refused rather than creating a confi
 Such an app connects only as one [shared account](#shared-apps). The person connecting types only
 what the connection names, such as Shopify's store subdomain, and the credential is the deployment's
 client, so a personal account would give anyone who can see the app the organization's full
-access. **Connect** refuses a personal account, and the Connections page and the app's Plugins page
+access. **Connect** refuses a personal account, and the Connections page and the app's page under Apps
 don't offer one: an administrator makes the app shared, connects the team account, and grants it to
 Bots. To change the client later, see
 [rotating the client](../configuration.md#rotating-a-composio-apps-own-client).
@@ -663,7 +664,7 @@ per person, app, Bot and kind, held by a unique index rather than a check, so tw
 both file one. A person can withdraw their own.
 
 Requests wait on the app's own page under `/admin/plugins`, and all of them at the top of the
-Plugins list, with a count on each app's row — an app nobody has switched on has no page of its own. They
+Apps list, with a count on each app's row — an app nobody has switched on has no page of its own. They
 show who asked and for which Bot — they asked — and nothing about anybody's connections.
 **Approve** does what was asked in the same press:
 

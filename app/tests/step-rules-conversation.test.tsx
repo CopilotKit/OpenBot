@@ -8,10 +8,10 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
-import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
-import { NOT_ASKED, NOT_DRAWN } from "@openbot/shared/tool-steps";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
+import { NOT_ASKED, NOT_DRAWN } from "@openbot/shared/tool-steps";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -30,6 +30,7 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -270,8 +271,8 @@ beforeAll(() => {
         return NativeResponse.json({ asksEveryStep: false });
       if (url.pathname.startsWith(`/api/computers/${bot}/`))
         return NativeResponse.json({ botId: bot, state: "ready" });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === `/api/plugins/for/${bot}`)
         return NativeResponse.json({ skills: [], tools: [] });
       if (url.pathname === "/api/voice/sessions")

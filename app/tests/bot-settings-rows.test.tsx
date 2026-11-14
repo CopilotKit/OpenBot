@@ -27,6 +27,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance",
@@ -147,7 +150,7 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
-test("the personal edition has three rows: Routines, What it can do and Setup", async () => {
+test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and Setup, in that order", async () => {
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -156,23 +159,41 @@ test("the personal edition has three rows: Routines, What it can do and Setup", 
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
   expect(await view.findByText("Setup")).toBeTruthy();
-  // The capabilities answer arrives on its own request; wait for the row it removes to settle.
+  // The capabilities answer arrives on its own request; wait for the rows it removes to settle.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  // Nobody to share a Bot with.
-  expect(view.queryByText("Sharing")).toBeNull();
-  // Approval rules, Goals and check-ins are sections of What it can do; no Slack, Teams or text,
-  // and no memory, which the personal edition's Intelligence isn't licensed for.
-  expect(view.getByText("What it can do")).toBeTruthy();
-  for (const gone of [
-    "Skills and access",
-    "Approval rules",
-    "Goals",
-    "Reaching you",
-    "Memory",
-  ])
-    expect(view.queryByText(gone)).toBeNull();
-  expect(view.getByText("Routines")).toBeTruthy();
+  const titles = [
+    ...view.container.querySelectorAll('[data-slot="item-title"]'),
+  ].map((title) => title.textContent);
+  // Nothing else: no Memory (not offered), no Sharing (nobody to share with), no Reaching you.
+  expect(titles).toEqual([
+    "Routines",
+    "Skills",
+    "Apps",
+    "Computer",
+    "Approvals",
+    "Setup",
+  ]);
   expect(view.container.querySelector('a[href$="/memory"]')).toBeNull();
+});
+
+test("the team edition keeps the order, with Memory, then Sharing and Reaching you after Setup", async () => {
+  serving("user");
+  const view = draw(BOT);
+  expect(await view.findByText("Reaching you")).toBeTruthy();
+  const titles = [
+    ...view.container.querySelectorAll('[data-slot="item-title"]'),
+  ].map((title) => title.textContent);
+  // No Computer row: this Bot has no computer of its own, and folders need OpenBot Desktop.
+  expect(titles).toEqual([
+    "Routines",
+    "Memory",
+    "Skills",
+    "Apps",
+    "Approvals",
+    "Setup",
+    "Sharing",
+    "Reaching you",
+  ]);
 });
 
 test("an administrator sees Sharing on somebody else's Bot", async () => {
@@ -188,7 +209,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   expect(await view.findByText("Whole team")).toBeTruthy();
 });
 
-test("the rows for goals, reach, memory and rules say what this Bot has and open their pages", async () => {
+test("the rows for routines, reach, memory and approvals say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
   const row = async (title: string, summary: string, path: string) => {
@@ -197,10 +218,10 @@ test("the rows for goals, reach, memory and rules say what this Bot has and open
       `/bots/expenses/${path}`,
     );
   };
-  await row("Goals", "1 active", "responsibilities");
+  await row("Routines", "3 routines", "routines");
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
-  await row("Approval rules", "1 rule", "approvals");
+  await row("Approvals", "1 rule", "approvals");
 });
 
 /** The personal starter on the harness picked at setup, as OpenBot Desktop on Windows starts it. */

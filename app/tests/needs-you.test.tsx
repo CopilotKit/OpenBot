@@ -29,6 +29,7 @@ import {
   TASKS_VIEW_STORAGE_KEY,
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -123,6 +124,15 @@ const task = (overrides: Partial<Task> & { id: string; title: string }) => ({
 
 let items: Item[] = [];
 let tasks: Task[] = [];
+let questions: {
+  id: string;
+  botId: string;
+  threadId: string;
+  question: string;
+  createdAt: string;
+}[] = [];
+/** Reads that fail right now, by path, to test a board drawn from some sources and not others. */
+let failing = new Set<string>();
 /** Conversations a turn is running in right now, as the sidebar's live list says. */
 let busy: string[] = [];
 const sent: { method: string; path: string }[] = [];
@@ -133,6 +143,8 @@ function serving() {
     const path = String(input);
     const method = init?.method ?? "GET";
     if (method !== "GET") sent.push({ method, path });
+    if (method === "GET" && failing.has(path))
+      return Response.json({ error: "Server error" }, { status: 500 });
     const started = path.match(/^\/api\/proactive\/suggestions\/(.+)\/start$/);
     if (started) {
       const found = items.find((entry) => entry.id === started[1]);
@@ -200,7 +212,7 @@ function serving() {
         rules: [],
         teamRules: [],
         requests: [],
-        questions: [],
+        questions,
       });
     if (path === "/api/bots/attention")
       return Response.json({ bots: [], lastPingId: null });
@@ -208,15 +220,14 @@ function serving() {
       return Response.json({ routines: [], sweep: null });
     if (path === "/api/responsibilities")
       return Response.json({ responsibilities: [] });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: path.includes("hidden=true")
-          ? []
-          : [
-              { id: "inbox", name: "Inbox Bot", mine: true },
-              { id: "ops", name: "Ops Bot", mine: true },
-            ],
-      });
+    const bots = answerBotsList(input, init, {
+      visible: [
+        { id: "inbox", name: "Inbox Bot", mine: true },
+        { id: "ops", name: "Ops Bot", mine: true },
+      ],
+      hidden: [],
+    });
+    if (bots) return bots;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -224,6 +235,8 @@ function serving() {
 beforeEach(() => {
   items = [];
   tasks = [];
+  questions = [];
+  failing = new Set();
   busy = [];
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
@@ -486,4 +499,132 @@ test("OpenDuet's Active lists the tasks under OpenDuet's headings, in its order"
   expect(order.indexOf("Ready for review")).toBeLessThan(
     order.indexOf("Working"),
   );
+});
+
+/*
+ * A board drawn from three reads: questions and approvals, tasks, and check-in findings. One failing
+ * must not hide what the others loaded, and must not read as "nothing waiting".
+ */
+const APPROVALS = "/api/approvals";
+const TASKS = "/api/tasks";
+const CHECK_INS = "/api/proactive/suggestions";
+
+async function botPage() {
+  const { region } = await drawAll();
+  return region("Bot page");
+}
+
+const notice = (page: ReturnType<typeof within>, what: string) =>
+  page.queryByText(`Couldn't load ${what}. Some may be missing here.`);
+
+test("approvals failing leaves the check-in findings on the board, with a notice and Retry", async () => {
+  items = [item({ id: "i1", title: "Reply to Dana" })];
+  failing = new Set([APPROVALS]);
+  serving();
+  const page = await botPage();
+  await page.findByText("Reply to Dana");
+  await waitFor(
+    () => expect(notice(page, "questions and approvals")).not.toBeNull(),
+    { timeout: 3000 },
+  );
+  expect(notice(page, "tasks")).toBeNull();
+  expect(notice(page, "check-in findings")).toBeNull();
+});
+
+test("check-ins failing leaves the questions on the board, with a notice", async () => {
+  questions = [
+    {
+      id: "q1",
+      botId: "inbox",
+      threadId: "thread",
+      question: "Which folder?",
+      createdAt: now,
+    },
+  ];
+  failing = new Set([CHECK_INS]);
+  serving();
+  const page = await botPage();
+  await page.findByText(/Which folder\?/);
+  await waitFor(
+    () => expect(notice(page, "check-in findings")).not.toBeNull(),
+    { timeout: 3000 },
+  );
+  expect(notice(page, "questions and approvals")).toBeNull();
+});
+
+test("tasks alone failing says so, and says nothing about the rest", async () => {
+  items = [item({ id: "i1", title: "Reply to Dana" })];
+  failing = new Set([TASKS]);
+  serving();
+  const page = await botPage();
+  await page.findByText("Reply to Dana");
+  await waitFor(() => expect(notice(page, "tasks")).not.toBeNull(), {
+    timeout: 3000,
+  });
+  expect(notice(page, "questions and approvals")).toBeNull();
+  expect(notice(page, "check-in findings")).toBeNull();
+});
+
+test("everything failing shows each notice, and never an empty board", async () => {
+  failing = new Set([APPROVALS, TASKS, CHECK_INS]);
+  serving();
+  const page = await botPage();
+  await waitFor(
+    () => {
+      expect(notice(page, "questions and approvals")).not.toBeNull();
+      expect(notice(page, "tasks")).not.toBeNull();
+      expect(notice(page, "check-in findings")).not.toBeNull();
+    },
+    { timeout: 3000 },
+  );
+  expect(page.getByText("Needs you")).toBeDefined();
+});
+
+test("Retry asks again, keeps what loaded, and the notice clears once it answers", async () => {
+  items = [item({ id: "i1", title: "Reply to Dana" })];
+  questions = [
+    {
+      id: "q1",
+      botId: "inbox",
+      threadId: "thread",
+      question: "Which folder?",
+      createdAt: now,
+    },
+  ];
+  failing = new Set([APPROVALS]);
+  serving();
+  const page = await botPage();
+  await waitFor(
+    () => expect(notice(page, "questions and approvals")).not.toBeNull(),
+    { timeout: 3000 },
+  );
+  expect(page.queryByText(/Which folder\?/)).toBeNull();
+
+  failing = new Set();
+  const alert = page.getByText(
+    "Couldn't load questions and approvals. Some may be missing here.",
+  ).parentElement as HTMLElement;
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+  await page.findByText(/Which folder\?/);
+  await waitFor(() =>
+    expect(notice(page, "questions and approvals")).toBeNull(),
+  );
+  expect(page.getByText("Reply to Dana")).toBeDefined();
+});
+
+test("a refetch that fails after a good read keeps the rows and adds the notice", async () => {
+  items = [item({ id: "i1", title: "Reply to Dana" })];
+  serving();
+  const page = await botPage();
+  await page.findByText("Reply to Dana");
+
+  failing = new Set([CHECK_INS]);
+  await queryClient.refetchQueries({ queryKey: ["proactive"] }).catch(() => {});
+
+  await waitFor(
+    () => expect(notice(page, "check-in findings")).not.toBeNull(),
+    { timeout: 3000 },
+  );
+  expect(page.getByText("Reply to Dana")).toBeDefined();
 });

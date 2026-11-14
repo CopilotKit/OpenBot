@@ -19,6 +19,7 @@ import {
 import { cleanup, render } from "@testing-library/react";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminPluginRoute } from "@/routes/_authed/admin/plugins/$key";
+import { answerBotsList } from "./bots-api";
 
 /**
  * The admin app page's "Bot owners can give it to their Bots" line says what letting owners decide
@@ -98,12 +99,13 @@ function install(setup: { shared: boolean; ownerGrants: "any" | "admin" }) {
       headers: { "content-type": "application/json" },
       status,
     });
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
     if (path === "/api/plugins") return json(page);
     if (path.startsWith("/api/plugins/connections"))
       return json({ connections: [], redirectUri: null });
-    if (path.startsWith("/api/agents")) return json([]);
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
     return json({ error: "unexpected" }, 404);
   }) as typeof fetch;
 }

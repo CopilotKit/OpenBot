@@ -27,6 +27,7 @@ import {
 import type { GuidanceReading } from "@/lib/reviewer-guidance/check";
 import type { GuidanceBacktest } from "@/lib/reviewer-guidance/queries";
 import { Route as GuidanceRoute } from "@/routes/_authed/admin/approvals_.guidance";
+import { answerBotsList } from "./bots-api";
 
 /**
  * Guidance for auto-review on Admin → Approvals: written, checked by a reading that sees only the
@@ -162,10 +163,10 @@ beforeEach(() => {
       }
       return Response.json({ guidance: saved });
     }
-    if (path.includes("/api/agents"))
-      return Response.json({
-        agents: [{ id: BOT, name: "Sales Assistant" }],
-      });
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: BOT, name: "Sales Assistant" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "unexpected" }, { status: 404 });
   }) as typeof fetch;
 });

@@ -1,4 +1,11 @@
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
+import {
+  DELEGATE_TOOL,
+  LINK_TOOL,
+  REACT_TOOL,
+  REACTIONS,
+  readTaskReport,
+} from "@openbot/shared/orchestration";
 import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
 import { classifyAttachment } from "@/lib/channels/attachments";
 
@@ -379,7 +386,7 @@ export function toVisibleChatItems(
     if (isToolResult(message)) results.set(message.toolCallId, message.content);
   }
 
-  return messages.flatMap((message): VisibleChatItem[] => {
+  const visible = messages.flatMap((message): VisibleChatItem[] => {
     if (!isReadableMessage(message)) return [];
     // Every row built below is keyed on `message.id`, including the one that keys on it by string
     // interpolation. See `isDrawableMessage` for why an unkeyable row is dropped rather than given
@@ -588,4 +595,96 @@ export function toVisibleChatItems(
 
     return items;
   });
+
+  return asTheBotMeantIt(visible);
+}
+
+/** A run of nothing but the reactions a Bot may leave, as a reply's whole text. */
+const REACTION_ONLY = new RegExp(
+  `^(?:\\s|${REACTIONS.map((emoji) => emoji.replace(/️/g, "")).join("|")}|\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])+$`,
+  "u",
+);
+
+/**
+ * One turn of a Bot that holds `delegate` and `react`, drawn the way it was meant to read.
+ *
+ * A REACTION IS THE WHOLE ANSWER. A Bot that reacts sometimes also writes the emoji as its reply, and
+ * the person saw 👍 under their message and 👍 again as a line of its own. In a turn that reacted, a
+ * line that is nothing but reactions is that reaction again, and is not drawn.
+ *
+ * THE LINE BEFORE THE CARD. A Bot says in a line what it will do and hands the work on, and a model
+ * that calls `delegate` first and writes its line after the result put the task card above "On it.".
+ * A turn whose first words come after its first `delegate` call has them drawn above it. What the
+ * Bot said is unchanged; only where the card sits.
+ */
+function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
+  const out: VisibleChatItem[] = [];
+  let turnStart = 0;
+  const closeTurn = () => {
+    const turn = out.splice(turnStart);
+    const named = (item: VisibleChatItem, name: string) =>
+      item.kind === "tool" && item.toolCall.function.name === name;
+    const reacted = turn.some((item) => named(item, REACT_TOOL));
+    const kept = reacted
+      ? turn.filter(
+          (item) =>
+            !(
+              item.kind === "text" &&
+              item.role === "assistant" &&
+              REACTION_ONLY.test(item.text)
+            ),
+        )
+      : turn;
+    /*
+     * THE CARD IS THE LINK. A Bot that started a task and then looked up its thread in the same
+     * turn drew the task twice, the card and a one-row link list under it. Asked for in a turn of
+     * its own, the list is drawn as always.
+     */
+    if (kept.some((item) => named(item, DELEGATE_TOOL)))
+      for (let at = kept.length - 1; at >= 0; at -= 1)
+        if (named(kept[at] as VisibleChatItem, LINK_TOOL)) kept.splice(at, 1);
+    const card = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const said = kept.findIndex(
+      (item) => item.kind === "text" && item.role === "assistant",
+    );
+    if (card >= 0 && said > card) {
+      const [line] = kept.splice(said, 1);
+      if (line) kept.splice(card, 0, line);
+    }
+    /*
+     * ONE LINE, THEN THE CARD. A model told that a started task ends its reply still wrote a second
+     * line after the result came back ("The task is running. Its chart will be posted here."), which
+     * says again what the line above and the card already say. Words after the card, up to the
+     * task's own reports (which the deployment writes later, in the same turn), are not drawn.
+     */
+    const lastCard = kept.findLastIndex((item) => named(item, DELEGATE_TOOL));
+    const firstCard = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const lineFirst = kept
+      .slice(0, Math.max(firstCard, 0))
+      .some((item) => item.kind === "text" && item.role === "assistant");
+    if (lineFirst)
+      for (let at = lastCard + 1; at < kept.length; at += 1) {
+        const item = kept[at] as VisibleChatItem;
+        if (item.kind === "text" && readTaskReport(item.id)) break;
+        if (item.kind === "text" && item.role === "assistant") {
+          kept.splice(at, 1);
+          at -= 1;
+        }
+      }
+    out.push(...kept);
+  };
+  for (const item of items) {
+    const fromPerson =
+      item.kind === "attachments" ||
+      (item.kind === "text" && item.role === "user");
+    if (fromPerson) {
+      closeTurn();
+      out.push(item);
+      turnStart = out.length;
+      continue;
+    }
+    out.push(item);
+  }
+  closeTurn();
+  return out;
 }

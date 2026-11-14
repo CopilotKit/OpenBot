@@ -1,0 +1,49 @@
+# The addresses CopilotKit Intelligence's v2 API owns, so OpenBot never takes one.
+#
+# OpenBot's resources sit beside Intelligence's under the same organization address, and a client sees
+# one API. That only holds while no OpenBot path names a resource Intelligence already serves: two
+# servers answering `/api/v2/organizations/{organizationId}/threads` is a routing fight, and two
+# different shapes under one name is a client that cannot tell which it got. Threads, memory, Learning
+# and trajectories come from Intelligence's spec, never a copy in OpenBot's.
+#
+# `redocly lint` enforces this list (rule `openbot/no-intelligence-collision`, api/redocly/rules.mjs).
+#
+# Read from Intelligence's api-design/openapi.yaml on main at 24fd8d592 (2026-11-12): every top-level
+# noun under an organization, every root under /api/v2, and the families Intelligence is growing.
+# When Intelligence adds a top-level resource, add its name here in the same pull request that
+# notices it. Intelligence's spec itself is not copied into this repository.
+
+# /api/v2/organizations/{organizationId}/<name>
+organization:
+  names:
+    - analytics
+    - api-keys
+    - channels
+    - insights
+    - learning-containers
+    - learning-schedule
+    - memories
+    - memory-sources
+    - overview
+    - projects
+    - service-accounts
+    - threads
+    - trajectories
+    - trust-policies
+    - usage
+  # Any name that starts with one of these: Learning and memory are Intelligence's families.
+  prefixes:
+    - learning-
+    - memory-
+
+# /api/v2/<name>, and everything under it
+roots:
+  - me
+  - oauth
+  - organization-slugs
+  - runtime
+
+# Exactly these, which Intelligence answers itself.
+exact:
+  - /api/v2/organizations
+  - /api/v2/organizations/{organizationId}

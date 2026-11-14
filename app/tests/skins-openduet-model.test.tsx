@@ -18,6 +18,7 @@ import {
   tabForPath,
 } from "@/skins/openduet/places";
 import { waitingCount } from "@/skins/openduet/tasks-model";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -154,11 +155,13 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
       },
     ],
   };
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0];
     if (path === "/api/approvals") return Response.json(inbox);
-    if (path === "/api/agents")
-      return Response.json({ agents: [{ id: "b-1", name: "Ops Bot" }] });
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: "b-1", name: "Ops Bot" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
   const view = render(

@@ -11,7 +11,9 @@
         const dark = window.localStorage.getItem("openbot-theme") === "dark";
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
-        const skin = window.localStorage.getItem("openbot-skin");
+        const saved = window.localStorage.getItem("openbot-skin");
+        // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
+        const skin = saved === "openmuse" ? "openfuse" : saved;
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
       } catch {}
     </script>

@@ -71,7 +71,7 @@ test("pinning PUTs the flag to the channel's pin route and invalidates the roste
   expect(invalidated).toEqual([{ queryKey: ["channels"] }]);
 });
 
-test("deleting sends DELETE to the channel route and invalidates the roster", async () => {
+test("deleting sends DELETE to the channel route and invalidates the roster and its searches", async () => {
   const seen = capturingFetch(204, undefined);
   const { queryClient, invalidated } = invalidationRecorder();
   const options = deleteChannelMutationOptions(queryClient);
@@ -87,7 +87,11 @@ test("deleting sends DELETE to the channel route and invalidates the roster", as
   expect(seen).toHaveLength(1);
   expect(seen[0]?.url).toBe("/api/channels/channel-1");
   expect(seen[0]?.init?.method).toBe("DELETE");
-  expect(invalidated).toEqual([{ queryKey: ["channels", "list"] }]);
+  // A search that found it must not offer it again either.
+  expect(invalidated).toEqual([
+    { queryKey: ["channels", "list"] },
+    { queryKey: ["channels", "search"] },
+  ]);
 });
 
 test("a refused delete surfaces the server's sentence", async () => {
@@ -145,6 +149,46 @@ test("marking read PUTs the read route and patches lastReadAt in place", async (
   );
   // The dot clears from the cache before the wire answered.
   expect(patched?.pages[0]?.channels[0]?.lastReadAt).not.toBeNull();
+});
+
+test("marking read clears the dot in a search that holds the row, without creating a roster", () => {
+  capturingFetch(204, undefined);
+  const queryClient = new QueryClient();
+  const searchKey = channelKeys.search("hello", 20);
+  queryClient.setQueryData(searchKey, {
+    pages: [
+      {
+        channels: [
+          {
+            id: "channel-1",
+            name: "Assistant channel",
+            agentIds: ["agent-1"],
+            threadId: "thread-1",
+            active: true,
+            summary: null,
+            lastMessage: "hello",
+            lastMessageAt: "2026-08-25T12:00:00.000Z",
+            lastMessageAgentId: "agent-1",
+            createdAt: "2026-08-25T11:00:00.000Z",
+            pinned: false,
+            lastReadAt: null,
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [""],
+  } satisfies InfiniteData<ChannelPage>);
+
+  markChannelReadMutationOptions(queryClient).onMutate?.(
+    "channel-1",
+    mutationContext(queryClient),
+  );
+
+  const patched =
+    queryClient.getQueryData<InfiniteData<ChannelPage>>(searchKey);
+  expect(patched?.pages[0]?.channels[0]?.lastReadAt).not.toBeNull();
+  expect(queryClient.getQueryData(channelKeys.list())).toBeUndefined();
 });
 
 test("a landed mark-read refreshes the Bots badge, and never the roster the socket patches", async () => {

@@ -32,6 +32,7 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -351,8 +352,8 @@ beforeAll(() => {
           });
         return NativeResponse.json({ error: "Not found" }, { status: 404 });
       }
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       if (url.pathname === `/api/plugins/for/${bot}`)
         return NativeResponse.json({ skills: [], tools: [] });
       if (url.pathname === "/api/voice/sessions")

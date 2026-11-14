@@ -261,3 +261,306 @@ test("the uninstaller deletes the data only when it is not an update", () => {
   expect(remove).toContain('RmDir /r "$APPDATA\\${BUNDLEID}"');
   expect(remove).toContain('RmDir /r "$LOCALAPPDATA\\${BUNDLEID}"');
 });
+
+/**
+ * Box H: after an in-app update the new OpenBot opened behind the maximised Edge that Windows put in
+ * front as the old one closed, and Starting OpenBot ran there unseen for four minutes. Every OpenBot
+ * the installer starts, after an update (/R) and from its last page, is started the same way: the
+ * installer first passes on its right to bring a window to the front (AllowSetForegroundWindow with
+ * ASFW_ANY, -1), then starts OpenBot with the flag that has it come forward as its window first shows
+ * (STARTED_BY_INSTALLER in src-tauri/src/main.rs), added once to the arguments an update hands on.
+ */
+test("every OpenBot the installer starts may come to the front and is told the installer started it", () => {
+  expect(hooks()).toContain(
+    '!define OPENBOT_STARTED_BY_INSTALLER "--started-by-installer"',
+  );
+  const run = code(
+    between(hooks(), "!macro OPENBOT_RUN_AFTER_INSTALL args\n", "!macroend"),
+  );
+  const at = (line: string) => {
+    const index = run.indexOf(line);
+    expect(index).toBeGreaterThan(-1);
+    return index;
+  };
+  const allowed = at("System::Call 'user32::AllowSetForegroundWindow(i -1)'");
+  const given = at('StrCpy $OpenBotRunArgs "${args}"');
+  const looked = at(
+    '${StrLoc} $OpenBotFlagAt "$OpenBotRunArgs" "${OPENBOT_STARTED_BY_INSTALLER}" ">"',
+  );
+  const started = at(
+    'nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$OpenBotRunArgs"',
+  );
+  expect(allowed).toBeLessThan(started);
+  expect(given).toBeLessThan(looked);
+  expect(looked).toBeLessThan(started);
+  // Exactly one launch in the macro.
+  expect(run.filter((line) => line.includes("RunAsUser"))).toHaveLength(1);
+
+  // After an update: the arguments the updater handed on (/ARGS), then nothing of Tauri's runs.
+  const success = code(
+    between(template(), "Function .onInstSuccess", "FunctionEnd"),
+  );
+  const handed = success.indexOf('${GetOptions} $CMDLINE "/ARGS" $R0');
+  expect(handed).toBeGreaterThan(-1);
+  expect(success.slice(handed + 1, handed + 3)).toEqual([
+    '!insertmacro OPENBOT_RUN_AFTER_INSTALL "$R0"',
+    "Return",
+  ]);
+  // From the last page: no arguments, the page stays until OpenBot's window is up, then nothing
+  // of Tauri's runs.
+  const finish = code(
+    between(template(), "Function RunMainBinary", "FunctionEnd"),
+  );
+  expect(finish.slice(0, 3)).toEqual([
+    '!insertmacro OPENBOT_RUN_AFTER_INSTALL ""',
+    "!insertmacro OPENBOT_STAY_UNTIL_OPEN",
+    "Return",
+  ]);
+});
+
+/**
+ * Box H, a clean install of 1.0.2: while Microsoft's WebView2 Runtime installed, the Installing
+ * page's status line said "Execute: C:\Users\ADMINI~1\AppData\Local\Temp\
+ * MicrosoftEdgeWebview2Setup.exe /silent /install" for as long as it took. NSIS's ExecWait writes
+ * its command there itself. Box I saw the same for the old version's uninstaller (#1462). So every
+ * ExecWait, in Tauri's template and in OpenBot's hooks, says it to the details list only
+ * (`SetDetailsPrint listonly`) and puts the status line back after (`SetDetailsPrint both`),
+ * https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint, so the plain line before it
+ * stays on screen.
+ */
+test("no ExecWait in the installer puts its command on the page", () => {
+  for (const [file, text, count] of [
+    ["windows/installer.nsi", template(), 4],
+    ["windows/hooks.nsh", hooks(), 1],
+  ] as const) {
+    const lines = code(text);
+    const waits = lines.flatMap((line, at) =>
+      line.startsWith("ExecWait ") || line.startsWith("ExecWait\t") ? [at] : [],
+    );
+    expect({ file, waits: waits.length }).toEqual({ file, waits: count });
+    for (const at of waits) {
+      expect({ file, wait: lines[at], before: lines[at - 1] }).toEqual({
+        file,
+        wait: lines[at],
+        before: "SetDetailsPrint listonly",
+      });
+      expect({ file, wait: lines[at], after: lines[at + 1] }).toEqual({
+        file,
+        wait: lines[at],
+        after: "SetDetailsPrint both",
+      });
+    }
+    // Nothing else of NSIS's own runs a program and says so (Exec, ExecShell).
+    expect(
+      lines.filter((line) => /^Exec(Shell)?\b(?!Wait)/.test(line)),
+    ).toEqual([]);
+  }
+});
+
+/**
+ * The WebView2 Runtime installs under the plain line (installingWebview2 in
+ * windows/installer-english.nsh), with the page's bar moving, as the old version's uninstall does.
+ */
+test("the WebView2 Runtime installs under a plain line with the bar moving", () => {
+  const install = code(
+    between(template(), "install_webview2:", "webview2_done:"),
+  );
+  expect(install.slice(0, 6)).toEqual([
+    'DetailPrint "$(installingWebview2)"',
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    "SetDetailsPrint listonly",
+    'ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1',
+    "SetDetailsPrint both",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  // An older Runtime brought up to date the same way.
+  const update = code(between(template(), "update_webview:", "SectionEnd"));
+  const run = update.findIndex((line) => line.startsWith("ExecWait "));
+  expect(update.slice(run - 2, run + 3)).toEqual([
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    "SetDetailsPrint listonly",
+    'ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1',
+    "SetDetailsPrint both",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  expect(update[0]).toBe('DetailPrint "$(installingWebview2)"');
+
+  // Box H: NSISdl's own box said "Downloading MicrosoftEdgeWebview2Setup.exe" and "Connecting ..."
+  // over the page. The bootstrapper comes quietly, from the address Tauri's own line uses, under
+  // the plain line with the bar moving, and Tauri's own lines after it are not reached.
+  const download = code(
+    between(
+      template(),
+      '!if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"',
+      "!endif",
+    ),
+  );
+  const quiet = download.findIndex((line) =>
+    line.startsWith("NSISdl::download_quiet "),
+  );
+  const tauris = download.findIndex((line) =>
+    line.startsWith("NSISdl::download "),
+  );
+  expect(download.slice(quiet - 5, quiet + 3)).toEqual([
+    'DetailPrint "$(webview2Downloading)"',
+    "SetDetailsPrint listonly",
+    'Delete "$TEMP\\MicrosoftEdgeWebview2Setup.exe"',
+    "SetDetailsPrint both",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 1",
+    download[quiet],
+    "Pop $0",
+    "!insertmacro OPENBOT_PROGRESS_MOVING 0",
+  ]);
+  expect(download[quiet].replace("download_quiet", "download")).toBe(
+    download[tauris],
+  );
+  const leave = download.indexOf("Goto install_webview2");
+  expect(leave).toBeGreaterThan(quiet);
+  expect(leave).toBeLessThan(tauris);
+});
+
+/**
+ * NSIS's own instructions that put a path on the Installing page's status line as they run:
+ * "Output folder:", "Create folder:", "Extract:", "Delete file:", "Remove folder:", "Rename:",
+ * "Created uninstaller:", "Create shortcut:" (Tauri's shortcut functions) and "Execute:".
+ */
+const SAYS_A_PATH =
+  /^(SetOutPath|CreateDirectory|File|Delete|RMDir|Rename|CopyFiles|WriteUninstaller|CreateShortcut|ExecWait|ExecShell|Exec)\b|^Call CreateOrUpdate\w*Shortcut$/;
+
+/**
+ * FileFunc's GetSize and Locate say their counts on the status line whatever the mode is
+ * ("Size:190 Kb  Files:1  Folders:"), and set it back to `both` when they end.
+ */
+const SAYS_ITS_OWN = /^\$\{(GetSize|Locate)\}/;
+
+/**
+ * What `lines` put on the status line, run in order from `SetDetailsPrint both`, a `Goto` going on
+ * from its label: the plain lines said there, the instructions that put a path or a count there, and
+ * the details mode left at the end.
+ */
+function statusLine(lines: string[]) {
+  let mode = "both";
+  const said: string[] = [];
+  const paths: string[] = [];
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at];
+    const jump = /^Goto (\w+)$/.exec(line);
+    const label = jump ? lines.indexOf(`${jump[1]}:`, at) : -1;
+    const set = /^SetDetailsPrint (\w+)$/.exec(line);
+    if (label > at) at = label;
+    else if (set) mode = set[1];
+    else if (SAYS_ITS_OWN.test(line)) {
+      paths.push(line);
+      mode = "both";
+    } else if (mode !== "both" && mode !== "textonly") continue;
+    else if (SAYS_A_PATH.test(line)) paths.push(line);
+    else if (line.startsWith("DetailPrint ")) said.push(line);
+  }
+  return { said, paths, mode };
+}
+
+/**
+ * Windows F, a clean install of 1.0.2: the Installing page's status line read "Create folder:
+ * C:\Users\Administrator\AppData\Local\OpenBot\cli-bundle\..." and "Extract: ..." for each of
+ * OpenBot's files, the person's own folders and nothing they could act on. A person reads plain
+ * lines only: "Copying OpenBot's files." while the files go in, and the WebView2 Runtime's own
+ * lines while it comes. NSIS's lines still go to the details list
+ * (https://nsis.sourceforge.io/Docs/Chapter4.html#setdetailsprint). On the first live run of that
+ * fix, FileFunc's GetSize still said "Size:190 Kb  Files:1  Folders:" and put the status line back,
+ * so "Create shortcut: C:\Users\Administrator\...\OpenBot.lnk" showed after it.
+ */
+test("the Installing page's status line says plain lines, never a folder or a file", () => {
+  const install = code(between(template(), "Section Install", "SectionEnd"));
+  const copying = statusLine(install);
+  expect(copying.paths).toEqual([]);
+  expect(copying.said).toEqual([`DetailPrint "Copying OpenBot's files."`]);
+  // Up before the first file is copied, and the status line is back for what comes after.
+  expect(install.indexOf(copying.said[0])).toBeLessThan(
+    install.findIndex((line) => line.startsWith("File ")),
+  );
+  expect(copying.mode).toBe("both");
+  // The old version's removal comes first and says its own plain line (OPENBOT_UNINSTALL_OLD_VERSION).
+  expect(install.indexOf("!insertmacro NSIS_HOOK_PREINSTALL")).toBeLessThan(
+    install.indexOf(copying.said[0]),
+  );
+
+  // The WebView2 Runtime, as OpenBot's installer brings it (downloadBootstrapper, Tauri's default).
+  const download = code(
+    between(
+      template(),
+      '!if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"',
+      "Goto install_webview2",
+    ),
+  );
+  const runtime = code(
+    between(template(), "install_webview2:", "webview2_done:"),
+  );
+  for (const part of [download, runtime]) {
+    const shown = statusLine(part);
+    expect(shown.paths).toEqual([]);
+    expect(shown.mode).toBe("both");
+    for (const line of shown.said)
+      expect(line).toMatch(
+        /^DetailPrint "\$\((webview2\w+|installingWebview2)\)"$/,
+      );
+  }
+});
+
+/**
+ * Box H: after Finish on a clean computer nothing was on screen for about ten seconds, the
+ * installer gone and OpenBot's window not up yet. The last page stays, saying OpenBot is opening,
+ * until a visible window with the class and title Tauri gives OpenBot's (tauri-runtime-wry's
+ * "Tauri Window", tauri.conf.json's title), for a minute at most; nothing on it can be pressed
+ * meanwhile, and it hands on its messages so Windows never shows it as not responding.
+ */
+test("after Finish the installer stays on screen until OpenBot's window is up", () => {
+  const config = readJson("tauri.conf.json");
+  const main = config.app.windows.find(
+    (window: { label?: string }) => (window.label ?? "main") === "main",
+  );
+  expect(main.title).toBe(config.productName);
+  expect(hooks()).toContain('!define OPENBOT_WINDOW_CLASS "Tauri Window"');
+  expect(hooks()).toContain("!define OPENBOT_OPEN_WAIT_TENTHS 600");
+  const stay = code(
+    between(hooks(), "!macro OPENBOT_STAY_UNTIL_OPEN\n", "!macroend"),
+  );
+  const at = (line: string) => {
+    const index = stay.indexOf(line);
+    expect({ line, found: index > -1 }).toEqual({ line, found: true });
+    return index;
+  };
+  // Finish, Cancel and Back, both boxes and the close button are off before it waits.
+  for (const button of [1, 2, 3]) {
+    at(`GetDlgItem $OpenBotWaitWindow $HWNDPARENT ${button}`);
+  }
+  at("EnableWindow $mui.FinishPage.Run 0");
+  at("EnableWindow $mui.FinishPage.ShowReadme 0");
+  const closed = at(
+    "System::Call 'user32::EnableMenuItem(p $OpenBotWaitWindow, i ${SC_CLOSE}, i ${MF_GRAYED})'",
+  );
+  const said = at(
+    'SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 "STR:Opening OpenBot. This can take a minute."',
+  );
+  const found = at(
+    'FindWindow $OpenBotWaitWindow "${OPENBOT_WINDOW_CLASS}" "${PRODUCTNAME}"',
+  );
+  const visible = at(
+    "System::Call 'user32::IsWindowVisible(p $OpenBotWaitWindow) i.s'",
+  );
+  const handed = at(
+    "System::Call 'user32::DispatchMessageW(p $OpenBotWaitMessage)'",
+  );
+  const slept = at("Sleep 100");
+  expect(closed).toBeLessThan(found);
+  expect(said).toBeLessThan(found);
+  expect(found).toBeLessThan(visible);
+  expect(visible).toBeLessThan(handed);
+  expect(handed).toBeLessThan(slept);
+  at(
+    "System::Call 'user32::PeekMessageW(p $OpenBotWaitMessage, p 0, i 0, i 0, i ${PM_REMOVE}) i.s'",
+  );
+  at("${If} $OpenBotWaitTenths >= ${OPENBOT_OPEN_WAIT_TENTHS}");
+  at("IntOp $OpenBotWaitTenths $OpenBotWaitTenths + 1");
+  // A silent install has no page to keep.
+  expect(stay[0]).toBe("${IfNot} ${Silent}");
+});

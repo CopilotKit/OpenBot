@@ -231,7 +231,15 @@ pub fn connection_of_machine(machine: &str) -> String {
     connection_keeping_openbot(machine, rootful, holds_openbot)
 }
 
-fn podman(args: &[&str]) -> Result<String, String> {
+/// A `podman` command, run so that the person's default connection stays as they had it (see
+/// `podman_default`).
+pub(crate) fn podman(args: &[&str]) -> Result<String, String> {
+    crate::podman_default::keeping(&mut crate::podman_default::ThisComputer, args)
+}
+
+/// A `podman` command as it is. Only `podman_default` runs these: everything else goes through
+/// `podman`.
+pub(crate) fn podman_as_is(args: &[&str]) -> Result<String, String> {
     podman_with(args, || {
         crate::engine::tool(Engine::Podman).args(args).output()
     })
@@ -335,7 +343,7 @@ pub fn create_machine(
     )
 }
 
-fn create_machine_with(
+pub(crate) fn create_machine_with(
     cpus: u32,
     memory_mib: u32,
     disk_gib: u32,
@@ -1271,10 +1279,18 @@ pub type Containers = Vec<(String, Vec<String>)>;
 /// The containers running in the machine `name` now. Asked over SSH, which still answers when the
 /// machine's API has gone.
 pub fn running_containers(name: &str) -> Containers {
+    running_containers_with(&mut podman, name)
+}
+
+/// `running_containers`, asked through `run`.
+pub(crate) fn running_containers_with(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    name: &str,
+) -> Containers {
     [connection_for(name, false), connection_for(name, true)]
         .into_iter()
         .filter_map(|connection| {
-            let ids = podman(&["--connection", &connection, "ps", "--quiet"]).ok()?;
+            let ids = run(&["--connection", &connection, "ps", "--quiet"]).ok()?;
             let ids: Vec<String> = ids.lines().map(str::to_string).collect();
             (!ids.is_empty()).then_some((connection, ids))
         })
@@ -1310,10 +1326,58 @@ pub fn machine_in(listing: &str, name: &str) -> Result<Option<bool>, String> {
         .map(|machine| machine.running))
 }
 
+/**
+Every container in OpenBot's machine `name` stopped, before the machine is removed (`uninstall`).
+
+Stopping a container is what takes its port rules out of WSL's shared network namespace (netavark's
+teardown). Removing the machine with them still running leaves its rules behind, ahead of the next
+OpenBot machine's for the same ports. Box I's backend couldn't be stopped, its cluster's rules
+outlived the machine, and the next install failed at "Opening OpenBot". Only OpenBot's own rootful
+connection, where its containers run and publish their ports, so nothing of the person's is touched.
+*/
+pub fn stop_all_containers(name: &str) -> Result<(), String> {
+    stop_all_containers_with(podman, name)
+}
+
+fn stop_all_containers_with(
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    name: &str,
+) -> Result<(), String> {
+    run(&["--connection", &connection_for(name, true), "stop", "--all"]).map(|_| ())
+}
+
+/// When they couldn't be stopped: every one of OpenBot's port rules in the machine `name` removed
+/// instead (`netavark_rules::clear_own`), while the machine can still be reached. Answers how many.
+pub fn clear_own_port_rules(name: &str) -> Result<usize, String> {
+    clear_own_port_rules_with(podman, name)
+}
+
+fn clear_own_port_rules_with(
+    run: impl FnMut(&[&str]) -> Result<String, String>,
+    name: &str,
+) -> Result<usize, String> {
+    let own = crate::netavark_rules::clear_own(run, name)?;
+    for rule in &own {
+        log::info!(
+            "[uninstall] removed a port rule in {}: {}",
+            rule.chain,
+            rule.text
+        );
+    }
+    Ok(own.len())
+}
+
 /// Remove the machine `name` and everything in it, stopping it first if it runs. `--force` because
 /// `podman machine rm` otherwise asks at a terminal, and OpenBot's commands have none.
 pub fn remove_machine_named(name: &str) -> Result<(), String> {
-    podman(&["machine", "rm", "--force", name]).map(|_| ())
+    remove_machine_with(name, podman)
+}
+
+pub(crate) fn remove_machine_with(
+    name: &str,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> Result<(), String> {
+    run(&["machine", "rm", "--force", name]).map(|_| ())
 }
 
 /// Start the machine `name`, then the containers that were running in it.
@@ -1334,10 +1398,19 @@ pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), St
             Err(error) => return Err(error),
         }
     }
+    start_containers_with(&mut podman, containers);
+    Ok(())
+}
+
+/// The containers that were running in a machine, started again once it is back, through `run`.
+pub(crate) fn start_containers_with(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    containers: &Containers,
+) {
     for (connection, ids) in containers {
         let mut args = vec!["--connection", connection.as_str(), "start"];
         args.extend(ids.iter().map(String::as_str));
-        match podman(&args) {
+        match run(&args) {
             Ok(_) => log::info!(
                 "[engine] started {} container(s) on {connection} again",
                 ids.len()
@@ -1345,7 +1418,6 @@ pub fn start_machine_named(name: &str, containers: &Containers) -> Result<(), St
             Err(error) => log::warn!("[engine] could not start containers again: {error}"),
         }
     }
-    Ok(())
 }
 
 /// The machine `name` is running and its Docker API answers, or why not.
@@ -2067,6 +2139,10 @@ mod tests {
     struct WslMachine {
         listing: String,
         networks: String,
+        /// `ip route` in the namespace, and `podman ps -a --format json` on OpenBot's machine, when
+        /// the case has them.
+        routes: String,
+        published: String,
         reads: usize,
     }
 
@@ -2075,8 +2151,16 @@ mod tests {
             Self {
                 listing: listing.to_string(),
                 networks: networks.to_string(),
+                routes: String::new(),
+                published: String::new(),
                 reads: 0,
             }
+        }
+
+        fn with_namespace(mut self, routes: &str, published: &str) -> Self {
+            self.routes = routes.to_string();
+            self.published = published.to_string();
+            self
         }
 
         fn run(&mut self, args: &[&str]) -> Result<String, String> {
@@ -2096,12 +2180,21 @@ mod tests {
                     if *script == crate::netavark_rules::read_script() =>
                 {
                     self.reads += 1;
-                    let said = format!(
+                    let mut said = format!(
                         "{}{}\n{}\n",
                         self.listing,
                         crate::netavark_rules::BETWEEN,
                         self.networks
                     );
+                    if !self.routes.is_empty() {
+                        said.push_str(&format!(
+                            "{}\n{}{}\n{}\n",
+                            crate::netavark_rules::ROUTES,
+                            self.routes,
+                            crate::netavark_rules::PUBLISHED,
+                            self.published
+                        ));
+                    }
                     Ok(said.trim().to_string())
                 }
                 ["machine", "ssh", "openbot", script] if script.starts_with("failed=0;") => {
@@ -2126,6 +2219,17 @@ mod tests {
             let mut failed = false;
             for command in script.split(';') {
                 let words: Vec<&str> = command.split_whitespace().collect();
+                match words.as_slice() {
+                    ["sudo", "nft", "flush", "chain", family, table, chain, ..] => {
+                        self.flush(family, table, chain);
+                        continue;
+                    }
+                    ["sudo", "nft", "delete", "chain", family, table, chain, ..] => {
+                        failed |= !self.delete_chain(family, table, chain);
+                        continue;
+                    }
+                    _ => {}
+                }
                 let ["sudo", "nft", "delete", "rule", family, table, chain, "handle", handle, ..] =
                     words.as_slice()
                 else {
@@ -2157,21 +2261,337 @@ mod tests {
                 Ok(String::new())
             }
         }
+
+        /// `nft flush chain`: every rule in the chain goes, and the chain stays.
+        fn flush(&mut self, family: &str, table: &str, chain: &str) {
+            let gone: Vec<String> = crate::netavark_rules::rules(&self.listing)
+                .into_iter()
+                .filter(|rule| rule.family == family && rule.table == table && rule.chain == chain)
+                .map(|rule| format!("{} # handle {}", rule.text, rule.handle))
+                .collect();
+            self.listing = self
+                .listing
+                .lines()
+                .filter(|listed| !gone.iter().any(|line| listed.trim() == line))
+                .map(|listed| format!("{listed}\n"))
+                .collect();
+        }
+
+        /// `nft delete chain`: refused, as nft refuses it ("Device or resource busy"), while the
+        /// chain has a rule or a rule jumps to it, or when there is no such chain.
+        fn delete_chain(&mut self, family: &str, table: &str, chain: &str) -> bool {
+            let busy = crate::netavark_rules::rules(&self.listing)
+                .iter()
+                .any(|rule| {
+                    rule.family == family
+                        && rule.table == table
+                        && (rule.chain == chain
+                            || rule.text.rsplit_once("jump ").map(|(_, to)| to.trim())
+                                == Some(chain))
+                });
+            if busy {
+                return false;
+            }
+            let (mut kept, mut found, mut in_table, mut skipping) =
+                (String::new(), false, false, false);
+            for line in self.listing.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("table ") {
+                    in_table = trimmed.starts_with(&format!("table {family} {table} "));
+                }
+                if in_table && trimmed.starts_with(&format!("chain {chain} {{")) {
+                    (found, skipping) = (true, true);
+                    continue;
+                }
+                if skipping {
+                    skipping = trimmed != "}";
+                    continue;
+                }
+                kept.push_str(line);
+                kept.push('\n');
+            }
+            self.listing = kept;
+            found
+        }
     }
 
-    /// Where a connection to `127.0.0.1:port` is sent: the first jump for the port in
-    /// `NETAVARK-HOSTPORT-DNAT`, then the first DNAT for it in that chain.
+    /// A person's machine's network and Docker's DNAT, as the namespace holds them beside box I's.
+    const THEIRS_AND_DOCKER: &str = "table inet theirs { # handle 90
+	chain nv_5f3a91c2_10_89_6_0_nm24_dnat { # handle 91
+		ip daddr 127.0.0.1 tcp dport 5432 ct mark set meta mark | 0x00001000 dnat ip to 10.89.6.2:5432 # handle 92
+	}
+}
+table ip nat { # handle 5
+	chain DOCKER { # handle 1
+		iifname != \"docker0\" tcp dport 3001 counter packets 0 bytes 0 dnat to 172.17.0.2:3001 # handle 3
+	}
+}
+";
+
+    /// Before OpenBot's machine is removed with its containers still running (their stop failed),
+    /// every one of its own port rules goes: 11 in box I's capture, in the backend's cluster's
+    /// network and OpenBot's two. Its dead-rule cleanup alone removes none, since every container
+    /// still runs. The removed machine's chains, a person's machine's and Docker's stay as listed.
+    #[test]
+    fn before_openbots_machine_is_removed_its_port_rules_go_and_no_one_elses() {
+        let listing = format!("{BOX_I}{THEIRS_AND_DOCKER}");
+        let theirs = |listing: &str| -> Vec<crate::netavark_rules::Rule> {
+            crate::netavark_rules::rules(listing)
+                .into_iter()
+                .filter(|rule| {
+                    !["nv_840610be_", "nv_c10856eb_", "nv_c2b6ea51_"]
+                        .iter()
+                        .any(|ours| rule.chain.starts_with(ours))
+                })
+                .collect()
+        };
+        assert!(crate::netavark_rules::dead_rules(&listing, BOX_I_NETWORKS)
+            .unwrap()
+            .is_empty());
+
+        // As the machine answers now: its rules and networks, then the namespace's routes and the
+        // ports its containers publish.
+        let mut machine =
+            WslMachine::new(&listing, BOX_I_NETWORKS).with_namespace(BOX_I_ROUTES, BOX_I_PS);
+        let removed = clear_own_port_rules_with(|args| machine.run(args), MACHINE).unwrap();
+        assert_eq!(removed, 11);
+        let left = crate::netavark_rules::rules(&machine.listing);
+        let ours_left: Vec<_> = left
+            .iter()
+            .filter(|rule| rule.to.is_some() && !theirs(&machine.listing).contains(rule))
+            .collect();
+        assert!(ours_left.is_empty(), "{ours_left:?}");
+        assert_eq!(theirs(&machine.listing), theirs(&listing));
+        // The removed machine's rules for 3010 and the person's for 5432 are still where they were.
+        assert_eq!(reaches(&machine.listing, 3010), reaches(&listing, 3010));
+        assert!(machine
+            .listing
+            .contains("dnat ip to 10.89.6.2:5432 # handle 92"));
+        assert!(machine
+            .listing
+            .contains("dnat to 172.17.0.2:3001 # handle 3"));
+    }
+
+    /// The containers are stopped on OpenBot's own rootful connection, where its stack and the
+    /// backend's cluster run, and nowhere else.
+    #[test]
+    fn openbots_containers_are_stopped_on_its_own_connection_only() {
+        let mut asked = Vec::new();
+        stop_all_containers_with(
+            |args| {
+                asked.push(args.join(" "));
+                Ok(String::new())
+            },
+            MACHINE,
+        )
+        .unwrap();
+        assert_eq!(asked, ["--connection openbot-root stop --all"]);
+    }
+
+    /// Where a connection to `127.0.0.1:port` is sent: the jumps for the port in
+    /// `NETAVARK-HOSTPORT-DNAT` in order, and the first DNAT for it in the first chain that has one.
     fn reaches(listing: &str, port: u16) -> Option<std::net::IpAddr> {
         let rules = crate::netavark_rules::rules(listing);
         let dport = format!("dport {port} ");
-        let jump = rules
-            .iter()
-            .find(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains(&dport))?;
-        let chain = jump.text.rsplit("jump ").next()?.trim();
+        // A jump into a chain with nothing for the port comes back, and the next one is tried.
         rules
             .iter()
-            .find(|rule| rule.chain == chain && rule.text.contains(&dport) && rule.to.is_some())?
-            .to
+            .filter(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains(&dport))
+            .filter_map(|jump| jump.text.rsplit("jump ").next())
+            .find_map(|chain| {
+                rules
+                    .iter()
+                    .find(|rule| {
+                        rule.chain == chain.trim()
+                            && rule.text.contains(&dport)
+                            && rule.to.is_some()
+                    })?
+                    .to
+            })
+    }
+
+    /*
+     * Box I (I-evidence I2-F-12): a ticked uninstall removed OpenBot's machine with its service stop
+     * failing, the person's rootless machine kept WSL up, and an install made a new `openbot`. The
+     * removed machine's chains, for 10.89.1.0/24 and 10.89.2.0/24, sit ahead of the new machine's,
+     * and no network anywhere maps to them now. The ruleset is the capture's, verbatim; the
+     * networks and containers are the capture's own list. The routes were not captured: they are
+     * the shape WSL lists them in, the removed machine's bridges with nothing attached (`linkdown`,
+     * as box F's capture shows such a bridge).
+     */
+    const BOX_I: &str = include_str!("../test-fixtures/netavark-rules/box-i.nft");
+    const BOX_I_NETWORKS: &str = include_str!("../test-fixtures/netavark-rules/box-i-inspect.json");
+    const BOX_I_ROUTES: &str = include_str!("../test-fixtures/netavark-rules/box-i-routes.txt");
+    const BOX_I_PS: &str = include_str!("../test-fixtures/netavark-rules/box-i-ps.json");
+    /// Box I with a rootful machine of the person's beside it, publishing 127.0.0.1:5432, one of
+    /// OpenBot's ports, to a postgres of theirs that runs, and Docker publishing 3001.
+    const BOX_I_WITH_PERSON: &str =
+        include_str!("../test-fixtures/netavark-rules/box-i-with-person-and-docker.nft");
+    const BOX_I_WITH_PERSON_ROUTES: &str =
+        include_str!("../test-fixtures/netavark-rules/box-i-with-person-routes.txt");
+
+    /// The removed machine's rules go, all of them, before the back end starts, so 3001, 3010,
+    /// 5432, 4100 and 4206 reach the new machine's containers; the new machine's rules stay.
+    #[test]
+    fn rules_a_removed_machine_left_go_before_the_back_end_starts() {
+        let mut machine =
+            WslMachine::new(BOX_I, BOX_I_NETWORKS).with_namespace(BOX_I_ROUTES, BOX_I_PS);
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        readied_for_backend_with(Some(&address), |args| machine.run(args), true, || ());
+
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        for (port, to) in [
+            (3001, "10.89.4.7"),
+            (3010, "10.89.4.7"),
+            (5432, "10.89.4.2"),
+            (4100, "10.89.5.2"),
+            (4206, "10.89.5.3"),
+            (49897, "10.89.3.3"),
+        ] {
+            assert_eq!(
+                reaches(&machine.listing, port),
+                Some(ip(to)),
+                "127.0.0.1:{port}"
+            );
+        }
+        let before = crate::netavark_rules::rules(BOX_I);
+        let after = crate::netavark_rules::rules(&machine.listing);
+        // The DNAT rules that went. Their chains went too, with the jumps to them: see
+        // `the_chains_a_removed_machine_left_go_with_the_jumps_to_them_and_nothing_else`.
+        let removed: Vec<(String, u64)> = before
+            .iter()
+            .filter(|rule| rule.to.is_some() && !after.contains(rule))
+            .map(|rule| (rule.chain.clone(), rule.handle))
+            .collect();
+        let removed_machine = |chain: &str, handles: &[u64]| {
+            handles
+                .iter()
+                .map(|handle| (chain.to_string(), *handle))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            removed,
+            [
+                removed_machine(
+                    "nv_9251097f_10_89_1_0_nm24_dnat",
+                    &[145, 168, 172, 215, 223, 227]
+                ),
+                removed_machine(
+                    "nv_6bd7ac84_10_89_2_0_nm24_dnat",
+                    &[160, 164, 176, 180, 211, 219, 231, 235]
+                ),
+            ]
+            .concat()
+        );
+    }
+
+    /// Box I after #1482's cleanup: `nv_9251097f_…_dnat` and `nv_6bd7ac84_…_dnat`, the removed
+    /// machine's chains, stayed with only netavark's SETMARK jumps in them, and the jumps to them
+    /// stayed first in `NETAVARK-HOSTPORT-DNAT`, so every connection fell through them. They go
+    /// now, chain and jumps, and nothing else does: OpenBot's machine's own chains, the removed
+    /// machine's other chains, and a person's machine's chain and the jump to it stay as they were.
+    #[test]
+    fn the_chains_a_removed_machine_left_go_with_the_jumps_to_them_and_nothing_else() {
+        let orphan_chains = [
+            "nv_9251097f_10_89_1_0_nm24_dnat",
+            "nv_6bd7ac84_10_89_2_0_nm24_dnat",
+        ];
+        for (listing, routes) in [
+            (BOX_I, BOX_I_ROUTES),
+            (BOX_I_WITH_PERSON, BOX_I_WITH_PERSON_ROUTES),
+        ] {
+            let mut machine =
+                WslMachine::new(listing, BOX_I_NETWORKS).with_namespace(routes, BOX_I_PS);
+            let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+            readied_for_backend_with(Some(&address), |args| machine.run(args), true, || ());
+
+            let into_orphan = |rule: &crate::netavark_rules::Rule| {
+                orphan_chains.contains(&rule.chain.as_str())
+                    || rule
+                        .text
+                        .rsplit_once("jump ")
+                        .is_some_and(|(_, to)| orphan_chains.contains(&to.trim()))
+            };
+            for chain in orphan_chains {
+                assert!(
+                    !machine.listing.contains(&format!("chain {chain} {{")),
+                    "{chain} is still there"
+                );
+            }
+            let after = crate::netavark_rules::rules(&machine.listing);
+            assert!(
+                !after.iter().any(into_orphan),
+                "{:?}",
+                after.iter().filter(|r| into_orphan(r)).collect::<Vec<_>>()
+            );
+            // Everything else is as it was.
+            let before: Vec<_> = crate::netavark_rules::rules(listing)
+                .into_iter()
+                .filter(|rule| !into_orphan(rule))
+                .collect();
+            assert_eq!(after, before);
+            assert!(machine
+                .listing
+                .contains("chain nv_9251097f_10_89_1_0_nm24 {"));
+            // The first jump for 3010 is now OpenBot's own machine's.
+            let first = after
+                .iter()
+                .find(|rule| {
+                    rule.chain == "NETAVARK-HOSTPORT-DNAT" && rule.text.contains("dport 3010 ")
+                })
+                .unwrap();
+            assert!(
+                first.text.ends_with("jump nv_c10856eb_10_89_4_0_nm24_dnat"),
+                "{}",
+                first.text
+            );
+        }
+    }
+
+    /// The same, with a rootful machine of the person's beside it that publishes 127.0.0.1:5432,
+    /// one of OpenBot's own ports, to a postgres of theirs that runs, and Docker publishing 3001.
+    /// OpenBot can't see that machine's containers, but their bridge is up, so their chain is not
+    /// taken for a removed machine's; Docker's is not netavark's. Both stay as they were.
+    #[test]
+    fn a_persons_machine_on_one_of_openbots_ports_is_not_taken_for_a_removed_one() {
+        let mut machine = WslMachine::new(BOX_I_WITH_PERSON, BOX_I_NETWORKS)
+            .with_namespace(BOX_I_WITH_PERSON_ROUTES, BOX_I_PS);
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        readied_for_backend_with(Some(&address), |args| machine.run(args), true, || ());
+
+        let after = crate::netavark_rules::rules(&machine.listing);
+        for kept in ["dnat ip to 10.89.6.2:5432", "dnat to 172.17.0.2:3001"] {
+            assert!(after.iter().any(|rule| rule.text.ends_with(kept)), "{kept}");
+        }
+        let before = crate::netavark_rules::rules(BOX_I_WITH_PERSON);
+        let removed = [
+            "nv_6bd7ac84_10_89_2_0_nm24_dnat",
+            "nv_9251097f_10_89_1_0_nm24_dnat",
+        ];
+        let gone: Vec<&str> = before
+            .iter()
+            .filter(|rule| !after.contains(rule))
+            .map(|rule| rule.chain.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(gone, ["NETAVARK-HOSTPORT-DNAT", removed[0], removed[1]]);
+        // What went from NETAVARK-HOSTPORT-DNAT is the jumps to the removed machine's chains.
+        for rule in before
+            .iter()
+            .filter(|rule| rule.chain == "NETAVARK-HOSTPORT-DNAT" && !after.contains(rule))
+        {
+            assert!(
+                removed
+                    .iter()
+                    .any(|chain| rule.text.ends_with(&format!("jump {chain}"))),
+                "{}",
+                rule.text
+            );
+        }
+        // Their 5432 comes first, as it did: OpenBot changes nothing of theirs.
+        let ip = |address: &str| address.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(reaches(&machine.listing, 5432), Some(ip("10.89.6.2")));
     }
 
     /// The bug on a Windows machine: OpenBot's machine stopped and started again, and its ports

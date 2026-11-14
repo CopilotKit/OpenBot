@@ -24,12 +24,14 @@ pub mod local_eval_state;
 pub mod local_images;
 pub mod local_update;
 pub mod logging;
+pub mod machine_size;
 #[cfg(target_os = "macos")]
 pub mod native_alert;
 pub mod netavark_rules;
 pub mod own_machine;
 pub mod paths;
 pub mod plan;
+pub mod podman_default;
 pub mod preparation;
 pub mod problem;
 pub mod provider;

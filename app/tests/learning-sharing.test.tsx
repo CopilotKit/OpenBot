@@ -255,7 +255,7 @@ test("a space with no skills yet says so plainly", async () => {
   answer = { mode: "choose", sharingAllowed: true, skills: [] };
   const view = draw();
   await view.findByText(
-    "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot.",
+    "No skills yet. Write one with New skill, or teach a Bot a task.",
   );
   expect(view.queryByRole("switch")).toBeNull();
 });

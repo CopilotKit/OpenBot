@@ -11,8 +11,8 @@ There are three supported paths, and they are different jobs:
   A. They want a server/container deployment. Use the published Docker image and an env file.
   B. They want to try OpenBot on their own machine, change OpenBot itself, or edit a tenant package
      from source. Use the clone.
-  C. They want OpenBot on a Kubernetes cluster (EKS, GKE, AKS or their own). Use the Helm chart in
-     charts/openbot.
+  C. They want OpenBot on a Kubernetes cluster (EKS, GKE, AKS or their own). Use the Helm chart
+     published with each release.
 
 There is also a desktop app, OpenBot Personal Edition, for somebody who only wants to use OpenBot
 on their own computer, not deploy it or change it. It runs the workspace and CopilotKit
@@ -137,9 +137,10 @@ Then:
 
   bash scripts/start.sh
 
-It starts Docker services, applies migrations, starts the API on 3001, starts the app on 3010,
-starts the local routine worker, and waits for each service to answer its own health route. Open
-http://localhost:3010.
+It starts Docker services, applies migrations, starts the API on 3001 and the routine worker from
+the published OpenBot server image (at the tag in backend-images.env), starts the app from the clone
+on 3010, and waits for each service to answer its own health route. Open http://localhost:3010. The
+server's log is `docker compose logs server`.
 
 `bash scripts/stop.sh` takes down the app, worker, API server, Docker services, and each Bot's
 computer. Pass `--keep-computers` only when they deliberately want browser sessions left signed in.
@@ -147,11 +148,10 @@ Nothing is deleted either way: the database, files and browser profiles are volu
 
 C. KUBERNETES: THE HELM CHART
 
-Use this when they are deploying to a Kubernetes cluster. The chart is `charts/openbot` in this
-repository and charts/openbot/README.md is its full guide. The release workflow pushes the chart to
-no Helm repository or registry; each GitHub release attaches it as `openbot-<chart version>.tgz`
-with its dependencies inside (v1.0.1 attaches openbot-0.2.0.tgz). The steps below use a checkout,
-because `ci/vanilla-values.yaml` is not in that package.
+Use this when they are deploying to a Kubernetes cluster. The chart is published with the GitHub
+release as `openbot-<chart version>.tgz`, with its dependencies inside (v1.0.2 attaches
+openbot-0.2.0.tgz), and no Helm repository or registry. Its full guide comes with it:
+`helm show readme https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz`.
 
 One install is the whole product: OpenBot (two API replicas, one shared Bot computer, and the
 scheduled Jobs) and CopilotKit Intelligence, which the chart installs too (`intelligence.enabled`
@@ -179,7 +179,11 @@ What the cluster needs first:
 1. They write the license and the model key into a file outside the repository that is never
    committed. You write the skeleton; they fill in the values:
 
-  cat > ~/openbot-secrets.yaml <<EOF
+  cat > ~/openbot-values.yaml <<EOF
+  config:
+    singleUser: true
+  postgresql:
+    enabled: true
   secrets:
     licenseToken: "<their CopilotKit license>"
     modelApiKey: "<their OpenAI API key>"
@@ -188,16 +192,14 @@ What the cluster needs first:
    With Anthropic, use `anthropicApiKey` in place of `modelApiKey`, and add `provider: anthropic`
    under `config.model` in the same file.
 
-2. Install, from the repository root:
+2. Install:
 
-  helm dependency build charts/openbot
-  helm install openbot charts/openbot \
+  helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz \
     --namespace openbot --create-namespace \
-    --values charts/openbot/ci/vanilla-values.yaml \
-    --values ~/openbot-secrets.yaml \
+    --values ~/openbot-values.yaml \
     --timeout 15m
 
-   `ci/vanilla-values.yaml` turns on `config.singleUser` and OpenBot's bundled PostgreSQL
+   The first two settings turn on `config.singleUser` and OpenBot's bundled PostgreSQL
    (`postgresql.enabled`, which is off in the chart's own defaults). The chart generates the rest:
    the key encryption key and the computer token in the Secret `openbot-secrets`, the database
    password in `openbot-postgresql`, OpenBot's Intelligence runtime key in `openbot-intel-api-key`
@@ -220,7 +222,7 @@ What the cluster needs first:
    `config.publicUrl` or with a LoadBalancer that has no source ranges; it does not refuse an
    Ingress or an HTTPRoute, so do not add either to a single-user install.
 
-For a team, leave out `ci/vanilla-values.yaml` and write their own values file with sign-in:
+For a team, leave out `config.singleUser` and write their own values file with sign-in:
 - One provider: `config.auth.google.clientId`, `config.auth.microsoft.clientId` (set `tenantId` to
   their directory; the default `common` admits personal Microsoft accounts), or
   `config.auth.okta.clientId` with `config.auth.okta.issuer`. Its client secret goes in
@@ -287,15 +289,14 @@ every five minutes (`routines.enabled`), `openbot-attachments-culler` deletes st
 nobody sent once they are 24 hours old (`attachments.culler.olderThanHours`), and in `sandbox` mode
 `openbot-culler` suspends computers idle for 30 minutes (`computers.sandbox.idleAfter`).
 
-Upgrades: from an updated checkout, `helm dependency build charts/openbot`, then
-`helm upgrade openbot charts/openbot --namespace openbot` with the same `--values` files and
-`--timeout 15m`. With `image.tag` empty the image is `v` plus the chart's appVersion (appVersion
+Upgrades: `helm upgrade openbot <the new release's chart> --namespace openbot` with the same
+`--values` files and `--timeout 15m`. With `image.tag` empty the image is `v` plus the chart's appVersion (appVersion
 1.0.1 deploys ghcr.io/copilotkit/openbot:v1.0.1); `image.digest`, from the release's
 `container-images.json`, pins the exact image. Never use `--reuse-values`: it drops the new
 chart's defaults, so new settings never arrive. After a failed upgrade, pass the same values files
 again, because Helm reuses the values of the last revision that succeeded.
 docs/kubernetes-upgrades.md covers `bun scripts/update.ts kubernetes plan|apply|gitops`, which
-promotes a release with a backup step; the chart README's Upgrades section covers the rest.
+promotes a release with a backup step; the Upgrades section of the chart's guide covers the rest.
 
 WHAT YOU MUST NOT DO FOR THEM
 - Do not run `copilotkit login` or `copilotkit license --print`; the first signs in as them and the
@@ -334,7 +335,7 @@ The server refuses to start rather than running half-configured. The message nam
 On Kubernetes the chart refuses a bad install before creating anything, and names the value:
 - "The bundled Intelligence is self-hosted and needs the CopilotKit licence."
   `secrets.licenseToken` is missing, usually because their secrets file was not passed.
-- "No database." They installed without `ci/vanilla-values.yaml` and named no database.
+- "No database." They installed without `postgresql.enabled` and named no database.
 - "Nobody could sign in." Neither `config.singleUser` nor an identity provider is set.
 - "secrets.keyEncryptionKey is required with a database of your own" or "A computer needs a
   token": an external database needs `secrets.keyEncryptionKey` and `secrets.computerToken`.
@@ -369,8 +370,9 @@ WHEN THEY WANT TO MAKE IT THEIRS
 
 The Bots, channels and skills are configuration: `examples/fintech` is a worked example pointed at
 by TENANT_PACKAGE_DIR. Copy it, edit `agents.yaml`, and point TENANT_PACKAGE_DIR at the copy.
-The server runs from `server/`, so TENANT_PACKAGE_DIR is relative to that; the default is
-`../examples/fintech`, not `examples/fintech`.
+The server runs from `/app/server` in its image, so TENANT_PACKAGE_DIR is relative to that; the
+default is `../examples/fintech`, not `examples/fintech`.
 
-Further reading: README.md, docs/development.md, docs/deployment.md, charts/openbot/README.md and
-docs/kubernetes-upgrades.md for Kubernetes, and docs/configuration.md for every variable.
+Further reading: README.md, docs/development.md, docs/deployment.md, the chart's guide
+(`helm show readme`) and docs/kubernetes-upgrades.md for Kubernetes, and docs/configuration.md for
+every variable.

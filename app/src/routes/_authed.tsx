@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
+import { CommandMenu } from "../components/navigation/command-menu";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
@@ -29,19 +30,25 @@ export const Route = createFileRoute("/_authed")({
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
   component: () => (
     <CopilotProvider>
-      <AppHotkeys />
-      {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
-      <SkinAccountSync />
-      {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
-      <TeamFeaturesDialog />
+      {/*
+       * Around everything, the command palette included. It sat outside, so it drew every Bot as a
+       * face in the colors of another palette while the sidebar and the Bots list drew its orb.
+       */}
       <SkinBotLook>
+        <AppHotkeys />
+        {/* The skin saved on the account, drawn over the browser's cached one once it loads. */}
+        <SkinAccountSync />
+        {/* Opened by the personal edition's "OpenBot for Business" entry, from whichever skin draws it. */}
+        <TeamFeaturesDialog />
+        {/* The command palette, from Cmd/Ctrl+K and from the skins' menus. */}
+        <CommandMenu />
         <Outlet />
       </SkinBotLook>
     </CopilotProvider>
   ),
 });
 
-/** Bots are drawn the way the active skin asks for, on every authed page. */
+/** Bots are drawn the way the active skin asks for, on every authed page and in every dialog over one. */
 function SkinBotLook({ children }: { children: ReactNode }) {
   return (
     <BotLookProvider value={useActiveSkin().botLook ?? "face"}>

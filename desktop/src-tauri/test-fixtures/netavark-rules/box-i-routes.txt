@@ -1,0 +1,9 @@
+default via 192.168.127.1 dev podman-usermode 
+10.88.0.0/16 dev podman0 proto kernel scope link src 10.88.0.1 linkdown 
+10.89.1.0/24 dev podman2 proto kernel scope link src 10.89.1.1 linkdown 
+10.89.2.0/24 dev podman3 proto kernel scope link src 10.89.2.1 linkdown 
+10.89.3.0/24 dev podman4 proto kernel scope link src 10.89.3.1 
+10.89.4.0/24 dev podman5 proto kernel scope link src 10.89.4.1 
+10.89.5.0/24 dev podman6 proto kernel scope link src 10.89.5.1 
+172.18.176.0/20 dev eth0 proto kernel scope link src 172.18.177.80 
+192.168.127.0/24 dev podman-usermode proto kernel scope link src 192.168.127.2 

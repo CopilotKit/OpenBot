@@ -10,6 +10,15 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+/** One setting from the file the server's container was handed, as Compose reads it. */
+function serverSetting(file: string, name: string): string | undefined {
+  for (const line of file.split("\n")) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(['"])(.*)\2$/.exec(line);
+    if (match?.[1] === name) return match[3];
+  }
+  return undefined;
+}
+
 async function writeExecutable(path: string, contents: string) {
   await writeFile(path, contents);
   await chmod(path, 0o755);
@@ -36,23 +45,21 @@ type Run = {
   composioSetup?: "configured" | "failed" | "real-helper" | "real-cli";
   /** What `npx` does when the real helper runs the CopilotKit CLI. */
   cli?: "missing-provision" | "provisions";
-  probeBrokerEnvironment?: { composioKey?: string; arcadeKey?: string };
+  /** The tag `backend-images.env` names in the copied checkout. */
+  pinnedTag?: string;
 };
 
-async function runStartWithStaleServerProbe(
-  status: 401 | 404,
-  {
-    otherWorker = false,
-    shell = "bash",
-    omitFromEnv = [],
-    settings = {},
-    processEnvironment = {},
-    unavailableHealthPorts = [],
-    composioSetup,
-    cli,
-    probeBrokerEnvironment,
-  }: Run = {},
-) {
+async function runStart({
+  otherWorker = false,
+  shell = "bash",
+  omitFromEnv = [],
+  settings = {},
+  processEnvironment = {},
+  unavailableHealthPorts = [],
+  composioSetup,
+  cli,
+  pinnedTag = "sha-pinned-for-the-test",
+}: Run = {}) {
   const root =
     await Bun.$`mktemp -d ${tmpdir()}/openbot-start-guard-XXXXXX`.text();
   const directory = root.trim();
@@ -61,7 +68,7 @@ async function runStartWithStaleServerProbe(
   const logPath = join(directory, "pkill.log");
   const dockerLogPath = join(directory, "docker.log");
   const curlLogPath = join(directory, "curl.log");
-  const brokerEnvironmentPath = join(directory, "broker-environment.log");
+  const serverEnvironmentPath = join(directory, "server-environment.log");
   await mkdir(fakeBin, { recursive: true });
   await mkdir(scripts, { recursive: true });
   const environment = [
@@ -76,7 +83,7 @@ async function runStartWithStaleServerProbe(
     "WORKER_SHARED_SECRET=worker-secret",
     "MANAGED_AGENT_TOKEN=managed-token",
     "AGENT_TOOL_TOKEN=agent-tool-token",
-    "MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui",
+    "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/",
     "OPENBOT_ONE_COMPUTER_EACH=true",
     "DATABASE_URL=postgres://openbot:openbot@localhost:5432/openbot",
   ].filter(
@@ -104,6 +111,18 @@ async function runStartWithStaleServerProbe(
     join(scripts, "processes.sh"),
     await readFile("scripts/processes.sh"),
   );
+  // What the server's container is handed, written by the real script.
+  await writeFile(
+    join(scripts, "server-env.ts"),
+    await readFile("scripts/server-env.ts"),
+  );
+  // The templates that say which settings the server reads.
+  for (const template of [".env.example", ".env.personal.example"])
+    await writeFile(join(directory, template), await readFile(template));
+  await writeFile(
+    join(directory, "backend-images.env"),
+    `# The images the test runs.\nOPENBOT_BACKEND_TAG=${pinnedTag}\n`,
+  );
   if (composioSetup === "real-cli") {
     // The real helper, unchanged. Bun resolves its imports from the checkout it links to.
     await symlink(
@@ -123,15 +142,6 @@ const result = await setupComposio({ runCli: async (args) => {
 console.log(result === "configured" ? "COMPOSIO-CONFIGURED" : "COMPOSIO-PRESERVED");
 `,
     );
-  await writeFile(
-    join(scripts, "probe-broker-environment.ts"),
-    `
-await Bun.write(process.env.BROKER_ENVIRONMENT_PROBE, [
-  "composio=" + (process.env.COMPOSIO_API_KEY === process.env.EXPECTED_COMPOSIO_KEY),
-  "arcade=" + (process.env.ARCADE_API_KEY === process.env.EXPECTED_ARCADE_KEY),
-].join("\\n"));
-`,
-  );
 
   // The CopilotKit CLI the real helper starts. One that predates `integrations composio provision`
   // fails the way an old CLI, a signed-out CLI or an Ops without provisioning does.
@@ -165,12 +175,8 @@ exit 1
 args="$*"
 printf '%s\\n' "$args" >> "$CURL_LOG"
 for port in ${unavailableHealthPorts.join(" ")}; do
-  if [[ "$args" == *"http://localhost:$port/health"* ]]; then exit 7; fi
+  if [[ "$args" == *"http://localhost:$port/health"* || "$args" == *"http://127.0.0.1:$port/health"* ]]; then exit 7; fi
 done
-if [[ "$args" == *"/internal/routines/run"* ]]; then
-  printf '${status}'
-  exit 0
-fi
 if [[ "$args" == *"/api/copilotkit/info"* ]]; then
   printf '{"licenseStatus":"valid","mode":"test","agents":{"analyst":{}}}'
   exit 0
@@ -186,7 +192,22 @@ exit 0
     join(fakeBin, "docker"),
     `#!/usr/bin/env bash
 args="$*"
-printf '%s\\n' "$args" >> "$DOCKER_LOG"
+# A pull says which policy it ran with, and fails when the test asks it to.
+if [[ "$args" == *"compose pull"* ]]; then args="$args policy=\${IMAGE_PULL_POLICY:-}"; fi
+printf '%s tool=%s network=%s tag=%s\\n' "$args" "$OPENBOT_TOOL_URL" "$COMPUTER_NETWORK" "$OPENBOT_BACKEND_TAG" >> "$DOCKER_LOG"
+if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then echo "registry unreachable" >&2; exit 1; fi
+# The server's container refused: for any reason, every time; or the way Docker Desktop refuses a
+# strict bind of a folder whose view is stale, until a plain -v bind of that folder resolves it.
+if [[ "$args" == run*" -v $PWD/.openbot:"* ]]; then touch "$DOCKER_LOG.seen"; fi
+if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
+  if [ -n "\${TEST_SERVER_FAILS:-}" ]; then echo "Error response from daemon: no space left on device" >&2; exit 1; fi
+  if [ -n "\${TEST_MOUNT_NOT_SEEN:-}" ] && [ ! -f "$DOCKER_LOG.seen" ]; then
+    echo "Error response from daemon: invalid mount config for type bind: bind source path does not exist: /host_mnt$PWD/.openbot" >&2
+    exit 1
+  fi
+fi
+# The settings the server's container would be created with, kept for the test to read.
+if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
 if [[ "$args" == *"to_regclass('public.agent_preferences')"* ]]; then echo agent_preferences; fi
 exit 0
@@ -209,7 +230,7 @@ exit 0
   // The Learning container check answers with one line, which start.sh relays.
   await writeExecutable(
     join(fakeBin, "bun"),
-    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then\n  if [ -n "$BROKER_ENVIRONMENT_PROBE" ]; then "$REAL_BUN" --env-file=.env scripts/probe-broker-environment.ts; fi\n  exec "$REAL_BUN" "$@"\nfi\nif [ "$1" = scripts/setup-learning.ts ]; then echo "noise"; echo "LEARNING-CHECK $*"; fi\nif [ "$1" = scripts/setup-composio.ts ]; then\n  if [ "$TEST_COMPOSIO_SETUP" = real-helper ] || [ "$TEST_COMPOSIO_SETUP" = real-cli ]; then exec "$REAL_BUN" "$@"; fi\n  if [ "$TEST_COMPOSIO_SETUP" = failed ]; then echo "Composio setup failed. Sign in and retry." >&2; exit 1; fi\n  if [ "$TEST_COMPOSIO_SETUP" = configured ]; then printf "COMPOSIO_API_KEY=synthetic-project-key\\n" >> .env; echo "COMPOSIO-CONFIGURED"; fi\nfi\nexit 0\n',
+    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then\n  exec "$REAL_BUN" "$@"\nfi\nif [ "$2" = scripts/server-env.ts ]; then exec "$REAL_BUN" "$@"; fi\nif [ "$1" = scripts/setup-learning.ts ]; then echo "noise"; echo "LEARNING-CHECK $*"; fi\nif [ "$1" = scripts/setup-composio.ts ]; then\n  if [ "$TEST_COMPOSIO_SETUP" = real-helper ] || [ "$TEST_COMPOSIO_SETUP" = real-cli ]; then exec "$REAL_BUN" "$@"; fi\n  if [ "$TEST_COMPOSIO_SETUP" = failed ]; then echo "Composio setup failed. Sign in and retry." >&2; exit 1; fi\n  if [ "$TEST_COMPOSIO_SETUP" = configured ]; then printf "COMPOSIO_API_KEY=synthetic-project-key\\n" >> .env; echo "COMPOSIO-CONFIGURED"; fi\nfi\nexit 0\n',
   );
   // What `python3` is on a stock Windows machine: the Microsoft Store alias, which runs nothing. A
   // script that still needed it would stop at the health check in every test in this file.
@@ -229,13 +250,7 @@ exit 0
         DOCKER_LOG: dockerLogPath,
         CURL_LOG: curlLogPath,
         TEST_COMPOSIO_SETUP: composioSetup ?? "preserved",
-        ...(probeBrokerEnvironment
-          ? {
-              BROKER_ENVIRONMENT_PROBE: brokerEnvironmentPath,
-              EXPECTED_COMPOSIO_KEY: probeBrokerEnvironment.composioKey,
-              EXPECTED_ARCADE_KEY: probeBrokerEnvironment.arcadeKey,
-            }
-          : {}),
+        SERVER_ENVIRONMENT: serverEnvironmentPath,
         ...processEnvironment,
       },
       stdout: "pipe",
@@ -255,7 +270,7 @@ exit 0
     const curlLog = await Bun.file(curlLogPath)
       .text()
       .catch(() => "");
-    const brokerEnvironment = await Bun.file(brokerEnvironmentPath)
+    const serverEnvironment = await Bun.file(serverEnvironmentPath)
       .text()
       .catch(() => "");
     const envFile = await Bun.file(join(directory, ".env")).text();
@@ -266,7 +281,7 @@ exit 0
       pkillLog,
       dockerLog,
       curlLog,
-      brokerEnvironment,
+      serverEnvironment,
       envFile,
     };
   } finally {
@@ -274,38 +289,42 @@ exit 0
   }
 }
 
-describe("start.sh server restart guard", () => {
-  test.each([401, 404] as const)(
-    "stops both current and legacy server launch patterns after handoff probe %s",
-    async (status) => {
-      const result = await runStartWithStaleServerProbe(status);
+describe("start.sh and a server an earlier start ran on the host", () => {
+  /**
+   * The faked `lsof` says a `bun` holds the server's port and the faked `curl` answers there as
+   * OpenBot: a server and its routine worker left running on the host by a start from before the
+   * server ran in a container. They are stopped by the commands they were started with, so the
+   * container can have the port, and then the container is started.
+   */
+  test("stops it and its worker, then starts the server's container", async () => {
+    const result = await runStart();
 
-      expect({
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        pkillLog: result.pkillLog,
-      }).toMatchObject({ exitCode: 0, stderr: "" });
-      expect(result.pkillLog).toContain(
-        "bun --env-file=../.env src/production-entry.ts",
-      );
-      expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
-    },
-  );
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(result.pkillLog).toContain(
+      "bun --env-file=../.env src/production-entry.ts",
+    );
+    expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
+    expect(result.pkillLog).toContain("bun worker/src/index.ts");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+  });
 });
 
 describe("start.sh automatic Composio setup", () => {
   test.each(["", " \t "])(
-    "a blank exported Composio key (%j) lets a later real Bun child load the provisioned key",
+    "a blank exported Composio key (%j) leaves the server the provisioned key",
     async (value) => {
-      const result = await runStartWithStaleServerProbe(401, {
+      const result = await runStart({
         composioSetup: "real-helper",
         processEnvironment: { COMPOSIO_API_KEY: value },
-        probeBrokerEnvironment: { composioKey: "synthetic-project-key" },
       });
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("COMPOSIO-CONFIGURED");
-      expect(result.brokerEnvironment).toBe("composio=true\narcade=true");
+      expect(serverSetting(result.serverEnvironment, "COMPOSIO_API_KEY")).toBe(
+        "synthetic-project-key",
+      );
       expect(result.stdout + result.stderr).not.toContain(
         "synthetic-project-key",
       );
@@ -317,37 +336,37 @@ describe("start.sh automatic Composio setup", () => {
       "supplied Composio",
       { COMPOSIO_API_KEY: "existing-composio" },
       {},
-      { composioKey: "existing-composio" },
+      { COMPOSIO_API_KEY: "existing-composio" },
     ],
     [
       "saved Composio behind a blank export",
       { COMPOSIO_API_KEY: "   " },
       { COMPOSIO_API_KEY: "saved-composio" },
-      { composioKey: "saved-composio" },
+      { COMPOSIO_API_KEY: "saved-composio" },
     ],
     [
       "Arcade",
       { COMPOSIO_API_KEY: "" },
       { ARCADE_API_KEY: "existing-arcade", OPENBOT_BROKER_PROVIDER: "arcade" },
-      { arcadeKey: "existing-arcade" },
+      { ARCADE_API_KEY: "existing-arcade" },
     ],
   ] as const)(
-    "real child startup preserves %s",
-    async (_, processEnvironment, settings, probeBrokerEnvironment) => {
-      const result = await runStartWithStaleServerProbe(401, {
+    "the server is started with %s",
+    async (_, processEnvironment, settings, expected) => {
+      const result = await runStart({
         composioSetup: "real-helper",
         processEnvironment,
         settings,
-        probeBrokerEnvironment,
       });
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("COMPOSIO-PRESERVED");
-      expect(result.brokerEnvironment).toBe("composio=true\narcade=true");
+      for (const [name, value] of Object.entries(expected))
+        expect(serverSetting(result.serverEnvironment, name)).toBe(value);
     },
   );
 
   test("provisions without Learning configuration and restarts a server to reload its environment", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       composioSetup: "configured",
     });
     expect(result.exitCode).toBe(0);
@@ -364,7 +383,7 @@ describe("start.sh automatic Composio setup", () => {
    * `integrations composio provision`, or against an Ops without the provisioning service.
    */
   test("starts with apps unavailable and the helper's reason when provisioning cannot complete", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       composioSetup: "failed",
     });
     expect(result.exitCode).toBe(0);
@@ -379,7 +398,7 @@ describe("start.sh automatic Composio setup", () => {
   });
 
   test("the real helper with a CLI that cannot provision leaves startup running", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       composioSetup: "real-cli",
       cli: "missing-provision",
     });
@@ -397,7 +416,7 @@ describe("start.sh automatic Composio setup", () => {
   });
 
   test("the real helper with a CLI that provisions restarts a running server for the new key", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       composioSetup: "real-cli",
       cli: "provisions",
     });
@@ -423,7 +442,7 @@ describe("start.sh runtime health", () => {
    * is that alias; the line below is only printed if the check ran, in Bun, and passed.
    */
   test("checks the licence and names the Bots without python3", async () => {
-    const result = await runStartWithStaleServerProbe(401);
+    const result = await runStart();
 
     expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
       exitCode: 0,
@@ -452,7 +471,7 @@ describe("start.sh under the wrong shell", () => {
    * somebody who typed the only invocation they knew.
    */
   test("sh refuses with a sentence naming bash, rather than exiting in silence", async () => {
-    const result = await runStartWithStaleServerProbe(401, { shell: "sh" });
+    const result = await runStart({ shell: "sh" });
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toMatch(/bash/);
@@ -493,7 +512,7 @@ describe("start.sh settings with no line in .env", () => {
    * fails the run instead of quietly reporting a different number.
    */
   test("a .env with no APP_PORT still starts, on the default port", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       omitFromEnv: ["APP_PORT"],
     });
 
@@ -517,7 +536,7 @@ describe("start.sh one computer each", () => {
    * to `docker compose up` is the observable half; the shared computer stays.
    */
   test("false in .env starts no supervisor", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       settings: { OPENBOT_ONE_COMPUTER_EACH: "false" },
     });
 
@@ -526,13 +545,13 @@ describe("start.sh one computer each", () => {
       stderr: "",
     });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres agent-computer agent-bot agent-langgraph",
+      "compose up -d --build postgres agent-computer agent-langgraph-agui",
     );
     expect(result.dockerLog).not.toContain("supervisor");
   });
 
   test("false in the process environment starts no supervisor either", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       settings: { OPENBOT_ONE_COMPUTER_EACH: "true" },
       processEnvironment: { OPENBOT_ONE_COMPUTER_EACH: "false" },
     });
@@ -543,14 +562,15 @@ describe("start.sh one computer each", () => {
 
   test("true, or absent, still starts it", async () => {
     for (const omitFromEnv of [[], ["OPENBOT_ONE_COMPUTER_EACH"]] as const) {
-      const result = await runStartWithStaleServerProbe(401, { omitFromEnv });
+      const result = await runStart({ omitFromEnv });
 
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+        "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
       );
     }
-  });
+    // Two whole starts, one after the other.
+  }, 20_000);
 });
 
 describe("start.sh Learning container check", () => {
@@ -561,7 +581,7 @@ describe("start.sh Learning container check", () => {
   test.each(["INTELLIGENCE_API_KEY", "CPK_INTELLIGENCE_API_KEY"])(
     "runs the non-interactive check when %s is set",
     async (keyName) => {
-      const result = await runStartWithStaleServerProbe(401, {
+      const result = await runStart({
         settings: { [keyName]: "cpk-synthetic" },
       });
 
@@ -581,7 +601,7 @@ describe("start.sh Learning container check", () => {
     ["it is switched off", { OPENBOT_LEARNING_AUTO_ASSIGN: "false" }],
     ["it is switched off with 0", { OPENBOT_LEARNING_AUTO_ASSIGN: "0" }],
   ])("is skipped when %s", async (_, settings) => {
-    const result = await runStartWithStaleServerProbe(401, {
+    const result = await runStart({
       settings: { INTELLIGENCE_API_KEY: "cpk-synthetic", ...settings },
     });
 
@@ -590,79 +610,217 @@ describe("start.sh Learning container check", () => {
   });
 
   test("is skipped without a runtime key", async () => {
-    const result = await runStartWithStaleServerProbe(401);
+    const result = await runStart();
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).not.toContain("LEARNING-CHECK");
   });
 });
 
-describe("start.sh selected provider services", () => {
-  test.each([".env", "process environment"])(
-    "an Anthropic-only %s selection starts the managed Bot without the OpenAI-only sample",
-    async (source) => {
-      const selected = {
-        BOT_PROVIDER: "anthropic",
-        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
-      };
-      const result = await runStartWithStaleServerProbe(401, {
-        settings: source === ".env" ? selected : { BOT_PROVIDER: "openai" },
-        processEnvironment: source === "process environment" ? selected : {},
-        unavailableHealthPorts: [4200],
-      });
-      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
-        exitCode: 0,
-        stderr: "",
-      });
-      expect(result.dockerLog).toContain(
-        "compose up -d --build postgres supervisor agent-computer agent-langgraph",
-      );
-      expect(result.dockerLog).not.toContain("agent-bot");
-      expect(result.dockerLog).toContain("compose run --rm --build migrate");
-      expect(result.curlLog).toContain("http://localhost:4100/health");
-      expect(result.curlLog).toContain("http://localhost:4201/health");
-      expect(result.curlLog).not.toContain("http://localhost:4200/health");
-      expect(result.stdout).toContain("agent-bot: skipped for Anthropic");
-      expect(result.stdout).not.toContain("agent-bot ready");
-      expect(result.stdout).toContain("agent-langgraph ready");
-      expect(result.stdout).toContain(
-        "managed coworker endpoint: http://localhost:4201/ag-ui",
-      );
-      expect(result.stdout).toContain("Ready. http://localhost:3010");
-    },
-  );
-
-  test("the default OpenAI startup still starts and checks the legacy sample", async () => {
-    const result = await runStartWithStaleServerProbe(401);
-    expect(result.exitCode).toBe(0);
-    expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
-    );
-    expect(result.curlLog).toContain("http://localhost:4200/health");
-    expect(result.stdout).toContain("agent-bot ready");
-    expect(result.stdout).not.toContain("agent-bot: skipped");
-  });
-
-  test("Anthropic startup still fails if its managed LangGraph Bot is unavailable", async () => {
-    const result = await runStartWithStaleServerProbe(401, {
-      settings: {
+describe("start.sh and the managed Bot", () => {
+  /**
+   * The managed Bot is the LangGraph harness (agent-langgraph-agui), on whichever provider
+   * BOT_PROVIDER names. agent-bot, an OpenAI-only proof of concept, and the TypeScript
+   * agent-langgraph were retired, so neither is started or waited for, whichever provider is picked.
+   */
+  test.each([
+    ["the default provider", {}],
+    [
+      "an Anthropic-only selection",
+      {
         BOT_PROVIDER: "anthropic",
         ANTHROPIC_API_KEY: "synthetic-anthropic-key",
       },
-      unavailableHealthPorts: [4200, 4201],
+    ],
+  ])("%s starts the harness and no retired Bot", async (_, settings) => {
+    const result = await runStart({ settings });
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
     });
+    expect(result.dockerLog).toContain(
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
+    );
+    expect(result.dockerLog).not.toMatch(/agent-bot|agent-langgraph(?!-agui)/);
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.curlLog).not.toContain(":4200/health");
+    expect(result.stdout).toContain("agent-langgraph-agui ready");
+    expect(result.stdout).not.toMatch(/agent-bot/);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+    expect(result.stdout).toContain("Ready. http://localhost:3010");
+  });
+
+  test("names the harness's own address when .env names none", async () => {
+    const result = await runStart({ omitFromEnv: ["MANAGED_AGENT_AG_UI_URL"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "managed coworker endpoint: http://127.0.0.1:4201/",
+    );
+  });
+
+  test("startup fails if the managed Bot is unavailable", async () => {
+    const result = await runStart({ unavailableHealthPorts: [4201] });
     expect(result.exitCode).toBe(1);
-    expect(result.curlLog).not.toContain("http://localhost:4200/health");
-    expect(result.curlLog).toContain("http://localhost:4201/health");
-    expect(result.stdout).toContain("agent-langgraph never became ready");
+    expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.stdout).toContain("agent-langgraph-agui never became ready");
     expect(result.stdout).not.toContain("Ready. http://localhost:3010");
   });
 });
 
-test("an unrelated routine worker does not suppress this checkout's worker startup", async () => {
-  const result = await runStartWithStaleServerProbe(401, { otherWorker: true });
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout).toContain("worker: started (routine sweep loop)");
-  expect(result.stdout).not.toContain("worker: already running");
-  expect(result.pkillLog).not.toContain("worker/src/index.ts");
+describe("start.sh and the OpenBot images", () => {
+  /**
+   * The server, the worker, the migrations, the computer and the supervisor all run from the
+   * published OpenBot images, at the one tag `backend-images.env` names. Compose reads it as
+   * OPENBOT_BACKEND_TAG, so every Compose call the script makes is handed it.
+   */
+  test("runs every Compose service at the tag backend-images.env names", async () => {
+    const result = await runStart({ pinnedTag: "sha-from-the-file" });
+
+    expect(result.exitCode).toBe(0);
+    const calls = result.dockerLog.trim().split("\n");
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call).toEndWith(" tag=sha-from-the-file");
+    expect(result.dockerLog).toContain("compose run --rm migrate");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+  });
+
+  /**
+   * The server is on the Compose network, so the Bots call their tools back at `server:3001` and
+   * the supervisor attaches each Bot's computer to that network. Both are told before they start:
+   * a container keeps what it was started with.
+   */
+  test("tells the Bots and the supervisor where the server is before they start", async () => {
+    const result = await runStart();
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).toContain(
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
+    );
+  });
+
+  /**
+   * `main` moves with every build, so a checkout of main must run the build that is current, not a
+   * copy pulled the week before. Compose's own policy keeps a copy it already has, so start.sh
+   * fetches the images itself, before anything starts from them.
+   */
+  test("fetches the OpenBot images at the tag on every start, before anything starts", async () => {
+    const result = await runStart({ pinnedTag: "main" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("OpenBot images: main");
+    const pull = result.dockerLog.indexOf(
+      "compose pull --quiet migrate supervisor agent-computer policy=always",
+    );
+    expect(pull).toBeGreaterThan(-1);
+    expect(pull).toBeLessThan(
+      result.dockerLog.indexOf("compose up -d --build"),
+    );
+  });
+
+  /**
+   * On a fresh clone, Docker Desktop refused the server's container with "bind source path does
+   * not exist" for `.openbot`, which was there, and kept refusing until a plain `-v` bind of the
+   * folder made it look again. The start makes that bind and starts the server again.
+   */
+  test("shows Docker the server's .openbot folder when it refuses it, then starts the server", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_MOUNT_NOT_SEEN: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("/.openbot; showing it the folder");
+    expect(result.stdout).toContain("server ready");
+    expect(result.dockerLog).toMatch(
+      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot-server:sha-pinned-for-the-test /,
+    );
+    expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(2);
+  });
+
+  test("any other refusal of the server stops the start at once", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_SERVER_FAILS: "1" },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("The server did not start");
+    expect(result.stderr).toContain("no space left on device");
+    expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(1);
+  });
+
+  test("offline, it starts from the copies already on this machine", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_PULL_FAILS: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "Could not fetch the OpenBot images at sha-pinned-for-the-test",
+    );
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+  });
+
+  test("IMAGE_PULL_POLICY=never fetches nothing", async () => {
+    const result = await runStart({
+      processEnvironment: { IMAGE_PULL_POLICY: "never" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toContain("compose pull");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+  });
+
+  test("a tag in .env or the environment runs another build", async () => {
+    for (const run of [
+      { settings: { OPENBOT_BACKEND_TAG: "sha-from-env-file" } },
+      { processEnvironment: { OPENBOT_BACKEND_TAG: "sha-from-env-file" } },
+    ]) {
+      const result = await runStart(run);
+      expect(result.exitCode).toBe(0);
+      expect(result.dockerLog).toMatch(
+        /compose up -d --no-deps server worker .* tag=sha-from-env-file\n/,
+      );
+    }
+    // Two whole starts, one after the other.
+  }, 20_000);
+
+  test("with no tag at all it says so and starts nothing", async () => {
+    const result = await runStart({ pinnedTag: "" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      "backend-images.env names no OPENBOT_BACKEND_TAG",
+    );
+    expect(result.dockerLog).toBe("");
+  });
+
+  /**
+   * The server runs in a container, which is handed only what is named for it. It gets `.env` with
+   * whatever the environment sets winning, as Bun gave it on the host, and the addresses of what
+   * runs on this machine as the container reaches them.
+   */
+  test("hands the server .env with the environment on top, and this machine's addresses", async () => {
+    const result = await runStart({
+      settings: {
+        OPENAI_BASE_URL: "http://127.0.0.1:46400/v1",
+        OPENBOT_LEARNING_AUTO_ASSIGN: "true",
+      },
+      processEnvironment: {
+        OPENBOT_LEARNING_AUTO_ASSIGN: "false",
+        OPENBOT_MODEL_CAPABILITIES_URL: "off",
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(
+      serverSetting(result.serverEnvironment, "OPENBOT_LEARNING_AUTO_ASSIGN"),
+    ).toBe("false");
+    expect(
+      serverSetting(result.serverEnvironment, "OPENBOT_MODEL_CAPABILITIES_URL"),
+    ).toBe("off");
+    expect(serverSetting(result.serverEnvironment, "MANAGED_AGENT_TOKEN")).toBe(
+      "managed-token",
+    );
+  });
 });

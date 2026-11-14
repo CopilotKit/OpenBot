@@ -32,6 +32,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance",

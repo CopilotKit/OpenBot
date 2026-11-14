@@ -52,8 +52,11 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
   const [main, setMain] = useState<HTMLElement | null>(null);
 
   return (
+    // The frame's own background, beside a column narrower than the window, moves the window in
+    // OpenBot Desktop on macOS, so the title bar's strip reaches both edges (`data-desktop-drag`).
     <div
       className="flex h-svh flex-col overflow-hidden bg-openduet-surface text-openduet-ink"
+      data-desktop-drag=""
       data-openduet-frame=""
     >
       {/*

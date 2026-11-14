@@ -11,7 +11,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { Route as ArcadeRoute } from "@/routes/_authed/admin/plugins/arcade";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
  * THE MEASURED LINES, ON A SCREEN SOMEBODY CAN REACH.
@@ -25,7 +25,7 @@ import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
  * markup. Nothing here imports a pure function: a passing pure function is exactly what this defect
  * already had.
  *
- * The app under test is `AirtableApi`, folded out of `server/tests/fixtures/arcade-catalogue.json`
+ * The app under test is `AirtableApi`, folded out of `app/tests/fixtures/arcade-catalogue.json`
  * the way `listApps` folds it — 2 actions, 0 classified, 1 distinct scope set over 1 scoped action.
  * The fixture is evidence of what Arcade returns and is read, never appended to.
  */

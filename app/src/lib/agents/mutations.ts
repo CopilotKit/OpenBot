@@ -1,33 +1,22 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { createBot, deleteBot, updateBot } from "@/lib/api/generated/bots/bots";
+import type { CreateBotRequest } from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
-import {
-  type AgentProfile,
-  type AgentVisibility,
-  agentApiPath,
-  agentKeys,
-} from "./queries";
+import { type AgentProfile, agentApiPath, agentKeys } from "./queries";
 
-export type AgentInput = {
-  name: string;
-  title: string;
-  roleDescription: string;
-  visibility: AgentVisibility;
-  /** Where this coworker runs. Empty means the Bot in the box. */
-  endpoint?: string;
-  /** Write-only auth value; omitted when the user leaves the key field empty. */
-  auth?: { header: string; value: string };
-  /**
-   * A computer of its own. Omitted leaves it as it is, so an edit to anything else never moves a
-   * Bot between computers; only the Isolated control sends it.
-   */
-  isolated?: boolean;
-  /**
-   * The framework picked for an agent somebody runs themselves, by its id in the harness list, so
-   * the Bot is told what runs it whatever its subtitle says. Only New Bot sends it.
-   */
-  harness?: string;
-};
+/**
+ * What a Bot is created or changed with: api/openapi.yaml's `CreateBotRequest`, generated from the
+ * spec. A change sends the same fields; `harness` is read on create only.
+ */
+export type AgentInput = CreateBotRequest;
+
+/**
+ * A fresh key for each write a person asks for. TanStack does not retry a mutation, so each attempt
+ * is a new write; a retry of the same write would reuse its key.
+ */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
 const FALLBACK = "Couldn't save that change to the Bot.";
@@ -39,27 +28,31 @@ function invalidateAgents(queryClient: QueryClient) {
 
 export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (input: AgentInput): Promise<AgentProfile> =>
-      client("/api/agents", "agent", {
-        method: "POST",
-        body: input,
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
+      (
+        await createBot(ORGANIZATION_ID, input, once(), {
+          fallback: FALLBACK,
+        })
+      ).bot,
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
 
 export function updateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: {
+    mutationFn: async (variables: {
       agentId: string;
       input: AgentInput;
     }): Promise<AgentProfile> =>
-      client(agentApiPath(variables.agentId), "agent", {
-        method: "PATCH",
-        body: variables.input,
-        fallback: FALLBACK,
-      }),
+      (
+        await updateBot(
+          ORGANIZATION_ID,
+          variables.agentId,
+          variables.input,
+          once(),
+          { fallback: FALLBACK },
+        )
+      ).bot,
     // A conversation is called by its Bot's name, so a rename shows in the sidebar and the header.
     onSuccess: () =>
       Promise.all([
@@ -107,8 +100,7 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await client(agentApiPath(agentId), {
-        method: "DELETE",
+      await deleteBot(ORGANIZATION_ID, agentId, once(), {
         fallback: FALLBACK,
       });
     },

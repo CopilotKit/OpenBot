@@ -90,6 +90,11 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the person says yes to pausing their own Podman",
   },
   {
+    file: "desktop/src/PodmanTooSmall.tsx",
+    word: /Podman/,
+    why: "the person's own Podman machine, which OpenBot resizes only once they say yes, or they resize with the commands shown",
+  },
+  {
     file: "desktop/src/SetupProgress.tsx",
     word: /Podman/,
     why: "the rows for pausing the person's own Podman and starting it again",
@@ -108,11 +113,6 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     file: "desktop/src/ProviderPicker.tsx",
     word: /\bcontainers?\b/i,
     why: "an advanced field for a model the person hosts: the address OpenBot's containers use",
-  },
-  {
-    file: "desktop/src/Welcome.tsx",
-    word: /\bbackend\b/i,
-    why: "the first screen says OpenBot's backend runs on this computer too, which is what self-contained means",
   },
   {
     file: "desktop/src/localEvalCli.ts",

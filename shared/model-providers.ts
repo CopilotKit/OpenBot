@@ -25,8 +25,8 @@
  * provider be registered here without pretending every harness can answer for it. The `bots`
  * section records what a Bot runs by default, not what it is able to drive.
  *
- * Its own module for the reason `model-key.ts` had to be one: `agent-bot` and `agent-langgraph`
- * call `serve()` at module scope, so importing a pure function from an entry point binds a port.
+ * Its own module for the reason `model-key.ts` had to be one: a Bot's entry point calls `serve()` at
+ * module scope, so importing a pure function from an entry point binds a port.
  */
 
 import specJson from "./model-providers.json";
@@ -233,7 +233,7 @@ export type BotSettings = {
  * somebody else.
  *
  * `pinnedProvider` is for a Bot that drives exactly one provider's API and answers to no other
- * name — `agent-bot` speaks chat completions by hand and has never read `BOT_PROVIDER`. Pinning
+ * name — `agent-antigravity` drives Google's API alone and does not read `BOT_PROVIDER`. Pinning
  * keeps that Bot's behavior what it was while its model still comes from the file.
  *
  * A provider nobody has heard of is kept as typed, not rewritten to OpenAI, so the Bot's own
@@ -294,8 +294,8 @@ export function botSettings(
  * A name a gateway publishes under its own namespace is the same model: LiteLLM and OpenRouter call
  * `gpt-5.6-terra` `openai/gpt-5.6-terra`, so only what follows the last slash is read.
  *
- * Named for the fact rather than for either consequence, because `agent-bot` uses it to refuse a
- * model and `agent-langgraph` uses it to select a flag, and neither name fits both.
+ * Named for the fact rather than for either consequence: one Bot may use it to refuse a model and
+ * another to select a flag, and neither name fits both.
  */
 export function requiresResponsesApi(model: string): boolean {
   const name = model.trim().split("/").at(-1) ?? "";

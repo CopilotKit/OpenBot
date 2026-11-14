@@ -6,6 +6,7 @@ import {
   cancelLocalEval,
   chatGate,
   connectLocalEval,
+  heldForRoom,
   type LocalConnection,
   LocalEvalError,
   type LocalFailure,
@@ -13,17 +14,25 @@ import {
   type LocalReport,
   type LocalTerms,
   localEvalDownload,
+  localEvalRoom,
   localEvalSteps,
   localEvalTerms,
   localEvalUpdateStep,
   onInstalledRelease,
   runLocalEval,
+  type Shortfall,
   setUpLocalEval,
   signInToCopilotKit,
   updateStepSaid,
   wakeEngine,
 } from "./localEvalCli";
-import { localReadiness, onInstalledReleaseSaid } from "./localReadiness";
+import {
+  engineTooSmallSaid,
+  localReadiness,
+  onInstalledReleaseSaid,
+  podmanTooSmallSaid,
+} from "./localReadiness";
+import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
   asProblem,
   Failure,
@@ -70,6 +79,12 @@ const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
 /** How often a running setup or update asks how far its download has got. */
 const DOWNLOAD_EVERY_MS = 1_000;
+
+/**
+ * How often a setup paused for room on its drive looks again, as the downloads behind it do
+ * (`early_downloads::wait_for_room`).
+ */
+export const ROOM_EVERY_MS = 10_000;
 
 const unreadable: Problem = {
   said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
@@ -128,7 +143,15 @@ type State = {
   running: boolean;
   /** When the current row began, so its elapsed time survives a change of screen. */
   since: number | null;
-  blocked: { said: string; reason: LocalReason | null } | null;
+  /**
+   * Why the sequence stopped. `shortfall` with `resources-short`: what the CLI found short, so the
+   * window can offer to make a Podman machine bigger (`PodmanTooSmall`).
+   */
+  blocked: {
+    said: string;
+    reason: LocalReason | null;
+    shortfall?: Shortfall;
+  } | null;
   problem: Problem | null;
   /**
    * The agreement version setup was given and still answered "acceptance required" to. The CLI
@@ -157,6 +180,13 @@ type State = {
   updating: boolean;
   /** Of the back end's services, how many the last status said were ready. */
   services: { ready: number; total: number } | null;
+  /**
+   * The setup is paused until the drive that holds the engine's disk has room, in the account
+   * step's words. Not a stop: it looks again every few seconds and on Try again, and sets up by
+   * itself once there is room. On Windows G it was said as a red "Setup stopped" with logs, and
+   * waited for Retry after the space was freed.
+   */
+  held: string | null;
 };
 
 const idle: State = {
@@ -176,6 +206,7 @@ const idle: State = {
   trailSince: null,
   updating: false,
   services: null,
+  held: null,
 };
 
 /** The row an update that failed is said on, under the back end's. */
@@ -197,10 +228,15 @@ export const RELEASE_SAID =
  * words. The step's own name and the releases are in the log (`log_update_due`). Its data is kept
  * either way: `local update` never deletes it, and the next Start repairs what a stopped update left
  * and tries again.
+ *
+ * `runsWhatItHad` false when the update left the back end not working (paused services): then it
+ * does not run the version it had, and Retry is what tries the update again.
  */
-function updateFailedSaid(step: string | null): string {
+function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
   const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
-  return `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`;
+  return runsWhatItHad
+    ? `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
+    : `OpenBot couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
 }
 
 export type LocalSequence = State & {
@@ -214,12 +250,16 @@ export type LocalSequence = State & {
   /** The go-ahead: runs what is left and starts OpenBot once Intelligence is ready. */
   start: () => void;
   retry: () => void;
+  /** While the setup is paused for room: look again now. */
+  tryAgain: () => void;
   /** The person accepted this agreement version in the window: set up again with it. */
   acceptTerms: (version: string) => void;
   /** Stops the running CLI call and says so. */
   cancel: () => void;
   /** Forgets the rows, as after Stop OpenBot. */
   reset: () => void;
+  /** The backend is gone (`stack-lost`): forget it and set OpenBot up again from the start. */
+  startFresh: () => void;
 };
 
 /**
@@ -239,7 +279,10 @@ export function useLocalSequence({
   connected = false,
   onStart,
   onRecorded = () => {},
+  onForgotten = () => {},
+  installAgain = async () => true,
   pollDelays = POLL_DELAYS,
+  roomEveryMs = ROOM_EVERY_MS,
 }: {
   root: string;
   stack: string | null;
@@ -249,16 +292,44 @@ export function useLocalSequence({
   onStart: (startable: LocalStartable) => Promise<StartOutcome>;
   /** A stack was set up, or connected. */
   onRecorded?: (stack: string, connected: boolean) => void;
+  /** The recorded stack is gone and is no longer OpenBot's: set up from the start (`startFresh`). */
+  onForgotten?: () => void;
+  /**
+   * Start fresh installs OpenBot's own software again before it sets up: the backend went with
+   * OpenBot's machine, and a machine made again has none of it. False when the install did not
+   * finish, which the window says.
+   */
+  installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
+  /** How often a setup paused for room looks again (`ROOM_EVERY_MS`). */
+  roomEveryMs?: number;
 }): LocalSequence {
   const [state, setState] = useState<State>(idle);
   const now = useRef(state);
-  const latest = useRef({ root, stack, connected, onStart, onRecorded });
-  latest.current = { root, stack, connected, onStart, onRecorded };
+  const latest = useRef({
+    root,
+    stack,
+    connected,
+    onStart,
+    onRecorded,
+    onForgotten,
+    installAgain,
+  });
+  latest.current = {
+    root,
+    stack,
+    connected,
+    onStart,
+    onRecorded,
+    onForgotten,
+    installAgain,
+  };
   // Bumped to stop a run: by Cancel, by leaving, and by any newer run.
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
   const wake = useRef<(() => void) | null>(null);
+  /** While the setup is paused for room: ends the wait before the next look, for Try again. */
+  const lookNow = useRef<(() => void) | null>(null);
   const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startable = useRef<LocalStartable | null>(null);
   // Start OpenBot once Intelligence is ready. Spent when it starts.
@@ -274,6 +345,7 @@ export function useLocalSequence({
   function halt() {
     generation.current += 1;
     wake.current?.();
+    lookNow.current?.();
     if (queued.current !== null) clearTimeout(queued.current);
     queued.current = null;
     const inFlight = attempt.current;
@@ -411,6 +483,29 @@ export function useLocalSequence({
   }
 
   /**
+   * Until the drive that holds the engine's disk has room for a setup it did not start: looks every
+   * `ROOM_EVERY_MS`, or at once on Try again, and says the newest figures meanwhile. False when the
+   * run was stopped.
+   */
+  async function waitForRoom(token: number): Promise<boolean> {
+    for (;;) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, roomEveryMs);
+        lookNow.current = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      lookNow.current = null;
+      if (generation.current !== token) return false;
+      const short = await localEvalRoom();
+      if (generation.current !== token) return false;
+      if (!short) return true;
+      update({ held: engineTooSmallSaid(short) });
+    }
+  }
+
+  /**
    * Install the release this app's CLI installs over a stack an older app set up, with the CLI's
    * own `local update`, which keeps the stack's data and app connections. Once per wait. A failure
    * is said and does not stop the sequence: the release the stack had is still there, and OpenBot
@@ -520,6 +615,8 @@ export function useLocalSequence({
     let updatedIntelligence = false;
     // The update ran on a stack found stopped. It starts the cluster itself, so the release the
     // stack had comes back up after a failed one, and is waited on like a stack that is starting.
+    // Not one found degraded: its cluster was already up, and nothing on it comes back by itself
+    // after the update fails again, so waiting would only run out the clock.
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
@@ -548,16 +645,29 @@ export function useLocalSequence({
        * usual, and the update runs on the next answer, when it reports ready.
        *
        * AN UPDATE THAT DID NOT FINISH is tried again the same way, on a stack ready on the release
-       * it had. On a stopped one too: there the CLI refuses `start` while the update is on record,
-       * and `local update` is the only call that starts the stack.
+       * it had. On a stopped or degraded one too: the CLI refuses `start` while the update is on
+       * record, so `local update` is the only call that gets the stack going again. On a stopped
+       * stack it starts the cluster itself. A degraded one is what an update leaves when it fails
+       * after pausing the services (`update-quiesce`): running, its checks failing, and nothing but
+       * the update will bring them back. Found in a dogfooding report, rc.10 to rc.11 stopped at
+       * `dependencies-install`, where every Retry asked for status once and gave up. A stack still
+       * on the release it had (`kept`) is one of these degraded ones.
+       *
+       * Once per wait (`updatedIntelligence`), so an update that keeps failing stops at its row
+       * rather than looping; Retry is the next attempt.
+       *
+       * Not on a degraded stack whose disk OpenBot found short, or still recovering from being
+       * short (`shortfall`): the update downloads the new release's images and fails there again,
+       * after up to ten minutes. The row says to free space, and the Retry after that updates.
        */
       if (
         found.updateTo &&
         found.stack &&
         !updatedIntelligence &&
         (found.readiness === "ready" ||
-          kept !== null ||
-          (found.readiness === "stopped" && unfinished !== null))
+          (unfinished !== null &&
+            (found.readiness === "stopped" ||
+              (found.readiness === "degraded" && !found.shortfall))))
       ) {
         updatedIntelligence = true;
         woken = found.readiness === "stopped";
@@ -570,10 +680,28 @@ export function useLocalSequence({
       }
       // Where the update that just failed stopped, from the record the CLI kept of it.
       const failedStep = unfinished?.failedStep;
-      if (failedTo && failedStep) {
-        update({ updateFailed: updateFailedSaid(failedStep) });
+      // A stack the failed update left degraded, its checks failing, does not run the version it
+      // had: its services stay paused until an update finishes. Not one it woke, which comes back
+      // up on that version.
+      const leftNotWorking =
+        failedTo !== null &&
+        !woken &&
+        found.readiness === "degraded" &&
+        found.checksPassed !== true;
+      if (failedTo && (failedStep || leftNotWorking)) {
+        update({
+          updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
+        });
       }
-      failedTo = null;
+      /*
+       * Kept while the back end still says `starting`, and with the update on record: whether it
+       * runs the version it had is known only once it settles. Found on Windows: an update stopped
+       * after pausing the services, the first answer after it said `starting` and the next
+       * `degraded`, and the row kept "so it runs the version it had" over a back end that did not.
+       */
+      if (!(found.readiness === "starting" && unfinished !== null)) {
+        failedTo = null;
+      }
       if (isReady(found)) {
         if (!found.stack) {
           update({ blocked: { said: said("missing-stack"), reason: null } });
@@ -632,15 +760,26 @@ export function useLocalSequence({
       detail: null,
       download: null,
       updateFailed: null,
+      held: null,
     });
     const { root } = latest.current;
     let id = latest.current.stack;
-    const stop = (reason?: { said: string; reason?: LocalReason | null }) => {
+    const stop = (reason?: {
+      said: string;
+      reason?: LocalReason | null;
+      shortfall?: Shortfall;
+    }) => {
       if (generation.current !== token) return;
       update({
         running: false,
         ...(reason
-          ? { blocked: { said: reason.said, reason: reason.reason ?? null } }
+          ? {
+              blocked: {
+                said: reason.said,
+                reason: reason.reason ?? null,
+                ...(reason.shortfall ? { shortfall: reason.shortfall } : {}),
+              },
+            }
           : {}),
       });
     };
@@ -687,24 +826,42 @@ export function useLocalSequence({
       });
       if (phase === "setup") {
         const carried = accepted.current;
-        const started = setUpLocalEval(root, carried);
-        const unfollowTrail = followSteps(started.attempt, token, "setup");
-        // A setup that resumes a stack downloads the images it still needs first.
-        const unfollow = followDownload(started.attempt, token);
-        const report = await call(
-          { attempt: started.attempt, answer: started.report },
-          token,
-        ).finally(() => {
-          unfollow();
-          unfollowTrail();
-        });
+        let report: LocalReport | null = null;
+        for (;;) {
+          const started = setUpLocalEval(root, carried);
+          const unfollowTrail = followSteps(started.attempt, token, "setup");
+          // A setup that resumes a stack downloads the images it still needs first.
+          const unfollow = followDownload(started.attempt, token);
+          report = await call(
+            { attempt: started.attempt, answer: started.report },
+            token,
+          ).finally(() => {
+            unfollow();
+            unfollowTrail();
+          });
+          if (!report) return stop();
+          // Not started for a drive that is short: paused, not stopped, until there is room.
+          const short = heldForRoom(report);
+          if (!short) break;
+          update({ held: engineTooSmallSaid(short), download: null });
+          const room = await waitForRoom(token);
+          if (generation.current === token) update({ held: null });
+          if (!room) return stop();
+        }
         if (!report) return stop();
         update({
           refused:
             report.reason === "eula-acceptance-required" ? carried : null,
         });
         if (report.outcome !== "completed") {
-          return stop({ said: said(report), reason: report.reason });
+          return stop({
+            said: said(report),
+            reason: report.reason,
+            shortfall:
+              report.reason === "resources-short"
+                ? report.shortfall
+                : undefined,
+          });
         }
         if (!report.stack) return stop({ said: said("missing-stack") });
         accepted.current = null;
@@ -782,6 +939,33 @@ export function useLocalSequence({
     if (at) void run(at);
   }
 
+  function tryAgain() {
+    lookNow.current?.();
+  }
+
+  /*
+   * The backend OpenBot set up is gone with everything in it (`stack-lost`): set up from the start.
+   * OpenBot's own software is installed again first (`installAgain`). On box I the backend went
+   * with OpenBot's machine, the machine made again had none of it, and Start was refused after
+   * setup, so the window went back from Starting to Installing. Setup then forgets the old stack
+   * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
+   * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
+   * connection are kept: neither was in what went.
+   */
+  async function startFresh() {
+    if (now.current.running) return;
+    halt();
+    const token = generation.current;
+    go.current = true;
+    latest.current.onForgotten();
+    // Nothing of the lost backend's rows is left to show: the install's rows come first.
+    update(idle);
+    if (!(await latest.current.installAgain())) return;
+    // Stopped or left while it installed.
+    if (generation.current !== token) return;
+    void run("setup");
+  }
+
   function acceptTerms(version: string) {
     accepted.current = version;
     retry();
@@ -815,21 +999,31 @@ export function useLocalSequence({
       const row: Progress =
         index < reached
           ? { step: label, ok: true, detail: "" }
-          : state.running
+          : state.running && state.held
             ? {
                 step: label,
                 ok: true,
                 running: true,
-                // What is happening now and how long is left is the journey's (`StartJourney`): the
-                // row says only what is particular to it, such as an update's download.
-                detail: state.detail ?? "",
-                downloads: state.download ?? undefined,
-                startedAt: state.since ?? undefined,
+                paused: true,
+                detail: state.held,
+                onTryAgain: tryAgain,
                 position: { at: index + 1, of: PHASES.length },
               }
-            : stopped
-              ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
-              : { step: label, ok: true, detail: "" };
+            : state.running
+              ? {
+                  step: label,
+                  ok: true,
+                  running: true,
+                  // What is happening now and how long is left is the journey's (`StartJourney`): the
+                  // row says only what is particular to it, such as an update's download.
+                  detail: state.detail ?? "",
+                  downloads: state.download ?? undefined,
+                  startedAt: state.since ?? undefined,
+                  position: { at: index + 1, of: PHASES.length },
+                }
+              : stopped
+                ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
+                : { step: label, ok: true, detail: "" };
       return phase === "wait" && state.updateFailed
         ? [row, { step: UPDATING, ok: false, detail: state.updateFailed }]
         : [row];
@@ -844,9 +1038,11 @@ export function useLocalSequence({
     prepare,
     start,
     retry,
+    tryAgain,
     acceptTerms,
     cancel,
     reset,
+    startFresh,
   };
 }
 
@@ -877,9 +1073,12 @@ export function LocalIntelligence({
   open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
+  const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   // While it runs, one journey says what is happening and how far along the whole Start is. The
   // rows then say which part is done and which is left, and nothing twice.
-  const journeying = offerStart && running && !stopped;
+  // Paused for room: its row says so, with Try again, and no time left counts down.
+  const journeying = offerStart && running && !stopped && !sequence.held;
   // Its download's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
   const rows = journeying
@@ -896,7 +1095,14 @@ export function LocalIntelligence({
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : sequence.steps;
+      : plan && tooSmall
+        ? // What happened on the row; what to do in the card under it.
+          sequence.steps.map((row) =>
+            row.ok
+              ? row
+              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+          )
+        : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -912,33 +1118,45 @@ export function LocalIntelligence({
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && <Failure problem={problem} />}
-      <div className="row">
-        {running && at !== "start" && (
-          <button type="button" className="quiet" onClick={sequence.cancel}>
-            Cancel
-          </button>
-        )}
-        {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
+      {plan && tooSmall && !waitingOn && (
+        <PodmanTooSmall
+          key={plan.machine}
+          plan={plan}
+          shortfall={tooSmall}
+          onRetry={sequence.retry}
+        />
+      )}
+      {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
+      {!(plan && tooSmall) && (
+        <div className="row">
+          {running && at !== "start" && (
+            <button type="button" className="quiet" onClick={sequence.cancel}>
+              Cancel
+            </button>
+          )}
+          {/* Cancel stops the setup's own calls. The last step is OpenBot starting, or updating and
             starting, which can't be stopped partway. Said where Cancel was, in its height: on
             Windows G Cancel went at step 4 and the card shrank under the rows. */}
-        {running && at === "start" && (
-          <p className="cannot-cancel">
-            {releasing || releaseDue
-              ? "You can't cancel this last step. Stopping it partway could leave the update half done."
-              : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
-          </p>
-        )}
-        {stopped && !waitingOn && (
-          <button type="button" onClick={sequence.retry}>
-            Retry
-          </button>
-        )}
-        {offerStart && !running && at === null && (
-          <button type="button" onClick={sequence.start}>
-            Start OpenBot
-          </button>
-        )}
-      </div>
+          {running && at === "start" && (
+            <p className="cannot-cancel">
+              {releasing || releaseDue
+                ? "You can't cancel this last step. Stopping it partway could leave the update half done."
+                : "You can't cancel this last step. Stopping it partway could leave OpenBot half started."}
+            </p>
+          )}
+          {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
+          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
+            <button type="button" onClick={sequence.retry}>
+              Retry
+            </button>
+          )}
+          {offerStart && !running && at === null && (
+            <button type="button" onClick={sequence.start}>
+              Start OpenBot
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -958,6 +1176,8 @@ export function LocalStatus({
   /** Its download's row too. Off where the background install's row says it already. */
   download?: boolean;
 }) {
+  const tooSmall = sequence.stopped ? sequence.blocked?.shortfall : undefined;
+  const plan = usePodmanPlan(tooSmall);
   if (!sequence.stopped) {
     // The rest of OpenBot downloads behind the screen in front: say how far, so the wait is visible.
     if (!download || !sequence.running || !sequence.download) return null;
@@ -997,19 +1217,31 @@ export function LocalStatus({
             : "Setup stopped"}
       </h2>
       {needs ? (
-        <LocalNeeds sequence={sequence} />
+        <LocalNeeds sequence={sequence} explain />
       ) : (
         <>
           <p>
             {openBot
               ? "Everything else is ready. Retry starts OpenBot again."
-              : (sequence.blocked?.said ?? sequence.problem?.said)}
+              : plan && tooSmall
+                ? podmanTooSmallSaid(tooSmall, plan)
+                : (sequence.blocked?.said ?? sequence.problem?.said)}
           </p>
-          <div className="row">
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          </div>
+          {plan && tooSmall && (
+            <PodmanTooSmall
+              key={plan.machine}
+              plan={plan}
+              shortfall={tooSmall}
+              onRetry={sequence.retry}
+            />
+          )}
+          {!plan && (
+            <div className="row">
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            </div>
+          )}
           <TroubleshootingLogs
             problem={
               sequence.problem ??
@@ -1030,11 +1262,25 @@ export function LocalStatus({
  * that click is passed to the CLI as the version they accepted (a product decision of 2026-10-22).
  * Nothing accepts it without the click.
  */
-export function LocalNeeds({ sequence }: { sequence: LocalSequence }) {
+export function LocalNeeds({
+  sequence,
+  explain = false,
+}: {
+  sequence: LocalSequence;
+  /** Says what stopped as well, where no row of the sequence says it (`LocalStatus`). */
+  explain?: boolean;
+}) {
   if (!needsPerson(sequence)) return null;
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
+  if (reason === "stack-lost")
+    return (
+      <StartFresh
+        said={explain ? (sequence.blocked?.said ?? null) : null}
+        onStartFresh={sequence.startFresh}
+      />
+    );
   if (reason === "eula-acceptance-required")
     return (
       <AcceptTerms
@@ -1050,7 +1296,33 @@ function needsPerson(sequence: LocalSequence): boolean {
   const reason = sequence.stopped ? sequence.blocked?.reason : null;
   return (
     reason === "authentication-required" ||
-    reason === "eula-acceptance-required"
+    reason === "eula-acceptance-required" ||
+    reason === "stack-lost"
+  );
+}
+
+/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+function backendLost(sequence: LocalSequence): boolean {
+  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+}
+
+/** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
+function StartFresh({
+  said,
+  onStartFresh,
+}: {
+  said: string | null;
+  onStartFresh: () => void;
+}) {
+  return (
+    <div className="local-needs">
+      {said && <p>{said}</p>}
+      <div className="row">
+        <button type="button" onClick={onStartFresh}>
+          Start fresh
+        </button>
+      </div>
+    </div>
   );
 }
 

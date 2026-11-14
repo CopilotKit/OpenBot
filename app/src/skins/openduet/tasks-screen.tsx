@@ -2,9 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { useWaitingRows } from "@/components/approvals/waiting";
 import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
-import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
+import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
+import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { TASK_ORDER } from "@/lib/tasks/groups";
 import { TASK_STATUS_LABEL } from "@/lib/tasks/queries";
@@ -39,7 +41,7 @@ function rememberView(view: TasksView) {
  * OpenDuet's Tasks: its two big words, Active and Up next, over OpenBot's own screens.
  *
  * Every row here is OpenBot's own: its task rows and its approval and question rows, then
- * `BotResponsibilities` for responsibilities, `RoutinesList` for routines and `SuggestionsInbox` for
+ * `RoutinesList` for routines, goals and check-ins, and `SuggestionsInbox` for
  * what check-ins found. So every choice, field and confirmation OpenBot offers is here, and a new
  * one arrives without this screen changing. The skin adds only the switch, the headings and the
  * layout around them.
@@ -137,12 +139,23 @@ function SwitchTab({
 
 /**
  * Active: the person's tasks grouped by what each needs from them, in OpenDuet's order (Ready for
- * review, Needs input, Failed, Working, Resolved this week), then the responsibilities and routines
- * their Bots carry, in OpenBot's own lists. Needs input also holds the approvals and questions
- * waiting outside any task, decided in OpenBot's own rows. A group with nothing in it is left out.
+ * review, Needs input, Failed, Working, Resolved this week), then the routines their Bots carry, in
+ * OpenBot's own Routines list, goals and check-ins included. Needs input also holds the approvals
+ * and questions waiting outside any task, decided in OpenBot's own rows. A group with nothing in it
+ * is left out.
  */
 function ActiveView() {
   const routines = useQuery(routinesQueryOptions());
+  const goals = useQuery(responsibilitiesQueryOptions());
+  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const routineCount =
+    routines.data && goals.data && checkIns.data
+      ? mergeRoutines({
+          routines: routines.data.routines,
+          goals: goals.data,
+          checkIns: checkIns.data,
+        }).length
+      : undefined;
   const waiting = useWaitingRows(undefined);
   const { tasks, done } = useNeedsYou();
   const listed = [...tasks, ...done];
@@ -168,8 +181,7 @@ function ActiveView() {
           {waiting.error.message}
         </p>
       ) : null}
-      <BotResponsibilities />
-      <Section count={routines.data?.routines.length} label="Routines">
+      <Section count={routineCount} label="Routines">
         <RoutinesList embedded />
       </Section>
     </div>

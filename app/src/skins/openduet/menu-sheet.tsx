@@ -5,6 +5,7 @@ import {
   IconPinFilled,
   IconPinnedOff,
   IconPlus,
+  IconSearch,
   IconStack2,
   IconTrash,
 } from "@tabler/icons-react";
@@ -36,13 +37,19 @@ import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import {
+  COMMAND_MENU_KEYS,
+  CommandMenuKeys,
+  openCommandMenu,
+  useBeforeCommandNavigate,
+} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
@@ -109,6 +116,8 @@ export function MenuSheet({
   const manageId = useId();
   const scrollRoot = useRef<HTMLDivElement>(null);
   const close = () => onOpenChange(false);
+  // Opened over this drawer with Cmd/Ctrl+K, the menu closes it before it navigates.
+  useBeforeCommandNavigate(close);
   const conversations = pinnedFirst(channels.data ?? []);
   // OpenBot's one navigation list, for this person: Settings on its own, the rest under Manage.
   const navigation = useNavigationItems();
@@ -125,7 +134,15 @@ export function MenuSheet({
         showCloseButton={false}
         side="left"
       >
-        <SheetHeader className="px-5 pt-5 pb-3">
+        {/*
+         * In OpenBot Desktop on macOS the window's buttons sit over the drawer's top-left corner,
+         * about 21–37px down (`data-desktop-titlebar`, macOS only), so the header then starts 48px
+         * down, below them, as onboarding's does, and it moves the window (`data-desktop-drag`).
+         */}
+        <SheetHeader
+          className="px-5 pt-5 pb-3 in-data-[desktop-titlebar=overlay]:pt-12"
+          data-desktop-drag="deep"
+        >
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
             <BrandName>{appConfig.brand.productName}</BrandName>
           </SheetTitle>
@@ -152,6 +169,27 @@ export function MenuSheet({
             </span>
             <RowText line="Start a conversation with any Bot" name="Chat" />
           </Link>
+          <button
+            aria-keyshortcuts={COMMAND_MENU_KEYS}
+            className={TALL_ROW}
+            onClick={() => {
+              close();
+              openCommandMenu();
+            }}
+            type="button"
+          >
+            <span
+              aria-hidden
+              className="grid size-6 shrink-0 place-items-center text-openduet-ink-2"
+            >
+              <IconSearch size={22} stroke={1.9} />
+            </span>
+            <RowText
+              line="Open any page, Bot or conversation"
+              name="Command palette"
+            />
+            <CommandMenuKeys className="ml-auto max-md:hidden" />
+          </button>
           <div className="mt-1 flex min-h-0 flex-1 flex-col">
             <div
               className="min-h-0 shrink overflow-y-auto overscroll-contain"
@@ -436,9 +474,9 @@ function ConversationRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={isOpen ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );

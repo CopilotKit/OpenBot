@@ -13,6 +13,7 @@ import {
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { ForATeam, useEdition } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -101,14 +102,24 @@ const skipped = (bot: BotCheckInMetrics) =>
   Object.values(bot.runs.skipped).reduce((sum, count) => sum + count, 0);
 
 /**
- * Admin, Check-ins: the switch and the daily limit, then how each Bot's check-ins went.
+ * Admin, Routines: the check-ins switch and the daily limit, then how each Bot's check-ins went.
+ * Routines and goals are each person's own and have nothing to set here; check-ins are the part an
+ * admin sets for everybody, so they are this page's sections.
  *
  * The switch is the same "Check-ins" capability Permissions lists, at the organization's
  * scope; roles and groups are set there. The numbers are counts only: the server sends no titles
  * and no people, because what a check-in raised came from somebody's own apps.
  */
 export function CheckInsPage() {
-  const overview = useQuery(enterpriseOverviewQueryOptions());
+  /*
+   * The switch and the limit are settings the personal edition fixes (check-ins on, 24 a day), so
+   * there they say they are for a team. How check-ins went is the one person's own, and shows.
+   */
+  const edition = useEdition();
+  const overview = useQuery({
+    ...enterpriseOverviewQueryOptions(),
+    enabled: edition === "team",
+  });
   const [days, setDays] = useState<Days>(7);
   /*
    * The previous window's numbers stay up while the other loads, so switching between 7 and 30 days
@@ -121,10 +132,14 @@ export function CheckInsPage() {
 
   return (
     <PageShell
-      description="Bots check the apps people connected and tell them when something needs them, at most once an hour. They never act without asking."
-      title="Check-ins"
+      description="People set their own Bots' routines and goals. Check-ins are set here, for everybody: Bots check the apps people connected and say when something needs them, at most once an hour, and never act without asking."
+      title="Routines"
     >
-      {overview.isPending ? null : overview.error ? (
+      {edition === "personal" ? (
+        <PageSection title="Check-ins">
+          <ForATeam />
+        </PageSection>
+      ) : overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load check-in settings. Reload the page.
         </p>
@@ -167,7 +182,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
           .
         </>
       }
-      title="Settings"
+      title="Check-ins"
     >
       <PageRows>
         <Item size="sm">
@@ -175,7 +190,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
             <IconRadar />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Check-ins</ItemTitle>
+            <ItemTitle>Check-ins for everybody</ItemTitle>
             <ItemDescription>
               {on
                 ? "Bots check in for everybody."
@@ -187,7 +202,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
           </ItemContent>
           <ItemActions>
             <Switch
-              aria-label="Check-ins"
+              aria-label="Check-ins for everybody"
               checked={on}
               disabled={saving}
               onCheckedChange={(checked) =>
@@ -272,7 +287,7 @@ function Activity({
         </Select>
       }
       description="Acceptance is how many items people started, out of the ones they started or hid."
-      title="Activity"
+      title="How check-ins went"
     >
       {metrics.isPending ? null : metrics.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">

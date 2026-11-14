@@ -24,6 +24,7 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { Route as BotAppRoute } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { answerBotsList } from "./bots-api";
 
 /**
  * What the per-Bot grant screen draws: which of its three pages a failed read returns, and the one
@@ -263,7 +264,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
   const view = renderScreen(failingQueryClient());
 
   expect(
-    await view.findByText("Couldn't load plugins. Reload the page."),
+    await view.findByText("Couldn't load apps. Reload the page."),
   ).toBeTruthy();
 
   // The whole point: an app that may be enabled, with grants on it right now, must never be
@@ -275,7 +276,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
 test("a failed plugin read draws no switches, so nothing reads as a Bot holding nothing", async () => {
   const view = renderScreen(failingQueryClient());
 
-  await view.findByText("Couldn't load plugins. Reload the page.");
+  await view.findByText("Couldn't load apps. Reload the page.");
 
   expect(view.container.querySelectorAll('[role="switch"]').length).toBe(0);
   expect(view.queryByText("Turn on every read-only action")).toBeNull();
@@ -330,20 +331,17 @@ test("a failed REFETCH keeps the grant list it already had, not the error", asyn
  */
 test("a hidden Bot's own page draws its grants instead of saying there is no such Bot", async () => {
   global.fetch = Object.assign(
-    async (path: Parameters<typeof fetch>[0]) => {
-      const url = String(path);
-      if (url.startsWith("/api/agents")) {
-        const hiddenBot = {
-          id: BOT_ID,
-          name: "Tucked Bot",
-          hidden: true,
-          hasCallbackToken: false,
-        };
-        return Response.json({
-          agents: url.includes("hidden=true") ? [hiddenBot] : [],
-        });
-      }
-      return new Response(null, { status: 500 });
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const hiddenBot = {
+        id: BOT_ID,
+        name: "Tucked Bot",
+        hidden: true,
+        hasCallbackToken: false,
+      };
+      return (
+        answerBotsList(path, init, { visible: [], hidden: [hiddenBot] }) ??
+        new Response(null, { status: 500 })
+      );
     },
     { preconnect: originalFetch.preconnect },
   );

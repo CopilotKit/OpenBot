@@ -83,25 +83,30 @@ time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
-# The version Tauri already uses. See `macos_quit` in main.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
+# The macOS quit OpenBot did not start (Dock, AppleScript, log out) routed through its own Quit.
+# The version Tauri already uses. See `macos_quit` in main.rs. `exception`: an AppKit exception
+# caught as an error, never unwound into a Rust thread (`reveal_in_file_manager`); Tauri's objc2
+# already builds it.
+objc2 = { version = "0.6", features = ["exception"] }
 # Narration on the Mac: on-device speech recognition from the microphone. See `speech/macos.rs`.
 # The same objc2 generation Tauri and wry already use.
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSLocale", "NSOperation", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSLocale", "NSOperation", "NSString"] }
 objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFTranscription"] }
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
-# The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
+# The shell's own messages in an alert with OpenBot's icon. See `native_alert.rs`. `NSAppearance`:
+# the system's light or dark before the main window exists (`first_paint::system_dark`).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 
 # Narration on Windows: the SAPI in-process recognizer. See `speech/sapi.rs`. The version Tauri uses.
 [target.'cfg(windows)'.dependencies]
 # `Win32_System_Pipes` and `Win32_Security`: holding Docker's default pipe name while OpenBot's
-# Podman machine starts. See `acquire::start_machine`.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes"] }
+# Podman machine starts. See `acquire::start_machine`. `Win32_Graphics_Gdi`, `Win32_UI_Accessibility`,
+# `Win32_UI_HiDpi`, `Win32_UI_Shell`, `Win32_System_LibraryLoader` and `Win32_System_SystemInformation`:
+# the main window's "Getting OpenBot ready" until its page paints. See `first_paint`.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Media_Speech", "Win32_System_Com", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Pipes", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_SystemInformation"] }
 # Where WSL keeps a Podman machine's disk, so its drive's free space is checked before Start. See
 # `windows::podman_machine_drive`. The version reqwest already uses.
 windows-registry = "0.6"

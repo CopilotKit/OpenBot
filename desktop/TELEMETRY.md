@@ -18,7 +18,7 @@ Sign-in, account-check and Start responses do not wait for attribution. The sign
 
 Each `telemetry link` is a CLI command with its own CLI analytics. Once a link confirms an installation and account, later hooks in the same launch skip it; a new sign-in clears that, as does a rotated installation or the next launch. A terminal logout is therefore noticed at the next sign-in or launch rather than the next Start.
 
-The bundled CLI is pinned to `copilotkit@7bd073b` (`desktop/intelligence-cli.json`), a `CLI_ENV=production` preview of Intelligence `7bd073b78`, the 0.16.0-rc.11 tag (`6bfaa0f5c` with `local --app-path` and loopback-equivalent reconnects) with `telemetry link` and `signed_out` support, the 0.16.0-rc.11 chart and CopilotKit v1.85.0 templates. Release still needs live PostHog checks for sign-in, task use, restart, account switching and the Settings opt-out. Measure cold and warm handshake times on macOS and Windows with that pin; fake-process tests do not establish real account-link latency.
+The bundled CLI is pinned to `copilotkit@7334f7d` (`desktop/intelligence-cli.json`), a `CLI_ENV=production` preview of Intelligence `7334f7d16`, the 0.16.0-rc.13 tag (`6bfaa0f5c` with `local --app-path`, loopback-equivalent reconnects and a CPU check on the engine's total) with `telemetry link` and `signed_out` support, the 0.16.0-rc.13 chart and CopilotKit v1.87.0 templates. Release still needs live PostHog checks for sign-in, task use, restart, account switching and the Settings opt-out. Measure cold and warm handshake times on macOS and Windows with that pin; fake-process tests do not establish real account-link latency.
 
 The added state fields are not readable by older desktop releases because their parsers reject unknown fields. After a downgrade, those releases disable native telemetry until a compatible version reads the state again. Do not treat a downgrade as proof that telemetry is still active.
 
@@ -70,11 +70,10 @@ Events persist before sending and keep their event IDs across retries. The queue
 
 The ingest must accept the new `oss.desktop.*` namespace: [oss-path-to-production #290](https://github.com/CopilotKit/oss-path-to-production/pull/290), merged on 2026-09-12. A successful HTTP response alone does not prove downstream acceptance; production ingest acknowledges filtered events too. Production desktop delivery depends on that change being deployed.
 
-Regression tests live in the native telemetry, stall (`stall.rs`, `desktop_stall.rs`) and pull-metrics modules, frontend telemetry, heartbeat and journey-timing tests, and server metadata tests. For an actual local HTTP and installed-runtime check, build the native probe and run the driver from the repository root:
+Regression tests live in the native telemetry, stall (`stall.rs`, `desktop_stall.rs`) and pull-metrics modules, frontend telemetry, heartbeat and journey-timing tests. For an actual local HTTP check, build the native probe and point it at a loopback receiver:
 
 ```sh
 cargo build --manifest-path desktop/src-tauri/Cargo.toml --release --example telemetry_probe
-bun desktop/scripts/validate-telemetry.ts desktop/src-tauri/target/release/examples/telemetry_probe
 ```
 
 The probe also accepts `provider-canary` to send three synthetic `model_chosen` events: Google OAuth, xAI OAuth, and a keyless compatible endpoint. It keeps `runtime_env=test`, uses a random installation UUID in the supplied data directory, and accepts only a loopback HTTP receiver. No credentials, model names, or endpoint values are included:
@@ -83,14 +82,4 @@ The probe also accepts `provider-canary` to send three synthetic `model_chosen` 
 telemetry_probe /path/to/fresh-data-dir http://127.0.0.1:PORT/ingest provider-canary
 ```
 
-The driver uses temporary data and a loopback receiver. It exercises separate-process persistence/replay, quit, activation deduplication, opt-out, and the installed runtime's identity/metadata handoff. It does not require AI credentials or send validation events to production. Windows and Linux execution remain covered by the platform CI runs; a Mac run is not proof of their native UI behavior.
-
-Local HTTP validation is reusable through `desktop/scripts/validate-telemetry.ts` with the separately built `telemetry_probe` example. It checks offline queue replay with stable installation/event IDs, recovered abandonment, quit flushing, activation once across process restarts, native/runtime metadata, and both `true`/`1` values of `COPILOTKIT_TELEMETRY_DISABLED` and `DO_NOT_TRACK`. Opt-out must remove queued state and identity and produce zero HTTP sends.
-
-The September 12 local run used installed runtime 1.70.1 and its public ESM Hono factory, following the production `eventsource` preload. Its existing Bun dependency layout needed an explicit `NODE_PATH` pointing at the existing hoist directory so a cached `gaxios` module could resolve `extend`. No dependency was installed or modified. Reproduce that adapter from the repository root:
-
-```sh
-NODE_PATH="$PWD/node_modules/.bun/node_modules" bun --no-env-file --no-install desktop/scripts/validate-telemetry.ts /absolute/path/to/telemetry_probe
-```
-
-The final loopback report recorded five native requests and one runtime request with matching installation identity, with all four opt-out cases passing. This covers the emitter and installed-runtime HTTP contract; fresh dependency installation and final PostHog delivery still require their own validation.
+It does not require AI credentials or send validation events to production. Windows and Linux execution remain covered by the platform CI runs; a Mac run is not proof of their native UI behavior.

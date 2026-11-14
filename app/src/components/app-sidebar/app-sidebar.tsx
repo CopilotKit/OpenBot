@@ -1,9 +1,9 @@
 import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BrandName } from "@/components/edition/brand-name";
 import {
   DropdownMenu,
@@ -28,28 +28,39 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { untitledLine } from "@/lib/channels/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
+  channelSearchInfiniteQueryOptions,
+  isChannelSearchable,
+  normalizeChannelSearch,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
+import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
+import {
+  isNavigationLink,
+  type NavigationLink,
+  useNavigationItems,
+} from "@/lib/navigation";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
 import { BotsNavBadge } from "../bot-profile/attention";
-import { BrowserNavItem } from "../browser/browser-nav-item";
+import {
+  RecordingDot,
+  recordingTooltip,
+  useLiveRecording,
+} from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
-import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import { AccountLabel } from "./account-label";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
@@ -58,37 +69,21 @@ const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
 const userMenuItemClassName = "gap-2 px-2 py-1.5";
 
-function UserAvatar() {
-  const { data: currentUser } = useQuery(currentUserQueryOptions());
-  const initials =
-    currentUser?.name
-      ?.trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") ?? currentUser?.email.slice(0, 2).toUpperCase();
-
-  return (
-    <div className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
-      {initials}
-    </div>
-  );
-}
-
 /**
  * Cap layout animation because `layout` measures every animated row on each reorder.
  */
 const MAX_ANIMATED_ROWS = 60;
 
 /**
- * The roster, narrowed to what the person typed.
+ * The loaded roster, narrowed to what the person typed.
  *
  * Matches the channel's name, its summary, its opening and the last message, because those are the
  * things the row can actually show — searching against something invisible returns results a person
  * cannot account for. The opening and the last message are included because one of them is what the
- * second line draws until the conversation has been named. Message history beyond that line is not
- * here to search: it lives in the thread store, and reaching for it is a server endpoint rather than
- * a filter.
+ * second line draws until the conversation has been named.
+ *
+ * Only what is loaded. This sidebar asks the server instead (see `SearchResults`), which searches
+ * the whole history; the alternate skins' rosters still narrow their loaded rows with this.
  *
  * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
  * not hand `AnimatePresence` a new array identity and restage the whole list.
@@ -109,6 +104,26 @@ export function matchingChannels(
       (field) => field?.toLowerCase().includes(needle),
     ),
   );
+}
+
+/** How long typing has to pause before the box is searched. */
+export const SEARCH_DEBOUNCE_MS = 250;
+
+/** What the search box searches, said where the person types. Not every word of every message. */
+export const SEARCH_SCOPE = "Search conversation names and recent messages";
+export const SEARCH_HINT = "Type at least 2 characters to search history";
+
+/**
+ * `value`, once it has stopped changing for `delay`. Each search is a request, so one per pause in
+ * typing rather than one per keystroke.
+ */
+function useDebounced(value: string, delay: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
 }
 
 /**
@@ -206,28 +221,197 @@ function ChannelRow({
   );
 }
 
+/**
+ * What the server found for the search box, a page at a time.
+ *
+ * The answer is for the text in the box or it is not shown: while the box is still settling, or the
+ * first page is on its way, this says it is searching. A list left over from what was typed a
+ * moment ago would answer a question nobody is asking any more, and an empty one would say there
+ * is nothing to find. A failure says so and offers Retry. It is never shown as no matches.
+ *
+ * FILTERING DOES NOT ANIMATE. The rows are drawn without the roster's order animation: results
+ * replace each other as somebody types, and a list that moves under them is the very thing they
+ * are trying to read.
+ */
+function SearchResults({
+  term,
+  settled,
+  emphasis,
+}: {
+  /** The search as it was when typing last paused, normalised. This is what is asked for. */
+  term: string;
+  /** Whether that is still what is in the box. */
+  settled: boolean;
+  emphasis: MessageListEmphasis;
+}) {
+  const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
+
+  if (!settled || results.isPending) {
+    return (
+      <p role="status" className="px-2 py-3 text-xs text-muted-foreground">
+        Searching…
+      </p>
+    );
+  }
+  if (!results.data) {
+    return (
+      <div className="px-2 py-3 text-center">
+        <p role="alert" className="mb-2 text-xs text-muted-foreground">
+          {results.error?.message || "Couldn't search your conversations."}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs"
+          disabled={results.isFetching}
+          onClick={() => void results.refetch()}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+  if (results.data.length === 0) {
+    return (
+      <div className="py-4">
+        <Empty className="border border-dashed min-h-[40dvh]">
+          <EmptyHeader>
+            <EmptyTitle>No conversations match your search</EmptyTitle>
+            <EmptyDescription className="text-pretty">
+              {`No conversation has “${term}” in its name or recent messages.`}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
+    );
+  }
+  return (
+    <>
+      {/* Mounted with its first rows, so they appear without the entrance a new channel gets. */}
+      <AnimatePresence initial={false}>
+        {results.data.map((channel) => (
+          <ChannelRow
+            emphasis={emphasis}
+            key={channel.id}
+            animateOrder={false}
+            channel={channel}
+          />
+        ))}
+      </AnimatePresence>
+      {results.hasNextPage ? (
+        <div className="px-2 py-3 text-center">
+          {results.isFetchNextPageError ? (
+            <p role="alert" className="mb-2 text-xs text-muted-foreground">
+              Couldn't load more results.
+            </p>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs"
+            disabled={results.isFetching}
+            onClick={() => void results.fetchNextPage({ cancelRefetch: false })}
+          >
+            {results.isFetchingNextPage
+              ? "Loading more results…"
+              : results.isFetchNextPageError
+                ? "Retry"
+                : "Load more results"}
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
+function PrimaryNavItem({
+  item,
+  tooltip,
+  children,
+}: {
+  item: NavigationLink;
+  tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  children?: React.ReactNode;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className="hover:bg-foreground/5 h-10"
+        render={(props) => (
+          <Link
+            {...props}
+            to={item.to}
+            activeProps={{ className: "bg-foreground/5" }}
+          />
+        )}
+        tooltip={tooltip}
+      >
+        <div className="size-[28px] flex items-center justify-center">
+          <item.icon />
+        </div>
+        <span className="text-sm">{item.label}</span>
+        {children}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The Skills entry. While any of the person's Recorders records, it carries a red dot named for the recording, and a
+ * tooltip saying the same, as the Teach a Bot entry once did. Nothing extra otherwise.
+ */
+function SkillsNavItem({ item }: { item: NavigationLink }) {
+  const recording = useLiveRecording();
+  return (
+    <PrimaryNavItem
+      item={item}
+      tooltip={recordingTooltip(recording, item.label)}
+    >
+      {recording ? <RecordingDot {...recording} /> : null}
+    </PrimaryNavItem>
+  );
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
-  const { data: currentUser } = useQuery(currentUserQueryOptions());
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
   const scrollRoot = useRef<HTMLDivElement>(null);
-  const searching = search.trim().length > 0;
-  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
+  const term = normalizeChannelSearch(search);
+  const debouncedTerm = normalizeChannelSearch(debouncedSearch);
+  const searching = term.length > 0;
+  const searchable = isChannelSearchable(term);
   /*
-   * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
-   * list thrashing under somebody who is still typing — and the moving target is the very thing
-   * they are trying to read. Order animation is for a channel that was just spoken in, which is
-   * occasional; this is not.
+   * WHILE SEARCHING, THE ROSTER IS NOT ON SCREEN. Its rows and its pagination unmount, so nothing
+   * pages through recent history looking for a match: the server searches all of it. Clearing the
+   * box puts the roster back as it was, scrolled where it was.
    */
-  const animateOrder =
-    !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
+  const rosterScroll = useRef<number | null>(null);
+  const changeSearch = (value: string) => {
+    if (!searching && normalizeChannelSearch(value)) {
+      rosterScroll.current = scrollRoot.current?.scrollTop ?? 0;
+    }
+    setSearch(value);
+  };
+  useLayoutEffect(() => {
+    if (searching || rosterScroll.current === null || !scrollRoot.current) {
+      return;
+    }
+    scrollRoot.current.scrollTop = rosterScroll.current;
+    rosterScroll.current = null;
+  }, [searching]);
+  const visibleChannels = pinnedFirst(channels.data ?? []);
+  const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
   const { setOpenMobile } = useSidebar();
+  // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
+  useBeforeCommandNavigate(() => setOpenMobile(false));
 
   return (
     <Sidebar variant="inset" {...props}>
@@ -272,7 +456,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <InputGroup className="bg-background text-sm rounded-lg h-9">
                 <InputGroupInput
                   aria-label="Search conversations"
-                  onChange={(event) => setSearch(event.target.value)}
+                  aria-describedby={
+                    searching ? "conversation-search-scope" : undefined
+                  }
+                  onChange={(event) => changeSearch(event.target.value)}
                   placeholder="Search…"
                   value={search}
                 />
@@ -281,58 +468,66 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </InputGroupAddon>
               </InputGroup>
             </SidebarMenuItem>
-            <div className="w-full h-2" />
             {/*
-             * TWO DIFFERENT NOTHINGS, AND SAYING THE WRONG ONE IS ALARMING. A roster nobody has
-             * used yet needs telling how to start. A roster that simply does not match what is in
-             * the box has to say so and quote it back — told "you don't have channels yet" while
-             * holding a typo, a person reads their conversations as gone.
+             * What is searched, said while somebody types: names and the recent lines the rows
+             * show, not every message of every conversation. One character is not searched at
+             * all, and says how many it takes, so a box that does nothing never looks broken.
              */}
-            {searching && visibleChannels.length === 0 ? (
-              <div className="py-4">
-                <Empty className="border border-dashed min-h-[40dvh]">
-                  <EmptyHeader>
-                    <EmptyTitle>
-                      {channels.hasNextPage
-                        ? "No loaded conversations match your search"
-                        : "No conversations match your search"}
-                    </EmptyTitle>
-                    <EmptyDescription className="text-pretty">
-                      {channels.hasNextPage
-                        ? "Load older conversations to search more of your history."
-                        : `No conversation has “${search.trim()}” in its name or latest message.`}
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              </div>
+            {searching ? (
+              <p
+                id="conversation-search-scope"
+                className="px-2 pt-1.5 text-xs text-muted-foreground"
+              >
+                {searchable ? SEARCH_SCOPE : SEARCH_HINT}
+              </p>
             ) : null}
-            {!searching && channels.data?.length === 0 ? (
-              <div className="py-4">
-                <Empty className="border border-dashed min-h-[40dvh]">
-                  <EmptyHeader>
-                    <EmptyTitle>No conversations yet</EmptyTitle>
-                    <EmptyDescription className="text-pretty">
-                      Start a conversation with a Bot and it shows up here.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              </div>
-            ) : null}
-            <AnimatePresence initial={false}>
-              {visibleChannels.map((channel) => (
-                <ChannelRow
+            <div className="w-full h-2" />
+            {searching ? (
+              searchable ? (
+                <SearchResults
                   emphasis={emphasis}
-                  key={channel.id}
-                  animateOrder={animateOrder}
-                  channel={channel}
+                  settled={debouncedTerm === term}
+                  term={debouncedTerm}
                 />
-              ))}
-            </AnimatePresence>
-            <ChannelPagination
-              query={channels}
-              scrollRoot={scrollRoot}
-              searching={searching}
-            />
+              ) : null
+            ) : (
+              <>
+                {/*
+                 * TWO DIFFERENT NOTHINGS, AND SAYING THE WRONG ONE IS ALARMING. A roster nobody
+                 * has used yet needs telling how to start; a search that matches nothing says so
+                 * and quotes it back (see SearchResults). Told "you don't have channels yet" while
+                 * holding a typo, a person reads their conversations as gone.
+                 */}
+                {channels.data?.length === 0 ? (
+                  <div className="py-4">
+                    <Empty className="border border-dashed min-h-[40dvh]">
+                      <EmptyHeader>
+                        <EmptyTitle>No conversations yet</EmptyTitle>
+                        <EmptyDescription className="text-pretty">
+                          Start a conversation with a Bot and it shows up here.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </div>
+                ) : null}
+                <AnimatePresence initial={false}>
+                  {visibleChannels.map((channel) => (
+                    <ChannelRow
+                      emphasis={emphasis}
+                      key={channel.id}
+                      animateOrder={animateOrder}
+                      channel={channel}
+                    />
+                  ))}
+                </AnimatePresence>
+                {/* Never searching here: a search unmounts the roster, this with it. */}
+                <ChannelPagination
+                  query={channels}
+                  scrollRoot={scrollRoot}
+                  searching={false}
+                />
+              </>
+            )}
           </SidebarGroup>
         </SidebarMenu>
       </SidebarContent>
@@ -341,29 +536,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
-            .map((item) => (
-              <SidebarMenuItem key={item.id}>
-                <SidebarMenuButton
-                  className="hover:bg-foreground/5 h-10"
-                  render={(props) => (
-                    <Link
-                      {...props}
-                      to={item.to}
-                      activeProps={{ className: "bg-foreground/5" }}
-                    />
-                  )}
-                >
-                  <div className="size-[28px] flex items-center justify-center">
-                    <item.icon />
-                  </div>
-                  <span className="text-sm">{item.label}</span>
+            .map((item) =>
+              // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
+              item.id === "skills" ? (
+                <SkillsNavItem item={item} key={item.id} />
+              ) : (
+                <PrimaryNavItem item={item} key={item.id}>
                   {/* What waits on you across every Bot; Bots lists them first. */}
                   {item.id === "bots" ? <BotsNavBadge /> : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          {/* Your own browser, with the Recorder in it. Drawn only where OpenBot can run one for you. */}
-          <BrowserNavItem />
+                </PrimaryNavItem>
+              ),
+            )}
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -371,14 +554,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
                 }
               >
-                <UserAvatar />
-                {/* The name and the release the server runs, side by side: 80/20 of the row. */}
-                <span className="grid min-w-0 flex-1 grid-cols-[4fr_1fr] items-center gap-2">
-                  <span className="truncate text-sm trackint-tight">
-                    {currentUser?.name || currentUser?.email}
-                  </span>
-                  <OpenBotVersion className="text-right text-[10px] leading-3 text-muted-foreground" />
-                </span>
+                <AccountLabel />
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="start"

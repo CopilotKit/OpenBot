@@ -37,6 +37,7 @@ import {
   setSkin,
   useSkinId,
 } from "@/skins/store";
+import { BOTS_PATH } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -199,6 +200,42 @@ test("picking a skin draws it at once and saves it on the account", async () => 
   expect(view.queryByRole("alert")).toBeNull();
 });
 
+test("the picker lists OpenFuse, and never OpenMuse", async () => {
+  signedIn();
+  serve("GET /api/settings/preferences", {
+    preferences: preferences("openbot"),
+  });
+  const { view, user } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await user.click(picker);
+  const options = await view.findAllByRole("option");
+  const names = options.map((option) => option.textContent ?? "");
+  expect(names.some((name) => name.startsWith("OpenFuse"))).toBe(true);
+  expect(names.join("\n")).not.toMatch(/openmuse/i);
+});
+
+test("an account still holding OpenMuse's id draws OpenFuse, and saves nothing", async () => {
+  signedIn();
+  // The id the skin had before it was renamed. The server answers with the new id, and the app reads
+  // the old one the same way, so an account is never dropped to the default by the rename.
+  serve("GET /api/settings/preferences", {
+    preferences: preferences("openmuse" as UserPreferences["skin"]),
+  });
+  const { view } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await waitFor(() =>
+    expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse"),
+  );
+  expect(document.documentElement.dataset.skin).toBe("openfuse");
+  expect(picker.textContent).toContain("OpenFuse");
+  expect(picker.textContent).not.toMatch(/openmuse/i);
+  expect(sent).toEqual([]);
+});
+
 test("a skin the account could not save is put back, and the picker says so", async () => {
   signedIn();
   setSkin("openduet");
@@ -213,7 +250,7 @@ test("a skin the account could not save is put back, and the picker says so", as
   await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
   await user.click(picker);
   await user.click(await view.findByRole("option", { name: /^OpenFuse/ }));
-  await waitFor(() => expect(getSkinId()).toBe("openmuse"));
+  await waitFor(() => expect(getSkinId()).toBe("openfuse"));
 
   await act(async () => {
     save.resolve(Response.json({ error: "Storage down" }, { status: 503 }));
@@ -234,11 +271,11 @@ test("a skin the account could not save is put back, and the picker says so", as
 test("the account's skin wins over a different one this browser cached", async () => {
   signedIn();
   // What a reload paints first: the cached skin, before the preferences have answered.
-  setSkin("openmuse");
+  setSkin("openfuse");
   const read = Promise.withResolvers<Response>();
   answers.set("GET /api/settings/preferences", () => read.promise);
   const { view } = renderSettings();
-  expect(view.getByLabelText("Drawn skin").textContent).toBe("openmuse");
+  expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse");
 
   await act(async () => {
     read.resolve(Response.json({ preferences: preferences("opendots") }));
@@ -351,7 +388,7 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
     userPreferencesQueryOptions("alice").queryKey,
     preferences("openduet"),
   );
-  serve("GET /api/agents", { agents: [] });
+  serve(`GET ${BOTS_PATH}`, { bots: [], nextCursor: null });
   serve("GET /api/channels", { channels: [], nextCursor: null });
   serve("GET /api/bots/attention", { bots: [], lastPingId: null });
   const { view, router } = renderApp(`/s/${key}`);

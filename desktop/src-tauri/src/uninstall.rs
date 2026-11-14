@@ -73,6 +73,10 @@ pub trait Computer {
     fn machine(&mut self, name: &str) -> Result<Option<bool>, String>;
     fn stop_machine(&mut self, name: &str) -> Result<(), String>;
     fn remove_machine(&mut self, name: &str) -> Result<(), String>;
+    /// Every container in the machine `name` stopped, taking its port rules with it.
+    fn stop_containers(&mut self, name: &str) -> Result<(), String>;
+    /// Every one of OpenBot's port rules in the machine `name` removed, when its containers wouldn't stop.
+    fn clear_port_rules(&mut self, name: &str) -> Result<(), String>;
     /// OpenBot's files in the installation folder `root` (`remove_installation`).
     fn remove_installation(&mut self, root: &Path) -> Result<(), String>;
 }
@@ -134,6 +138,24 @@ pub fn stop_with(
     let own = crate::acquire::MACHINE;
     match computer.machine(own) {
         Ok(Some(running)) => {
+            // Before the machine goes, its containers stop, and their port rules go with them. In
+            // WSL's shared network namespace they would outlive the machine, ahead of the next
+            // OpenBot's rules for the same ports (box I: the backend wouldn't stop, its cluster's
+            // rules stayed, and the next install failed at "Opening OpenBot"). If they won't stop,
+            // OpenBot's rules are removed instead, while the machine can still be reached.
+            if asked.delete_data && running {
+                match computer.stop_containers(own) {
+                    Ok(()) => log::info!("[uninstall] stopped every container in {own}"),
+                    Err(error) => {
+                        log::warn!(
+                            "[uninstall] podman stop --all in {own} failed ({error}); removing its port rules instead"
+                        );
+                        if let Err(error) = computer.clear_port_rules(own) {
+                            log::warn!("[uninstall] could not remove {own}'s port rules: {error}");
+                        }
+                    }
+                }
+            }
             if running {
                 say("Stopping the software OpenBot runs on.");
                 let stopped = computer.stop_machine(own);
@@ -349,6 +371,12 @@ mod tests {
         fn remove_machine(&mut self, name: &str) -> Result<(), String> {
             self.result(format!("remove machine {name}"))
         }
+        fn stop_containers(&mut self, name: &str) -> Result<(), String> {
+            self.result(format!("stop containers {name}"))
+        }
+        fn clear_port_rules(&mut self, name: &str) -> Result<(), String> {
+            self.result(format!("clear port rules {name}"))
+        }
         fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
             self.result(format!("remove installation {}", root.display()))
         }
@@ -409,6 +437,7 @@ mod tests {
                 "stop backend /home/a/OpenBot",
                 "delete backend /home/a/OpenBot",
                 "machine openbot",
+                "stop containers openbot",
                 "stop machine openbot",
                 "remove machine openbot",
                 "remove installation /home/a/OpenBot",
@@ -425,6 +454,56 @@ mod tests {
                 "Removing the software OpenBot runs on.",
                 "Removing OpenBot's files.",
             ]
+        );
+    }
+
+    /// Box I: deleting the data removed `openbot` with the backend's cluster still running (its stop
+    /// had failed), the cluster's port rules stayed in WSL's shared network namespace, and the next
+    /// install failed at "Opening OpenBot". Before the machine stops and goes, every container in it
+    /// stops, and if they won't, OpenBot's port rules are removed. Not when the data stays: the
+    /// machine stays too, and its next start clears its own dead rules.
+    #[test]
+    fn before_openbots_machine_goes_its_containers_stop_or_its_port_rules_go() {
+        let mut computer = Recorded::with_machine(true);
+        run(&mut computer, DELETE);
+        assert_eq!(
+            computer.calls[4..],
+            [
+                "machine openbot",
+                "stop containers openbot",
+                "stop machine openbot",
+                "remove machine openbot",
+                "remove installation /home/a/OpenBot",
+            ]
+        );
+
+        let mut computer = Recorded::with_machine(true);
+        computer.failing = vec!["stop containers"];
+        let (_, failures) = run(&mut computer, DELETE);
+        assert_eq!(
+            computer.calls[4..],
+            [
+                "machine openbot",
+                "stop containers openbot",
+                "clear port rules openbot",
+                "stop machine openbot",
+                "remove machine openbot",
+                "remove installation /home/a/OpenBot",
+            ]
+        );
+        // Nothing the person can act on: said in the log only.
+        assert!(failures.is_empty(), "{failures:?}");
+
+        let mut computer = Recorded::with_machine(true);
+        run(&mut computer, KEEP);
+        assert!(
+            computer
+                .calls
+                .iter()
+                .all(|call| !call.starts_with("stop containers")
+                    && !call.starts_with("clear port rules")),
+            "{:?}",
+            computer.calls
         );
     }
 
@@ -516,7 +595,7 @@ mod tests {
         let mut computer = Recorded::with_machine(true);
         computer.failing = vec!["compose down", "stop machine"];
         let (_, failures) = run(&mut computer, DELETE);
-        assert_eq!(computer.calls.len(), 8, "{:?}", computer.calls);
+        assert_eq!(computer.calls.len(), 9, "{:?}", computer.calls);
         // Plain words for the person (box I's details said "computer namespace" and an exit
         // code); the engine's own words go to the log.
         assert_eq!(

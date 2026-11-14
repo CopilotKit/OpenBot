@@ -9,13 +9,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
+import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import {
   PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
@@ -77,12 +77,12 @@ import {
   pluginsPageQueryOptions,
   pluginsProvider,
 } from "@/lib/plugins/queries";
-import { toolsListError } from "@/lib/plugins/tools-error";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
+import { toolsListError } from "@/lib/plugins/tools-error";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -207,6 +207,8 @@ export function connectionKindFor(
 ): CatalogueItem["auth"] | "brokered" | "person-entra" {
   if (server && brokeredProvenance(server.provenance)) return "brokered";
   if (server?.entraScope) return "person-entra";
+  // Added by its address, and it signs each person in: the same shape as a catalogue OAuth vendor.
+  if (server?.signIn) return "user-oauth";
   return auth ?? "deployment-bearer";
 }
 
@@ -438,6 +440,12 @@ export function PluginPage({
   );
 
   const auth = connectionKindFor(server, entry?.auth);
+  /* Added by its address, and it answered with no account at all: nothing is missing here. */
+  const openByUrl =
+    server?.provenance === "custom" &&
+    !server.signIn &&
+    !server.entraScope &&
+    !server.hasCredential;
   const title = entry?.title ?? server?.title ?? key;
 
   /* Bound once because the brokered row below is told it twice — once inside the whole
@@ -593,7 +601,7 @@ export function PluginPage({
    * connected this". The personal screen had the identical gap; see its own note.
    */
   if (plugins.isPending || connections.isPending) {
-    return <PageShell title="Plugin">{null}</PageShell>;
+    return <PageShell title="App">{null}</PageShell>;
   }
   /*
    * Gated on the plugin list having ARRIVED, the guard the per-Bot grant screen already keeps
@@ -612,7 +620,7 @@ export function PluginPage({
         <p className="mt-12 text-destructive text-sm" role="alert">
           {personal
             ? "Couldn't load your apps. Reload the page."
-            : "Couldn't load plugins. Reload the page."}
+            : "Couldn't load apps. Reload the page."}
         </p>
       </PageShell>
     );
@@ -624,14 +632,11 @@ export function PluginPage({
         description={
           personal
             ? "There is no app with that name."
-            : "There is no plugin with that name, here or in the catalogue."
+            : "There is no app with that name, here or in the catalogue."
         }
-        title={personal ? "Not an app" : "Not a plugin"}
+        title="Not an app"
       >
-        <PageEmpty
-          icon={IconPuzzle}
-          title={personal ? "App not found" : "Plugin not found"}
-        >
+        <PageEmpty icon={IconPuzzle} title="App not found">
           Nothing to configure.
         </PageEmpty>
       </PageShell>
@@ -866,9 +871,11 @@ export function PluginPage({
                     brokeredConnectionDescription(provider, brokeredApp)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
-                    : personal
-                      ? `What OpenBot sends to ${title}. Your Bots all use it.`
-                      : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                    : openByUrl
+                      ? `${title} answers without an account, so ${personal ? "your Bots use" : "Bots use"} it as it is. Add a key only if ${title} gives you one.`
+                      : personal
+                        ? `What OpenBot sends to ${title}. Your Bots all use it.`
+                        : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
           }
           title="Connection"
         >
@@ -980,12 +987,18 @@ export function PluginPage({
                 <ItemContent>
                   <ItemTitle>Access token</ItemTitle>
                   <ItemDescription>
-                    Sent with every call to this vendor.
+                    {openByUrl
+                      ? "Nothing is sent. Add one if the server gives you a key."
+                      : "Sent with every call to this vendor."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {server?.hasCredential ? "Saved" : "Not set"}
+                    {server?.hasCredential
+                      ? "Saved"
+                      : openByUrl
+                        ? "None needed"
+                        : "Not set"}
                   </span>
                   <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                 </ItemActions>
@@ -1243,6 +1256,24 @@ export function PluginPage({
                 </Item>
               </>
             ) : null}
+
+            {/*
+             * A server added by its address has no catalogue entry to say where it is, so the
+             * address itself is shown. Read-only: a server at a different address is another server.
+             */}
+            {server?.provenance === "custom" ? (
+              <>
+                <Separator />
+                <Item size="sm">
+                  <ItemContent>
+                    <ItemTitle>Server address</ItemTitle>
+                    <ItemDescription className="line-clamp-none break-all font-mono text-xs">
+                      {server.url}
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+              </>
+            ) : null}
           </PageRows>
 
           {auth === "user-oauth" ? (
@@ -1330,8 +1361,11 @@ export function PluginPage({
           />
           {server.tools.length === 0 ? (
             <PageEmpty icon={IconTool} title="No tools listed">
-              {toolsListError(server.lastError, { title, personal }) ??
-                "Refresh tools to check again."}
+              {/* A server that signs each person in lists its tools once somebody has. */}
+              {server.signIn && !youConnected
+                ? `Connect your ${title} account to see its tools.`
+                : (toolsListError(server.lastError, { title, personal }) ??
+                  "Refresh tools to check again.")}
             </PageEmpty>
           ) : (
             <PageRows>

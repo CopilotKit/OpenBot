@@ -25,8 +25,9 @@ import { Route as BotAccessRoute } from "@/routes/_authed/_app/bots.$agentId.acc
 import { Route as BotMemoryRoute } from "@/routes/_authed/_app/bots.$agentId.memory";
 import { Route as BotsRoute } from "@/routes/_authed/_app/bots.index";
 import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabilities.memory";
-import { Route as LegacyMemoryRoute } from "@/routes/_authed/_app/memory";
+import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as SettingsMemoryRoute } from "@/routes/_authed/settings/memory";
+import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -69,9 +70,9 @@ function servingNothing() {
       const path = String(input);
       if (path === "/api/proactive/settings")
         return Response.json({ settings: [], allowed: true });
-      if (path === "/api/agents/expenses")
+      if (path === botPath("expenses"))
         return Response.json({
-          agent: { id: "expenses", name: "Expenses", mine: true },
+          bot: { id: "expenses", name: "Expenses", mine: true },
         });
       return Response.json({ error: "Not part of this test" }, { status: 404 });
     },
@@ -107,10 +108,11 @@ describe("an address that opened memory", () => {
       routeTree: root.addChildren([
         page("/bots", "Bots"),
         page("/bots/$agentId/access", "What it can do"),
+        page("/bots/$agentId/routines", "Routines"),
         page("/bots/$agentId/memory", "Bot memory", BotMemoryRoute),
-        page("/capabilities/memory", "Memory", CapabilitiesMemoryRoute),
-        page("/memory", "Old memory", LegacyMemoryRoute),
-        page("/settings/memory", "Old settings memory", SettingsMemoryRoute),
+        page("/capabilities/memory", "Old memory", CapabilitiesMemoryRoute),
+        page("/settings/memory", "Older memory", SettingsMemoryRoute),
+        page("/memory", "Memory", MemoryRoute),
       ]),
     });
     const view = render(
@@ -131,16 +133,16 @@ describe("an address that opened memory", () => {
     }
   });
 
-  test("goes to the Bot's What it can do page, where its check-ins are, in the personal edition", async () => {
+  test("goes to the Bot's Routines, where its check-ins are, in the personal edition", async () => {
     const { view, path } = await land("personal", "/bots/expenses/memory");
-    await waitFor(() => expect(path()).toBe("/bots/expenses/access"));
-    expect(await view.findByText("What it can do")).toBeTruthy();
+    await waitFor(() => expect(path()).toBe("/bots/expenses/routines"));
+    expect(await view.findByText("Routines")).toBeTruthy();
   });
 
-  test("still opens memory in the team edition", async () => {
+  test("still opens memory in the team edition, on its own page", async () => {
     for (const at of ["/capabilities/memory", "/memory", "/settings/memory"]) {
       const { view, path } = await land("team", at);
-      await waitFor(() => expect(path()).toBe("/capabilities/memory"));
+      await waitFor(() => expect(path()).toBe("/memory"));
       expect(await view.findByText("Memory")).toBeTruthy();
       cleanup();
     }
@@ -175,7 +177,7 @@ function drawPage(edition: Edition, Page: ComponentType, at: string) {
 }
 
 describe("the Bots page", () => {
-  test("has Skills and no Memory under What your Bots know in the personal edition", async () => {
+  test("has Skills and no Memory under What your Bots learn in the personal edition", async () => {
     servingNothing();
     // The page reads its search and navigates through its own route, mounted here at `$`.
     const search = spyOn(BotsRoute, "useSearch").mockImplementation(
@@ -187,14 +189,12 @@ describe("the Bots page", () => {
         BotsRoute.options.component as ComponentType,
         "/bots",
       );
-      expect(await view.findByText("What your Bots know")).toBeTruthy();
+      expect(await view.findByText("What your Bots learn")).toBeTruthy();
       expect(view.getByText("Skills").closest("a")?.getAttribute("href")).toBe(
-        "/capabilities/skills",
+        "/skills",
       );
       expect(view.queryByText("Memory")).toBeNull();
-      expect(
-        view.container.querySelector('a[href="/capabilities/memory"]'),
-      ).toBeNull();
+      expect(view.container.querySelector('a[href="/memory"]')).toBeNull();
     } finally {
       search.mockRestore();
     }
@@ -202,46 +202,20 @@ describe("the Bots page", () => {
 });
 
 describe("a Bot's What it can do page", () => {
-  test("holds its check-ins in the personal edition, which has no Memory page to hold them", async () => {
-    servingNothing();
-    const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
-      (() => ({ agentId: "expenses" })) as never,
-    );
+  test("is split by kind, and an old link opens the Bot's Apps", () => {
+    let thrown: unknown;
     try {
-      const view = drawPage(
-        "personal",
-        BotAccessRoute.options.component as ComponentType,
-        "/bots/expenses/access",
-      );
-      expect(
-        await view.findByRole("heading", { name: "What it can do" }),
-      ).toBeTruthy();
-      expect(
-        await view.findByRole("heading", { name: "Check-ins" }),
-      ).toBeTruthy();
-    } finally {
-      params.mockRestore();
+      (
+        BotAccessRoute.options.beforeLoad as unknown as (input: unknown) => void
+      )({ params: { agentId: "expenses" } });
+    } catch (error) {
+      thrown = error;
     }
-  });
-
-  test("leaves check-ins on the Memory page in the team edition", async () => {
-    servingNothing();
-    const params = spyOn(BotAccessRoute, "useParams").mockImplementation(
-      (() => ({ agentId: "expenses" })) as never,
-    );
-    try {
-      const view = drawPage(
-        "team",
-        BotAccessRoute.options.component as ComponentType,
-        "/bots/expenses/access",
-      );
-      expect(
-        await view.findByRole("heading", { name: "Skills and access" }),
-      ).toBeTruthy();
-      await settleReactWork();
-      expect(view.queryByRole("heading", { name: "Check-ins" })).toBeNull();
-    } finally {
-      params.mockRestore();
-    }
+    expect(
+      (thrown as { options?: { to?: string; params?: unknown } }).options,
+    ).toMatchObject({
+      to: "/bots/$agentId/apps",
+      params: { agentId: "expenses" },
+    });
   });
 });

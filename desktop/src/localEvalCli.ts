@@ -57,6 +57,9 @@ export type LocalReason =
   | "browser-open-failed"
   // The CLI's resource check failed: the report's `shortfall` says which resource is short.
   | "resources-short"
+  // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
+  // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
+  | "stack-lost"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */
@@ -242,6 +245,66 @@ export function setUpLocalEval(
     throw failure(rejection);
   });
   return { attempt, report };
+}
+
+/**
+ * While a setup waits for room on a drive that is short: that drive's shortfall now, or null once
+ * there is room (`local_eval::drive_short`). Null too when it can't say: the setup measures again.
+ */
+export function localEvalRoom(): Promise<Shortfall | null> {
+  return invoke<Shortfall | null>("local_eval_room").catch(() => null);
+}
+
+/**
+ * `machine_size::Plan`: how the Podman machine OpenBot runs on would be made big enough for what
+ * setup found short. Memory in MiB, as Podman counts it. `forThem` when OpenBot can do it itself;
+ * otherwise the window gives the person the commands.
+ */
+export type PodmanPlan = {
+  machine: string;
+  cpus: number;
+  memoryMib: number;
+  toCpus: number;
+  toMemoryMib: number;
+  forThem: boolean;
+};
+
+/**
+ * The plan for a Podman machine the CLI found too few CPUs or too little memory in, or null when a
+ * bigger machine isn't the answer here (not a Mac, WSL, a computer with no more to give).
+ */
+export function podmanMachinePlan(
+  shortfall: Shortfall,
+): Promise<PodmanPlan | null> {
+  if (!shortfall.podman || !(shortfall.cpu || shortfall.memory))
+    return Promise.resolve(null);
+  return invoke<PodmanPlan | null>("podman_machine_plan", {
+    short: shortfall,
+  }).catch(() => null);
+}
+
+/**
+ * The person's yes: restart their Podman machine with the plan's CPUs and memory, and the
+ * containers that were running in it, and wait until it can download. Rejects with
+ * `{ said, resized }`: a plain sentence, and whether the machine is bigger and only not ready yet.
+ */
+export function resizePodmanMachine(plan: PodmanPlan): Promise<void> {
+  return invoke<void>("resize_podman_machine", {
+    cpus: plan.toCpus,
+    memoryMib: plan.toMemoryMib,
+  });
+}
+
+/**
+ * A setup the native side did not start, because the drive that holds the engine's disk is short
+ * of what OpenBot needs (`local_eval::checked_call`). Not a failure: it waits for room.
+ */
+export function heldForRoom(report: LocalReport): Shortfall | null {
+  return report.reason === "resources-short" &&
+    report.shortfall?.freeOnDrive === true &&
+    report.shortfall.disk
+    ? report.shortfall
+    : null;
 }
 
 /**

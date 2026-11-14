@@ -1,20 +1,39 @@
 import { describe, expect, test } from "bun:test";
-import { SETTINGS_SIDEBAR_ITEMS } from "../src/components/settings/settings-sidebar";
+import {
+  SETTINGS_GROUPS,
+  SETTINGS_SIDEBAR_ITEMS,
+} from "../src/components/settings/settings-sidebar";
 
 describe("settings sidebar", () => {
-  test("Browsers links to /settings/browsers, right after Approvals", () => {
+  test("Computer links to /settings/computer, first of Every Bot and before Approvals, and Browsers is part of it", () => {
     const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
-    const browsers = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Browsers")];
+    const computer = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Computer")];
 
-    expect(browsers?.linkOptions).toEqual({ to: "/settings/browsers" });
-    expect(titles.indexOf("Browsers")).toBe(titles.indexOf("Approvals") + 1);
+    expect(computer?.linkOptions).toEqual({ to: "/settings/computer" });
+    expect(
+      SETTINGS_SIDEBAR_ITEMS.find((item) => item.group === "every-bot")?.title,
+    ).toBe("Computer");
+    expect(titles.indexOf("Approvals")).toBe(titles.indexOf("Computer") + 1);
+    expect(titles).not.toContain("Browsers");
+    expect(titles).not.toContain("This computer");
   });
 
-  test("Learning links to /settings/learning, right after Browsers", () => {
-    const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
-    const learning = SETTINGS_SIDEBAR_ITEMS[titles.indexOf("Learning")];
+  test("groups the entries as You, Every Bot and OpenBot, in that order", () => {
+    expect(SETTINGS_GROUPS.map((group) => group.label)).toEqual([
+      "You",
+      "Every Bot",
+      "OpenBot",
+    ]);
+    const order = SETTINGS_GROUPS.map((group) => group.id);
+    const groups = SETTINGS_SIDEBAR_ITEMS.map((item) =>
+      order.indexOf(item.group),
+    );
+    expect(groups).toEqual([...groups].sort((a, b) => a - b));
+  });
 
-    expect(learning?.linkOptions).toEqual({ to: "/settings/learning" });
-    expect(titles.indexOf("Learning")).toBe(titles.indexOf("Browsers") + 1);
+  test("Routines, Memory, Skills and Learning are not in Settings: the first three are in the main menu", () => {
+    const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
+    for (const moved of ["Routines", "Memory", "Skills", "Learning"])
+      expect(titles).not.toContain(moved);
   });
 });

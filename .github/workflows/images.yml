@@ -4,6 +4,11 @@ name: Images
 # Callable rather than triggered, so every channel that publishes images builds them the same way
 # and only the tags differ. The caller decides what the images are called; this decides how they
 # are made.
+#
+# Built here: the Bots and harnesses in .github/published-images.json. The server, computer and
+# supervisor images, and the all-in-one `openbot` image, are the published OpenBot images at the tag
+# in backend-images.env at this commit, or at the tag the caller names; the manifest pins them by the
+# digest that tag names.
 on:
   workflow_call:
     inputs:
@@ -26,6 +31,11 @@ on:
       manifest_version:
         type: string
         required: true
+      # The OpenBot images' tag to pin in place of the one backend-images.env names: `main`, a
+      # version such as `v1.0.3`, or a `test-<date>-<run>` tag. Empty keeps the file's.
+      backend_tag:
+        type: string
+        default: ""
     outputs:
       manifest-artifact:
         description: The name of the artifact that holds container-images.json.
@@ -52,6 +62,7 @@ jobs:
       components: ${{ steps.components.outputs.components }}
       tags: ${{ steps.tags.outputs.tags }}
       repository: ${{ steps.registry.outputs.repository }}
+      backend-tag: ${{ steps.backend.outputs.tag }}
     steps:
       - name: Check the commit
         env:
@@ -109,6 +120,27 @@ jobs:
       # set that is tested and the set that is published cannot drift apart.
       - id: components
         run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+      # The tag the server, computer and supervisor run at, from the commit being published, so the
+      # manifest pins what this commit was tested with, unless the caller names another.
+      - id: backend
+        name: Read the OpenBot images' tag
+        env:
+          REQUESTED: ${{ inputs.backend_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED" ]; then
+            tag="$REQUESTED"
+            source="the backend_tag input"
+          else
+            tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+            source="backend-images.env"
+          fi
+          if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "::error::$source names no valid OpenBot image tag ('$tag')."
+            exit 1
+          fi
+          echo "OpenBot images at '$tag', from $source."
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       # This repository's own namespace. A fork publishes under its own name and never into
       # another publisher's registry.
       - id: registry
@@ -120,84 +152,61 @@ jobs:
           repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
 
-  # One image, built once. Everything downstream refers to it by digest, so what was tested is what
-  # is deployed and there is no second build to disagree with the first.
-  image:
-    name: image
+  # The server, the computer, the supervisor and the all-in-one image, by the digest their tag names
+  # now, so a deploy or a rollback of this release names exactly the images it was tested with. The
+  # three a laptop runs must carry both architectures: a manifest list holding one installs on half
+  # the machines. The all-in-one image is pulled by servers and is amd64, as it always was.
+  backend-images:
+    name: OpenBot images
     needs: components
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
-      # and the signature says which workflow, repository and commit produced the image.
-      id-token: write
-      attestations: write
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
+      packages: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # The commit, whatever the caller added, and a moving latest when the caller asked for it. A
-      # release adds its version, which is the tag to deploy; the commit tag is how you find out
-      # what a running image actually contains.
-      - id: tags
-        name: Write the image references
+      - name: Pin each image by digest
         env:
-          REPOSITORY: ${{ needs.components.outputs.repository }}
-          TAGS: ${{ needs.components.outputs.tags }}
+          TAG: ${{ needs.components.outputs.backend-tag }}
         run: |
           set -euo pipefail
-          delimiter="EOF_$(openssl rand -hex 16)"
-          {
-            echo "tags<<$delimiter"
-            while IFS= read -r tag; do
-              [ -z "$tag" ] && continue
-              echo "$REPOSITORY:$tag"
-            done <<< "$TAGS"
-            echo "$delimiter"
-          } >> "$GITHUB_OUTPUT"
-      - id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+          mkdir -p manifests
+          # The name the manifest gives each image, as OpenBot Desktop reads it, its repository, and
+          # the architectures it must carry.
+          for entry in openbot:openbot:amd64 server:openbot-server:amd64,arm64 \
+                       agent-computer:openbot-agent-computer:amd64,arm64 \
+                       supervisor:openbot-supervisor:amd64,arm64; do
+            IFS=: read -r name image required <<< "$entry"
+            repository="ghcr.io/copilotkit/$image"
+            digest="$(docker buildx imagetools inspect "$repository:$TAG" --format '{{.Manifest.Digest}}')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::$repository:$TAG has no digest."; exit 1; }
+            platforms="$(docker buildx imagetools inspect --raw "$repository@$digest" \
+              | jq -r '[.manifests[]?.platform | select(.os == "linux") | .architecture] | sort | unique | join(",")')"
+            for arch in ${required//,/ }; do
+              if [[ ",$platforms," != *",$arch,"* ]]; then
+                echo "::error::$repository:$TAG carries '$platforms', not $required."
+                exit 1
+              fi
+            done
+            jq -n --arg name "$name" --arg repository "$repository" --arg digest "$digest" \
+              '{name: $name, repository: $repository, digest: $digest}' > "manifests/$name.json"
+            echo "$name: $repository@$digest"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          context: .
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          build-args: |
-            OPENBOT_BUILD_VERSION=${{ inputs.manifest_version }}
-            OPENBOT_BUILD_COMMIT=${{ inputs.ref }}
-            OPENBOT_BUILD_DISTRIBUTION_ID=${{ env.OPENBOT_DISTRIBUTION_ID }}
-            OPENBOT_BUILD_REPOSITORY=${{ github.repository }}
-            OPENBOT_BUILD_CHANNEL=${{ env.OPENBOT_RELEASE_CHANNEL }}
-          # The cache only ever saves time, so it never fails a build. A cache that cannot be read
-          # is a miss: BuildKit logs the import error and builds every layer. One that cannot be
-          # written fails the build unless `ignore-error=true` says to warn and carry on.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max,ignore-error=true
-          provenance: true
-          sbom: true
-      # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
-      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
-      # because a tag can be moved to point at something else afterwards.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ needs.components.outputs.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+          name: manifest-openbot-images
+          path: manifests/
+          retention-days: 1
 
-  # The images the installer pulls instead of building. `docker-compose.yml` builds these from
-  # source on every machine, which needs a toolchain and several minutes a desktop install does not
-  # have. Published here, from the same commit as the image above, so a deployment and a laptop run
-  # the same code.
+  # The images the installer pulls instead of building. `docker-compose.yml` builds the Bots from
+  # this tree on every machine, which needs a toolchain and several minutes a desktop install does not
+  # have. Published here, from the commit being released, so a deployment and a laptop run the same
+  # code.
   #
   # Two architectures, because the machines are laptops: arm64 Macs and amd64 everything else. Built
   # on native runners rather than under QEMU. Emulated `bun install` and `vite build` are a known
@@ -242,11 +251,7 @@ jobs:
       # reaches layers that came from somebody else's registry; without it only our own thin layers
       # change and the saving rounds to nothing. The cost is that these images no longer share layers
       # with a gzip pull of the same base, and that a client which cannot read zstd cannot read them,
-      # which is why this is here and not on the `openbot` image above: that one is pulled by servers
-      # with whatever they have, and these are pulled by an installer that ships Podman. After the
-      # Chromium-only `agent-computer` Dockerfile change, while keeping Node/npm/npx from the
-      # official Node 24.18.1 image, local zstd OCI layer descriptors measured 535.0 MiB on arm64
-      # and 518.1 MiB on amd64.
+      # which is acceptable because these are pulled by an installer that ships Podman.
       - id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -312,7 +317,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
-      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
+      # name is a prefix of another (`agent-langgraph` was one of `agent-langgraph-agui`) would otherwise
       # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
       # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
       # from a digest that lived in the other's repository, so the join failed with "not found".
@@ -401,7 +406,7 @@ jobs:
   # caller's decision.
   manifest:
     name: manifest
-    needs: [components, image, component-manifests]
+    needs: [components, backend-images, component-manifests]
     runs-on: ubuntu-latest
     outputs:
       artifact: container-images
@@ -414,16 +419,14 @@ jobs:
       - name: Write the image manifest
         env:
           VERSION: ${{ inputs.manifest_version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
           COMMIT: ${{ inputs.ref }}
           COMPONENTS: ${{ needs.components.outputs.components }}
         run: |
           set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          # Every image this build published, or the file is not written. A missing entry is a
-          # service whatever reads this would quietly build from source instead, which is the thing
-          # publishing them was for, and it would only be noticed on somebody's laptop.
-          expected="$(jq -r 'length' <<< "$COMPONENTS")"
+          # Every image this build published, and the four it pinned, or the file is not written. A
+          # missing entry is a service whatever reads this would have to find some other way, and it
+          # would only be noticed on somebody's laptop.
+          expected="$(( $(jq -r 'length' <<< "$COMPONENTS") + 4 ))"
           found="$(find manifests -name '*.json' -type f | wc -l | tr -d ' ')"
           if [ "$found" != "$expected" ]; then
             echo "::error::Expected $expected component manifests, found $found."
@@ -443,20 +446,12 @@ jobs:
           # nothing pointing at it.
           jq -n \
             --arg version "$VERSION" \
-            --arg digest "$DIGEST" \
             --arg commit "$COMMIT" \
-            --arg repository "${{ needs.components.outputs.repository }}" \
             --argjson components "$components" \
             '{
               version: $version,
               commit: $commit,
-              images: ({
-                openbot: {
-                  repository: $repository,
-                  digest: $digest,
-                  reference: ($repository + "@" + $digest),
-                },
-              } + $components),
+              images: $components,
             }' > container-images.json
           cat container-images.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

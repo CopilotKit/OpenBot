@@ -1,0 +1,1085 @@
+openapi: 3.1.1
+info:
+  title: OpenBot API
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: >-
+    The one API every OpenBot client uses: the web app, Desktop, mobile, the
+    Recorder and the CLI. It follows the conventions of CopilotKit
+    Intelligence's v2 API so both read as one API, and OpenBot's resources sit
+    beside Intelligence's under the same organization address
+    (/api/v2/organizations/{organizationId}/...). Errors are RFC 9457 problem
+    details (application/problem+json), lists page with an opaque cursor and a
+    limit, and every write takes an Idempotency-Key.
+
+
+    Until multi-organization lands, an OpenBot install has exactly one
+    organization, and organizationId is that organization. Clients address it
+    as `default`; the server treats any other value as an organization that
+    does not exist.
+
+
+    This file is the single source of truth: the clients, the server's types,
+    the docs and the contract tests are all generated from it or checked
+    against it. A change that breaks an existing client fails the pull request.
+servers:
+  - url: http://127.0.0.1:3001
+    description: An OpenBot server on this machine (the default local port).
+tags:
+  - name: Bots
+    description: >-
+      The Bots a person can see: their own, those shared with them, the ones an
+      administrator assigned them, and the ones that come with OpenBot.
+  - name: Reactions
+    description: >-
+      The reactions a Bot leaves on a person's message in place of a line of
+      its own, when the message only needs an acknowledgement.
+paths:
+  /api/v2/organizations/{organizationId}/reactions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Reactions]
+      operationId: listReactions
+      summary: List reactions in a conversation
+      description: >-
+        Return one page of the reactions Bots left on the caller's messages in
+        one of their conversations, named by its thread. Another person's
+        thread answers with an empty list. A missing cursor starts at the
+        first page and nextCursor null ends the list. Today's server returns
+        every reaction on the first page.
+      security:
+        - webSession: []
+        - appOAuth: [reactions:read]
+        - apiKey: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          description: The conversation's thread, as its messages name it.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of reactions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ReactionPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/v2/organizations/{organizationId}/bots:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Bots]
+      operationId: listBots
+      summary: List Bots
+      description: >-
+        Return one page of the Bots the caller can see: theirs, the ones shared
+        with them, the ones assigned to them and the ones that come with
+        OpenBot, in the order the server keeps them. hidden=true lists only
+        the Bots the caller hid from their own list instead. A missing cursor
+        starts at the first page and nextCursor null ends the list. Today's
+        server returns every Bot on the first page.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      parameters:
+        - name: hidden
+          in: query
+          description: List the Bots the caller hid instead of the ones they did not.
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of Bots.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Bots]
+      operationId: createBot
+      summary: Create a Bot
+      description: >-
+        Create a Bot owned by the caller. With no endpoint it runs inside
+        OpenBot on its role description; with one, OpenBot sends each turn to
+        that AG-UI address, which the server checks before saving. A key, when
+        given, is stored encrypted and never returned. Asking for isolated
+        needs the caller's Isolated Bots switch and a deployment that can give
+        a Bot a computer of its own. A repeated request with the same
+        Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBotRequest'
+            examples:
+              builtIn:
+                summary: A Bot that runs inside OpenBot.
+                value:
+                  name: Expense Review
+                  title: Finance Operations
+                  roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+                  visibility: private
+              ownAgent:
+                summary: An agent somebody runs themselves, behind a key.
+                value:
+                  name: Expense Review
+                  title: ''
+                  roleDescription: Review receipts.
+                  visibility: private
+                  endpoint: https://agents.example.com/ag-ui
+                  auth:
+                    header: Authorization
+                    value: Bearer example-key
+                  harness: langgraph-python
+      responses:
+        '201':
+          description: The Bot was created.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            Location:
+              description: The new Bot's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/bots/agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                created:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: '#/components/responses/InvalidBot'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/v2/organizations/{organizationId}/bots/{botId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Bots]
+      operationId: getBot
+      summary: Read one Bot
+      description: >-
+        Return one Bot the caller can see. A Bot that does not exist, was
+        deleted, or is private to somebody else is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                starter:
+                  $ref: '#/components/examples/StarterBot'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Bots]
+      operationId: updateBot
+      summary: Change a Bot
+      description: >-
+        Replace a Bot's name, title, role description and visibility, which are
+        all required, and change any optional field that is present. An absent
+        endpoint, key or isolated leaves that setting as it is, so an edit to
+        a name never drops a key or moves a Bot between computers. Only whoever
+        may manage the Bot may change it, and a Bot that comes with OpenBot
+        cannot be changed. Making a Bot public reports what that means for the
+        shared app accounts it uses.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBotRequest'
+            examples:
+              rename:
+                value:
+                  name: Expense Review Desk
+                  title: Finance Operations
+                  roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+                  visibility: private
+      responses:
+        '200':
+          description: The changed Bot.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateBotResponse'
+              examples:
+                renamed:
+                  $ref: '#/components/examples/CreatedBot'
+                published:
+                  $ref: '#/components/examples/PublishedBot'
+        '400':
+          $ref: '#/components/responses/InvalidBot'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [Bots]
+      operationId: deleteBot
+      summary: Delete a Bot
+      description: >-
+        Delete a Bot for everyone and retire its key. Conversations with it
+        stay readable. Only whoever may manage the Bot may delete it, and a
+        Bot that comes with OpenBot cannot be deleted. A Bot that is already
+        deleted is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The Bot was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    webSession:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+      description: >-
+        The web app's server-side session, so no token ever reaches the
+        browser. Served over HTTPS the cookie is
+        __Secure-better-auth.session_token. A single-user install signs its
+        one person in without a cookie.
+    appOAuth:
+      type: oauth2
+      description: >-
+        Desktop, mobile and the CLI. OAuth 2.1 authorization code with PKCE
+        (RFC 7636, S256 only); the access token is sent as a bearer token. The
+        server does not accept it yet.
+      flows:
+        authorizationCode:
+          authorizationUrl: /api/auth/oauth2/authorize
+          tokenUrl: /api/auth/oauth2/token
+          refreshUrl: /api/auth/oauth2/token
+          scopes:
+            bots:read: Read the Bots the signed-in person can see.
+            bots:write: Create, change and delete the signed-in person's Bots.
+            reactions:read: Read the reactions Bots left on the signed-in person's messages.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: OpenBot API key
+      description: >-
+        Automation. An API key acts as the person who created it, inside one
+        organization. The server does not accept it yet.
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      description: >-
+        The organization. Until multi-organization lands every install has one,
+        addressed as `default`.
+      schema:
+        type: string
+        minLength: 1
+      example: default
+    BotId:
+      name: botId
+      in: path
+      required: true
+      description: The Bot's id.
+      schema:
+        type: string
+        minLength: 1
+        pattern: \S
+      example: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    Limit:
+      name: limit
+      in: query
+      description: Most items in one page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      description: >-
+        Opaque continuation from the previous page's nextCursor, bound to the
+        organization and the filters that made it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 4096
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Generated by the caller for each write it means to make once. Reuse the
+        same key and the same request for 24 hours after an uncertain response;
+        the same key with a different request is a conflict.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    PrivateNoStore:
+      description: A Bot is private to the caller.
+      schema:
+        type: string
+        const: private, no-store
+  schemas:
+    BotVisibility:
+      type: string
+      enum: [public, private]
+      description: Public Bots are shared with everybody in the organization.
+    Bot:
+      type: object
+      description: >-
+        A Bot as the caller sees it. canManage, mine, systemOwned and the
+        isolation fields are the server's verdicts for this caller; a client
+        renders them and never recomputes them. No secret is ever part of a
+        Bot: hasAuth and hasCallbackToken say whether one is set.
+      required:
+        - id
+        - name
+        - title
+        - roleDescription
+        - avatarSeed
+        - visibility
+        - hidden
+        - pinned
+        - systemOwned
+        - endpoint
+        - hasAuth
+        - hasCallbackToken
+        - isolated
+        - canManage
+        - mine
+        - assignedToMe
+        - builtIn
+        - runsOnOpenBotModel
+        - keyFromOpenBot
+        - isolationActive
+        - isolationOffReason
+      properties:
+        id:
+          type: string
+          description: The Bot's id.
+        name:
+          type: string
+          description: What the Bot is called.
+        title:
+          type: string
+          description: The subtitle under its name. May be empty.
+        roleDescription:
+          type: string
+          description: What it does, in its owner's words.
+        avatarSeed:
+          type: string
+          description: The seed its avatar is drawn from.
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        hidden:
+          type: boolean
+          description: Whether the caller hid it from their own list.
+        pinned:
+          type: boolean
+          description: Whether the caller pinned it to the top of their own list.
+        systemOwned:
+          type: boolean
+          description: Whether it comes with OpenBot rather than belonging to a person.
+        endpoint:
+          type: [string, 'null']
+          description: >-
+            The AG-UI address it runs at. Null for a Bot that runs inside
+            OpenBot.
+        hasAuth:
+          type: boolean
+          description: Whether a key is set for its address. Never the key.
+        hasCallbackToken:
+          type: boolean
+          description: >-
+            Whether it holds a credential for calling OpenBot's tools back.
+            Never the credential.
+        isolated:
+          type: boolean
+          description: >-
+            Whether its owner asked for it to have a computer of its own.
+            isolationActive says whether it has one now.
+        instructions:
+          type: string
+          description: >-
+            What the starter Bot is told, kept apart from its role description.
+            Only the starter Bot has instructions.
+        framework:
+          type: string
+          description: >-
+            What runs it, by the name a person reads ("LangChain", "OpenBot").
+            Absent when OpenBot doesn't know.
+        canManage:
+          type: boolean
+          description: Whether the caller may change and delete it.
+        mine:
+          type: boolean
+          description: >-
+            Whether the caller created it. Separate from canManage, which is
+            also true for an administrator on everybody's Bots.
+        assignedToMe:
+          type: boolean
+          description: Whether an administrator assigned this Bot to the caller.
+        builtIn:
+          type: boolean
+          description: >-
+            Whether it runs at the deployment's own managed address, so it
+            needs no callback credential of its own.
+        runsOnOpenBotModel:
+          type: boolean
+          description: >-
+            Whether it runs on OpenBot's model, so a person can pick the model
+            per conversation.
+        keyFromOpenBot:
+          type: boolean
+          description: >-
+            Whether OpenBot gives it a key for its tools on every run, because
+            OpenBot runs it.
+        isolationActive:
+          type: boolean
+          description: Whether its next run gets a computer of its own.
+        isolationOffReason:
+          type: [string, 'null']
+          enum: [admin, deployment, null]
+          description: >-
+            Why an isolated Bot runs on a shared computer instead. admin: its
+            owner no longer holds Isolated Bots. deployment: this deployment
+            cannot make another computer. Null otherwise.
+    BotPage:
+      type: object
+      required: [bots, nextCursor]
+      properties:
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Bot'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          description: Pass as cursor for the next page. Null ends the list.
+    Reaction:
+      type: object
+      required: [messageId, agentId, emoji, createdAt]
+      properties:
+        messageId:
+          type: string
+          description: The person's message the reaction is on, by the id its conversation gives it.
+        agentId:
+          type: string
+          description: The Bot that reacted.
+        emoji:
+          type: string
+          description: The reaction itself.
+          example: 👍
+        createdAt:
+          type: string
+          format: date-time
+    ReactionPage:
+      type: object
+      required: [reactions, nextCursor]
+      properties:
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reaction'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          description: Pass as cursor for the next page. Null ends the list.
+    BotResponse:
+      type: object
+      required: [bot]
+      properties:
+        bot:
+          $ref: '#/components/schemas/Bot'
+    SharedApp:
+      type: object
+      required: [serverId, title]
+      properties:
+        serverId:
+          type: string
+          description: The app's id.
+        title:
+          type: string
+          description: The app's name.
+    SharedAppsAfterChange:
+      type: object
+      description: >-
+        What making a Bot public means for the shared app accounts it uses. An
+        administrator's change approves them; anybody else's lists the ones an
+        administrator still has to approve.
+      required: [approved, needsApproval]
+      properties:
+        approved:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedApp'
+        needsApproval:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedApp'
+    UpdateBotResponse:
+      type: object
+      required: [bot]
+      properties:
+        bot:
+          $ref: '#/components/schemas/Bot'
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    BotKey:
+      type: object
+      description: >-
+        A key the Bot's address sits behind. Write-only: stored encrypted and
+        never returned. A blank value sets no key.
+      required: [value]
+      properties:
+        header:
+          type: string
+          pattern: ^[A-Za-z0-9-]*$
+          description: The header it is sent in. Blank or absent means Authorization.
+        value:
+          type: string
+          writeOnly: true
+          description: The header's value.
+    BotFields:
+      type: object
+      required: [name, title, roleDescription, visibility]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: What the Bot is called, 1 to 80 characters once trimmed.
+        title:
+          type: string
+          maxLength: 120
+          description: The subtitle under its name, up to 120 characters. May be empty.
+        roleDescription:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: >-
+            What it does, 1 to 1000 characters once trimmed. A Bot with no
+            endpoint runs on these words.
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          type: string
+          description: >-
+            The AG-UI address it runs at. Empty or absent on create means it
+            runs inside OpenBot; empty or absent on a change leaves it as it
+            is. The server refuses an address this deployment may not reach.
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          type: boolean
+          description: >-
+            Whether it gets a computer of its own. Absent leaves it as it is.
+            True needs the owner's Isolated Bots switch.
+        instructions:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: >-
+            New instructions for the starter Bot, 1 to 1000 characters once
+            trimmed. Absent leaves them as they are; every other Bot ignores
+            them.
+    CreateBotRequest:
+      description: A new Bot.
+      allOf:
+        - $ref: '#/components/schemas/BotFields'
+        - type: object
+          properties:
+            harness:
+              type: string
+              description: >-
+                The framework an agent somebody runs themselves is built on,
+                by its id in OpenBot's harness list. Kept only with an
+                endpoint.
+    UpdateBotRequest:
+      description: A Bot's fields after the change.
+      allOf:
+        - $ref: '#/components/schemas/BotFields'
+    Problem:
+      type: object
+      description: >-
+        RFC 9457 problem details, in the shape CopilotKit Intelligence's v2
+        API uses. status equals the HTTP status; code and type name the same
+        stable error. detail is the sentence a person reads.
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - code
+        - category
+        - retryable
+        - requestId
+        - traceId
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          minLength: 1
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          enum:
+            - validation
+            - auth
+            - permission
+            - not_found
+            - conflict
+            - rate_limit
+            - internal
+            - dependency
+        retryable:
+          type: boolean
+        requestId:
+          type: string
+          minLength: 1
+        traceId:
+          type: string
+          minLength: 1
+        capability:
+          type: string
+          description: >-
+            The switch an administrator can turn on for this person, when the
+            refusal is for want of one (isolatedComputers).
+  responses:
+    InvalidRequest:
+      description: A parameter is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A Bot id is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidBot:
+      description: >-
+        A field is missing or out of bounds, the address is one this deployment
+        may not reach, or the deployment cannot give a Bot a computer of its
+        own.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            name:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name must be text between 1 and 80 characters.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noIsolation:
+              value:
+                type: https://open.bot/errors/isolation-unavailable
+                title: This OpenBot can't give a Bot a computer of its own.
+                status: 400
+                detail: This OpenBot can't give a Bot a computer of its own, so it runs on yours.
+                code: ISOLATION_UNAVAILABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    Unauthenticated:
+      description: The caller is not signed in.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/auth-unauthenticated
+                title: Authentication is required.
+                status: 401
+                detail: Authentication required.
+                code: AUTH_UNAUTHENTICATED
+                category: auth
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    Forbidden:
+      description: The caller holds no role in this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noRole:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Authorization required.
+                status: 403
+                detail: Authorization required.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotForbidden:
+      description: >-
+        The caller may not manage this Bot, the Bot comes with OpenBot, or the
+        caller may not give it a computer of its own.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: You can't manage this Bot.
+                status: 403
+                detail: You can't manage this Bot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            isolation:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: Your admin hasn't turned on Isolated Bots for you.
+                status: 403
+                detail: Your admin hasn't turned on Isolated Bots for you.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: isolatedComputers
+    OrganizationNotFound:
+      description: The organization does not exist or is not visible to the caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotNotFound:
+      description: >-
+        The Bot does not exist, was deleted, or is not visible to the caller,
+        or the organization is not.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: Couldn't find that Bot.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    IdempotencyConflict:
+      description: The Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ServerError:
+      description: The server could not complete the request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://open.bot/errors/internal-server-error
+                title: Unexpected server error.
+                status: 500
+                detail: Unexpected server error.
+                code: INTERNAL_SERVER_ERROR
+                category: internal
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    ReactionPageLast:
+      summary: Every reaction in a conversation, on one page.
+      value:
+        reactions:
+          - messageId: msg_2f0c1e7a
+            agentId: general-assistant
+            emoji: 👍
+            createdAt: '2026-11-12T22:41:07.000Z'
+        nextCursor: null
+    BotPageLast:
+      summary: Every Bot, on one page.
+      value:
+        bots:
+          - id: general-assistant
+            name: General Assistant
+            title: Everyday Work
+            roleDescription: Help with everyday work using clear, concise, and accurate answers.
+            avatarSeed: general-assistant
+            visibility: public
+            hidden: false
+            pinned: false
+            systemOwned: true
+            endpoint: null
+            hasAuth: false
+            hasCallbackToken: false
+            isolated: false
+            framework: OpenBot
+            canManage: false
+            mine: false
+            assignedToMe: false
+            builtIn: false
+            runsOnOpenBotModel: true
+            keyFromOpenBot: false
+            isolationActive: false
+            isolationOffReason: null
+        nextCursor: null
+    StarterBot:
+      summary: A Bot that comes with OpenBot.
+      value:
+        bot:
+          id: general-assistant
+          name: General Assistant
+          title: Everyday Work
+          roleDescription: Help with everyday work using clear, concise, and accurate answers.
+          avatarSeed: general-assistant
+          visibility: public
+          hidden: false
+          pinned: false
+          systemOwned: true
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: false
+          mine: false
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+    CreatedBot:
+      summary: A Bot a person made, running inside OpenBot.
+      value:
+        bot:
+          id: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          visibility: private
+          hidden: false
+          pinned: false
+          systemOwned: false
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: true
+          mine: true
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+    PublishedBot:
+      summary: Made public by somebody who is not an administrator.
+      value:
+        bot:
+          id: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          visibility: public
+          hidden: false
+          pinned: false
+          systemOwned: false
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: true
+          mine: true
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+        sharedApps:
+          approved: []
+          needsApproval:
+            - serverId: composio-gmail
+              title: Gmail

@@ -10,10 +10,11 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
-import { AccessSections } from "@/components/bot-profile/access";
+import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { appAccess } from "./app-access-fixture";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -38,6 +39,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance",
@@ -71,7 +75,7 @@ function serving(options: {
   tools?: ReturnType<typeof tool>[];
 }) {
   const { role = "user", apps = [], tools = [] } = options;
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/plugins/for/expenses/apps"))
       return apps === "fail"
@@ -88,7 +92,8 @@ function serving(options: {
           grantable: false,
         },
       });
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
     return Response.json({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });
@@ -103,7 +108,12 @@ function draw() {
   const page = createRoute({
     getParentRoute: () => root,
     path: "/",
-    component: () => <AccessSections agent={BOT} />,
+    component: () => (
+      <>
+        <AppsSections agent={BOT} />
+        <SkillsSections agent={BOT} />
+      </>
+    ),
   });
   const grants = createRoute({
     getParentRoute: () => root,
@@ -127,7 +137,7 @@ function draw() {
 }
 
 const row = async (view: ReturnType<typeof draw>, key: string) => {
-  await view.findByText("What it can use");
+  await view.findByText("Apps it can use");
   const found = await view.findByText((_, element) =>
     Boolean(element?.getAttribute("data-app") === key),
   );

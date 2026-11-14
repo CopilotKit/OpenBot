@@ -8,17 +8,27 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type * as React from "react";
+import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * One Bot's check-ins on its Memory page, against a server answering as `/api/proactive` does: the
- * row says how often and when it runs next whatever the focus, what the last check-in did (a skip and
- * why included), what Run now did, and Turn on check-ins is offered only for a Bot that has none,
- * over the person's own conversations with it, never a task's.
+ * One Bot's check-ins, against a server answering as `/api/proactive` does: the row says how often
+ * and when it runs next whatever the focus and links to the check-in's page, which says what the last
+ * check-in did (a skip and why included) and what Run now did. Turn on check-ins is offered only for
+ * a Bot that has none, over the person's own conversations with it, never a task's.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -119,8 +129,10 @@ function serving() {
         ],
         nextCursor: null,
       });
-    if (path.startsWith("/api/agents"))
-      return Response.json({ agents: [{ id: "expenses", name: "Expenses" }] });
+    const bots = answerBotsList(input, init, {
+      visible: [{ id: "expenses", name: "Expenses" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -134,26 +146,45 @@ beforeEach(() => {
   queryClient.clear();
 });
 
-function draw() {
+/** Drawn under a router: a row is a link to its page, and the page has a back link. */
+function inRouter(node: React.ReactNode) {
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => node,
+      }),
+    ]),
+  });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProactiveResearchSettings agentId="expenses" />
+      <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
 }
 
-test("the row leads with how often and when, whatever the focus, and the focus follows on one line", async () => {
+const draw = () => inRouter(<ProactiveResearchSettings agentId="expenses" />);
+/** The check-in's own page, as its row's link opens it. */
+const page = () => inRouter(<CheckInRoutePage checkInId="p1" />);
+
+test("the row leads with how often, that it tells you, and when, whatever the focus, and the focus follows on one line", async () => {
   settings = [setting({ focus: FOCUS })];
   const view = draw();
-  const row = await view.findByRole("button", { name: /Expenses/ });
+  const row = await view.findByRole("link", { name: /Expenses/ });
   const lines = [...row.querySelectorAll("[data-slot=item-description]")];
-  expect(lines[0]?.textContent).toMatch(/^Every hour · Next /);
+  // When it looks next in the words a routine's page uses, never a raw date and time.
+  expect(lines[0]?.textContent).toBe(
+    "Every hour · Tells you · Next check in 45 minutes",
+  );
   const focus = lines.find((line) => line.textContent?.includes(FOCUS));
   expect(focus?.textContent).toBe(`Looks for: ${FOCUS}`);
   expect(focus?.className).toContain("line-clamp-1");
 });
 
-test("a skipped check-in says why on the row and in its dialog", async () => {
+test("a skipped check-in says why on the row and on its page", async () => {
   settings = [
     setting({
       lastRun: {
@@ -168,19 +199,19 @@ test("a skipped check-in says why on the row and in its dialog", async () => {
     }),
   ];
   const view = draw();
-  const row = await view.findByRole("button", { name: /Expenses/ });
+  const row = await view.findByRole("link", { name: /Expenses/ });
   expect(
     within(row).getByText(`Skipped 5 minutes ago. ${NOTHING_TO_READ}`),
   ).toBeTruthy();
-  const user = userEvent.setup({ document });
-  await user.click(row);
-  const dialog = await view.findByRole("dialog");
+  expect(row.getAttribute("href")).toBe("/routines/check-ins/p1");
+  cleanup();
+  const details = page();
   expect(
-    within(dialog).getByText(`Skipped 5 minutes ago. ${NOTHING_TO_READ}`),
+    await details.findByText(`Skipped 5 minutes ago. ${NOTHING_TO_READ}`),
   ).toBeTruthy();
 });
 
-test("Run now skipped at once says why in its dialog, never nothing", async () => {
+test("Run now skipped at once says why on the page, never nothing", async () => {
   runAnswer = { queued: false, skipped: "no_sources", why: NOTHING_TO_READ };
   afterRun = {
     outcome: "skipped",
@@ -191,14 +222,12 @@ test("Run now skipped at once says why in its dialog, never nothing", async () =
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
   };
-  const view = draw();
+  const view = page();
   const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: /Expenses/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Run now" }));
+  await user.click(await view.findByRole("button", { name: /^Run now/ }));
   expect(writes).toEqual(["POST /api/proactive/settings/p1/run"]);
   expect(
-    await within(dialog).findByText(`Skipped just now. ${NOTHING_TO_READ}`),
+    await view.findByText(`Skipped just now. ${NOTHING_TO_READ}`),
   ).toBeTruthy();
 });
 
@@ -216,22 +245,20 @@ test("Run now queued says it is on its way, and a check-in that ran says what it
       },
     }),
   ];
-  const view = draw();
+  const view = page();
   const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: /Expenses/ }));
-  const dialog = await view.findByRole("dialog");
   expect(
-    within(dialog).getByText("Checked 2 hours ago. Found 2 things for you."),
+    await view.findByText("Checked 2 hours ago. Found 2 things for you."),
   ).toBeTruthy();
-  await user.click(within(dialog).getByRole("button", { name: "Run now" }));
+  await user.click(view.getByRole("button", { name: /^Run now/ }));
   expect(
-    await within(dialog).findByText("Queued. It checks in within a minute."),
+    await view.findByText("Queued. It checks in within a minute."),
   ).toBeTruthy();
 });
 
 test("Turn on check-ins is offered only for a Bot without them, and lists its own conversations, never a task's", async () => {
   const on = draw();
-  await on.findByRole("button", { name: /Expenses/ });
+  await on.findByRole("link", { name: /Expenses/ });
   expect(on.queryByRole("button", { name: "Turn on check-ins" })).toBeNull();
   cleanup();
   queryClient.clear();
@@ -248,5 +275,21 @@ test("Turn on check-ins is offered only for a Bot without them, and lists its ow
     expect(
       off.getAllByRole("option").map((option) => option.textContent),
     ).toEqual(["Expenses: Expense reports"]),
+  );
+});
+
+test("Remove asks first, and only then removes the check-in", async () => {
+  const view = page();
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: /^Remove check-in/ }),
+  );
+  const confirm = await view.findByRole("dialog", {
+    name: "Remove this check-in?",
+  });
+  expect(writes).toEqual([]);
+  await user.click(within(confirm).getByRole("button", { name: "Remove" }));
+  await waitFor(() =>
+    expect(writes).toEqual(["DELETE /api/proactive/settings/p1"]),
   );
 });

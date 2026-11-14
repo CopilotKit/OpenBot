@@ -33,10 +33,17 @@
 ; for each one it stopped (30 seconds at most) before the installer goes on to replace the file.
 ; The folder reaches PowerShell as data, in OPENBOT_CLI_BUNDLE, never inside the script: a profile folder like
 ; C:\Users\O'Brien would end a quoted string there, and [ and ] are wildcards to -like.
+; Only when this installation has a cli-bundle folder: nothing can run from a folder that isn't there, and Windows
+; keeps a running program's file, so its folder, until it exits. On a fresh computer the folder isn't there yet, and
+; starting PowerShell and WMI there to find nothing held the Installing page still on "Output folder" for about two
+; minutes. An update or a reinstall over a bundled CLI has the folder, and stops it as before.
+; IfFileExists with \*.* is how NSIS asks whether a folder exists (https://nsis.sourceforge.io/Docs/Chapter4.html).
 !macro OPENBOT_STOP_BUNDLED_CLI
-  System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
-  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue } | Stop-Process -Force -PassThru -ErrorAction SilentlyContinue | ForEach-Object { $$null = $$_.WaitForExit(30000) }"`
-  Pop $0
+  ${If} ${FileExists} "$INSTDIR\cli-bundle\*.*"
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
+    nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue } | Stop-Process -Force -PassThru -ErrorAction SilentlyContinue | ForEach-Object { $$null = $$_.WaitForExit(30000) }"`
+    Pop $0
+  ${EndIf}
 !macroend
 
 ; Installing over an installed OpenBot with "Uninstall before installing" uninstalls the old version
@@ -158,6 +165,94 @@ Var OpenBotRunning
     nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-for-uninstall'
   ${EndIf}
   Pop $0
+!macroend
+
+; Every OpenBot the installer starts, after an in-app update (/R, in .onInstSuccess) and from its last
+; page (RunMainBinary), is started here, so it can come to the front as its window first shows. On
+; box H, after an in-app update, the new OpenBot opened behind the maximised Edge that Windows put in
+; front as the old one closed, and Starting OpenBot ran there unseen for four minutes. Windows lets
+; only some processes set the foreground window, and one that may can let every other process do it
+; (AllowSetForegroundWindow with ASFW_ANY, -1) until the person next gives input. The updating OpenBot
+; passes that on before its window goes (src/main.rs), and the person's click on Finish gives it to
+; the installer, so the installer passes it on again, then starts OpenBot with
+; --started-by-installer, which has it come forward once (`forward_at_first_show` in src/main.rs).
+; Where Windows still says no, OpenBot flashes its taskbar button. An update hands the old version's
+; own arguments on (/ARGS), which carry the flag from the last update, so it is added only when
+; missing. RunAsUser is how Tauri starts the app, as the person rather than an elevated installer.
+!define OPENBOT_STARTED_BY_INSTALLER "--started-by-installer"
+Var OpenBotRunArgs
+Var OpenBotFlagAt
+!macro OPENBOT_RUN_AFTER_INSTALL args
+  System::Call 'user32::AllowSetForegroundWindow(i -1)'
+  StrCpy $OpenBotRunArgs "${args}"
+  ${StrLoc} $OpenBotFlagAt "$OpenBotRunArgs" "${OPENBOT_STARTED_BY_INSTALLER}" ">"
+  ${If} $OpenBotRunArgs == ""
+    StrCpy $OpenBotRunArgs "${OPENBOT_STARTED_BY_INSTALLER}"
+  ${ElseIf} $OpenBotFlagAt == ""
+    StrCpy $OpenBotRunArgs "$OpenBotRunArgs ${OPENBOT_STARTED_BY_INSTALLER}"
+  ${EndIf}
+  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$OpenBotRunArgs"
+!macroend
+
+; Box H: after Finish on a clean computer, nothing was on screen for about ten seconds: this
+; installer had closed, and OpenBot's window wasn't up yet. So from the last page the installer
+; stays, saying OpenBot is opening, until OpenBot's window is on screen (the class and title Tauri
+; gives it), for a minute at most. Nothing on the page can be pressed meanwhile, its close button
+; included. It keeps answering Windows: every tenth of a second it hands on whatever messages are
+; waiting for it, as its own loop would, so the page never shows as not responding.
+!define OPENBOT_WINDOW_CLASS "Tauri Window"
+!define OPENBOT_OPEN_WAIT_TENTHS 600
+!define /ifndef SC_CLOSE 0xF060
+!define /ifndef MF_GRAYED 0x0001
+!define /ifndef PM_REMOVE 0x0001
+Var OpenBotWaitMessage
+Var OpenBotWaitTenths
+Var OpenBotWaitWindow
+Var OpenBotWaitAnswer
+!macro OPENBOT_STAY_UNTIL_OPEN
+  ${IfNot} ${Silent}
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 1
+    EnableWindow $OpenBotWaitWindow 0
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 2
+    EnableWindow $OpenBotWaitWindow 0
+    GetDlgItem $OpenBotWaitWindow $HWNDPARENT 3
+    EnableWindow $OpenBotWaitWindow 0
+    EnableWindow $mui.FinishPage.Run 0
+    EnableWindow $mui.FinishPage.ShowReadme 0
+    System::Call 'user32::GetSystemMenu(p $HWNDPARENT, i 0) p.s'
+    Pop $OpenBotWaitWindow
+    System::Call 'user32::EnableMenuItem(p $OpenBotWaitWindow, i ${SC_CLOSE}, i ${MF_GRAYED})'
+    SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 "STR:Opening OpenBot. This can take a minute."
+    ; A MSG, with room to spare.
+    System::Alloc 64
+    Pop $OpenBotWaitMessage
+    StrCpy $OpenBotWaitTenths 0
+    ${Do}
+      FindWindow $OpenBotWaitWindow "${OPENBOT_WINDOW_CLASS}" "${PRODUCTNAME}"
+      ${If} $OpenBotWaitWindow <> 0
+        System::Call 'user32::IsWindowVisible(p $OpenBotWaitWindow) i.s'
+        Pop $OpenBotWaitAnswer
+        ${If} $OpenBotWaitAnswer <> 0
+          ${ExitDo}
+        ${EndIf}
+      ${EndIf}
+      ${If} $OpenBotWaitTenths >= ${OPENBOT_OPEN_WAIT_TENTHS}
+        ${ExitDo}
+      ${EndIf}
+      ${Do}
+        System::Call 'user32::PeekMessageW(p $OpenBotWaitMessage, p 0, i 0, i 0, i ${PM_REMOVE}) i.s'
+        Pop $OpenBotWaitAnswer
+        ${If} $OpenBotWaitAnswer = 0
+          ${ExitDo}
+        ${EndIf}
+        System::Call 'user32::TranslateMessage(p $OpenBotWaitMessage)'
+        System::Call 'user32::DispatchMessageW(p $OpenBotWaitMessage)'
+      ${Loop}
+      Sleep 100
+      IntOp $OpenBotWaitTenths $OpenBotWaitTenths + 1
+    ${Loop}
+    System::Free $OpenBotWaitMessage
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
