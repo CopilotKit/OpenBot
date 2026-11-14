@@ -3,7 +3,10 @@ import type { Message } from "@ag-ui/core";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { InlineApproval } from "@/components/approvals/inline-approval";
+import {
+  InlineApproval,
+  PendingApprovals,
+} from "@/components/approvals/inline-approval";
 import { type ApprovalInboxData, leftAnswers } from "@/lib/approvals";
 import {
   repairUnansweredToolCalls,
@@ -88,6 +91,23 @@ test("a step whose conversation could not be carried on says the action was done
   // Said as a status under the step, which is still drawn: nothing replaces the step itself.
   expect(told.getAttribute("role")).toBe("status");
   expect(view.getByText("Send message…")).toBeTruthy();
+});
+
+test("a step folded into its group says so beside the group, where a waiting card would be", async () => {
+  global.fetch = (async () =>
+    Response.json(
+      inbox({ done: true, message: DONE, answer: ANSWER }),
+    )) as unknown as typeof fetch;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <PendingApprovals toolCallIds={["call-find", "call-send"]} />
+    </QueryClientProvider>,
+  );
+  const told = await waitFor(() => view.getByTestId("approval-left"));
+  expect(told.textContent).toBe(DONE);
 });
 
 test("one that was not done says so as an alert", async () => {
