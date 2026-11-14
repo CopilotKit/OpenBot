@@ -305,7 +305,7 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       return Response.json({ error: learnRefusal }, { status: 409 });
     return Response.json({ run: { id: "run-new", status: "queued" } });
   }
-  if (path === "/api/recorder/recordings") {
+  if (path === "/api/v2/organizations/default/people/me/recordings") {
     recordingsAsked += 1;
     await recordingsHeld;
     return Response.json({ recordings: recordingRows, nextCursor: null });

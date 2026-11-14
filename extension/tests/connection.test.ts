@@ -88,7 +88,7 @@ async function openbot(request: Request): Promise<Response> {
   );
   if (
     request.method === "POST" &&
-    url.pathname === "/api/recorder/connections"
+    url.pathname === "/api/v2/organizations/default/recorder-connections"
   ) {
     const body = (await request.json()) as Exchange;
     exchanges.push(body);
@@ -112,12 +112,13 @@ async function openbot(request: Request): Promise<Response> {
   }
   if (
     request.method === "DELETE" &&
-    url.pathname === "/api/recorder/connections/current"
+    url.pathname ===
+      "/api/v2/organizations/default/recorder-connections/current"
   ) {
     await holdIfAsked(url.pathname);
     return new Response(null, { status: 204 });
   }
-  if (url.pathname === "/api/recorder/me") {
+  if (url.pathname === "/api/v2/organizations/default/recorder/me") {
     await holdIfAsked(url.pathname);
     return Response.json(meAnswer.body, { status: meAnswer.status });
   }
@@ -398,7 +399,7 @@ test("disconnect tells OpenBot and forgets the token without a notice", async ()
     ok: true,
   });
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
   expect(await currentConnection()).toBeNull();
   expect(await readLocal("notice")).toBeUndefined();
@@ -406,7 +407,9 @@ test("disconnect tells OpenBot and forgets the token without a notice", async ()
 
 test("a disconnect still telling OpenBot when a reconnect lands forgets only the connection it disconnected", async () => {
   await connected("obr_old");
-  const deleting = holdAnswer("/api/recorder/connections/current");
+  const deleting = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections/current",
+  );
   const disconnecting = handleConnectionMessage({ type: "page.disconnect" });
   await deleting.arrived;
   await connect("obc_abc");
@@ -421,7 +424,7 @@ test("a disconnect still telling OpenBot when a reconnect lands forgets only the
   deleting.release();
   expect(await disconnecting).toEqual({ ok: true });
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_old",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_old",
   );
   expect((await currentConnection())?.token).toBe("obr_fixture");
   expect(await readLocal("notice")).toBeUndefined();
@@ -644,7 +647,9 @@ test("a connect tab Chrome failed to close cannot connect the site that replaced
 test("an approve still exchanging when another origin replaces the stale pending connect leaves the new one in place", async () => {
   const other = "https://b.example.test";
   await connect("obc_a");
-  const exchange = holdAnswer("/api/recorder/connections");
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
   const approving = handleConnectionMessage({
     type: "page.connect.decide",
     approve: true,
@@ -890,7 +895,9 @@ test("a code OpenBot refuses, or an OpenBot that does not answer, stores nothing
 });
 
 test("a pin elsewhere that lands while Desktop's code is exchanged keeps the connection out and revokes its new token", async () => {
-  const exchange = holdAnswer("/api/recorder/connections");
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
   const connecting = connectThroughDesktop({
     askDesktop: async () => ({ openbotUrl: loopback, code: "obc_d" }),
     openTab,
@@ -905,7 +912,7 @@ test("a pin elsewhere that lands while Desktop's code is exchanged keeps the con
   });
   expect(await currentConnection()).toBeNull();
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
 });
 
@@ -1264,14 +1271,14 @@ test("the keep-alive uses the organization session twice a day and forgets only 
   fake.alarms.fire("recorder-session-keepalive");
   await settle();
   expect(hits.filter((hit) => hit.includes("/me"))).toEqual([
-    "GET /api/recorder/me Bearer obr_fixture",
+    "GET /api/v2/organizations/default/recorder/me Bearer obr_fixture",
   ]);
   expect(await readLocal("lastKeepAliveAt")).toBe(clock);
 
   clock += 1000;
   meAnswer = {
     status: 503,
-    body: { error: "Try again.", code: "RECORDER_AUTHORITY_UNAVAILABLE" },
+    body: { detail: "Try again.", code: "RECORDER_AUTHORITY_UNAVAILABLE" },
   };
   fake.alarms.fire("recorder-session-keepalive");
   await settle();
@@ -1281,7 +1288,7 @@ test("the keep-alive uses the organization session twice a day and forgets only 
   meAnswer = {
     status: 401,
     body: {
-      error: "Signed out.",
+      detail: "Signed out.",
       code: "RECORDER_SIGNED_OUT",
       reason: "organization",
     },
@@ -1309,7 +1316,7 @@ test("a signed-out answer to a keep-alive sent with the old token leaves a recon
   await writeLocal("lastKeepAliveAt", clock);
   installConnection();
   await settle();
-  const me = holdAnswer("/api/recorder/me");
+  const me = holdAnswer("/api/v2/organizations/default/recorder/me");
   fake.alarms.fire("recorder-session-keepalive");
   await me.arrived;
   // Reconnecting this copy stores the new token and revokes the old one on OpenBot...
@@ -1326,14 +1333,16 @@ test("a signed-out answer to a keep-alive sent with the old token leaves a recon
   meAnswer = {
     status: 401,
     body: {
-      error: "Signed out.",
+      detail: "Signed out.",
       code: "RECORDER_SIGNED_OUT",
       reason: "revoked",
     },
   };
   me.release();
   await settle();
-  expect(hits).toContain("GET /api/recorder/me Bearer obr_old");
+  expect(hits).toContain(
+    "GET /api/v2/organizations/default/recorder/me Bearer obr_old",
+  );
   expect((await currentConnection())?.token).toBe("obr_fixture");
   expect(await readLocal("notice")).toBeUndefined();
 });
@@ -1343,13 +1352,13 @@ test("a signed-out answer to a held keep-alive still forgets the connection that
   await writeLocal("lastKeepAliveAt", clock);
   installConnection();
   await settle();
-  const me = holdAnswer("/api/recorder/me");
+  const me = holdAnswer("/api/v2/organizations/default/recorder/me");
   fake.alarms.fire("recorder-session-keepalive");
   await me.arrived;
   meAnswer = {
     status: 401,
     body: {
-      error: "Signed out.",
+      detail: "Signed out.",
       code: "RECORDER_SIGNED_OUT",
       reason: "revoked",
     },
@@ -1366,7 +1375,7 @@ test("a signed-out answer to a held keep-alive still forgets the connection that
 
 const signedOut = (reason: "revoked" | "removed" | "organization") => ({
   status: 401,
-  body: { error: "Signed out.", code: "RECORDER_SIGNED_OUT", reason },
+  body: { detail: "Signed out.", code: "RECORDER_SIGNED_OUT", reason },
 });
 
 test("a reconnect approved while a signed-out forget is removing the old connection waits for it, and stands", async () => {
@@ -1416,7 +1425,7 @@ test("a stale signed-out keep-alive answer after a deliberate Disconnect leaves 
   await writeLocal("lastKeepAliveAt", clock);
   installConnection();
   await settle();
-  const me = holdAnswer("/api/recorder/me");
+  const me = holdAnswer("/api/v2/organizations/default/recorder/me");
   fake.alarms.fire("recorder-session-keepalive");
   await me.arrived;
   expect(await handleConnectionMessage({ type: "page.disconnect" })).toEqual({
@@ -1475,7 +1484,7 @@ test("a policy that moves the Recorder away tells the recording controller, then
     },
   ]);
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
 });
 
@@ -1504,7 +1513,9 @@ test("a connect page opened before a pin elsewhere cannot connect once the polic
 
 test("a pin elsewhere that lands while the code is exchanged keeps the connection out and revokes its new token", async () => {
   await connect("obc_abc");
-  const exchange = holdAnswer("/api/recorder/connections");
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
   const approving = handleConnectionMessage(
     {
       type: "page.connect.decide",
@@ -1520,7 +1531,7 @@ test("a pin elsewhere that lands while the code is exchanged keeps the connectio
   expect(await approving).toMatchObject({ ok: false });
   expect(await currentConnection()).toBeNull();
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
 });
 
@@ -1681,7 +1692,9 @@ test("a trusted OpenBot's connect closes a Connect page another site left open, 
 
 test("a pin elsewhere that lands while a trusted OpenBot's code is exchanged keeps the connection out and revokes its new token", async () => {
   desktopAnswers(loopback);
-  const exchange = holdAnswer("/api/recorder/connections");
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
   const connecting = connect("obc_desktop_page", loopback);
   await exchange.arrived;
   policy = { ...policy, openbotUrl: "https://moved.example.test" };
@@ -1689,7 +1702,7 @@ test("a pin elsewhere that lands while a trusted OpenBot's code is exchanged kee
   expect(await connecting).toEqual({ ok: false, error: "pinned-elsewhere" });
   expect(await currentConnection()).toBeNull();
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
 });
 
@@ -1799,7 +1812,8 @@ test("approving a Connect page that replaces another OpenBot's or another person
   const revoked = (token: string) =>
     hits.filter(
       (hit) =>
-        hit === `DELETE /api/recorder/connections/current Bearer ${token}`,
+        hit ===
+        `DELETE /api/v2/organizations/default/recorder-connections/current Bearer ${token}`,
     ).length;
   const recordRevokes = () => {
     for (const token of ["obr_old", "obr_fixture"])
@@ -1846,7 +1860,9 @@ test("approving a Connect page that replaces another OpenBot's or another person
 
 test("a connection that lands while a trusted OpenBot's code is exchanged is never replaced: the new token is revoked and the page told to try again", async () => {
   desktopAnswers(loopback);
-  const exchange = holdAnswer("/api/recorder/connections");
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
   const connecting = connect("obc_desktop_page", loopback);
   await exchange.arrived;
   await connected("obr_old");
@@ -1854,10 +1870,10 @@ test("a connection that lands while a trusted OpenBot's code is exchanged is nev
   expect(await connecting).toEqual({ ok: false, error: "busy" });
   expect(await currentConnection()).toMatchObject({ token: "obr_old" });
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_fixture",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_fixture",
   );
   expect(hits).not.toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_old",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_old",
   );
 });
 
@@ -1888,6 +1904,6 @@ test("a connection OpenBot Desktop makes in place of another person's stops what
     },
   ]);
   expect(hits).toContain(
-    "DELETE /api/recorder/connections/current Bearer obr_bea",
+    "DELETE /api/v2/organizations/default/recorder-connections/current Bearer obr_bea",
   );
 });

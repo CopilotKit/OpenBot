@@ -44,6 +44,8 @@ afterAll(() => {
 });
 
 const EXTENSION_ID = "a".repeat(32);
+/** Where the API answers a person's own things. */
+const ME = "/api/v2/organizations/default/people/me";
 const THIS_COPY = "c".repeat(32);
 const OTHER_COPY = "d".repeat(32);
 const originalFetch = global.fetch;
@@ -133,7 +135,7 @@ beforeEach(() => {
           method,
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         });
-        if (url === "/api/recorder/connect-codes")
+        if (url === `${ME}/recorder-connect-codes`)
           return Response.json(
             { code: "obc_x", expiresAt: new Date().toISOString() },
             { status: 201 },
@@ -142,17 +144,37 @@ beforeEach(() => {
           const id = url.split("/").pop();
           await held.get(id ?? "");
           if (refusedDelete)
-            return Response.json({ error: refusedDelete }, { status: 409 });
+            return Response.json(
+              {
+                type: "https://open.bot/errors/conflict",
+                title: "The request conflicts with the current state.",
+                status: 409,
+                detail: refusedDelete,
+                code: "CONFLICT",
+                category: "conflict",
+                retryable: false,
+                requestId: "req_test",
+                traceId: "trace_test",
+              },
+              {
+                status: 409,
+                headers: { "content-type": "application/problem+json" },
+              },
+            );
           connections = connections.filter((c) => c.id !== id);
           return new Response(null, { status: 204 });
         }
       }
-      if (url === "/api/recorder/connections") {
+      // The whole list is asked for a page at a time, a hundred to a page.
+      if (url === `${ME}/recorder-connections?limit=100`) {
         connectionsFetches += 1;
         if (connectionsFail) return new Response(null, { status: 500 });
+        return Response.json({
+          recorderConnections: connections,
+          extensionIds: [EXTENSION_ID],
+          nextCursor: null,
+        });
       }
-      if (url === "/api/recorder/connections")
-        return Response.json({ connections, extensionIds: [EXTENSION_ID] });
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -191,7 +213,7 @@ test("Connect sends the code to the detected Recorder and asks for confirmation 
   );
   await view.findByText("Confirm in the OpenBot Recorder tab that opened.");
   expect(sent).toContainEqual({
-    path: "/api/recorder/connect-codes",
+    path: `${ME}/recorder-connect-codes`,
     method: "POST",
     body: { via: "web" },
   });
@@ -462,7 +484,7 @@ test("Disconnect sends the DELETE and the row disappears", async () => {
   fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/recorder/connections/conn-1",
+      path: `${ME}/recorder-connections/conn-1`,
       method: "DELETE",
       body: undefined,
     }),

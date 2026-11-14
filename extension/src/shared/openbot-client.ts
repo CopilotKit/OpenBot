@@ -48,10 +48,11 @@ async function readErrorBody(
 ): Promise<RecorderErrorBody | null> {
   try {
     const body: unknown = await response.json();
+    // The API's problem details (RFC 9457): the sentence is `detail`.
     if (
       typeof body === "object" &&
       body !== null &&
-      typeof (body as { error?: unknown }).error === "string"
+      typeof (body as { detail?: unknown }).detail === "string"
     ) {
       return body as RecorderErrorBody;
     }
@@ -61,7 +62,21 @@ async function readErrorBody(
   return null;
 }
 
-/** JSON in, JSON out, bearer when given, `redirect: "error"`, no cookies (`credentials: "omit"`). */
+/**
+ * A key for one write, so OpenBot's API does it once: every write there carries one. `getRandomValues` rather than
+ * `randomUUID`, which needs a secure context.
+ */
+function idempotencyKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+/**
+ * JSON in, JSON out, bearer when given, `redirect: "error"`, no cookies (`credentials: "omit"`). A write (anything but
+ * a GET) carries a fresh `Idempotency-Key`. A refusal is thrown as an {@link OpenBotError} in the server's own sentence.
+ */
 export async function openbotJson<T>(
   target: OpenBotTarget,
   path: string,
@@ -74,8 +89,10 @@ export async function openbotJson<T>(
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
+  const method = init.method ?? (init.body === undefined ? "GET" : "POST");
+  if (method !== "GET") headers["Idempotency-Key"] = idempotencyKey();
   const response = await openbotRaw(target, path, {
-    method: init.method ?? (init.body === undefined ? "GET" : "POST"),
+    method,
     headers: { ...headers, ...init.headers },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     signal: init.signal,
@@ -84,7 +101,7 @@ export async function openbotJson<T>(
     const body = await readErrorBody(response);
     throw new OpenBotError(
       response.status,
-      body?.error ?? `OpenBot answered ${response.status}.`,
+      body?.detail ?? `OpenBot answered ${response.status}.`,
       body,
     );
   }
