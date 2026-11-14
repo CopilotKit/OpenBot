@@ -46,8 +46,8 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The server here keeps two, Acme and Acme Research, each with a Bot and a conversation of its own,
  * and answers as OpenBot does: the person's organizations at /api/v2/people/me/organizations with
- * the one their session works in marked active, an organization's Bots under the address that names
- * it, and conversations (not yet addressed by organization) from whichever one the session works in.
+ * the one their session works in marked active, and an organization's Bots and conversations under
+ * the address that names it.
  * The app is the real sidebar and its account menu, on the app's one query client.
  */
 
@@ -110,13 +110,14 @@ function conversation(organization: string) {
   return {
     id: `${organization}-conversation`,
     name: "Personal Assistant",
-    agentIds: ["assistant"],
+    botIds: ["assistant"],
     threadId: `${organization}-conversation`,
     active: true,
     lastMessageAt: "2026-11-08T14:00:00Z",
     summary: CONVERSATIONS[organization],
     lastMessage: null,
-    lastMessageAgentId: null,
+    lastMessageBotId: null,
+    work: [],
     createdAt: "2026-11-08T13:00:00Z",
     pinned: false,
     lastReadAt: "2026-11-08T14:00:00Z",
@@ -206,6 +207,18 @@ async function answer(
         },
         openbotVersion: null,
       });
+    // Conversations are addressed by organization, as Bots are.
+    if (rest === "conversations")
+      return Response.json({
+        conversations: CONVERSATIONS[organization as string]
+          ? [conversation(organization as string)]
+          : [],
+        nextCursor: null,
+      });
+    if (rest === `conversations/${organization}-conversation`)
+      return Response.json({
+        conversation: conversation(organization as string),
+      });
     if (rest === "bots") {
       const name = BOTS[organization as string];
       return Response.json({
@@ -222,15 +235,6 @@ async function answer(
       });
     }
   }
-
-  // Conversations are not addressed by organization yet: the session's is the one answered.
-  if (path === "/api/channels")
-    return Response.json({
-      channels: CONVERSATIONS[server.active]
-        ? [conversation(server.active)]
-        : [],
-      nextCursor: null,
-    });
 
   return Response.json({ error: "not served" }, { status: 404 });
 }
@@ -416,8 +420,7 @@ test("every cached answer is kept under the organization it was asked in", async
   const inAcme = organizationScopedHash(agentKeys.list());
   const conversationsInAcme = organizationScopedHash(channelKeys.list());
   setCurrentOrganization(RESEARCH.id);
-  // The same key in another organization is another entry, whether the request names the
-  // organization in its address (Bots) or the server reads it from the session (conversations).
+  // The same key in another organization is another entry, for Bots and for conversations alike.
   expect(inAcme).toContain(ACME.id);
   expect(organizationScopedHash(agentKeys.list())).toContain(RESEARCH.id);
   expect(organizationScopedHash(agentKeys.list())).not.toBe(inAcme);

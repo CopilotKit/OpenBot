@@ -1,12 +1,14 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { batchCreateApprovalRules } from "@/lib/api/generated/approval-rules/approval-rules";
+import type { ApprovalRuleDraftAuthoring } from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ApprovalRuleInput, approvalsKey } from "@/lib/approvals";
-import { client } from "@/lib/client";
 import { approvalRuleKeys } from "./queries";
 
 const FALLBACK = "The team rules could not be saved.";
 
 /** Where saved rules came from: the sentence the model wrote them from. */
-export type ApprovalRuleAuthoring = { source: "english"; text: string };
+export type ApprovalRuleAuthoring = ApprovalRuleDraftAuthoring;
 
 /**
  * Several team rules in one save, with the sentence they were written from. The server refuses them,
@@ -19,11 +21,12 @@ export const saveTeamRulesMutationOptions = (queryClient: QueryClient) =>
       rules: ApprovalRuleInput[];
       authoring?: ApprovalRuleAuthoring;
     }) =>
-      client("/api/approvals/team/rules/batch", {
-        method: "POST",
-        body: variables,
-        fallback: FALLBACK,
-      }),
+      batchCreateApprovalRules(
+        organizationId(),
+        variables,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: approvalsKey }),

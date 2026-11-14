@@ -58,7 +58,21 @@ import {
   PREFERENCES_PATH,
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerBotsList } from "./bots-api";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
+import {
+  activityOf,
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  botOperationPath,
+} from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPage,
+  noContent,
+  problem,
+} from "./conversations-api";
 import {
   CHECK_IN_ITEMS_PATH,
   CHECK_INS_PATH,
@@ -206,33 +220,11 @@ const inbox: ApprovalInboxData = {
 };
 
 const attention: BotAttention[] = [
-  {
-    agentId: fuse.id,
-    name: fuse.name,
-    questions: 0,
-    approvals: 1,
-    handoffs: 0,
-    unread: 0,
-    paused: false,
-    notify: "all",
-    items: 0,
-    tasks: { needsInput: 0, ready: 0, failed: 0 },
-  },
-  {
-    agentId: scout.id,
-    name: scout.name,
-    questions: 0,
-    approvals: 0,
-    handoffs: 0,
-    unread: 1,
-    paused: false,
-    notify: "all",
-    items: 0,
-    tasks: { needsInput: 0, ready: 0, failed: 0 },
-  },
+  attentionOf(fuse.id, fuse.name, { approvals: 1 }),
+  attentionOf(scout.id, scout.name, { unread: 1 }),
 ];
 
-const activity: BotActivity = {
+const activity: BotActivity = activityOf({
   inProgress: [
     {
       id: "a-live",
@@ -262,7 +254,7 @@ const activity: BotActivity = {
       cancellable: false,
     },
   ],
-};
+});
 
 const settings: ProactiveSetting[] = [
   {
@@ -441,13 +433,9 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     }),
-    "/api/channels": { channels, nextCursor: null },
-    "/api/approvals": inbox,
-    "/api/bots/attention": { bots: attention, lastPingId: null },
-    [`/api/bots/${fuse.id}/activity`]: { activity },
-    [`/api/bots/${scout.id}/activity`]: {
-      activity: { inProgress: [], scheduled: [], completed: [] },
-    },
+    [CONVERSATIONS_PATH]: conversationPage(channels),
+    [botOperationPath(fuse.id, "activity")]: activity,
+    [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
       checkIns: settings,
       allowed: true,
@@ -485,16 +473,33 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-      if (method !== "GET") return Response.json({ ok: true });
+      // A conversation marked read, or saying what it is doing, answers with nothing.
+      if (
+        method === "POST" &&
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(mark-read|activity|signal-busy)$/.test(
+          path,
+        )
+      )
+        return noContent();
+      if (method !== "GET")
+        return (
+          approvalWriteResponse(input, init) ?? Response.json({ ok: true })
+        );
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
-      const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
+      const waiting = answerBotAttention(input, init, { bots: attention });
+      if (waiting) return waiting;
+      const detail = path.match(
+        /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
+      );
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);
         return found
-          ? Response.json({ channel: found })
-          : Response.json({ error: "Not found" }, { status: 404 });
+          ? Response.json({ conversation: conversationOf(found) })
+          : problem(404, "Couldn't find that conversation.");
       }
+      const approvals = approvalInboxResponse(input, inbox);
+      if (approvals) return approvals;
       if (path in routes) return Response.json(routes[path]);
       return Response.json({ error: "Not here" }, { status: 404 });
     },
@@ -740,10 +745,8 @@ describe("the frame", () => {
       const real = globalThis.fetch;
       return Object.assign(
         (input: RequestInfo | URL, init?: RequestInit) =>
-          String(input) === "/api/channels"
-            ? Promise.resolve(
-                Response.json({ channels: roster, nextCursor: null }),
-              )
+          String(input) === CONVERSATIONS_PATH
+            ? Promise.resolve(Response.json(conversationPage(roster)))
             : real(input, init),
         { preconnect: originalFetch.preconnect },
       );
@@ -1019,7 +1022,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: "POST",
-        path: "/api/approvals/r-pending/decision",
+        path: "/api/v2/organizations/default/people/me/approvals/r-pending/decide",
         body: { decision: "allow_once" },
       }),
     );
@@ -1067,18 +1070,7 @@ describe("the rules the frame runs on", () => {
     const busy = [
       channel({ id: "x", agentIds: ["b"], busy: true, summary: "Report" }),
     ];
-    const base = {
-      agentId: "b",
-      name: "B",
-      questions: 0,
-      approvals: 0,
-      handoffs: 0,
-      unread: 0,
-      paused: false,
-      notify: "all" as const,
-      items: 0,
-      tasks: { needsInput: 0, ready: 0, failed: 0 },
-    };
+    const base = attentionOf("b", "B");
     expect(
       statusLine({ attention: undefined, channels: busy, agentId: "b" }),
     ).toBe("Working on Report…");

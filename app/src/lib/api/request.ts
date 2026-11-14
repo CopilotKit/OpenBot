@@ -5,12 +5,8 @@
  * body the spec gives it. It sends them through `clientRequest` in lib/client.ts, so a generated call
  * carries the session the way every other request in the app does, and a refusal reaches a screen as
  * the same `ClientError` with the server's own sentence, or the `fallback` the caller named.
- *
- * Until the server answers at the API's addresses, `servedToday` sends an operation to the
- * route that answers it now and puts the answer in the API's shape.
  */
 import { clientRequest } from "@/lib/client";
-import { servedToday } from "./served-today";
 
 /** What a caller of a generated function may add to the request it makes. */
 export type ApiRequestOptions = RequestInit & {
@@ -66,8 +62,7 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {},
 ): Promise<T> {
   const { fallback, onResponse, ...init } = options;
-  const today = servedToday(url, init.method);
-  const response = await clientRequest(today?.path ?? url, init, fallback);
+  const response = await clientRequest(url, init, fallback);
   onResponse?.(response);
   if (response.status === 204) return undefined as T;
   const type = response.headers.get("content-type") ?? "";
@@ -79,5 +74,5 @@ export async function apiRequest<T>(
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error(fallback ?? "That request failed.");
   }
-  return (today ? today.answer(body) : body) as T;
+  return body as T;
 }

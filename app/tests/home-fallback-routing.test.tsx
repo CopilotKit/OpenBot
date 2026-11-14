@@ -1,3 +1,4 @@
+import { CONVERSATIONS_PATH, problem, ROUTE_PATH } from "./conversations-api";
 import "./home-fallback-routing.fixture";
 
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
@@ -116,6 +117,10 @@ async function submitHomeMessage(
   await user.click(await view.findByRole("button", { name: "Send message" }));
 }
 
+/** The API's refusal when a message names a Bot more than one Bot answers to: its sentence. */
+const AMBIGUOUS =
+  "More than one Bot has that name. Data Analyst, Risk Analyst. Choose one with @.";
+
 function installHomeRoutingFetch(options: {
   routeResponse: Response;
   starts: string[][];
@@ -123,23 +128,23 @@ function installHomeRoutingFetch(options: {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/route") return options.routeResponse.clone();
-      if (url === "/api/channels") {
-        const body = JSON.parse(String(init?.body)) as { agentIds: string[] };
-        options.starts.push(body.agentIds);
-        return Response.json({
-          channel: {
-            busy: false,
-            id: `channel-${options.starts.length}`,
-            lastMessage: null,
-            lastMessageAt: null,
-            participantIds: body.agentIds,
-            pinned: false,
-            threadId: `thread-${options.starts.length}`,
-            title: null,
-            unread: false,
+      if (url === ROUTE_PATH) return options.routeResponse.clone();
+      if (url === CONVERSATIONS_PATH && init?.method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { botIds: string[] };
+        options.starts.push(body.botIds);
+        return Response.json(
+          {
+            conversation: {
+              id: `channel-${options.starts.length}`,
+              name: "Conversation",
+              botIds: body.botIds,
+              threadId: `thread-${options.starts.length}`,
+              active: true,
+              lastMessageAt: null,
+            },
           },
-        });
+          { status: 201 },
+        );
       }
       throw new Error(`Unexpected fetch: ${url}`);
     },
@@ -157,7 +162,7 @@ test("/ starts the box with the words a link hands over, and sends them only whe
   });
   const starts: string[][] = [];
   installHomeRoutingFetch({
-    routeResponse: Response.json({ error: "router down" }, { status: 503 }),
+    routeResponse: problem(503, "router down"),
     starts,
   });
   const view = renderHome(
@@ -187,7 +192,7 @@ test("/ fallback routing matches the server default when route selection is unav
   });
   const starts: string[][] = [];
   installHomeRoutingFetch({
-    routeResponse: Response.json({ error: "router down" }, { status: 503 }),
+    routeResponse: problem(503, "router down"),
     starts,
   });
   const view = renderHome(queryClientWithAgents([ownPublic, sharedPublic]));
@@ -213,7 +218,7 @@ test("/ keeps a successful route decision ahead of the fallback", async () => {
   const starts: string[][] = [];
   installHomeRoutingFetch({
     routeResponse: Response.json({
-      agentId: "shared-public",
+      botId: "shared-public",
       fallback: false,
       name: "Shared Public",
       reason: "matched",
@@ -231,17 +236,15 @@ test("/ keeps a successful route decision ahead of the fallback", async () => {
 for (const refusal of [
   {
     status: 409,
-    body: {
-      error: "More than one coworker matches that name.",
-      names: ["Data Analyst", "Risk Analyst"],
-    },
+    code: "BOT_NAME_AMBIGUOUS",
+    detail: AMBIGUOUS,
     message: "Data Analyst, Risk Analyst",
   },
 ]) {
   test(`routing refusal ${refusal.status} preserves the draft and shows the explanation without starting a fallback`, async () => {
     const starts: string[][] = [];
     installHomeRoutingFetch({
-      routeResponse: Response.json(refusal.body, { status: refusal.status }),
+      routeResponse: problem(refusal.status, refusal.detail, refusal.code),
       starts,
     });
     const view = renderHome(
@@ -281,7 +284,7 @@ test("send opens the placeholder at once, before a Bot is picked or a channel ma
   await submitHomeMessage(view, "hello");
 
   expect(await view.findByText("Starting")).toBeTruthy();
-  expect(asked).toEqual(["/api/route"]);
+  expect(asked).toEqual([ROUTE_PATH]);
 });
 
 test("a start that fails after the person went back home shows its words and reason on that home page", async () => {
@@ -290,7 +293,7 @@ test("a start that fails after the person went back home shows its words and rea
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/route")
+      if (url === ROUTE_PATH)
         return new Promise<Response>((resolve) => {
           answer = resolve;
         });
@@ -310,15 +313,7 @@ test("a start that fails after the person went back home shows its words and rea
   await view.router.navigate({ to: "/" });
   await view.findByRole("textbox", { name: "Message" });
 
-  answer(
-    Response.json(
-      {
-        error: "More than one coworker matches that name.",
-        names: ["Data Analyst", "Risk Analyst"],
-      },
-      { status: 409 },
-    ),
-  );
+  answer(problem(409, AMBIGUOUS, "BOT_NAME_AMBIGUOUS"));
 
   // Both, in one wait. The reason shows in the render that restores the start, and the words reach
   // the box after it, in PromptArea's own effect, which under load runs a task later.
@@ -337,7 +332,7 @@ test("a start that fails while the person is writing something else on home leav
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/route")
+      if (url === ROUTE_PATH)
         return new Promise<Response>((resolve) => {
           answer = resolve;
         });
@@ -360,15 +355,7 @@ test("a start that fails while the person is writing something else on home leav
     "something new",
   );
 
-  answer(
-    Response.json(
-      {
-        error: "More than one coworker matches that name.",
-        names: ["Data Analyst", "Risk Analyst"],
-      },
-      { status: 409 },
-    ),
-  );
+  answer(problem(409, AMBIGUOUS, "BOT_NAME_AMBIGUOUS"));
 
   // Nothing to wait on but the failure itself; give it the turns it needs to land.
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -384,17 +371,13 @@ for (const status of [409, 500]) {
     const starts: string[][] = [];
     const requests: unknown[] = [];
     installHomeRoutingFetch({
-      routeResponse: Response.json(
-        { error: "Cannot route these skills" },
-        { status },
-      ),
+      routeResponse: problem(status, "Cannot route these skills"),
       starts,
     });
     const installed = global.fetch;
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (input === "/api/route")
-          requests.push(JSON.parse(String(init?.body)));
+        if (input === ROUTE_PATH) requests.push(JSON.parse(String(init?.body)));
         return installed(input, init);
       },
       { preconnect: originalFetch.preconnect },

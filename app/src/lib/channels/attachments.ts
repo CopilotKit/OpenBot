@@ -22,3 +22,24 @@ export {
   namesNoFormat,
   shouldClaimPaste,
 } from "@openbot/shared/attachments";
+
+import { getGetAttachmentUrl } from "@/lib/api/generated/conversations/conversations";
+import { organizationId } from "@/lib/api/request";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
+
+/**
+ * Where the browser reads an attachment's bytes from: the API's address for it.
+ *
+ * A sent message names its attachment by the form `attachmentUrl` writes, which the server reads
+ * when it builds a Bot's turn and which every message already sent keeps. That stored form does not
+ * change. This is only where the app loads the file from to show it, with anything after the id
+ * (a cache-busting query) carried over. Anything that is not a stored attachment is returned as it
+ * is, to be refused by whoever asked.
+ */
+export function attachmentAddress(stored: string): string {
+  const prefix = storedAttachmentUrl("");
+  if (!stored.startsWith(prefix)) return stored;
+  const [id = "", query] = stored.slice(prefix.length).split("?", 2);
+  const address = getGetAttachmentUrl(organizationId(), decodeURIComponent(id));
+  return query === undefined ? address : `${address}?${query}`;
+}

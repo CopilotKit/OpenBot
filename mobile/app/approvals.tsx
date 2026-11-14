@@ -8,7 +8,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { type ApprovalInbox, api } from "../src/api";
+import {
+  api,
+  approvalDecisionPath,
+  loadApprovalInbox,
+  questionResponsePath,
+} from "../src/api";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
 export default function ApprovalsScreen() {
@@ -17,7 +22,7 @@ export default function ApprovalsScreen() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const load = useCallback(() => api<ApprovalInbox>("/api/approvals"), []);
+  const load = useCallback(() => loadApprovalInbox(), []);
   const inbox = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   async function decide(
@@ -27,7 +32,7 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(`/api/approvals/${encodeURIComponent(id)}/decision`, {
+      await api(approvalDecisionPath(id), {
         method: "POST",
         body: { decision },
       });
@@ -46,7 +51,7 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(`/api/approvals/questions/${encodeURIComponent(id)}/respond`, {
+      await api(questionResponsePath(id), {
         method: "POST",
         body: { response: answers[id] ?? "" },
       });

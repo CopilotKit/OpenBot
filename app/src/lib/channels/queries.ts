@@ -1,5 +1,13 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  getConversation,
+  listConversations,
+} from "@/lib/api/generated/conversations/conversations";
+import type {
+  Conversation,
+  ConversationSummary,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A channel as the browser sees it.
@@ -141,15 +149,14 @@ export function channelListQueryOptions() {
   return infiniteQueryOptions({
     queryKey: channelKeys.list(),
     initialPageParam: "",
-    queryFn: async ({ pageParam }): Promise<ChannelPage> => {
-      const suffix = pageParam
-        ? `?cursor=${encodeURIComponent(pageParam as string)}`
-        : "";
-      const response = await client(`/api/channels${suffix}`, {
-        fallback: "Couldn't load your conversations.",
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          pageParam ? { cursor: pageParam as string } : undefined,
+          { fallback: "Couldn't load your conversations." },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -202,18 +209,18 @@ export function channelSearchInfiniteQueryOptions(
     queryKey: channelKeys.search(normalized, limit),
     enabled: isChannelSearchable(normalized),
     initialPageParam: "",
-    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> => {
-      const params = new URLSearchParams({
-        q: normalized,
-        limit: String(limit),
-      });
-      if (pageParam) params.set("cursor", pageParam as string);
-      const response = await client(`/api/channels/search?${params}`, {
-        fallback: "Couldn't search your conversations.",
-        signal,
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            q: normalized,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't search your conversations.", signal },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -223,10 +230,44 @@ export function channelSearchInfiniteQueryOptions(
 export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
-    queryFn: async (): Promise<AgentChannel> => {
-      return client(`/api/channels/${channelId}`, "channel", {
-        fallback: "Couldn't load this conversation.",
-      });
-    },
+    queryFn: async (): Promise<AgentChannel> =>
+      channelOf(
+        (
+          await getConversation(organizationId(), channelId, {
+            fallback: "Couldn't load this conversation.",
+          })
+        ).conversation,
+      ),
   });
+}
+
+/**
+ * A conversation as the API answers it, in the names the app's screens and its socket events use:
+ * the API calls a conversation's Bots `botIds`.
+ */
+export function channelOf({ botIds, ...rest }: Conversation): AgentChannel {
+  return { ...rest, agentIds: botIds, work: rest.work as ChannelWork[] };
+}
+
+function channelSummaryOf({
+  botIds,
+  lastMessageBotId,
+  ...rest
+}: ConversationSummary): ChannelSummary {
+  return {
+    ...rest,
+    agentIds: botIds,
+    lastMessageAgentId: lastMessageBotId,
+    work: rest.work as ChannelWork[],
+  };
+}
+
+function channelPageOf(page: {
+  conversations: ConversationSummary[];
+  nextCursor: string | null;
+}): ChannelPage {
+  return {
+    channels: page.conversations.map(channelSummaryOf),
+    nextCursor: page.nextCursor,
+  };
 }

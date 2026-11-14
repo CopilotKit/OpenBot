@@ -86,7 +86,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ...destinationsQueryOptions(),
     enabled: !personal,
   });
-  const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
+  const published = teamBots.data?.find((bot) => bot.botId === agent.id);
   const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
   const canShare =

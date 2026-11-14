@@ -34,8 +34,8 @@ import { MainChatLink } from "./links";
 import { MenuSheet } from "./menu-sheet";
 import {
   centreBot,
-  inColumn,
   type FuseTab,
+  inColumn,
   statusLine,
   tabFor,
   waitingOnYou,
@@ -126,7 +126,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   const column = inColumn(pathname, sidePanelOpen);
   const waiting = waitingOnYou(inbox.data).count;
   const status = statusLine({
-    attention: attention.data?.find((entry) => entry.agentId === bot?.id),
+    attention: attention.data?.find((entry) => entry.botId === bot?.id),
     channels: channels.data,
     agentId: bot?.id,
   });

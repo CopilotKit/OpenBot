@@ -23,6 +23,7 @@ import {
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { Route as StartRoute } from "@/routes/_authed/_app/start.$startId";
+import { CONVERSATIONS_PATH, ROUTE_PATH } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -187,22 +188,25 @@ test("sent from home, left before it was made, and come back to: the conversatio
   let picked: (response: Response) => void = () => undefined;
   const made: string[] = [];
   answer = async (url, init) => {
-    if (url === "/api/route")
+    if (url === ROUTE_PATH)
       return new Promise<Response>((resolve) => {
         picked = resolve;
       });
-    if (url === "/api/channels" && init?.method === "POST") {
+    if (url === CONVERSATIONS_PATH && init?.method === "POST") {
       made.push(String(init.body));
-      return Response.json({
-        channel: {
-          id: "channel-made",
-          name: "Knowledge",
-          agentIds: ["knowledge"],
-          threadId: "thread-made",
-          active: true,
-          lastMessageAt: null,
+      return Response.json(
+        {
+          conversation: {
+            id: "channel-made",
+            name: "Knowledge",
+            botIds: ["knowledge"],
+            threadId: "thread-made",
+            active: true,
+            lastMessageAt: null,
+          },
         },
-      });
+        { status: 201 },
+      );
     }
     throw new Error(`Unexpected fetch: ${url}`);
   };
@@ -219,7 +223,15 @@ test("sent from home, left before it was made, and come back to: the conversatio
 
   // Off to home's own link while the Bot is being picked; the conversation is made behind it.
   await view.router.navigate({ to: "/" });
-  picked(Response.json({ agentId: "knowledge", reason: "matched" }));
+  picked(
+    Response.json({
+      botId: "knowledge",
+      name: "Knowledge",
+      reason: "matched",
+      fallback: false,
+      viaMention: false,
+    }),
+  );
   await waitFor(() => expect(made).toHaveLength(1));
   // Not pulled back to it.
   await new Promise((resolve) => setTimeout(resolve, 20));

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { tryClient } from "@/lib/client";
+import {
+  createConversationThread,
+  getConversationThread,
+} from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { newId } from "../new-id";
 
 /**
@@ -47,10 +52,10 @@ function remember(agentId: string, threadId: string): void {
 
 async function mint(): Promise<string | null> {
   try {
-    const response = await tryClient("/api/threads/mint", { method: "POST" });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { threadId?: unknown };
-    return typeof body.threadId === "string" ? body.threadId : null;
+    const made = await createConversationThread(organizationId(), {
+      "Idempotency-Key": idempotencyKey(),
+    });
+    return typeof made.threadId === "string" ? made.threadId : null;
   } catch {
     return null;
   }
@@ -67,28 +72,21 @@ async function checkKnown(
   threadId: string,
 ): Promise<{ known: boolean | undefined; unavailable: boolean }> {
   try {
-    const response = await tryClient(
-      `/api/threads/${encodeURIComponent(threadId)}`,
-    );
-    if (response.status === 404) {
-      // The route itself is absent, which is what an unconfigured reader looks like server-side.
-      // Behave exactly as this hook did before the check existed: nothing was learned, nothing
-      // changes.
+    const status = await getConversationThread(organizationId(), threadId);
+    if (typeof status.known !== "boolean") {
+      // An answer that does not carry the shape this hook asked for is not an answer either.
+      return { known: undefined, unavailable: true };
+    }
+    return { known: status.known, unavailable: false };
+  } catch (error) {
+    // Not found is this deployment having no way to check, which is what an unconfigured reader
+    // looks like. Behave exactly as this hook did before the check existed: nothing was learned,
+    // nothing changes.
+    if (error instanceof ClientError && error.status === 404)
       return { known: undefined, unavailable: false };
-    }
-    if (!response.ok) {
-      // A 400 means the remembered id was not even a plausible thread id; a 502 means the check
-      // itself failed to reach Intelligence. Either way there is no clean answer, and the safer
-      // read is "unknown" rather than "gone" — see threadToUse for why.
-      return { known: undefined, unavailable: true };
-    }
-    const body = (await response.json()) as { known?: unknown };
-    if (typeof body.known !== "boolean") {
-      // A 200 that does not carry the shape this hook asked for is not an answer either.
-      return { known: undefined, unavailable: true };
-    }
-    return { known: body.known, unavailable: false };
-  } catch {
+    // A 400 means the remembered id was not even a plausible thread id; a 502 means the check
+    // itself failed to reach Intelligence. Either way there is no clean answer, and the safer
+    // read is "unknown" rather than "gone" — see threadToUse for why.
     return { known: undefined, unavailable: true };
   }
 }

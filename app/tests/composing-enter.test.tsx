@@ -22,6 +22,7 @@ import { SetupSections } from "@/components/bot-profile/setup";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { computerKeys } from "@/lib/computers/queries";
 import { Route as NewRuleRoute } from "@/routes/_authed/admin/boundaries_.new";
+import { DEPLOYMENT_PATH, deploymentResponse } from "./admin-settings-api";
 import { BOTS_PATH, botPath } from "./bots-api";
 
 /**
@@ -88,11 +89,11 @@ beforeEach(() => {
         typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
       if (method !== "GET") writes.push({ request: `${method} ${path}`, body });
       const json = (value: unknown) => Response.json(value);
-      if (path === "/api/computers/policy") {
-        return json({ policy: method === "PUT" ? body : POLICY });
+      if (path === "/api/v2/organizations/default/boundaries") {
+        return json(method === "PUT" ? body : POLICY);
       }
-      if (path === "/api/agents/capabilities") {
-        return json({ capabilities: { builtInAvailable: true } });
+      if (path === DEPLOYMENT_PATH) {
+        return deploymentResponse({ builtInBots: true });
       }
       if (path === botPath(PROFILE.id)) {
         return json({ bot: PROFILE });
@@ -223,7 +224,7 @@ test("a boundary rule is not added by the Enter that confirms a composed charact
   await settle();
   expect(writes).toEqual([
     {
-      request: "PUT /api/computers/policy",
+      request: "PUT /api/v2/organizations/default/boundaries",
       body: {
         ...POLICY,
         deny: [rule],

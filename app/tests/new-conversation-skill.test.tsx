@@ -21,6 +21,12 @@ import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPath,
+  ROUTE_PATH,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -112,10 +118,19 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/channels" && method === "POST")
-        return NativeResponse.json({ channel }, { status: 201 });
-      if (url.pathname === "/api/route")
-        return NativeResponse.json({ agentId: BOT, reason: "chosen" });
+      if (url.pathname === CONVERSATIONS_PATH && method === "POST")
+        return NativeResponse.json(
+          { conversation: conversationOf(channel) },
+          { status: 201 },
+        );
+      if (url.pathname === ROUTE_PATH)
+        return NativeResponse.json({
+          botId: BOT,
+          name: bot.name,
+          reason: "chosen",
+          fallback: false,
+          viaMention: false,
+        });
       const bots = answerBotsList(url, init, { visible: [bot] });
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
@@ -134,7 +149,11 @@ beforeAll(() => {
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
@@ -161,10 +180,15 @@ beforeAll(() => {
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
         ]);
       }
-      if (/\/api\/channels\/[^/]+(\/(activity|busy|read))?$/.test(url.pathname))
-        return method === "GET"
-          ? NativeResponse.json({ channel })
-          : new NativeResponse(null, { status: 204 });
+      if (url.pathname === conversationPath(channel.id) && method === "GET")
+        return NativeResponse.json({ conversation: conversationOf(channel) });
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy|mark-read)$/.test(
+          url.pathname,
+        ) &&
+        method === "POST"
+      )
+        return new NativeResponse(null, { status: 204 });
       if (/\/threads\/[^/]+(\/messages)?$/.test(url.pathname))
         return NativeResponse.json({ messages: [] });
       throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);
