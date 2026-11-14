@@ -413,10 +413,12 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.images.outputs.manifest-artifact }}
-      # The list `image-list` wrote, attached beside it, so the release is never without it.
+      # The list `image-list` wrote, attached beside it, so the release is never without it. Named
+      # for the run and not the attempt: a re-run of this job alone is a new attempt, and the list
+      # was uploaded by the first.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: desktop-images-${{ github.run_id }}-${{ github.run_attempt }}
+          name: desktop-images-${{ github.run_id }}
       # A rerun of a half-published release. The provenance bundle is signed again on every run, so
       # this run's bytes never equal the published ones even when nothing changed. What was published is fetched first; each asset this run produces is
       # compared with it by content, and the published bytes are kept, so the manifest and the
@@ -440,8 +442,10 @@ jobs:
           cosign-release: v2.6.5
       # The two Helm charts, `openbot` and `openbot-bundle`, as the OpenBot images of this release
       # published them: the very files `verify` checked the policy against, fetched again by their
-      # digest and their signature. The step below copies them into release-assets, records each in
-      # the release manifest and refuses one that is not this release's.
+      # digest and their signature. The step below copies them into release-assets and refuses one
+      # that is not this release's. The release manifest names the `openbot` chart, in the shape it
+      # has always had, so the readers of earlier releases still read it; release-charts.json,
+      # written beside it, lists both.
       - name: Fetch this release's Helm charts
         env:
           RELEASE_FILES: ${{ needs.verify.outputs.release_files }}
@@ -457,6 +461,7 @@ jobs:
         with:
           subject-path: |
             release-assets/release-manifest.json
+            release-assets/release-charts.json
             release-assets/openbot-source.tar.gz
             release-assets/*.tgz
             container-images.json
@@ -624,9 +629,12 @@ jobs:
           cat desktop-images.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-images-${{ github.run_id }}-${{ github.run_attempt }}
+          # One name for every attempt of this run, which `tag and release` reads; a re-run of the
+          # whole workflow writes it again.
+          name: desktop-images-${{ github.run_id }}
           path: desktop-images.json
           if-no-files-found: error
+          overwrite: true
 
   # A candidate or beta's ad-hoc and unsigned installers, onto the release once `desktop` has built
   # them, so testers have a link before signing is approved. Signing is already running by now, and

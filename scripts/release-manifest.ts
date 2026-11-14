@@ -11,10 +11,11 @@ import {
 import { basename, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
-  type ChartArtifact,
   parseReleaseManifest,
   type ReleaseManifest,
 } from "../shared/release-manifest";
+
+type ChartArtifact = NonNullable<ReleaseManifest["artifacts"]["chart"]>;
 
 /** The reviewed upgrade policy, committed at the repository root and read from the release commit. */
 export const RELEASE_POLICY_FILE = "release-policy.json";
@@ -95,6 +96,45 @@ function validateSource(
     options.commit,
   );
 }
+/** Each chart the release attaches: its own version, its address on the release, and its bytes. */
+function chartArtifacts(
+  options: Pick<
+    ReleaseBuildOptions,
+    "repository" | "version" | "chart" | "bundleChart"
+  >,
+): Partial<Record<ChartField, ChartArtifact>> {
+  const charts: Partial<Record<ChartField, ChartArtifact>> = {};
+  for (const field of chartFields) {
+    const packaged = options[field];
+    if (!packaged) continue;
+    const { path, version } = packaged;
+    if (
+      !chartVersion.test(version) ||
+      basename(path) !== `${CHARTS[field]}-${version}.tgz`
+    )
+      throw new Error(
+        `Chart artifact filename must match its exact ${CHARTS[field]} chart version`,
+      );
+    charts[field] = {
+      version,
+      url: `https://github.com/${options.repository}/releases/download/${options.version}/${basename(path)}`,
+      sha256: sha256(readFileSync(path)),
+    };
+  }
+  return charts;
+}
+
+/**
+ * release-charts.json: every Helm chart a release attaches, by chart name. It sits beside
+ * release-manifest.json, which names only the `openbot` chart and whose shape does not change, so
+ * the manifest readers of earlier releases read a new release exactly as they read their own.
+ */
+export const RELEASE_CHARTS = "release-charts.json";
+export interface ReleaseCharts {
+  version: string;
+  charts: Record<string, ChartArtifact>;
+}
+
 function manifest(
   options: Omit<ReleaseBuildOptions, "publishedDirectory">,
   sourceSha256: string,
@@ -121,24 +161,10 @@ function manifest(
       "rev-parse",
       `${options.upstreamCommit}^{tree}`,
     );
-  const charts: Partial<Record<ChartField, ChartArtifact>> = {};
-  for (const field of chartFields) {
-    const packaged = options[field];
-    if (!packaged) continue;
-    const { path, version } = packaged;
-    if (
-      !chartVersion.test(version) ||
-      basename(path) !== `${CHARTS[field]}-${version}.tgz`
-    )
-      throw new Error(
-        `Chart artifact filename must match its exact ${CHARTS[field]} chart version`,
-      );
-    charts[field] = {
-      version,
-      url: `https://github.com/${options.repository}/releases/download/${options.version}/${basename(path)}`,
-      sha256: sha256(readFileSync(path)),
-    };
-  }
+  // The manifest keeps the shape every released reader accepts: it names the `openbot` chart, the
+  // one a Kubernetes promotion installs, and nothing new. A reader from an earlier release refuses
+  // a field it does not know, so the bundle chart is listed in release-charts.json instead.
+  const { chart } = chartArtifacts(options);
   return parseReleaseManifest({
     schemaVersion: 1,
     distribution: {
@@ -159,7 +185,7 @@ function manifest(
         sha256: sourceSha256,
       },
       images: options.images,
-      ...charts,
+      ...(chart ? { chart } : {}),
     },
     compatibility: options.compatibility,
     upgrade: options.upgrade,
@@ -417,6 +443,22 @@ export function createReleaseArtifacts(
       parseReleaseManifest(JSON.parse(readFileSync(other, "utf8"))),
     ),
   );
+  // Written when the release has the bundle chart, which the manifest has no place for.
+  if (charts.bundleChart) {
+    const listed = chartArtifacts({ ...options, ...charts });
+    const releaseCharts: ReleaseCharts = {
+      version: options.version,
+      charts: Object.fromEntries(
+        chartFields.flatMap((field) => {
+          const artifact = listed[field];
+          return artifact ? [[CHARTS[field], artifact]] : [];
+        }),
+      ),
+    };
+    const chartsPath = resolve(options.outputDirectory, RELEASE_CHARTS);
+    writeFileSync(chartsPath, `${JSON.stringify(releaseCharts, null, 2)}\n`);
+    adoptPublished(chartsPath, published, sameJson);
+  }
   return release;
 }
 

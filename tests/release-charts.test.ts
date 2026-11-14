@@ -113,7 +113,7 @@ function publish(
 }
 
 describe("a release's Helm charts", () => {
-  test("both are attached at the release's own address and recorded in its manifest", () => {
+  test("both are attached at the release's own address and listed in release-charts.json", () => {
     const rel = release("v0.4.0");
     const files = published({
       version: "v0.4.0",
@@ -126,23 +126,52 @@ describe("a release's Helm charts", () => {
       "openbot-0.3.0.tgz",
       "openbot-bundle-0.1.0.tgz",
       "openbot-source.tar.gz",
+      "release-charts.json",
       "release-manifest.json",
     ]);
-    const manifest = parseReleaseManifest(
-      JSON.parse(readFileSync(join(assets, "release-manifest.json"), "utf8")),
-    );
     const address =
       "https://github.com/CopilotKit/OpenBot/releases/download/v0.4.0";
-    expect(manifest.artifacts.chart).toEqual({
+    const openbot = {
       version: "0.3.0",
       url: `${address}/openbot-0.3.0.tgz`,
       sha256: sha256(join(files, "openbot-0.3.0.tgz")),
+    };
+    expect(
+      JSON.parse(readFileSync(join(assets, "release-charts.json"), "utf8")),
+    ).toEqual({
+      version: "v0.4.0",
+      charts: {
+        openbot,
+        "openbot-bundle": {
+          version: "0.1.0",
+          url: `${address}/openbot-bundle-0.1.0.tgz`,
+          sha256: sha256(join(files, "openbot-bundle-0.1.0.tgz")),
+        },
+      },
     });
-    expect(manifest.artifacts.bundleChart).toEqual({
-      version: "0.1.0",
-      url: `${address}/openbot-bundle-0.1.0.tgz`,
-      sha256: sha256(join(files, "openbot-bundle-0.1.0.tgz")),
-    });
+
+    // THE MANIFEST KEEPS THE SHAPE RELEASED READERS ACCEPT. `scripts/update.ts` of 1.0.3 and
+    // earlier, which a source install and a Kubernetes promotion run to move to the next release,
+    // refuses a manifest with a field it does not know ("artifacts: missing or unsupported
+    // fields"). So the manifest names the `openbot` chart as it always has, and nothing else.
+    const written = JSON.parse(
+      readFileSync(join(assets, "release-manifest.json"), "utf8"),
+    );
+    expect(Object.keys(written).sort()).toEqual([
+      "artifacts",
+      "compatibility",
+      "distribution",
+      "schemaVersion",
+      "source",
+      "upgrade",
+      "version",
+    ]);
+    expect(Object.keys(written.artifacts).sort()).toEqual([
+      "chart",
+      "images",
+      "source",
+    ]);
+    expect(parseReleaseManifest(written).artifacts.chart).toEqual(openbot);
     // What is attached is byte for byte what was published and signed.
     for (const name of ["openbot-0.3.0.tgz", "openbot-bundle-0.1.0.tgz"])
       expect(sha256(join(assets, name))).toBe(sha256(join(files, name)));
@@ -390,6 +419,32 @@ describe("the release workflow", () => {
     );
   });
 
+  /**
+   * A release whose `tag and release` job failed is completed by re-running that job alone. The
+   * image list it attaches was uploaded by `image list` in the first attempt, which is not run
+   * again, so its artifact has to be findable from any attempt of the same run. Named with the
+   * attempt number, the re-run asked for `desktop-images-<run>-2`, which nothing ever uploaded.
+   */
+  test("a re-run of tag and release alone finds the image list the first attempt uploaded", () => {
+    const uploads = jobs["image-list"]!.steps.filter((candidate) =>
+      String((candidate as { uses?: string }).uses).startsWith(
+        "actions/upload-artifact@",
+      ),
+    );
+    expect(uploads).toHaveLength(1);
+    const uploaded = uploads[0]!.with!;
+    const downloads = jobs["github-release"]!.steps.filter((candidate) =>
+      String((candidate as { uses?: string }).uses).startsWith(
+        "actions/download-artifact@",
+      ),
+    ).map((candidate) => candidate.with?.name);
+    expect(downloads).toContain(uploaded.name);
+    expect(uploaded.name).toBe(`desktop-images-${expression("github.run_id")}`);
+    for (const name of downloads) expect(name).not.toContain("run_attempt");
+    // A re-run of the whole workflow uploads it again under the same name.
+    expect(uploaded.overwrite).toBe(true);
+  });
+
   test("the release attaches and attests the charts verify checked, by their digest", () => {
     const fetch = step("github-release", "Fetch this release's Helm charts");
     const write = step(
@@ -409,6 +464,9 @@ describe("the release workflow", () => {
     );
     expect(attest.step.with?.["subject-path"]).toContain(
       "release-assets/*.tgz",
+    );
+    expect(attest.step.with?.["subject-path"]).toContain(
+      "release-assets/release-charts.json",
     );
     // Everything in release-assets is uploaded, the charts with it.
     expect(step("github-release", "Tag and publish").step.run).toContain(

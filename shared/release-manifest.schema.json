@@ -1,29 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OpenBot release manifest v1",
-  "$defs": {
-    "chartArtifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["version", "url", "sha256"],
-      "properties": {
-        "version": {
-          "type": "string",
-          "minLength": 1,
-          "pattern": "^\\S(?:.*\\S)?$"
-        },
-        "url": {
-          "type": "string",
-          "format": "uri",
-          "pattern": "^https://[^/@#\\s]+(?:/[^#\\s]*)?$"
-        },
-        "sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        }
-      }
-    }
-  },
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -132,8 +109,27 @@
             }
           }
         },
-        "chart": { "$ref": "#/$defs/chartArtifact" },
-        "bundleChart": { "$ref": "#/$defs/chartArtifact" }
+        "chart": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "url", "sha256"],
+          "properties": {
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\S(?:.*\\S)?$"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://[^/@#\\s]+(?:/[^#\\s]*)?$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
       }
     },
     "compatibility": {

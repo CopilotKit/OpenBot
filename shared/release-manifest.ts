@@ -1,10 +1,4 @@
 export type SourceKind = "stock" | "extended" | "forked" | "unknown";
-/** A packaged Helm chart attached to the release: its own version, where it is, and its bytes. */
-export interface ChartArtifact {
-  version: string;
-  url: string;
-  sha256: string;
-}
 export interface ReleaseManifest {
   schemaVersion: 1;
   distribution: { id: string; repository: string; channel: string };
@@ -18,10 +12,7 @@ export interface ReleaseManifest {
   artifacts: {
     source: { url: string; sha256: string };
     images: Record<string, { reference: string }>;
-    /** The `openbot` chart: OpenBot alone, pointed at an Intelligence. */
-    chart?: ChartArtifact;
-    /** The `openbot-bundle` chart: OpenBot and Intelligence installed together. */
-    bundleChart?: ChartArtifact;
+    chart?: { version: string; url: string; sha256: string };
   };
   compatibility: {
     launcherApi: number;
@@ -152,7 +143,7 @@ export function parseReleaseManifest(input: unknown): ReleaseManifest {
     root.artifacts,
     "artifacts",
     ["source", "images"],
-    ["chart", "bundleChart"],
+    ["chart"],
   );
   const archive = object(artifacts.source, "artifacts.source", [
     "url",
@@ -178,20 +169,19 @@ export function parseReleaseManifest(input: unknown): ReleaseManifest {
   }
   if (Object.keys(images).length === 0)
     throw new Error("artifacts.images: at least one image is required");
-  const chartArtifact = (
-    key: "chart" | "bundleChart",
-  ): ChartArtifact | undefined => {
-    if (artifacts[key] === undefined) return undefined;
-    const path = `artifacts.${key}`;
-    const value = object(artifacts[key], path, ["version", "url", "sha256"]);
-    return {
-      version: string(value.version, `${path}.version`),
-      url: url(value.url, `${path}.url`),
-      sha256: string(value.sha256, `${path}.sha256`, shaPattern),
+  let chart: ReleaseManifest["artifacts"]["chart"];
+  if (artifacts.chart !== undefined) {
+    const value = object(artifacts.chart, "artifacts.chart", [
+      "version",
+      "url",
+      "sha256",
+    ]);
+    chart = {
+      version: string(value.version, "artifacts.chart.version"),
+      url: url(value.url, "artifacts.chart.url"),
+      sha256: string(value.sha256, "artifacts.chart.sha256", shaPattern),
     };
-  };
-  const chart = chartArtifact("chart");
-  const bundleChart = chartArtifact("bundleChart");
+  }
   const compatibility = object(root.compatibility, "compatibility", [
     "launcherApi",
     "configSchema",
@@ -255,7 +245,6 @@ export function parseReleaseManifest(input: unknown): ReleaseManifest {
       },
       images,
       ...(chart ? { chart } : {}),
-      ...(bundleChart ? { bundleChart } : {}),
     },
     compatibility: {
       launcherApi: api(compatibility.launcherApi, "compatibility.launcherApi"),
