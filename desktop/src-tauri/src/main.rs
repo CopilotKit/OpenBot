@@ -5963,6 +5963,15 @@ fn quit_cleanup_notice_path(root: &Path) -> PathBuf {
 struct QuitCleanupNotice {
     version: u8,
     failures: Vec<QuitCleanupFailure>,
+    /**
+    The Quit could not reach the software OpenBot runs on (`ENGINE_UNREACHABLE_AT_QUIT`).
+
+    A field of its own, never a failure of its own: an app rolled back to an earlier release reads
+    this file too, and its reader knows only `failures` and the two kinds in it. It skips a field it
+    does not know and says those as it always has.
+    */
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    engine_unreachable: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -5970,16 +5979,16 @@ struct QuitCleanupNotice {
 enum QuitCleanupFailure {
     HostProcesses,
     Containers,
-    EngineUnreachable,
+}
+
+/// What follows `ENGINE_UNREACHABLE_AT_STOP` in a Quit's failure line, when the line starts with it.
+fn after_engine_unreachable(line: &str) -> Option<&str> {
+    line.strip_prefix("[exit] cleanup failed: ")
+        .and_then(|failure| failure.strip_prefix(ENGINE_UNREACHABLE_AT_STOP))
 }
 
 fn known_safe_quit_cleanup_failure(line: &str) -> QuitCleanupFailure {
-    if line
-        .strip_prefix("[exit] cleanup failed: ")
-        .is_some_and(|failure| failure.starts_with(ENGINE_UNREACHABLE_AT_STOP))
-    {
-        QuitCleanupFailure::EngineUnreachable
-    } else if line.starts_with("[exit] cleanup failed: Compose down failed:") {
+    if line.starts_with("[exit] cleanup failed: Compose down failed:") {
         QuitCleanupFailure::Containers
     } else {
         QuitCleanupFailure::HostProcesses
@@ -5990,7 +5999,6 @@ fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
     match failure {
         QuitCleanupFailure::HostProcesses => "OpenBot could not confirm all app processes stopped.",
         QuitCleanupFailure::Containers => "OpenBot could not confirm all containers stopped.",
-        QuitCleanupFailure::EngineUnreachable => ENGINE_UNREACHABLE_AT_QUIT,
     }
 }
 
@@ -6049,14 +6057,23 @@ fn write_openbot_quit_cleanup_notice(root: &Path, lines: &[&String]) -> Result<(
     if lines.is_empty() {
         return Ok(());
     }
+    let engine_unreachable = lines
+        .iter()
+        .any(|line| after_engine_unreachable(line).is_some());
+    let mut failures = lines
+        .iter()
+        // The sentence alone says only that the engine did not answer, which is its own field.
+        .filter(|line| after_engine_unreachable(line) != Some(""))
+        .map(|line| known_safe_quit_cleanup_failure(line))
+        .collect::<std::collections::BTreeSet<_>>();
+    if failures.is_empty() {
+        // An earlier release reads only `failures`, and an empty list to it is nothing to say.
+        failures.insert(QuitCleanupFailure::HostProcesses);
+    }
     let notice = QuitCleanupNotice {
         version: 1,
-        failures: lines
-            .iter()
-            .map(|line| known_safe_quit_cleanup_failure(line))
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect(),
+        failures: failures.into_iter().collect(),
+        engine_unreachable,
     };
     let bytes = serde_json::to_vec(&notice)
         .map_err(|error| format!("could not serialize shutdown notice: {error}"))?;
@@ -6121,9 +6138,15 @@ fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
         )
     })?;
     let detail = notice
-        .failures
-        .iter()
-        .map(|failure| quit_cleanup_failure_summary(*failure))
+        .engine_unreachable
+        .then_some(ENGINE_UNREACHABLE_AT_QUIT)
+        .into_iter()
+        .chain(
+            notice
+                .failures
+                .iter()
+                .map(|failure| quit_cleanup_failure_summary(*failure)),
+        )
         .collect::<Vec<_>>()
         .join("\n");
     if detail.is_empty() {
@@ -22994,5 +23017,177 @@ fn main() {
                 .as_str(),
             format!("http://127.0.0.1:{}/", f.ports.app)
         );
+    }
+}
+
+/**
+A Quit's notice as OpenBot 1.0.3 reads it, for an app rolled back to it after this build quit.
+
+Copied as it is at the `v1.0.3` tag (`desktop/src-tauri/src/main.rs`), and never changed here: what
+this build writes must read in it.
+*/
+#[cfg(test)]
+mod release_1_0_3_quit_notice {
+    use super::*;
+
+    const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+
+    const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
+
+    fn quit_cleanup_notice_path(root: &Path) -> PathBuf {
+        root.join(QUIT_CLEANUP_NOTICE_FILE)
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct QuitCleanupNotice {
+        version: u8,
+        failures: Vec<QuitCleanupFailure>,
+    }
+
+    #[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum QuitCleanupFailure {
+        HostProcesses,
+        Containers,
+    }
+
+    fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
+        match failure {
+            QuitCleanupFailure::HostProcesses => {
+                "OpenBot could not confirm all app processes stopped."
+            }
+            QuitCleanupFailure::Containers => "OpenBot could not confirm all containers stopped.",
+        }
+    }
+
+    fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
+        let path = quit_cleanup_notice_path(root);
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(Problem::with(
+                    "OpenBot could not read its previous shutdown notice.",
+                    format!("{}: {error}", path.display()),
+                ))
+            }
+        };
+        let size = file
+            .metadata()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not read its previous shutdown notice.",
+                    format!("{}: {error}", path.display()),
+                )
+            })?
+            .len();
+        if size > QUIT_CLEANUP_NOTICE_LIMIT as u64 {
+            return Err(Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!(
+                    "{}: shutdown notice exceeded its size limit",
+                    path.display()
+                ),
+            ));
+        }
+        let notice: QuitCleanupNotice = serde_json::from_reader(file).map_err(|error| {
+            Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+        std::fs::remove_file(&path).map_err(|error| {
+            Problem::with(
+                "OpenBot could not clear its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+        let detail = notice
+            .failures
+            .iter()
+            .map(|failure| quit_cleanup_failure_summary(*failure))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if detail.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Problem::with(
+            "OpenBot had trouble shutting down last time.",
+            detail,
+        )))
+    }
+
+    fn root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "openbot-{label}-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// A Quit that could not reach the software OpenBot runs on, as this build records it: 1.0.3
+    /// reads it and says what it always said, and this build says why.
+    #[test]
+    fn a_quit_that_could_not_reach_the_engine_reads_in_1_0_3() {
+        let root = root("notice-1-0-3");
+        let lines = vec![
+            format!("[exit] cleanup failed: {ENGINE_UNREACHABLE_AT_STOP}\nCould not verify host containers stopped: Cannot connect to Podman"),
+            "[exit] cleanup failed: Compose down failed: could not resolve computer namespace: Compose configuration failed (exit status: 125)".to_string(),
+        ];
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let rolled_back = read_quit_cleanup_notice(&root)
+            .expect("1.0.3 reads the notice")
+            .expect("and says it");
+        assert_eq!(
+            rolled_back.said,
+            "OpenBot had trouble shutting down last time."
+        );
+        assert_eq!(
+            rolled_back.detail.as_deref(),
+            Some("OpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
+        );
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(now.said, "OpenBot had trouble shutting down last time.");
+        assert_eq!(
+            now.detail.as_deref(),
+            Some(
+                format!("{ENGINE_UNREACHABLE_AT_QUIT}\nOpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
+                    .as_str()
+            )
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The sentence alone, put first by `EngineAtStop::say_first`, adds nothing for 1.0.3 to list.
+    #[test]
+    fn the_engine_sentence_alone_adds_nothing_1_0_3_lists() {
+        let root = root("notice-1-0-3-sentence");
+        let lines = vec![
+            format!("[exit] cleanup failed: {ENGINE_UNREACHABLE_AT_STOP}"),
+            "[exit] cleanup failed: Compose down failed: could not resolve computer namespace: Compose configuration failed (exit status: 125)".to_string(),
+        ];
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let rolled_back = read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(
+            rolled_back.detail.as_deref(),
+            Some("OpenBot could not confirm all containers stopped.")
+        );
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(
+            now.detail.as_deref(),
+            Some(
+                format!("{ENGINE_UNREACHABLE_AT_QUIT}\nOpenBot could not confirm all containers stopped.")
+                    .as_str()
+            )
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
