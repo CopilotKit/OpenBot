@@ -115,6 +115,25 @@ paths:
   /api/v2/organizations/{organizationId}/app-directory: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-directory' }
   /api/v2/organizations/{organizationId}/app-setup: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-setup' }
   /api/v2/organizations/{organizationId}/shortened-tool-names: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shortened-tool-names' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/connect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1connect' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/confirm: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1confirm' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/recheck: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1recheck' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1disconnect' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect-preview: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1disconnect-preview' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorizations: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1authorizations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorize: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1authorize' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/make-default: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts~1{accountId}~1make-default' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts~1{accountId}~1disconnect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/connect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1connect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/confirm: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1confirm' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/recheck: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1recheck' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1disconnect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorizations: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1authorizations' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorize: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1authorize' }
 components:
   securitySchemes:
     webSession:
