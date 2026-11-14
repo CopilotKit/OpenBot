@@ -1,6 +1,6 @@
 {
   "$schema": "./shared/release-policy.schema.json",
-  "version": "v1.0.3",
+  "version": "v1.0.3-rc.1",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
