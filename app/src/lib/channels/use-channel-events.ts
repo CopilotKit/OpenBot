@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
-import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
+import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -310,7 +310,7 @@ const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
 function socketUrl() {
-  return buildSocketUrl("/api/channels/events");
+  return buildSocketUrl(apiSocketPath("/conversation-events"));
 }
 
 export function useChannelEvents() {

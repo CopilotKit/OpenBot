@@ -1338,7 +1338,7 @@ export function ChannelChat({
          * watch covers one run at a time.
          */
         const quiet = watchQuietRun({
-          ask: () => askRunLiveness(runtimeAgentId, channel.threadId),
+          ask: () => askRunLiveness(channel.id),
         });
         const hearing = target.subscribe({
           onEvent: ({ event }) => {
