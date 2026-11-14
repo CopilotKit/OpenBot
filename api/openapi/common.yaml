@@ -525,6 +525,12 @@ components:
           description: >-
             The switch an administrator can turn on for this person, when the
             refusal is for want of one (isolatedComputers).
+        appId:
+          type: string
+          minLength: 1
+          description: >-
+            The app the refusal is about, when it names one that is already
+            here (APP_ALREADY_ADDED), so a client can open it.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }

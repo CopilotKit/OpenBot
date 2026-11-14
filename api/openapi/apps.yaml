@@ -1509,6 +1509,7 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+                appId: acme-wiki
             records:
               $ref: '#/components/examples/AppRecordsConflictExample'
             idempotency:
