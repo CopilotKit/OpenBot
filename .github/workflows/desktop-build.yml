@@ -110,11 +110,11 @@ jobs:
           CHANNEL: ${{ inputs.channel }}
         run: bun scripts/desktop-version.ts "$CHANNEL"
         working-directory: desktop
-      # The CLI ships only in the macOS and Windows installers. A tree from before the bundled CLI
+      # The CLI ships in every installer. A tree from before the bundled CLI
       # existed has no overlay to add it, so it builds without one and says so rather than failing.
       - name: Bundle the CLI
         id: cli
-        if: inputs.bundle_cli && matrix.platform != 'linux'
+        if: inputs.bundle_cli
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -126,6 +126,7 @@ jobs:
           case "$PLATFORM" in
             macos) bun desktop/scripts/cli-bundle.ts darwin arm64 ;;
             windows) bun desktop/scripts/cli-bundle.ts win32 x64 ;;
+            linux) bun desktop/scripts/cli-bundle.ts linux x64 ;;
           esac
           echo "bundled=true" >> "$GITHUB_OUTPUT"
       # The image manifest the images workflow published for this commit. build.rs compiles it into

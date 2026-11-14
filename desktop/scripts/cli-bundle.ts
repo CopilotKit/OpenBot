@@ -51,7 +51,7 @@ export function resolveCliSource(cli: string): CliSource {
   return { kind: "npm", spec: `copilotkit@${value}` };
 }
 
-export type Platform = "darwin" | "win32";
+export type Platform = "darwin" | "linux" | "win32";
 export type Arch = "arm64" | "x64";
 
 /**
@@ -89,7 +89,7 @@ export function nodeAsset(
     const file = `win-${arch}/node.exe`;
     return { url: base + file, file, inArchive: "", key };
   }
-  const folder = `node-v${node}-darwin-${arch}`;
+  const folder = `node-v${node}-${platform}-${arch}`;
   const file = `${folder}.tar.gz`;
   return { url: base + file, file, inArchive: `${folder}/bin/node`, key };
 }
@@ -392,8 +392,10 @@ export const realRun: Runner = (cmd, cwd) => {
 };
 
 async function main(platform?: string, arch?: string) {
-  if (platform !== "darwin" && platform !== "win32") {
-    throw new Error(`Platform must be darwin or win32, got "${platform}".`);
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+    throw new Error(
+      `Platform must be darwin, linux or win32, got "${platform}".`,
+    );
   }
   if (arch !== "arm64" && arch !== "x64") {
     throw new Error(`Architecture must be arm64 or x64, got "${arch}".`);

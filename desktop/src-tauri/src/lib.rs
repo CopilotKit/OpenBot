@@ -2,6 +2,7 @@
 pub mod acquire;
 pub mod ai_connection;
 pub mod app_update;
+pub mod cgroup_delegation;
 pub mod cli_release;
 pub mod composio;
 pub mod deployment;

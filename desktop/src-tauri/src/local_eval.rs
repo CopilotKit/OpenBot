@@ -2585,13 +2585,22 @@ fn bundled_cli() -> Option<Result<PinnedCli, Failure>> {
     ))
 }
 
-/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, beside the program
-/// elsewhere.
+/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, Tauri's resource folder
+/// `../lib/OpenBot/cli-bundle` on Linux (`/usr/lib/OpenBot` for the .deb and .rpm, `usr/lib/OpenBot`
+/// inside the AppImage), beside the program on Windows.
 fn bundled_cli_root() -> Option<PathBuf> {
     let program = std::env::current_exe().ok()?;
     let directory = program.parent()?;
     if cfg!(target_os = "macos") {
         Some(directory.parent()?.join("Resources").join("cli-bundle"))
+    } else if cfg!(target_os = "linux") {
+        Some(
+            directory
+                .parent()?
+                .join("lib")
+                .join("OpenBot")
+                .join("cli-bundle"),
+        )
     } else {
         Some(directory.join("cli-bundle"))
     }
@@ -2656,6 +2665,9 @@ const INHERITED: &[&str] = &[
     "DOCKER_HOST",
     "DOCKER_CONTEXT",
     "DOCKER_CONFIG",
+    // Where rootless Podman's socket is on Linux (`$XDG_RUNTIME_DIR/podman/podman.sock`). Without
+    // it the CLI can't find the engine OpenBot runs on there, and reports no engine at all.
+    "XDG_RUNTIME_DIR",
     // The CLI's telemetry opt-outs (`services/consent/gate.ts`). Dropping them would turn
     // telemetry back on for somebody who turned it off.
     "DO_NOT_TRACK",

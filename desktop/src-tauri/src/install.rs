@@ -1130,11 +1130,15 @@ fn install_podman_with_pkexec() -> Result<(), Problem> {
     })?;
 
     // `pkexec` rather than `sudo`: sudo on a desktop with no terminal has nowhere to ask for a
-    // password, and pkexec raises the desktop's own authorization dialog.
+    // password, and pkexec raises the desktop's own authorization dialog. The same prompt lets the
+    // person's systemd delegate the cgroup controllers the backend's rootless node needs, so the
+    // install asks once. See `cgroup_delegation`.
     let output = crate::quiet::command("pkexec")
-        .arg(manager)
-        .args(args)
-        .arg("podman")
+        .args([
+            "/bin/sh",
+            "-c",
+            &crate::cgroup_delegation::install_then_setup(manager, args),
+        ])
         .output()
         .map_err(|error| {
             Problem::with(
