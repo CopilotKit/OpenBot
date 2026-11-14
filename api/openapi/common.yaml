@@ -737,37 +737,6 @@ components:
           description: >-
             The switch an administrator can turn on for this person, when the
             refusal is for want of one (isolatedComputers).
-        rule:
-          type: [string, 'null']
-          description: >-
-            The boundary rule that refused a Bot's action on its computer
-            (COMPUTER_ACTION_REFUSED). Null when no rule did: the address or
-            the file is one the computer may not reach.
-        snapshotRequired:
-          type: boolean
-          description: >-
-            True when a Bot must take a new snapshot before it acts again
-            (COMPUTER_SNAPSHOT_STALE).
-        controlRequestId:
-          type: string
-          description: >-
-            The request under which a person is driving the computer
-            (COMPUTER_PERSON_HAS_CONTROL).
-        handoff:
-          $ref: './computers.yaml#/components/schemas/ComputerControlRequest'
-        unfinished:
-          type: string
-          description: >-
-            Why an action on an element that is there did not finish, as the
-            computer named it (COMPUTER_ACTION_UNFINISHED).
-        reason:
-          type: string
-          enum: [revoked, removed, organization]
-          description: >-
-            Why a Recorder's connection ended, on RECORDER_SIGNED_OUT: the
-            connection was ended or is unknown (revoked), the person was
-            removed (removed), or their organization sign-in ended
-            (organization).
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }

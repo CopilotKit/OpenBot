@@ -5,9 +5,10 @@
 /**
  * Why a Recorder's connection ended, on RECORDER_SIGNED_OUT: the connection was ended or is unknown (revoked), the person was removed (removed), or their organization sign-in ended (organization).
  */
-export type ProblemReason = (typeof ProblemReason)[keyof typeof ProblemReason];
+export type RecorderProblemReason =
+  (typeof RecorderProblemReason)[keyof typeof RecorderProblemReason];
 
-export const ProblemReason = {
+export const RecorderProblemReason = {
   revoked: "revoked",
   removed: "removed",
   organization: "organization",

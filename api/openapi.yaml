@@ -15833,29 +15833,6 @@ components:
         capability:
           type: string
           description: The switch an administrator can turn on for this person, when the refusal is for want of one (isolatedComputers).
-        rule:
-          type:
-            - string
-            - 'null'
-          description: 'The boundary rule that refused a Bot''s action on its computer (COMPUTER_ACTION_REFUSED). Null when no rule did: the address or the file is one the computer may not reach.'
-        snapshotRequired:
-          type: boolean
-          description: True when a Bot must take a new snapshot before it acts again (COMPUTER_SNAPSHOT_STALE).
-        controlRequestId:
-          type: string
-          description: The request under which a person is driving the computer (COMPUTER_PERSON_HAS_CONTROL).
-        handoff:
-          $ref: '#/components/schemas/ComputerControlRequest'
-        unfinished:
-          type: string
-          description: Why an action on an element that is there did not finish, as the computer named it (COMPUTER_ACTION_UNFINISHED).
-        reason:
-          type: string
-          enum:
-            - revoked
-            - removed
-            - organization
-          description: 'Why a Recorder''s connection ended, on RECORDER_SIGNED_OUT: the connection was ended or is unknown (revoked), the person was removed (removed), or their organization sign-in ended (organization).'
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -17465,6 +17442,76 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    ComputerControlRequest:
+      type: object
+      description: A request for a person to drive a Bot's computer.
+      required:
+        - id
+        - reason
+        - source
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        toolCallId:
+          type: string
+        reason:
+          type: string
+        source:
+          type: string
+          enum:
+            - model
+            - cloudflare
+            - visible-challenge
+            - manual
+          description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
+        status:
+          type: string
+          enum:
+            - waiting
+            - taken
+            - completed
+            - cancelled
+            - expired
+            - interrupted
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        expiresAt:
+          type: string
+        finishedAt:
+          type: string
+        interruption:
+          type: string
+        url:
+          type: string
+        keepsPage:
+          type: boolean
+    ComputerProblem:
+      description: 'A problem from a Bot''s computer: the shared problem details, with what a Bot or the app needs to carry on when an action was refused or could not finish.'
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            rule:
+              type:
+                - string
+                - 'null'
+              description: 'The boundary rule that refused a Bot''s action on its computer (COMPUTER_ACTION_REFUSED). Null when no rule did: the address or the file is one the computer may not reach.'
+            snapshotRequired:
+              type: boolean
+              description: True when a Bot must take a new snapshot before it acts again (COMPUTER_SNAPSHOT_STALE).
+            controlRequestId:
+              type: string
+              description: The request under which a person is driving the computer (COMPUTER_PERSON_HAS_CONTROL).
+            handoff:
+              $ref: '#/components/schemas/ComputerControlRequest'
+            unfinished:
+              type: string
+              description: Why an action on an element that is there did not finish, as the computer named it (COMPUTER_ACTION_UNFINISHED).
     ComputerTarget:
       type: object
       additionalProperties: false
@@ -23577,6 +23624,19 @@ components:
           $ref: '#/components/schemas/RecorderConnection'
         user:
           $ref: '#/components/schemas/RecorderUser'
+    RecorderProblem:
+      description: 'A problem for the OpenBot Recorder: the shared problem details, with why its connection ended.'
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            reason:
+              type: string
+              enum:
+                - revoked
+                - removed
+                - organization
+              description: 'Why a Recorder''s connection ended, on RECORDER_SIGNED_OUT: the connection was ended or is unknown (revoked), the person was removed (removed), or their organization sign-in ended (organization).'
     RecorderIdentity:
       type: object
       required:
@@ -24809,7 +24869,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             sms:
               value:
@@ -24845,7 +24905,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             bot:
               value:
@@ -24898,7 +24958,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             anotherAccount:
             stale:
@@ -24978,7 +25038,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             missing:
               value:
@@ -25020,7 +25080,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             notTheirs:
             'off':
@@ -25051,7 +25111,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/ComputerProblem'
           examples:
             rule:
               value:
@@ -25767,7 +25827,7 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: '#/components/schemas/Problem'
+            $ref: '#/components/schemas/RecorderProblem'
           examples:
             missing:
               value:
