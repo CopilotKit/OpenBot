@@ -34,7 +34,13 @@ import { TeamBotConsents } from "@/components/settings/team-bot-consents";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerBotsList } from "./bots-api";
+import {
+  answerBotsList,
+  CLEAR_TEAM_BOT_CONSENTS_PATH,
+  noContent,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -491,6 +497,34 @@ test("team approvals still show the shared Bot account controls", async () => {
   const view = draw(<TeamBotConsents />);
   expect(await view.findByText("Shared Bots")).toBeTruthy();
   expect(view.getByRole("button", { name: "Reset" })).toBeTruthy();
+});
+
+test("Reset forgets every answer the person gave shared Bots, as the API's own write for them", async () => {
+  const cleared: SentRequest[] = [];
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = sentRequest(path, init);
+      if (request.path !== CLEAR_TEAM_BOT_CONSENTS_PATH)
+        return served(path, init);
+      cleared.push(request);
+      return noContent();
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<TeamBotConsents />);
+  fireEvent.click(await view.findByRole("button", { name: "Reset" }));
+  expect(
+    await view.findByText("Reset. Each shared Bot will ask again."),
+  ).toBeTruthy();
+  expect(cleared).toEqual([
+    {
+      method: "POST",
+      path: CLEAR_TEAM_BOT_CONSENTS_PATH,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
 });
 
 /*

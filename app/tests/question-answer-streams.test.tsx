@@ -23,7 +23,12 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
-import { answerBotsList, botPath } from "./bots-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  botPath,
+} from "./bots-api";
 
 /**
  * The Bot asked the person a question in their conversation ("Which city?"), and they answered it
@@ -221,24 +226,15 @@ beforeAll(() => {
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/bots/attention")
-        return NativeResponse.json({
-          lastPingId: null,
-          bots: [
-            {
-              agentId: BOT,
-              name: channel.name,
-              questions: open ? 1 : 0,
-              approvals: 0,
-              handoffs: 0,
-              unread: 0,
-              paused: false,
-              notify: "none",
-              items: 0,
-              tasks: { needsInput: 0, ready: 0, failed: 0 },
-            },
-          ],
-        });
+      const waiting = answerBotAttention(url, init, {
+        bots: [
+          attentionOf(BOT, channel.name, {
+            questions: open ? 1 : 0,
+            notify: "none",
+          }),
+        ],
+      });
+      if (waiting) return waiting;
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The question the Bot is waiting on, in this conversation, until it is answered.

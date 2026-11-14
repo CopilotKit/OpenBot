@@ -3,9 +3,9 @@ import { useCallback } from "react";
 import { Text } from "react-native";
 import {
   api,
-  type Bot,
   type BotTask,
   type CheckInItem,
+  everyBot,
   everyPage,
   ORGANIZATION,
 } from "../src/api";
@@ -39,11 +39,11 @@ export default function NeedsYouScreen() {
     [],
   );
   const tasks = useLoad(loadTasks, Boolean(session));
-  const loadBots = useCallback(() => api<{ agents: Bot[] }>("/api/agents"), []);
+  const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const nameOf = (agentId: string) =>
-    bots.data?.agents.find((bot) => bot.id === agentId)?.name ?? "A Bot";
+    bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
   const waiting = waitingTasks(tasks.data?.tasks ?? []);
   const found = items.data ?? [];
 

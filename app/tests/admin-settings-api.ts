@@ -60,6 +60,10 @@ export type TodayDeployment = {
   authProviders?: string[];
   ssoConfigured?: boolean;
   ssoRequired?: boolean;
+  /** Whether a Bot can run inside OpenBot, with no address of its own. */
+  builtInBots?: boolean;
+  /** Whether this OpenBot can give a Bot a computer of its own. */
+  isolatedBots?: boolean;
 };
 
 /** The API's `deployment`, with what a test left out read as off. */
@@ -75,6 +79,8 @@ export function deploymentBody(today: TodayDeployment = {}) {
     authProviders: today.authProviders ?? [],
     ssoConfigured: today.ssoConfigured === true,
     ssoRequired: today.ssoRequired === true,
+    builtInBots: today.builtInBots === true,
+    isolatedBots: today.isolatedBots === true,
   };
 }
 

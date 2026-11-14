@@ -12,6 +12,7 @@ import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { answerTeamBots, teamBotOf } from "./bots-api";
 import { notificationsResponse } from "./notifications-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
@@ -58,9 +59,17 @@ function serving(
   role: "admin" | "user",
   teamBots: { id: string; audience: "team" | "people" }[] = [],
 ) {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const schedules = answerScheduleLists(input, undefined, {
+    const listed = answerTeamBots(
+      input,
+      init,
+      teamBots.map((bot) =>
+        teamBotOf(bot.id, bot.id, { audience: bot.audience, mine: false }),
+      ),
+    );
+    if (listed) return listed;
+    const schedules = answerScheduleLists(input, init, {
       routines: [{ id: "r1", botId: "expenses" }],
       goals: [
         { id: "g1", botId: "expenses", status: "active" },
@@ -71,9 +80,6 @@ function serving(
     if (schedules) return schedules;
     if (url.includes("/api/plugins/for/")) {
       return Response.json({ tools: [], skills: [] });
-    }
-    if (url.includes("/api/team-bots")) {
-      return Response.json({ teamBots, publishable: [] });
     }
     const reach = notificationsResponse("GET", url, {
       bindings: [

@@ -1,4 +1,10 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  pauseBot,
+  resetBot,
+  resumeBot,
+  stopBotHandoff,
+} from "@/lib/api/generated/bots/bots";
 import { cancelFollowUp } from "@/lib/api/generated/follow-ups/follow-ups";
 import {
   updateBotNotificationSettings,
@@ -6,18 +12,19 @@ import {
 } from "@/lib/api/generated/notification-settings/notification-settings";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
 import {
   type BotLifecycle,
   type BotNotify,
   botLifecycleKeys,
-  botPath,
   type ResetPlan,
   type UpdateKind,
   type UpdateTransport,
 } from "./queries";
 
 const FALLBACK = "Bot operation failed";
+
+/** A fresh key for each write a person asks for, as `once` in lib/agents/mutations.ts. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /** Everything here moves badges, Activity and state together, so all of it is refetched. */
 function invalidateLifecycle(queryClient: QueryClient) {
@@ -26,15 +33,19 @@ function invalidateLifecycle(queryClient: QueryClient) {
 
 export function setBotPausedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: {
+    mutationFn: async (variables: {
       agentId: string;
       paused: boolean;
     }): Promise<BotLifecycle> =>
-      client(
-        `${botPath(variables.agentId)}/${variables.paused ? "pause" : "resume"}`,
-        "lifecycle",
-        { method: "POST", fallback: FALLBACK },
-      ),
+      variables.paused
+        ? (
+            await pauseBot(ORGANIZATION_ID, variables.agentId, once(), {
+              fallback: FALLBACK,
+            })
+          ).lifecycle
+        : resumeBot(ORGANIZATION_ID, variables.agentId, once(), {
+            fallback: FALLBACK,
+          }),
     onSuccess: () => invalidateLifecycle(queryClient),
   });
 }
@@ -57,12 +68,18 @@ export function setBotNotifyMutationOptions(queryClient: QueryClient) {
 
 export function resetBotMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (agentId: string): Promise<ResetPlan> =>
-      client(`${botPath(agentId)}/reset`, "deleted", {
-        method: "POST",
-        body: { confirm: true },
-        fallback: "Could not reset this Bot",
-      }),
+    mutationFn: async (agentId: string): Promise<ResetPlan> =>
+      (
+        await resetBot(
+          ORGANIZATION_ID,
+          agentId,
+          { validateOnly: false },
+          once(),
+          {
+            fallback: "Could not reset this Bot",
+          },
+        )
+      ).deleted,
     onSuccess: async () => {
       await invalidateLifecycle(queryClient);
       // Conversations were deleted; the roster has to drop them.
@@ -74,11 +91,13 @@ export function resetBotMutationOptions(queryClient: QueryClient) {
 export function stopHandoffMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; id: string }) => {
-      await client(`${botPath(variables.agentId)}/activity/handoffs/stop`, {
-        method: "POST",
-        body: { id: variables.id },
-        fallback: "Could not stop the delegated task",
-      });
+      await stopBotHandoff(
+        ORGANIZATION_ID,
+        variables.agentId,
+        { handoffId: variables.id },
+        once(),
+        { fallback: "Could not stop the delegated task" },
+      );
     },
     onSuccess: () => invalidateLifecycle(queryClient),
   });
