@@ -1,5 +1,6 @@
 # Conversations: a person's conversations and what is said in them (members, messages, attachments,
-# reactions, dictation and voice calls), their tasks, and joining a conversation's live channel.
+# reactions, dictation and voice calls), their tasks, joining a conversation's live channel, and
+# the product events that count which of a Bot's answers people saw or copied.
 #
 # One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
 # api/openapi.yaml, the file every client and check reads. See api/README.md.
@@ -1507,6 +1508,55 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/product-events:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordProductEvent
+      summary: Record that the caller saw or copied a Bot's answer
+      description: >-
+        Tell OpenBot that the caller saw a Bot's answer on screen, or copied
+        it, so OpenBot can count which answers people use. It is best effort:
+        a client sends one for each answer it shows or copies, waits on
+        nothing, and sends it with keepalive so it still leaves when the page
+        closes. The event counts for the caller, and names only the answer.
+        Where this OpenBot has product telemetry switched off, it is accepted
+        and dropped.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductEvent'
+            examples:
+              viewed:
+                $ref: '#/components/examples/ProductEventViewed'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     ConversationLimit:
@@ -1923,6 +1973,49 @@ components:
         busy:
           type: boolean
           description: True when a Bot started answering, false when it stopped.
+    ProductEvent:
+      type: object
+      description: The caller saw a Bot's answer, or copied it. Names the answer and
+        nothing about the person, who is the caller.
+      additionalProperties: false
+      required:
+        - kind
+        - threadId
+        - messageId
+        - surface
+      properties:
+        kind:
+          type: string
+          enum:
+            - result_viewed
+            - result_copied
+          description: What the caller did with the answer, result_viewed when it was
+            on screen and result_copied when they copied it.
+        threadId:
+          type: string
+          description: The thread the answer is in, as its messages name it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        messageId:
+          type: string
+          description: The answer's message, by the id its thread gives it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        runId:
+          type: string
+          description: The run that wrote the answer, when the client knows it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+            - mobile
+          description: Where the caller saw or copied it.
     RouteMessageRequest:
       type: object
       required:
@@ -2980,3 +3073,6 @@ components:
     TranscriptionExample:
       summary: "What was said."
       value: {"text": "Remind me to send the forecast on Friday."}
+    ProductEventViewed:
+      summary: "An answer the caller saw in the web app."
+      value: {"kind": "result_viewed", "threadId": "6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "messageId": "msg_0b1c6f0e", "surface": "web"}
