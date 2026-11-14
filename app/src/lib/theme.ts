@@ -1,4 +1,14 @@
-export const THEME_STORAGE_KEY = "openbot-theme";
+/**
+ * Where the choice made in the Theme setting is saved, and nothing else: only that setting writes it.
+ */
+export const THEME_STORAGE_KEY = "openbot-theme-choice";
+
+/**
+ * Where releases from before OpenBot followed the system saved a light or dark. They saved one on
+ * every visit, whether or not the person had touched the setting, so it was never a choice. It is
+ * not read, and it is cleared the first time the app opens.
+ */
+export const LEGACY_THEME_STORAGE_KEY = "openbot-theme";
 
 /** The system's own setting, as the browser reports it. */
 export const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
@@ -12,10 +22,7 @@ export const THEME_PREFERENCES = [
   "dark",
 ] as const satisfies ReadonlyArray<ThemePreference>;
 
-/**
- * The saved choice. Nothing saved is the system's. A saved "light" or "dark" is that person's own,
- * including one saved by a release from before OpenBot followed the system.
- */
+/** The saved choice. Nothing saved is the system's. A saved "light" or "dark" is that person's own. */
 export function parseStoredTheme(value: string | null): ThemePreference {
   return value === "light" || value === "dark" ? value : "system";
 }
@@ -41,6 +48,7 @@ export function applyTheme(
   effects: ThemeEffects,
 ) {
   const dark = resolveDarkTheme(preference, systemDark);
+  effects.removeStoredValue(LEGACY_THEME_STORAGE_KEY);
   // Following the system saves nothing, which is what `index.html` reads before the first paint.
   if (preference === "system") effects.removeStoredValue(THEME_STORAGE_KEY);
   else effects.setStoredValue(THEME_STORAGE_KEY, preference);

@@ -17,8 +17,9 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
-  deliveryQueryOptions,
-  type Reachability,
+  type Delivery,
+  deliveriesQueryOptions,
+  devicesQueryOptions,
   removePushDeviceMutationOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
@@ -27,8 +28,6 @@ const PLATFORM: Record<"ios" | "android", string> = {
   ios: "iOS",
   android: "Android",
 };
-
-type Delivery = Reachability["deliveries"][number];
 
 /** Each channel as the switches under "Where updates go" name it. */
 const CHANNEL: Record<Delivery["transport"], string> = {
@@ -67,9 +66,9 @@ const STATE: Record<Delivery["state"], string> = {
 
 /** The phones that receive push notifications for every one of the person's Bots. */
 export function NativeDevices() {
-  const reach = useQuery(deliveryQueryOptions());
+  const devices = useQuery(devicesQueryOptions());
   const remove = useMutation(removePushDeviceMutationOptions(queryClient));
-  const error = reach.error ?? remove.error;
+  const error = devices.error ?? remove.error;
   return (
     <PageSection
       description="Sign in to the OpenBot app on your phone and turn on notifications to add it here."
@@ -80,14 +79,13 @@ export function NativeDevices() {
           {error.message}
         </p>
       ) : null}
-      {reach.isPending || !reach.data ? null : reach.data.devices.length ===
-        0 ? (
+      {devices.isPending || !devices.data ? null : devices.data.length === 0 ? (
         <PageEmpty icon={IconDevices} title="No devices yet">
           Phones and computers you sign in on show up here.
         </PageEmpty>
       ) : (
         <PageRows>
-          {reach.data.devices.map((device, index) => (
+          {devices.data.map((device, index) => (
             <Fragment key={device.id}>
               {index > 0 ? <Separator /> : null}
               <Item size="sm">
@@ -118,22 +116,22 @@ export function NativeDevices() {
 
 /** What was sent to the person outside the web app, most recent first, with any failure. */
 export function RecentDeliveries() {
-  const reach = useQuery(deliveryQueryOptions());
+  const deliveries = useQuery(deliveriesQueryOptions());
   return (
     <PageSection title="Recent deliveries">
-      {reach.error ? (
+      {deliveries.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {reach.error.message}
+          {deliveries.error.message}
         </p>
       ) : null}
-      {reach.isPending || !reach.data ? null : reach.data.deliveries.length ===
-        0 ? (
+      {deliveries.isPending || !deliveries.data ? null : deliveries.data
+          .length === 0 ? (
         <PageEmpty icon={IconSend} title="No deliveries yet">
           Notifications sent to your devices show up here.
         </PageEmpty>
       ) : (
         <PageRows>
-          {reach.data.deliveries.map((delivery, index) => (
+          {deliveries.data.map((delivery, index) => (
             <Fragment key={delivery.id}>
               {index > 0 ? <Separator /> : null}
               <Item size="sm">

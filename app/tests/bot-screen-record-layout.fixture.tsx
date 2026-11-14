@@ -1,0 +1,26 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createRoot } from "react-dom/client";
+import { ComputerView } from "@/components/computer/computer-view";
+
+/**
+ * A Bot's screen as the Computer beside a conversation draws it, as a page of its own for
+ * bot-screen-record-layout.test.tsx to bundle and load in a browser: the real `ComputerView`, which the test opens
+ * full size. What the server answers (the screen, who has control, the Bot's browser) comes from the test's routes.
+ */
+const root = document.getElementById("root");
+if (root)
+  createRoot(root).render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <div style={{ width: 380 }}>
+        <ComputerView
+          active
+          computerId="fernhill-guide"
+          name="Fernhill Guide"
+        />
+      </div>
+    </QueryClientProvider>,
+  );

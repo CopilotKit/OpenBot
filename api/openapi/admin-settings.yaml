@@ -1006,6 +1006,8 @@ components:
         - authProviders
         - ssoConfigured
         - ssoRequired
+        - builtInBots
+        - isolatedBots
       properties:
         edition:
           type: string
@@ -1048,6 +1050,15 @@ components:
           description: >-
             Whether an administrator requires single sign-on; social sign-in
             then stays only as the configured administrators' way in.
+        builtInBots:
+          type: boolean
+          description: >-
+            Whether a Bot can run inside OpenBot, with no address of its own.
+        isolatedBots:
+          type: boolean
+          description: >-
+            Whether this OpenBot can give a Bot a computer of its own. Whether
+            a person may is their Isolated Bots switch.
     AllowlistEntry:
       type: string
       minLength: 1
@@ -2063,6 +2074,8 @@ components:
         authProviders: [google, microsoft]
         ssoConfigured: true
         ssoRequired: false
+        builtInBots: true
+        isolatedBots: false
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
