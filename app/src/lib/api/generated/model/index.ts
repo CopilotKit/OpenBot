@@ -255,3 +255,6 @@ export * from "./updatePersonRequest";
 export * from "./updatePreferencesHeaders";
 export * from "./updatePreferencesRequest";
 export * from "./updateStandingInstructionsHeaders";
+export * from "./writtenCapabilityChange";
+export * from "./writtenCapabilityChangeScopeKind";
+export * from "./writtenEgressRule";

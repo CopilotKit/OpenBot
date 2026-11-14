@@ -333,31 +333,23 @@ export const TranslateNetworkPolicyBody = zod.object({
     ),
 });
 
-export const translateNetworkPolicyResponseRulesItemValueMax = 253;
-
-export const translateNetworkPolicyResponseRulesItemPortsMax = 100;
-
 export const TranslateNetworkPolicyResponse = zod.object({
   mode: zod.enum(["allowlist_only", "defaults_plus_allowlist"]),
-  rules: zod.array(
-    zod.object({
-      type: zod.enum(["domain", "cidr"]),
-      value: zod
-        .string()
-        .min(1)
-        .max(translateNetworkPolicyResponseRulesItemValueMax)
+  rules: zod
+    .array(
+      zod
+        .object({
+          type: zod.string(),
+          value: zod.string(),
+          ports: zod.string().optional(),
+        })
         .describe(
-          "A host, which covers its subdomains, or an IP range in CIDR form.",
+          "An allowlist entry as the model wrote it, before it is parsed.",
         ),
-      ports: zod
-        .string()
-        .max(translateNetworkPolicyResponseRulesItemPortsMax)
-        .optional()
-        .describe(
-          "Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.",
-        ),
-    }),
-  ),
+    )
+    .describe(
+      "The entries. Parsed and tidied when `check.ok` is true, each then a valid EgressRule; as the model wrote them when it is false, so the admin can see and fix what failed.",
+    ),
   summary: zod.string().nullable(),
   reachable: zod
     .array(zod.string())

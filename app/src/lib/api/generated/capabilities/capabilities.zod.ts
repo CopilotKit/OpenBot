@@ -399,45 +399,28 @@ export const TranslateCapabilityChangesBody = zod.object({
     ),
 });
 
-export const translateCapabilityChangesResponseChangesItemScopeIdMax = 200;
-
-export const translateCapabilityChangesResponseChangesItemScopeIdRegExp =
-  new RegExp("^[^\\x00]*$");
-
 export const TranslateCapabilityChangesResponse = zod.object({
-  changes: zod.array(
-    zod.object({
-      scopeKind: zod.enum(["organization", "role", "group"]),
-      scopeId: zod
-        .string()
-        .max(translateCapabilityChangesResponseChangesItemScopeIdMax)
-        .regex(translateCapabilityChangesResponseChangesItemScopeIdRegExp)
-        .optional()
+  changes: zod
+    .array(
+      zod
+        .object({
+          scopeKind: zod.enum(["organization", "role", "group"]),
+          scopeId: zod.string(),
+          capability: zod.string(),
+          allowed: zod
+            .boolean()
+            .nullable()
+            .describe(
+              "On, off, or null to clear it so the level beneath decides.",
+            ),
+        })
         .describe(
-          "Empty for the organization; admin or user for a role; the group's name for a group.",
+          "A switch change as the model wrote it, before it is checked.",
         ),
-      capability: zod
-        .enum([
-          "useBots",
-          "cloudBrowser",
-          "cloudNetwork",
-          "cloudComputer",
-          "localComputer",
-          "customRules",
-          "passwordManager",
-          "slackTeams",
-          "teamBots",
-          "ownerApps",
-          "isolatedComputers",
-          "proactive",
-        ])
-        .describe("A permission switch."),
-      allowed: zod
-        .boolean()
-        .nullable()
-        .describe("On, off, or null to clear it so the level beneath decides."),
-    }),
-  ),
+    )
+    .describe(
+      "The changes the model wrote. When `check.ok` is true each is a valid CapabilityChange; when it is false they are as written, so the admin can see what failed, and `check.problems` says which.",
+    ),
   summary: zod.string().nullable(),
   explanation: zod.string().nullable(),
   check: zod
@@ -753,11 +736,13 @@ export const StopPersonComputersHeader = zod.object({
 export const StopPersonComputersResponse = zod.object({
   stopped: zod
     .array(zod.string())
-    .describe("The Bots whose computers stopped."),
+    .describe(
+      "The computers stopped: `person:<id>` for the person's own, which every Bot they use runs on, and `bot:<id>` for each of their Bots that has a computer of its own.",
+    ),
   failed: zod
     .array(
       zod.object({
-        botId: zod.string(),
+        computer: zod.string().describe("The computer, named as in `stopped`."),
         reason: zod.string(),
       }),
     )

@@ -123,8 +123,13 @@ export const getGetPersonCapabilitiesResponseMock = (): PersonCapabilities => ({
 
 export const getStopPersonComputersResponseMock =
   (): PersonComputersStopped => ({
-    stopped: ["research-assistant"],
-    failed: [],
+    stopped: ["person:user_2b8kq4"],
+    failed: [
+      {
+        computer: "bot:research-assistant",
+        reason: "The computer did not answer in time.",
+      },
+    ],
   });
 
 export const getListCapabilitiesMockHandler = (

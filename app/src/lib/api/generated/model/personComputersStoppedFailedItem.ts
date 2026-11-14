@@ -3,6 +3,7 @@
  */
 
 export type PersonComputersStoppedFailedItem = {
-  botId: string;
+  /** The computer, named as in `stopped`. */
+  computer: string;
   reason: string;
 };

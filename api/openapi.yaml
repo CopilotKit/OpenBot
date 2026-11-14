@@ -4415,7 +4415,10 @@ components:
       properties:
         stopped:
           type: array
-          description: The Bots whose computers stopped.
+          description: >-
+            The computers stopped: `person:<id>` for the person's own, which every
+            Bot they use runs on, and `bot:<id>` for each of their Bots that has a
+            computer of its own.
           items:
             type: string
         failed:
@@ -4423,10 +4426,11 @@ components:
           description: The ones that would not stop, and why.
           items:
             type: object
-            required: [botId, reason]
+            required: [computer, reason]
             properties:
-              botId:
+              computer:
                 type: string
+                description: The computer, named as in `stopped`.
               reason:
                 type: string
     CapabilityId:
@@ -4615,8 +4619,12 @@ components:
       properties:
         changes:
           type: array
+          description: >-
+            The changes the model wrote. When `check.ok` is true each is a valid
+            CapabilityChange; when it is false they are as written, so the admin
+            can see what failed, and `check.problems` says which.
           items:
-            $ref: '#/components/schemas/CapabilityChange'
+            $ref: '#/components/schemas/WrittenCapabilityChange'
         summary:
           type: [string, 'null']
         explanation:
@@ -4625,6 +4633,20 @@ components:
           $ref: '#/components/schemas/RuleCheck'
         warning:
           type: [string, 'null']
+    WrittenCapabilityChange:
+      type: object
+      description: A switch change as the model wrote it, before it is checked.
+      required: [scopeKind, scopeId, capability, allowed]
+      properties:
+        scopeKind:
+          type: string
+          enum: [organization, role, group]
+        scopeId:
+          type: string
+        capability:
+          type: string
+        allowed:
+          $ref: '#/components/schemas/SwitchValue'
     CapabilityAnswer:
       type: object
       required: [allowed, decidedBy, scopeId]
@@ -4757,6 +4779,17 @@ components:
           type: string
           maxLength: 100
           description: Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.
+    WrittenEgressRule:
+      type: object
+      description: An allowlist entry as the model wrote it, before it is parsed.
+      required: [type, value]
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+        ports:
+          type: string
     NetworkPolicy:
       type: object
       required: [id, scopeKind, scopeId, mode, rules, locked, updatedBy, updatedAt]
@@ -4854,8 +4887,12 @@ components:
           enum: [allowlist_only, defaults_plus_allowlist]
         rules:
           type: array
+          description: >-
+            The entries. Parsed and tidied when `check.ok` is true, each then a
+            valid EgressRule; as the model wrote them when it is false, so the
+            admin can see and fix what failed.
           items:
-            $ref: '#/components/schemas/EgressRule'
+            $ref: '#/components/schemas/WrittenEgressRule'
         summary:
           type: [string, 'null']
         reachable:
@@ -6431,10 +6468,12 @@ components:
           proactive: true
         enforced: true
     PersonComputersStoppedExample:
-      summary: One computer stopped.
+      summary: Their own computer stopped, and one Bot's that would not.
       value:
-        stopped: [research-assistant]
-        failed: []
+        stopped: ['person:user_2b8kq4']
+        failed:
+          - computer: 'bot:research-assistant'
+            reason: The computer did not answer in time.
     NetworkPolicyExample:
       summary: The organization's list.
       value:
