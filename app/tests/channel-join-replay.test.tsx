@@ -83,6 +83,17 @@ let joins = 0;
 let history: () => Response;
 let historyReads = 0;
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
+/** Intelligence has stopped answering: a join and a history read are taken and never answered. */
+let frozen = false;
+
+/** A request nothing answers, which ends only when its caller gives up on it. */
+function neverAnswered(init?: RequestInit): Promise<Response> {
+  return new Promise((_, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("Aborted", "AbortError")),
+    );
+  });
+}
 
 function CoreProbe() {
   core = useCopilotKit().copilotkit;
@@ -179,6 +190,12 @@ beforeAll(() => {
           intelligence: { wsUrl: `ws://127.0.0.1:${gateway.port}/client` },
           telemetryDisabled: true,
         });
+      if (
+        frozen &&
+        (url.pathname.endsWith("/agent/join-bot/connect") ||
+          /\/threads\/[^/]+\/messages$/.test(url.pathname))
+      )
+        return neverAnswered(init);
       if (url.pathname.endsWith("/agent/join-bot/connect"))
         return NativeResponse.json({
           threadId: channel.threadId,
@@ -215,6 +232,7 @@ afterEach(() => {
   historyReads = 0;
   joins = 0;
   joinHeld = null;
+  frozen = false;
 });
 afterAll(() => {
   globalThis.fetch = originalFetch;
@@ -375,6 +393,30 @@ test("a reply still being written when the conversation is opened arrives whole"
   expect(shown(view.container, ASKING_TEXT)).toBe(1);
   expect(shown(view.container, ASKED_TEXT)).toBe(1);
 }, 15_000);
+
+test("a conversation opened while nothing answers says its history could not be loaded, with no Stop for a run that is not there", async () => {
+  // Intelligence is frozen: the join is taken and never answered, and so is the history read. The
+  // roster still says the Bot is working here, as it does for a message just sent from this screen.
+  frozen = true;
+  roster("2026-11-08T00:00:01.000Z", "Planning the cycle");
+  queryClient.setQueryData<ChannelCache>(channelKeys.list(), (cache) =>
+    cache
+      ? {
+          ...cache,
+          pages: cache.pages.map((page) => ({
+            ...page,
+            channels: page.channels.map((row) => ({ ...row, busy: true })),
+          })),
+        }
+      : cache,
+  );
+
+  const view = opened();
+  await view.findByText(/Couldn't load earlier messages\./, undefined, {
+    timeout: 12_000,
+  });
+  expect(view.queryByRole("button", { name: "Stop the Bot" })).toBeNull();
+}, 20_000);
 
 /*
  * The conversation's real route, under the app's layout ids, beside a home page to leave it for.
