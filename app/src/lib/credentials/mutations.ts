@@ -1,24 +1,32 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  createCredential,
+  revokeCredential,
+} from "@/lib/api/generated/credentials/credentials";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { credentialKeys } from "./queries";
+
+const FALLBACK = "Credential operation failed";
 
 export type CredentialInput = {
   kind: "model" | "connector";
   provider: string;
   /** Left out of a model key, which the server files under the name the Bots read. */
   keyId?: string;
-  metadata: Record<string, unknown>;
-  plaintext: string;
+  metadata: Record<string, string>;
+  /** Write-only: the server never sends it back. */
+  secret: string;
 };
 
 export function createCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (input: CredentialInput) =>
-      client("/api/admin/credentials", {
-        method: "POST",
-        body: input,
-        fallback: "Credential operation failed",
-      }),
+      createCredential(
+        ORGANIZATION_ID,
+        input,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: credentialKeys.all }),
   });
@@ -27,10 +35,12 @@ export function createCredentialMutationOptions(queryClient: QueryClient) {
 export function revokeCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (credentialId: string) =>
-      client(`/api/admin/credentials/${credentialId}/revoke`, {
-        method: "POST",
-        fallback: "Credential operation failed",
-      }),
+      revokeCredential(
+        ORGANIZATION_ID,
+        credentialId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: credentialKeys.all }),
   });
@@ -51,20 +61,17 @@ export async function storeMcpToken(
   token?: string,
 ): Promise<string | undefined> {
   if (!token?.trim()) return undefined;
-  const credential = await client<{ id: string }>(
-    "/api/admin/credentials",
-    "credential",
+  const credential = await createCredential(
+    ORGANIZATION_ID,
     {
-      method: "POST",
-      body: {
-        kind: "mcp",
-        provider: serverId,
-        keyId: `mcp-${serverId}`,
-        plaintext: token.trim(),
-        metadata: { server: serverId },
-      },
-      fallback: "The token could not be stored.",
+      kind: "mcp",
+      provider: serverId,
+      keyId: `mcp-${serverId}`,
+      secret: token.trim(),
+      metadata: { server: serverId },
     },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "The token could not be stored." },
   );
-  return credential?.id;
+  return credential.id;
 }

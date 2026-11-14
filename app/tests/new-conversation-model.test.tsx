@@ -21,6 +21,12 @@ import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
+import {
+  catalogueBody,
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -33,7 +39,7 @@ import { settleReactWork } from "./settle-react-work";
  *
  * Everything below the HTTP boundary is real: the route, its composer and picker, the start
  * sequence, the hand-over to `ChannelChat` and the run request. Only `fetch` is a fixture, and its
- * model endpoints answer and refuse as `GET`/`PUT /api/channels/:id/model` and `GET /api/models` do.
+ * model addresses answer and refuse as the API's `model-catalogue` and a person's `model-choices` do.
  */
 
 const NativeResponse = globalThis.Response;
@@ -127,8 +133,9 @@ beforeAll(() => {
         trail.push("create");
         return NativeResponse.json({ channel }, { status: 201 });
       }
-      if (url.pathname === "/api/models") return NativeResponse.json(catalogue);
-      if (url.pathname === `/api/channels/${channel.id}/model`) {
+      if (catalogueView(url) === "offered")
+        return NativeResponse.json(catalogueBody(catalogue));
+      if (modelChoiceConversation(url.pathname) === channel.id) {
         if (method === "PUT") {
           const pick = JSON.parse(String(init?.body)) as ConversationModel;
           trail.push(`save ${pick.model} ${pick.effort}`);
@@ -136,14 +143,16 @@ beforeAll(() => {
             (option) => option.id === (pick.model ?? catalogue.default),
           );
           if (!runs)
-            return NativeResponse.json(
-              { error: "That model isn't available. Pick another one." },
-              { status: 400 },
+            return problemResponse(
+              400,
+              "VALIDATION_ERROR",
+              "That model isn't available. Pick another one.",
             );
           if (pick.effort !== null && !runs.efforts?.includes(pick.effort))
-            return NativeResponse.json(
-              { error: `${runs.label} doesn't take that thinking effort.` },
-              { status: 400 },
+            return problemResponse(
+              400,
+              "VALIDATION_ERROR",
+              `${runs.label} doesn't take that thinking effort.`,
             );
           saved = { model: pick.model, effort: pick.effort };
         }

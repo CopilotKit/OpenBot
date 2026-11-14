@@ -35,6 +35,11 @@ import {
   SETUP_CHECKLIST_PATH,
 } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
+import {
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
@@ -157,7 +162,7 @@ beforeAll(() => {
           reason: "fixture override",
         });
       }
-      if (url.pathname === "/api/models")
+      if (catalogueView(url) === "offered")
         return NativeResponse.json({
           provider: "openai",
           source: "openai",
@@ -173,13 +178,14 @@ beforeAll(() => {
             },
           ],
         });
-      if (url.pathname.endsWith("/model")) {
+      if (modelChoiceConversation(url.pathname)) {
         if (method === "PUT") {
           await modelSaveGate;
           if (failModel)
-            return NativeResponse.json(
-              { error: "Model save failed. Try again." },
-              { status: 500 },
+            return problemResponse(
+              500,
+              "INTERNAL_SERVER_ERROR",
+              "Model save failed. Try again.",
             );
           saved = JSON.parse(String(init?.body));
         }
