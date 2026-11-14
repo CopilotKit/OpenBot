@@ -26,6 +26,7 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { closeDesktop, launchDesktop } from "./desktop-notifications.fixture";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -139,8 +140,8 @@ const serveAttention = (async (input: RequestInfo | URL) => {
       },
     });
   }
-  if (url.endsWith("/api/proactive/suggestions"))
-    return Response.json({ suggestions: [] });
+  if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+    return Response.json({ checkInItems: [], nextCursor: null });
   return Response.json({ error: "not served" }, { status: 404 });
 }) as unknown as typeof fetch;
 // A turn's replies settle quickly here; the rule is the same.

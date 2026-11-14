@@ -23,6 +23,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -67,13 +68,14 @@ function serving() {
     }
     if (path === PREFERENCES_PATH)
       return preferencesResponse({ preferences: preferences() });
-    if (path === "/api/proactive/settings")
+    if (pathOf(path) === CHECK_INS_PATH)
       return Response.json({
-        settings: [
+        nextCursor: null,
+        checkIns: [
           {
             id: "p1",
-            agentId: "expenses",
-            channelId: "c1",
+            botId: "expenses",
+            conversationId: "c1",
             focus: "",
             enabled: true,
             intervalMinutes: 60,

@@ -44,8 +44,8 @@ const server = setupServer(
   http.get("*/api/bots/attention", () =>
     HttpResponse.json({ bots: [], lastPingId: null }),
   ),
-  http.get("*/api/proactive/suggestions", () =>
-    HttpResponse.json({ suggestions: [] }),
+  http.get("*/api/v2/organizations/default/check-in-items", () =>
+    HttpResponse.json({ checkInItems: [], nextCursor: null }),
   ),
   http.get("*/api/tasks", () => HttpResponse.json({ tasks: [] })),
   http.get("*/api/channels", () =>

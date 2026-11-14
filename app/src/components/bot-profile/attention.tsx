@@ -96,7 +96,7 @@ const titleKey = (title: string) =>
  * something needs them, without a title it cannot name.
  */
 export function pingNotice(
-  items: Pick<ProactiveSuggestion, "agentId" | "title">[],
+  items: Pick<ProactiveSuggestion, "botId" | "title">[],
   botName: (agentId: string) => string | undefined,
 ): { title: string; body: string } {
   const seen = new Set<string>();
@@ -112,7 +112,7 @@ export function pingNotice(
       body: "Open Bots to see what's waiting.",
     };
   const lines = once.slice(0, PING_LISTED).map((item) => {
-    const bot = botName(item.agentId);
+    const bot = botName(item.botId);
     return bot ? `${bot}: ${item.title}` : item.title;
   });
   const more = once.length - PING_LISTED;
