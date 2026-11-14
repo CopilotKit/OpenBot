@@ -332,16 +332,12 @@ components:
             conversations:write: Start, rename, pin and delete the signed-in person's conversations, and send messages and files in them.
             tasks:read: Read the signed-in person's tasks.
             tasks:write: Mark the signed-in person's tasks done, reopen them and try them again.
-            computers:read: Watch the signed-in person's Bots' screens and terminals.
-            computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
             bots:read: Read the Bots the signed-in person can see, and what each is doing for them.
             bots:write: Create, change and delete the signed-in person's Bots, and pause, reset, hide and pin any Bot they can see, for themselves.
             team-bots:read: Read the Team Bots the signed-in person may use or manages.
             team-bots:write: Publish the signed-in person's Bots to the team, answer Team Bots' requests to use their accounts, and for an administrator assign Team Bots to groups.
             computers:read: Watch the signed-in person's Bots' screens and terminals, read their computers and browsers, and for an administrator list the organization's computers.
             computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers and browsers, act on them as a Bot, and for an administrator stop, reset and update the organization's computers.
-            bots:read: Read the Bots the signed-in person can see.
-            bots:write: Create, change and delete the signed-in person's Bots.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
             audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
             people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
