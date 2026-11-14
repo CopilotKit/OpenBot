@@ -532,6 +532,11 @@ async function openMenu() {
 }
 
 describe("OpenMuse is a registered skin with its own frame", () => {
+  test("is shown to people as OpenFuse, and keeps the id a saved choice uses", () => {
+    expect(SKINS.openmuse.name).toBe("OpenFuse");
+    expect(SKINS.openmuse.id).toBe("openmuse");
+  });
+
   test("the registry hands OpenBot the frame and the three skin screens", () => {
     expect(SKINS.openmuse.Frame).toBe(OpenMuseFrame);
     // Apps is OpenBot's own Connections page, so the skin adds three screens, not four.
