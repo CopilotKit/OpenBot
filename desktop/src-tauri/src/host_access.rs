@@ -511,6 +511,22 @@ impl HostAccess {
         Ok(Self { inner })
     }
 
+    /// `stop`, with the machine the engine runs in stopped: the containers stopped with it, and an
+    /// engine that cannot answer is asked nothing.
+    pub fn stop_with_machine_stopped(&self) {
+        let _effect = self
+            .inner
+            .effect_lock
+            .lock()
+            .expect("host effect lock poisoned");
+        let mut state = self.inner.state.lock().expect("host state poisoned");
+        state.stopped = true;
+        for grant in state.grants.values_mut() {
+            grant.revoked = true;
+        }
+        state.running.clear();
+    }
+
     pub fn stop(&self) -> HostAccessResult<()> {
         let _effect = self
             .inner
