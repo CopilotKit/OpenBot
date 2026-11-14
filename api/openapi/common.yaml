@@ -107,6 +107,21 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/batch-update: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1batch-update' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/translate: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1translate' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/replay: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1replay' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/{grantId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1{grantId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/give: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1give' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/take-back: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1take-back' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1approve' }
+  /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1giveable-apps' }
+  /api/v2/organizations/{organizationId}/app-access-requests: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1approve' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1dismiss' }
 components:
   securitySchemes:
     webSession:

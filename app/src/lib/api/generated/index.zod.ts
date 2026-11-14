@@ -1,5 +1,7 @@
 export * from "./api-keys/api-keys.zod";
+export * from "./app-access-requests/app-access-requests.zod";
 export * from "./audit-events/audit-events.zod";
+export * from "./bot-grants/bot-grants.zod";
 export * from "./bots/bots.zod";
 export * from "./capabilities/capabilities.zod";
 export * from "./conversations/conversations.zod";

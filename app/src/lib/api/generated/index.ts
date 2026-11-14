@@ -1,5 +1,7 @@
 export * from "./api-keys/api-keys";
+export * from "./app-access-requests/app-access-requests";
 export * from "./audit-events/audit-events";
+export * from "./bot-grants/bot-grants";
 export * from "./bots/bots";
 export * from "./capabilities/capabilities";
 export * from "./conversations/conversations";
