@@ -175,7 +175,9 @@ class ServerSocket {
 /** Announce `event` to every roster socket, as the server's channel events route does. */
 function announce(event: Record<string, unknown>) {
   for (const socket of ServerSocket.opened)
-    if (socket.url.includes("/api/channels/events"))
+    if (
+      socket.url.endsWith("/api/v2/organizations/default/conversation-events")
+    )
       socket.onmessage?.({ data: JSON.stringify(event) });
 }
 

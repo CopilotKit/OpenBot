@@ -1456,7 +1456,9 @@ test("on hosted OpenBot the page is the browser: its tabs, its address and its l
   // Strict mode opens and closes one first; every socket is to the person's own browser.
   expect(QuietSocket.urls.length).toBeGreaterThan(0);
   for (const url of QuietSocket.urls)
-    expect(url).toEndWith(`/api/computers/${PERSON_BROWSER}/stream`);
+    expect(url).toEndWith(
+      `/api/v2/organizations/default/computers/${PERSON_BROWSER}/screen`,
+    );
   expect(opens()).toBe(1);
 
   const tabs = within(view.getByRole("tablist", { name: "Tabs" }));
