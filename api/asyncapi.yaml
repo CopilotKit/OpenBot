@@ -203,6 +203,12 @@ channels:
         $ref: "#/components/messages/ThreadExpired"
       threadStopRun:
         $ref: "#/components/messages/ThreadStopRun"
+      threadLeave:
+        $ref: "#/components/messages/ThreadLeave"
+      threadClose:
+        $ref: "#/components/messages/ThreadClose"
+      threadError:
+        $ref: "#/components/messages/ThreadError"
 operations:
   sendConversationEvents:
     action: send
@@ -271,9 +277,11 @@ operations:
       - $ref: "#/channels/threadStream/messages/threadStreamIdle"
       - $ref: "#/channels/threadStream/messages/threadReplayFailed"
       - $ref: "#/channels/threadStream/messages/threadExpired"
+      - $ref: "#/channels/threadStream/messages/threadClose"
+      - $ref: "#/channels/threadStream/messages/threadError"
   receiveThreadCommands:
     action: receive
-    title: Join a thread, keep the socket alive, stop a run
+    title: Join a thread, keep the socket alive, stop a run, leave
     summary: What a client sends on the gateway's socket.
     channel:
       $ref: "#/channels/threadStream"
@@ -281,6 +289,7 @@ operations:
       - $ref: "#/channels/threadStream/messages/threadJoin"
       - $ref: "#/channels/threadStream/messages/threadHeartbeat"
       - $ref: "#/channels/threadStream/messages/threadStopRun"
+      - $ref: "#/channels/threadStream/messages/threadLeave"
 components:
   securitySchemes:
     webSession:
@@ -478,6 +487,24 @@ components:
       summary: Stop the run in progress, keeping what it has written.
       payload:
         $ref: "#/components/schemas/ThreadStopRunFrame"
+    ThreadLeave:
+      name: threadLeave
+      title: Leave a thread
+      summary: Stop receiving the thread's events, keeping the socket.
+      payload:
+        $ref: "#/components/schemas/ThreadLeaveFrame"
+    ThreadClose:
+      name: threadClose
+      title: Closed
+      summary: The gateway closed the thread's topic, after a leave or at the end of the connection's time.
+      payload:
+        $ref: "#/components/schemas/ThreadCloseFrame"
+    ThreadError:
+      name: threadError
+      title: Topic error
+      summary: The thread's topic failed on the gateway. Ask for a new join token and connect again.
+      payload:
+        $ref: "#/components/schemas/ThreadErrorFrame"
   schemas:
     ConversationActivity:
       type: object
@@ -877,13 +904,17 @@ components:
                 connect, the default, replays what the thread holds and then
                 goes live; run follows one run from its start.
             run_id:
-              type: string
+              type:
+                - string
+                - "null"
               description: The run to follow, in run mode.
             last_seen_event_id:
-              type: string
+              type:
+                - string
+                - "null"
               description: >-
-                The id of the last event this client drew. The replay starts
-                after it.
+                The id of the last event this client drew, so the replay
+                starts after it. Null, or left out, replays from the start.
     ThreadHeartbeatFrame:
       type: array
       description: "[null, reference, \"phoenix\", \"heartbeat\", {}]"
@@ -1094,3 +1125,39 @@ components:
             run_id:
               type: string
               description: The run to stop.
+    ThreadLeaveFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_leave\", {}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: phx_leave
+        - type: object
+    ThreadCloseFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_close\", {}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: phx_close
+        - type: object
+    ThreadErrorFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_error\", {}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: phx_error
+        - type: object
