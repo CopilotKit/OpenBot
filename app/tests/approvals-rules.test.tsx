@@ -33,6 +33,7 @@ import {
 import { TeamBotConsents } from "@/components/settings/team-bot-consents";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -318,7 +319,7 @@ test("the personal edition's one person is not pointed at an Admin it does not h
   const served = global.fetch;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
-      String(path) === "/api/capabilities"
+      String(path) === DEPLOYMENT_PATH
         ? Response.json({ edition: "personal" })
         : served(path, init),
     { preconnect: originalFetch.preconnect },

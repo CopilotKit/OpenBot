@@ -12,6 +12,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -76,7 +77,7 @@ const bodies: Record<string, unknown> = {
       onboarding: null,
     },
   }),
-  "/api/capabilities": { transcription: true },
+  [DEPLOYMENT_PATH]: { transcription: true },
   [PREFERENCES_PATH]: {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,

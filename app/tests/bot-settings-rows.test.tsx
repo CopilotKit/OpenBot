@@ -11,6 +11,7 @@ import { cleanup, render } from "@testing-library/react";
 import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The "Settings for this Bot" card: each row says its current answer and opens its page. */
@@ -155,7 +156,7 @@ test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input) === "/api/capabilities"
+    String(input) === DEPLOYMENT_PATH
       ? Response.json({ edition: "personal" })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
@@ -237,7 +238,7 @@ const ON_HARNESS: AgentProfile = {
 function withEdition(edition: "team" | "personal") {
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input) === "/api/capabilities"
+    String(input) === DEPLOYMENT_PATH
       ? Response.json({ edition })
       : served(input, init)) as unknown as typeof fetch;
 }

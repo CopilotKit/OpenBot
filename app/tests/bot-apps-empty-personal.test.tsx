@@ -13,6 +13,7 @@ import { cleanup, render, within } from "@testing-library/react";
 import { AppsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -70,8 +71,7 @@ const PERSONAL_USER = {
 function servePersonal() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://127.0.0.1").pathname;
-    if (path === "/api/capabilities")
-      return Response.json({ edition: "personal" });
+    if (path === DEPLOYMENT_PATH) return Response.json({ edition: "personal" });
     if (path === `/api/plugins/for/${BOT.id}/apps`)
       return Response.json({ apps: [] });
     if (path === `/api/plugins/for/${BOT.id}`)

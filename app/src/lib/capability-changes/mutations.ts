@@ -1,6 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
-import { client } from "@/lib/client";
+import { batchUpdateCapabilities } from "@/lib/api/generated/capabilities/capabilities";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { enterpriseKeys } from "@/lib/enterprise/queries";
 import { capabilityChangeKeys } from "./queries";
 import type { CapabilityChange } from "./translate";
@@ -22,11 +23,12 @@ export const saveCapabilityChangesMutationOptions = (
       changes: CapabilityChange[];
       authoring?: CapabilityChangeAuthoring;
     }) =>
-      client("/api/admin/enterprise/capabilities/batch", {
-        method: "POST",
-        body: variables,
-        fallback: FALLBACK,
-      }),
+      batchUpdateCapabilities(
+        ORGANIZATION_ID,
+        variables,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     /*
      * The switches are the Permissions page's, and a Bot's profile says whether its computer of its
      * own is in effect, decided from its owner's "Isolated Bots" switch, as the one-switch save does.

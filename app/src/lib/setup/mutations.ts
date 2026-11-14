@@ -1,5 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { checkSetup } from "@/lib/api/generated/organization-settings/organization-settings";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { type SetupChecklist, setupKeys } from "./queries";
 
 /**
@@ -12,10 +13,11 @@ import { type SetupChecklist, setupKeys } from "./queries";
 export function recheckSetupMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<SetupChecklist> =>
-      client("/api/setup/check", "checklist", {
-        method: "POST",
-        fallback: "Couldn't check your setup.",
-      }),
+      checkSetup(
+        ORGANIZATION_ID,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't check your setup." },
+      ) as Promise<SetupChecklist>,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: setupKeys.all }),
   });
 }

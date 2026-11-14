@@ -1,10 +1,11 @@
-import { client } from "@/lib/client";
+import { translateCapabilityChanges as translate } from "@/lib/api/generated/capabilities/capabilities";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 
 /** One switch to set: the organization's, a role's or a group's, for one permission. */
 export type CapabilityChange = {
   scopeKind: "organization" | "role" | "group";
-  /** Empty for the organization; "admin" or "user" for a role; the group's name for a group. */
+  /** Empty for the organization; "admin" or "member" for a role; a directory group's name for a group. */
   scopeId: string;
   capability: CapabilityKey;
   /** On, off, or null to remove the switch so the level beneath it decides. */
@@ -48,14 +49,18 @@ export type CapabilityTranslation = {
 export async function translateCapabilityChanges(
   text: string,
 ): Promise<CapabilityTranslation> {
-  const response = await client(
-    "/api/admin/enterprise/capabilities/translate",
+  const translation = await translate(
+    ORGANIZATION_ID,
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
     {
-      method: "POST",
-      body: { text },
       fallback:
         "Couldn't write the changes. Try again, or set the switches by hand.",
     },
   );
-  return (await response.json()) as CapabilityTranslation;
+  /*
+   * Changes that don't check come back as the model wrote them, a permission that isn't one
+   * included, for the admin to edit; `check` says what is wrong, and the preview checks them again.
+   */
+  return translation as CapabilityTranslation;
 }

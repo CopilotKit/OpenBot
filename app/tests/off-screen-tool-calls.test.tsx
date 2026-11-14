@@ -24,6 +24,7 @@ import {
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { CopilotProvider } from "@/lib/copilot/provider";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -352,7 +353,7 @@ beforeAll(() => {
           ],
           tools: [],
         });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       // The gate, answering as it does when nothing asks: the step is done, and here is its result.
       if (/^\/api\/approvals\/computer\/[^/]+$/.test(url.pathname)) {

@@ -35,6 +35,7 @@ import { deploymentKeys } from "@/lib/deployment/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -400,7 +401,7 @@ async function serve(url: URL, request: Request): Promise<Response> {
     });
   if (path === "/api/components/showRecord/decision")
     return NativeResponse.json({ allowed: true });
-  if (path === "/api/admin/enterprise/me")
+  if (path === MY_CAPABILITIES_PATH)
     return NativeResponse.json({ capabilities: {}, enforced: false });
   if (path.endsWith("/info"))
     return NativeResponse.json({

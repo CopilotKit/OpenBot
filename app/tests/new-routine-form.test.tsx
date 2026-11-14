@@ -13,6 +13,7 @@ import { NewRoutinePage } from "@/components/routines/new-routine-page";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -64,7 +65,7 @@ function serving({
   goalDeletes = true,
   edition = "team",
 }: {
-  /** What `GET /api/capabilities` says this deployment is. */
+  /** What the API's `deployment` says this deployment is. */
   edition?: "team" | "personal";
   proactive?: unknown;
   /** How `POST /api/routines` answers. */
@@ -110,7 +111,7 @@ function serving({
       });
     if (url === "/api/proactive/settings")
       return Response.json(proactiveAnswer);
-    if (url === "/api/capabilities") return Response.json({ edition });
+    if (url === DEPLOYMENT_PATH) return Response.json({ edition });
     return Response.json({});
   }) as unknown as typeof fetch;
 }

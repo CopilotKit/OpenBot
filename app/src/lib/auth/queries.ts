@@ -1,8 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
+import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
 import { getPerson } from "@/lib/api/generated/people/people";
 import { ORGANIZATION_ID } from "@/lib/api/request";
-import { ClientError, client } from "@/lib/client";
+import { ClientError } from "@/lib/client";
 
 /**
  * Where this person is in first-run onboarding.
@@ -63,21 +64,14 @@ export type SignInOptions = {
 };
 
 async function signInOptions(): Promise<SignInOptions> {
-  // The whole body, so both fields arrive together. Reading a field off the Response `client`
-  // returns without a key quietly yields undefined: the screen would say no provider is configured
-  // while the server was saying it has one.
-  const body = (await (
-    await client("/api/capabilities", { fallback: "Could not load sign-in" })
-  ).json()) as {
-    authProviders?: AuthProviderId[];
-    ssoConfigured?: boolean;
-    ssoRequired?: boolean;
-  };
-
+  // The API's `deployment`, which answers before anybody has signed in.
+  const body = await getDeployment(ORGANIZATION_ID, {
+    fallback: "Could not load sign-in",
+  });
   return {
-    providers: body.authProviders ?? [],
-    sso: body.ssoConfigured === true,
-    ssoRequired: body.ssoRequired === true,
+    providers: body.authProviders,
+    sso: body.ssoConfigured,
+    ssoRequired: body.ssoRequired,
   };
 }
 

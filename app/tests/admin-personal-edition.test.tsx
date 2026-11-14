@@ -20,6 +20,11 @@ import type * as React from "react";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
+import {
+  COMPUTER_ACTIONS_PATH,
+  isOverviewRead,
+  MODEL_USAGE_PATH,
+} from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
@@ -97,7 +102,7 @@ function servePersonal() {
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
-    if (path === "/api/admin/enterprise/models/usage")
+    if (path === MODEL_USAGE_PATH)
       return Response.json({
         days: 30,
         summary: [
@@ -193,6 +198,8 @@ test.each([
       asked.filter(
         (path) =>
           path.startsWith("/api/admin") ||
+          isOverviewRead(path) ||
+          path.startsWith(COMPUTER_ACTIONS_PATH) ||
           path.startsWith(PEOPLE_PATH) ||
           path.startsWith(IDENTITY_PROVIDERS_PATH),
       ),
@@ -227,7 +234,7 @@ test("Providers shows who serves the models and what the Bots ran on, without th
   expect(view.getByText(/3 runs by 1 person/)).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Routines shows how check-ins went, and the check-in switch is for a team", async () => {
@@ -241,7 +248,7 @@ test("Routines shows how check-ins went, and the check-in switch is for a team",
   expect(within(checkIns).getByText(FOR_A_TEAM)).toBeTruthy();
   expect(within(checkIns).queryByRole("switch")).toBeNull();
   expect(view.queryByRole("alert")).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Computers keeps the idle and network settings in place, for a team", async () => {
@@ -252,7 +259,7 @@ test("Computers keeps the idle and network settings in place, for a team", async
     ).closest("section") as HTMLElement;
     expect(within(section).getByText(FOR_A_TEAM)).toBeTruthy();
   }
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("in the team edition the same pages are the team's, and ask for what they show", async () => {

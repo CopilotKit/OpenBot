@@ -13,6 +13,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 
 /**
@@ -209,7 +210,7 @@ beforeAll(() => {
         });
       if (url.pathname === "/api/components/for-agent/failed-run-bot")
         return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({

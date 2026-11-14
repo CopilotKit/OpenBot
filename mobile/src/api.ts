@@ -19,15 +19,19 @@ export async function api<T>(
   });
   if (response.status === 204) return undefined as T;
   const body: unknown = await response.json();
-  if (!response.ok)
-    throw new Error(
-      body &&
-        typeof body === "object" &&
-        "error" in body &&
-        typeof body.error === "string"
-        ? body.error
-        : `Request failed (${response.status}).`,
-    );
+  if (!response.ok) {
+    // Today's routes say why in `error`; the API's problems in `detail`.
+    const said =
+      body && typeof body === "object"
+        ? (("detail" in body && typeof body.detail === "string"
+            ? body.detail
+            : undefined) ??
+          ("error" in body && typeof body.error === "string"
+            ? body.error
+            : undefined))
+        : undefined;
+    throw new Error(said ?? `Request failed (${response.status}).`);
+  }
   return body as T;
 }
 export type Conversation = {

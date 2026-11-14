@@ -17,17 +17,23 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ModelSource } from "@/lib/models/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import type { ModelSource } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
+import {
+  capabilityPath,
+  MODEL_USAGE_PATH,
+  overviewResponse,
+  SETTINGS_PATH,
+} from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 /*
  * Admin, Providers and Permissions: the pages Enterprise controls was split into. The server is
- * faked at the fetch boundary with the shapes `GET /api/admin/enterprise` and
- * `GET /api/models/available` answer with, and the writes are the enterprise routes' own. Marks
- * resolve as the app resolves them, from the files vendored in `shared/marks`.
+ * faked at the fetch boundary with the API's answers for the settings, the switches and model
+ * usage, and `GET /api/models/available`'s; the writes are the API's own. Marks resolve as the app
+ * resolves them, from the files vendored in `shared/marks`.
  */
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
@@ -73,41 +79,40 @@ function serving() {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if ((init?.method ?? "GET") === "PUT") {
+    if ((init?.method ?? "GET") === "PATCH") {
       const body = JSON.parse(String(init?.body));
       writes.push({ path, body });
-      const key = path.split("/").pop() as string;
-      settings = { ...settings, [key]: body.value };
-      return Response.json({ key, value: body.value });
+      if (path === SETTINGS_PATH) settings = { ...settings, ...body };
+      return Response.json({});
     }
-    if (path === "/api/admin/enterprise")
-      return Response.json({
-        capabilities: [
-          {
-            capability: "useBots",
-            title: "Use Bots",
-            description: "Talk to Bots and let them run work.",
-            default: true,
-            organization: null,
-            roles: {},
-            groups: {},
-          },
-        ],
-        settings,
-        groups: [],
-        network: [],
-        defaultDestinations: [],
-        mcpServers: [],
-        builtInModel: "openai/gpt-5.6-terra",
-        scim: {
-          configured: false,
-          connectionId: "directory",
-          baseUrl: null,
-          rotating: false,
+    const overview = overviewResponse(path, {
+      capabilities: [
+        {
+          capability: "useBots",
+          title: "Use Bots",
+          description: "Talk to Bots and let them run work.",
+          default: true,
+          organization: null,
+          roles: {},
+          groups: {},
         },
-        otel: { configured: false },
-        actionRecordRetentionDays: 90,
-      });
+      ],
+      settings,
+      groups: [],
+      network: [],
+      defaultDestinations: [],
+      mcpServers: [],
+      builtInModel: "openai/gpt-5.6-terra",
+      scim: {
+        configured: false,
+        connectionId: "directory",
+        baseUrl: null,
+        rotating: false,
+      },
+      otel: { configured: false },
+      actionRecordRetentionDays: 90,
+    });
+    if (overview) return overview;
     if (path === "/api/models/available")
       return Response.json({
         provider: "openai",
@@ -132,7 +137,7 @@ function serving() {
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
-    if (path.startsWith("/api/admin/enterprise/models/usage"))
+    if (path.startsWith(MODEL_USAGE_PATH))
       return Response.json({ days: 30, summary: usage, recent: [] });
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
@@ -340,9 +345,9 @@ test("the allowlist is picked from the provider's models, and takes one it doesn
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/settings/modelAllowlist",
+      path: SETTINGS_PATH,
       body: {
-        value: {
+        modelAllowlist: {
           enabled: true,
           models: [
             "openai/gpt-5.6-terra",
@@ -373,13 +378,8 @@ test("Permissions holds the organization's switches", async () => {
   fireEvent.click(await view.findByRole("switch", { name: "Use Bots" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/capabilities",
-      body: {
-        scopeKind: "organization",
-        scopeId: "",
-        capability: "useBots",
-        allowed: false,
-      },
+      path: capabilityPath("useBots"),
+      body: { organization: false },
     }),
   );
   expect(view.getByRole("button", { name: /Role and group overrides/ }));
@@ -421,8 +421,10 @@ test("cancelling allowlist edits restores the saved choices when reopened", asyn
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/settings/modelAllowlist",
-      body: { value: { enabled: true, models: ["openai/gpt-5.6-terra"] } },
+      path: SETTINGS_PATH,
+      body: {
+        modelAllowlist: { enabled: true, models: ["openai/gpt-5.6-terra"] },
+      },
     }),
   );
 });

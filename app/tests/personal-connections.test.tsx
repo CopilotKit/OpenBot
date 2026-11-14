@@ -29,6 +29,7 @@ import {
 } from "@/lib/plugins/queries";
 import { Route as ConnectionRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as ConnectionsRoute } from "@/routes/_authed/_app/connections.index";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -501,7 +502,7 @@ describe("when Connections can't list apps", () => {
   });
 
   test("with the edition unread, a failed read says neither admin nor Setup", async () => {
-    failing = new Set(["/api/plugins", "/api/capabilities"]);
+    failing = new Set(["/api/plugins", DEPLOYMENT_PATH]);
     const { view } = draw(null, "/connections", { fetchApps: true });
     const alert = await appsAlert(view);
     expect(alert.textContent).toContain(

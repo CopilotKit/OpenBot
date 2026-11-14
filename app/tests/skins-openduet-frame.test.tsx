@@ -29,6 +29,7 @@ import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -97,7 +98,7 @@ function api(role: "admin" | "user") {
         onboarding: null,
       },
     }),
-    "/api/capabilities": { transcription: true },
+    [DEPLOYMENT_PATH]: { transcription: true },
     [PREFERENCES_PATH]: {
       messageListEmphasis: "thread",
       selfHostBannerDismissed: true,

@@ -29,6 +29,11 @@ import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { ME_PATH, meResponse, PREFERENCES_PATH } from "./accounts-api";
+import {
+  DEPLOYMENT_PATH,
+  MY_CAPABILITIES_PATH,
+  SETUP_CHECKLIST_PATH,
+} from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -126,14 +131,12 @@ beforeAll(() => {
         });
       if (url.pathname === PREFERENCES_PATH)
         return NativeResponse.json(preferences);
-      if (url.pathname === "/api/capabilities")
+      if (url.pathname === DEPLOYMENT_PATH)
         return NativeResponse.json({ generativeUi: true });
-      if (url.pathname === "/api/setup")
+      if (url.pathname === SETUP_CHECKLIST_PATH)
         return NativeResponse.json({
-          checklist: {
-            audience: "admin",
-            rows: [{ id: "computer", ready: true }],
-          },
+          audience: "admin",
+          rows: [{ id: "computer", ready: true }],
         });
       if (url.pathname === "/api/channels" && method === "GET")
         return NativeResponse.json({ channels: [], nextCursor: null });
@@ -207,7 +210,7 @@ beforeAll(() => {
         return NativeResponse.json({ components: [] });
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
