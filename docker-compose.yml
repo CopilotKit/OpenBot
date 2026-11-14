@@ -63,8 +63,12 @@ services:
   # else, which is the point.
   server:
     profiles: ["openbot"]
-    # PULLED, NEVER BUILT HERE. This image, and the computer's and the supervisor's below, are the
-    # published OpenBot images, all at one tag: OPENBOT_BACKEND_TAG, set in backend-images.env.
+    # ONE IMAGE, AND A COMMAND FOR EACH ROLE. The OpenBot image runs this server and every Bot's
+    # computer. Started with no command it is the whole of OpenBot in one container, so each service
+    # here names the part it is: this one the server, `agent-computer` below the computer.
+    #
+    # PULLED, NEVER BUILT HERE. This image and the supervisor's below are the published OpenBot
+    # images, both at one tag: OPENBOT_BACKEND_TAG, set in backend-images.env.
     # scripts/start.sh, CI and Desktop's local build read that file and hand the tag to Compose
     # here. SERVER_IMAGE still wins over it, which is how OpenBot Desktop pins a
     # release's digest.
@@ -75,8 +79,13 @@ services:
     #
     # `missing` rather than `always`: a `sha-` tag names one build and never moves, so an image this
     # machine already has is the right one. OpenBot Desktop sets `missing` too.
-    image: &server-image ${SERVER_IMAGE:-ghcr.io/copilotkit/openbot-server:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
+    image: &server-image ${SERVER_IMAGE:-ghcr.io/copilotkit/openbot:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # The server, and nothing else in the image: the executable and its command, from the directory
+    # the server reads its migrations from. Naming the entrypoint drops the image's own, and with it
+    # everything else the image would have started.
+    entrypoint: ["/app/bin/openbot", "server"]
+    working_dir: /app/server
     # The deployment's settings, `.env`. Optional, because `docker compose config` and a first start
     # both come before anything wrote it. `scripts/start.sh` names a file of its own instead, `.env`
     # with its run's environment on top (scripts/server-env.ts), removed once the container exists.
@@ -224,7 +233,10 @@ services:
     profiles: ["openbot"]
     image: *server-image
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    command: ["bun", "../worker/src/index.ts"]
+    # The executable and the command, in full, as `server` above: nothing else in the image starts.
+    entrypoint: ["/app/bin/openbot"]
+    command: ["worker"]
+    working_dir: /app/server
     restart: unless-stopped
     networks:
       - data
@@ -237,7 +249,9 @@ services:
     profiles: ["openbot"]
     image: *server-image
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    command: ["bun", "scripts/migrate.ts"]
+    entrypoint: ["/app/bin/openbot"]
+    command: ["migrate"]
+    working_dir: /app/server
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
     depends_on:
@@ -268,10 +282,17 @@ services:
 
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
-    # Named rather than Compose-derived, because the supervisor starts one computer per Bot from this
-    # image by name. Pulled like the server's; see server above.
-    image: &computer-image ${COMPUTER_IMAGE:-ghcr.io/copilotkit/openbot-agent-computer:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
+    # The OpenBot image again, the one `server` runs, started as a computer. Named rather than
+    # Compose-derived, because the supervisor starts one computer per Bot from this image by name.
+    # COMPUTER_IMAGE is still a setting of its own: an OpenBot Desktop app pins it from a release's
+    # image list, where it names the same image as SERVER_IMAGE.
+    image: &computer-image ${COMPUTER_IMAGE:-ghcr.io/copilotkit/openbot:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # THE COMPUTER, AND NOTHING ELSE IN THE IMAGE. A container of its own, so what a Bot's shell can
+    # read is what this service is given below and not one setting of the server's: no database
+    # address, no keys, no licence. The server's executable is in the image, and from here it has
+    # none of those either, so it does not start.
+    entrypoint: ["/app/bin/openbot-computer"]
     # A Bot's shell runs `ping`, which needs raw ICMP sockets. Docker grants NET_RAW by default and
     # Podman does not, so without this ping fails with "Operation not permitted" on Podman (the
     # Desktop's engine on Windows), even as root. Asked for here so both engines give the same.
@@ -300,6 +321,8 @@ services:
       # shutdown notes tell you to use -- hands the container an empty string instead. Reaches only
       # a loopback-bound port; a deployment sets a real value in .env.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # Where the computer listens. Said here because the image's own PORT is the server's.
+      PORT: "4100"
       # Headed by default: full Chromium on the container's own X server, behind the same streamed
       # screen, which bot checks such as Cloudflare's challenge far less than headless. `headless`
       # still chooses headless, for a smaller footprint where the sites a Bot uses do not mind.
@@ -373,7 +396,8 @@ services:
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
       # Forwarded into every per-Bot computer the supervisor creates. Headed, as above.
       COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headed}
-      # The same image the shared computer above runs.
+      # The same image the shared computer above runs. The supervisor starts each computer it makes
+      # from it with the computer's command.
       COMPUTER_IMAGE: *computer-image
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.

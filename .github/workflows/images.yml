@@ -152,10 +152,11 @@ jobs:
           repository="ghcr.io/$(tr '[:upper:]' '[:lower:]' <<< "$REPOSITORY")"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
 
-  # The server, the computer, the supervisor and the all-in-one image, by the digest their tag names
-  # now, so a deploy or a rollback of this release names exactly the images it was tested with. The
-  # three a laptop runs must carry both architectures: a manifest list holding one installs on half
-  # the machines. The all-in-one image is pulled by servers and is amd64, as it always was.
+  # The OpenBot image and the supervisor's, by the digest their tag names now, so a deploy or a
+  # rollback of this release names exactly the images it was tested with. The OpenBot image runs the
+  # server and every Bot's computer, each as a container started with its own command, so a laptop
+  # runs it too. Both must carry both architectures: a manifest list holding one installs on half
+  # the machines.
   backend-images:
     name: OpenBot images
     needs: components
@@ -178,9 +179,7 @@ jobs:
           mkdir -p manifests
           # The name the manifest gives each image, as OpenBot Desktop reads it, its repository, and
           # the architectures it must carry.
-          for entry in openbot:openbot:amd64 server:openbot-server:amd64,arm64 \
-                       agent-computer:openbot-agent-computer:amd64,arm64 \
-                       supervisor:openbot-supervisor:amd64,arm64; do
+          for entry in openbot:openbot:amd64,arm64 supervisor:openbot-supervisor:amd64,arm64; do
             IFS=: read -r name image required <<< "$entry"
             repository="ghcr.io/copilotkit/$image"
             digest="$(docker buildx imagetools inspect "$repository:$TAG" --format '{{.Manifest.Digest}}')"
@@ -423,10 +422,10 @@ jobs:
           COMPONENTS: ${{ needs.components.outputs.components }}
         run: |
           set -euo pipefail
-          # Every image this build published, and the four it pinned, or the file is not written. A
+          # Every image this build published, and the two it pinned, or the file is not written. A
           # missing entry is a service whatever reads this would have to find some other way, and it
           # would only be noticed on somebody's laptop.
-          expected="$(( $(jq -r 'length' <<< "$COMPONENTS") + 4 ))"
+          expected="$(( $(jq -r 'length' <<< "$COMPONENTS") + 2 ))"
           found="$(find manifests -name '*.json' -type f | wc -l | tr -d ' ')"
           if [ "$found" != "$expected" ]; then
             echo "::error::Expected $expected component manifests, found $found."
@@ -445,11 +444,15 @@ jobs:
           # which is the one point in a release where a failure leaves a published image with
           # nothing pointing at it.
           #
-          # `agent-bot` and `agent-langgraph` are the server image under two more names, kept for
-          # one release: the 1.0.2 and 1.0.3 apps refuse a manifest that names neither, so they
-          # could not start an installation a newer app had updated. They are names only. Nothing
-          # is built, pushed or copied for them, and no app pulls or runs an image under them.
-          # Drop both in the release after (docs/releasing.md).
+          # ONE IMAGE UNDER ITS OTHER NAMES. `server` and `agent-computer` are the OpenBot image:
+          # it runs the server and every Bot's computer, each started with its own command, and
+          # OpenBot Desktop reads the image for each under these two names. They stay.
+          #
+          # `agent-bot` and `agent-langgraph` are that image under two more names, kept for one
+          # release: the 1.0.2 and 1.0.3 apps refuse a manifest that names neither, so they could
+          # not start an installation a newer app had updated. They are names only. Nothing is
+          # built, pushed or copied for them, and no app pulls or runs an image under them. Drop
+          # both in the release after (docs/releasing.md).
           jq -n \
             --arg version "$VERSION" \
             --arg commit "$COMMIT" \
@@ -458,13 +461,15 @@ jobs:
               version: $version,
               commit: $commit,
               images: ($components + {
-                "agent-bot": $components.server,
-                "agent-langgraph": $components.server,
+                server: $components.openbot,
+                "agent-computer": $components.openbot,
+                "agent-bot": $components.openbot,
+                "agent-langgraph": $components.openbot,
               }),
             }' > container-images.json
-          # Two names for an image that is not there would be a manifest no app can read.
-          if ! jq -e '.images.server.reference' container-images.json > /dev/null; then
-            echo "::error::The manifest names no server image."
+          # Four names for an image that is not there would be a manifest no app can read.
+          if ! jq -e '.images.openbot.reference and .images.server.reference' container-images.json > /dev/null; then
+            echo "::error::The manifest names no OpenBot image."
             exit 1
           fi
           cat container-images.json
