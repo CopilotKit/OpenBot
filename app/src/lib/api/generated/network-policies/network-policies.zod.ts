@@ -13,7 +13,7 @@ export const ListNetworkPoliciesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -135,7 +135,7 @@ export const ReplaceNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   networkPolicyId: zod
     .string()
@@ -278,7 +278,7 @@ export const DeleteNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   networkPolicyId: zod
     .string()
@@ -312,7 +312,7 @@ export const TranslateNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -389,7 +389,7 @@ export const ReplayNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 

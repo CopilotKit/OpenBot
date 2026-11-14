@@ -6,6 +6,7 @@ export * from "./identity-providers/identity-providers.zod";
 export * from "./linked-accounts/linked-accounts.zod";
 export * from "./network-policies/network-policies.zod";
 export * from "./organization-settings/organization-settings.zod";
+export * from "./organizations/organizations.zod";
 export * from "./people/people.zod";
 export * from "./reactions/reactions.zod";
 export * from "./sessions/sessions.zod";

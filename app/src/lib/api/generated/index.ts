@@ -6,6 +6,7 @@ export * from "./identity-providers/identity-providers";
 export * from "./linked-accounts/linked-accounts";
 export * from "./network-policies/network-policies";
 export * from "./organization-settings/organization-settings";
+export * from "./organizations/organizations";
 export * from "./people/people";
 export * from "./reactions/reactions";
 export * from "./sessions/sessions";

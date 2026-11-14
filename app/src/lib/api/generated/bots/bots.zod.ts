@@ -13,7 +13,7 @@ export const ListBotsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -179,7 +179,7 @@ export const CreateBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -412,7 +412,7 @@ export const GetBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -535,7 +535,7 @@ export const UpdateBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -767,7 +767,7 @@ export const DeleteBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
