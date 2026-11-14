@@ -10191,6 +10191,57 @@ components:
           - offered
           - all
         default: offered
+    ConversationLimit:
+      name: limit
+      in: query
+      description: Most items in one page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: The person's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: usr_9b1c6f0e
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      description: The attachment's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    ConversationThreadId:
+      name: threadId
+      in: path
+      required: true
+      description: The thread's id.
+      schema:
+        type: string
+        format: uuid
+      example: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: The task's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
     DeviceId:
       name: deviceId
       in: path
@@ -13551,6 +13602,967 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    AddConversationMemberRequest:
+      type: object
+      required:
+        - email
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          description: The email address the person signs in to this OpenBot with.
+          format: email
+          minLength: 3
+          maxLength: 320
+    AddedConversationMember:
+      type: object
+      required:
+        - personId
+      properties:
+        personId:
+          type: string
+          description: The person who is now in the conversation.
+    ConversationMessage:
+      type: object
+      description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
+      required:
+        - id
+        - role
+        - personId
+        - botId
+        - text
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The message's id.
+        role:
+          type: string
+          enum:
+            - person
+            - bot
+            - tool
+            - system
+          description: Who it is from. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group.
+        personId:
+          type:
+            - string
+            - 'null'
+          description: Who sent it, for a person's message; whose turn it answered, for a Bot's reply.
+        botId:
+          type:
+            - string
+            - 'null'
+          description: The Bot that replied. Null for a person's message.
+        text:
+          type: string
+          description: What was said. Empty while another person's Bot is still writing it.
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - waiting
+            - completed
+            - failed
+          description: Where a Bot's reply stands. A person's message is completed.
+        createdAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was said. Null where the time was not kept.
+        reason:
+          type: string
+          description: Why a waiting Bot is waiting.
+        answeredBy:
+          type: string
+          description: 'For an answer passed on from another Bot: which Bot answered.'
+        consent:
+          type: object
+          description: A Team Bot asking the person whose turn it was to use their own account.
+          required:
+            - botId
+            - serverId
+          properties:
+            botId:
+              type: string
+            serverId:
+              type: string
+        toolCalls:
+          type: integer
+          minimum: 0
+          description: How many tools the Bot called in this message, when it called any.
+    ConversationMessagePage:
+      type: object
+      required:
+        - messages
+        - nextCursor
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    SendConversationMessageRequest:
+      type: object
+      required:
+        - id
+        - text
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: The caller's own id for the message, so a retry is the same message.
+          minLength: 1
+          maxLength: 160
+        text:
+          type: string
+          description: The message.
+          minLength: 1
+          maxLength: 16000
+          pattern: \S
+        botId:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 200
+          description: The one Bot to answer. Needed in a conversation that is not a group; in a group, leave it out for every Bot or the ones the message names.
+    SentConversationMessage:
+      type: object
+      required:
+        - queued
+      properties:
+        id:
+          type: string
+          description: The message's id.
+        queued:
+          type: boolean
+          description: True when the message is waiting for its answer. False when the same message was already accepted.
+    AttachmentUpload:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The file.
+        uploadGroup:
+          type: string
+          description: Names the message being written, so the files of two windows are counted apart.
+          maxLength: 200
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
+    VoiceCallRequest:
+      type: object
+      properties:
+        sdp:
+          type: string
+          description: The caller's audio offer, where calls run over WebRTC.
+          minLength: 1
+          maxLength: 65536
+    VoiceConnection:
+      type: object
+      description: 'How to connect a call. Over WebRTC: the answer to the caller''s offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.'
+      required:
+        - transport
+      properties:
+        transport:
+          type: string
+          enum:
+            - webrtc
+            - websocket
+        sdp:
+          type: string
+          description: The answer to the caller's offer.
+        url:
+          type: string
+          description: The socket to open.
+        clientSecret:
+          type: string
+          description: A secret that opens that socket once, for a few minutes.
+        session:
+          type: object
+          description: The session to open on the socket, as the voice service reads it.
+          additionalProperties: true
+    VoiceTranscriptEntry:
+      type: object
+      required:
+        - id
+        - role
+        - text
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          description: The person, or the Bot.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 60000
+          pattern: \S
+    VoiceSession:
+      type: object
+      description: A saved voice call.
+      required:
+        - id
+        - conversationId
+        - anchorMessageId
+        - startedAt
+        - endedAt
+        - transcript
+        - durationSeconds
+        - summary
+        - summaryStatus
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+          description: The conversation the call was in.
+        anchorMessageId:
+          type:
+            - string
+            - 'null'
+          description: The message the call followed.
+        startedAt:
+          type: string
+          format: date-time
+          description: When the call started.
+        endedAt:
+          type: string
+          format: date-time
+          description: When it ended.
+        transcript:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceTranscriptEntry'
+        durationSeconds:
+          type: integer
+          minimum: 0
+        summary:
+          type:
+            - string
+            - 'null'
+          description: What the call was about, in a few lines. Null when it could not be written.
+        summaryStatus:
+          type: string
+          enum:
+            - ready
+            - failed
+    VoiceSessionPage:
+      type: object
+      required:
+        - sessions
+        - nextCursor
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceSession'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    VoiceSessionInput:
+      type: object
+      required:
+        - id
+        - anchorMessageId
+        - startedAt
+        - endedAt
+        - transcript
+      properties:
+        id:
+          type: string
+          description: The caller's own id for the call.
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+        anchorMessageId:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+          description: The message the call followed, so it is shown after it. Null at the start of a conversation.
+        startedAt:
+          type: string
+          format: date-time
+          description: When the call started.
+        endedAt:
+          type: string
+          format: date-time
+          description: 'When it ended: after it started, within a day.'
+        transcript:
+          type: array
+          minItems: 1
+          maxItems: 300
+          description: What was said, in order, at most 60,000 characters in all.
+          items:
+            $ref: '#/components/schemas/VoiceTranscriptEntry'
+    VoiceSessionResponse:
+      type: object
+      required:
+        - session
+      properties:
+        session:
+          $ref: '#/components/schemas/VoiceSession'
+        notice:
+          type: string
+          description: Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it.
+    VoiceConfiguration:
+      type: object
+      required:
+        - transport
+      properties:
+        transport:
+          type: string
+          enum:
+            - webrtc
+            - websocket
+          description: How a call connects.
+    ConversationThread:
+      type: object
+      required:
+        - threadId
+      properties:
+        threadId:
+          type: string
+          description: The new thread's id.
+    ConversationThreadStatus:
+      type: object
+      required:
+        - threadId
+        - known
+      properties:
+        threadId:
+          type: string
+        known:
+          type: boolean
+          description: Whether the thread still holds the caller's conversation.
+    TaskStatus:
+      type: string
+      enum:
+        - needs_input
+        - working
+        - resolved
+        - failed
+        - ready_for_review
+      description: 'Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.'
+    Task:
+      type: object
+      description: A piece of work a Bot does for a person in a conversation of its own.
+      required:
+        - id
+        - botId
+        - conversationId
+        - threadId
+        - title
+        - why
+        - origin
+        - suggestionId
+        - sourceApp
+        - sourceLink
+        - originConversationId
+        - status
+        - failure
+        - failedAt
+        - next
+        - resolvedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: The task's id.
+        botId:
+          type: string
+          description: The Bot doing it.
+        conversationId:
+          type: string
+          description: The task's own conversation, where the person reads it and replies.
+        threadId:
+          type:
+            - string
+            - 'null'
+          description: That conversation's thread. Null once it is gone.
+        title:
+          type: string
+          description: What the task is.
+        why:
+          type:
+            - string
+            - 'null'
+          description: Why it was raised.
+        origin:
+          type: string
+          enum:
+            - check_in
+            - delegated
+          description: Whether the person started it from a check-in, or a Bot was asked to do it.
+        suggestionId:
+          type:
+            - string
+            - 'null'
+          description: The check-in item it was started from.
+        sourceApp:
+          type:
+            - string
+            - 'null'
+          description: The app the item came from.
+        sourceLink:
+          type:
+            - string
+            - 'null'
+          description: Where the item is in that app.
+        originConversationId:
+          type:
+            - string
+            - 'null'
+          description: The conversation a delegated task was asked for in, where its result is said.
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        failure:
+          type:
+            - string
+            - 'null'
+          description: Why its turn could not finish, while it is failed.
+        failedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it failed.
+        next:
+          type:
+            - string
+            - 'null'
+          description: One line on what comes next.
+        resolvedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the person marked it done.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was started.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+    TaskPage:
+      type: object
+      required:
+        - tasks
+        - nextCursor
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    TaskResponse:
+      type: object
+      required:
+        - task
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+    TranscriptionUpload:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: 'The recording: WebM, MP4 or WAV audio.'
+    Transcription:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: What was said.
+    DevicePlatform:
+      type: string
+      enum:
+        - ios
+        - android
+      description: The phone's operating system.
+    Device:
+      type: object
+      description: A phone that gets push notifications for the person, from every one of their Bots. Never its push token.
+      required:
+        - id
+        - platform
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the OpenBot app made for the phone.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first registered the phone.
+    DevicePage:
+      type: object
+      required:
+        - devices
+        - nextCursor
+      properties:
+        devices:
+          type: array
+          description: The first registered first, then by id.
+          items:
+            $ref: '#/components/schemas/Device'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - projectId
+        - platform
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          pattern: ^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$
+          description: 'The phone''s Expo push token, as the OpenBot app read it when it started. It is a credential: OpenBot never sends it back.'
+        projectId:
+          type: string
+          format: uuid
+          description: The OpenBot app's project, which must be the one this deployment sends push notifications through.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+    DeviceResponse:
+      type: object
+      required:
+        - device
+      properties:
+        device:
+          $ref: '#/components/schemas/Device'
+    DestinationTransport:
+      type: string
+      enum:
+        - slack
+        - teams
+        - sms
+      description: Slack, Microsoft Teams, or text messages.
+    Destination:
+      type: object
+      description: 'Somewhere outside OpenBot a person continues one conversation with one Bot: a Slack or Microsoft Teams chat, or a phone number.'
+      required:
+        - id
+        - transport
+        - conversationId
+        - botId
+        - address
+        - optedOutAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The destination's id.
+        transport:
+          $ref: '#/components/schemas/DestinationTransport'
+        conversationId:
+          type: string
+          description: The conversation it continues.
+        botId:
+          type: string
+          description: The Bot that answers there.
+        address:
+          type: string
+          description: 'Where the Bot sends: the phone number for text messages, or the chat''s own id in Slack or Teams.'
+        optedOutAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: 'Text messages only: when the person texted STOP. Nothing is texted until they text START. Null while they can be texted.'
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was connected.
+    DestinationPage:
+      type: object
+      required:
+        - destinations
+        - nextCursor
+      properties:
+        destinations:
+          type: array
+          description: The first connected first, then by id.
+          items:
+            $ref: '#/components/schemas/Destination'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    DestinationConversationId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: One of the person's conversations, by its id.
+    DestinationBotId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: A Bot in that conversation, by its id.
+    LinkChatDestinationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - platform
+        - conversationId
+        - botId
+      properties:
+        platform:
+          type: string
+          enum:
+            - slack
+            - teams
+          description: Slack or Microsoft Teams.
+        conversationId:
+          $ref: '#/components/schemas/DestinationConversationId'
+        botId:
+          $ref: '#/components/schemas/DestinationBotId'
+    ChatLinkCode:
+      type: object
+      description: A one-time code the person sends the OpenBot app in Slack or Teams.
+      required:
+        - platform
+        - code
+        - command
+        - expiresAt
+      properties:
+        platform:
+          type: string
+          enum:
+            - slack
+            - teams
+        code:
+          type: string
+          description: The code. It works once, and only for the person it was made for.
+        command:
+          type: string
+          description: The message to send the OpenBot app, the code in it.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the code stops working.
+    VerifyPhoneDestinationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - phone
+        - conversationId
+        - botId
+      properties:
+        phone:
+          type: string
+          pattern: ^\+[1-9]\d{7,14}$
+          description: The phone number in international form, such as +14155550123.
+        conversationId:
+          $ref: '#/components/schemas/DestinationConversationId'
+        botId:
+          $ref: '#/components/schemas/DestinationBotId'
+    PhoneVerification:
+      type: object
+      description: A code on its way to a phone, to confirm under this verification.
+      required:
+        - verificationId
+        - expiresAt
+      properties:
+        verificationId:
+          type: string
+          format: uuid
+          description: Send this with the code to confirmPhoneDestination.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the verification stops working.
+    ConfirmPhoneDestinationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - verificationId
+        - code
+      properties:
+        verificationId:
+          type: string
+          format: uuid
+          description: The verification verifyPhoneDestination answered.
+        code:
+          type: string
+          pattern: ^\d{4,10}$
+          description: The code the phone was texted.
+    DestinationResponse:
+      type: object
+      required:
+        - destination
+      properties:
+        destination:
+          $ref: '#/components/schemas/Destination'
+    NotificationTransport:
+      type: string
+      enum:
+        - push
+        - slack
+        - teams
+        - sms
+      description: 'A way OpenBot reaches a person outside it: push notifications to their phones, Slack, Microsoft Teams, or text messages.'
+    DeliveryKind:
+      type: string
+      enum:
+        - reply
+        - question
+        - approval
+        - attention
+      description: 'What was sent: a Bot''s reply, a question it asked, an approval it needs, or what the person''s Bots'' check-ins found that needs them.'
+    DeliveryState:
+      type: string
+      enum:
+        - queued
+        - running
+        - accepted
+        - sent
+        - delivered
+        - failed
+        - unknown
+        - opted_out
+      description: Where it got to. accepted is the provider taking it without saying yet that it arrived. unknown is a send that may or may not have gone. opted_out is a text message not sent because the person texted STOP.
+    Delivery:
+      type: object
+      description: One update a Bot sent a person outside OpenBot.
+      required:
+        - id
+        - transport
+        - kind
+        - state
+        - error
+        - conversationId
+        - botId
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The delivery's id.
+        transport:
+          $ref: '#/components/schemas/NotificationTransport'
+        kind:
+          $ref: '#/components/schemas/DeliveryKind'
+        state:
+          $ref: '#/components/schemas/DeliveryState'
+        error:
+          type:
+            - string
+            - 'null'
+          description: Why it failed or may not have arrived, as the provider said. Null otherwise.
+        conversationId:
+          type: string
+          description: The conversation it was about.
+        botId:
+          type: string
+          description: The Bot that sent it.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was sent.
+    DeliveryPage:
+      type: object
+      required:
+        - deliveries
+        - nextCursor
+      properties:
+        deliveries:
+          type: array
+          description: The newest first, then by id.
+          items:
+            $ref: '#/components/schemas/Delivery'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    UpdateRoute:
+      description: 'Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.'
+      oneOf:
+        - type: string
+          enum:
+            - all
+        - type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationTransport'
+    UpdateRouting:
+      type: object
+      description: Where each kind of update may go.
+      required:
+        - progress
+        - decision
+        - question
+        - attention
+      properties:
+        progress:
+          $ref: '#/components/schemas/UpdateRoute'
+        decision:
+          $ref: '#/components/schemas/UpdateRoute'
+        question:
+          $ref: '#/components/schemas/UpdateRoute'
+        attention:
+          $ref: '#/components/schemas/UpdateRoute'
+    NotificationSettings:
+      type: object
+      description: 'Where a person''s updates go, for every one of their Bots at once. progress: replies and results from work they weren''t watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots'' check-ins found, at most once an hour, every Bot in one message.'
+      required:
+        - routing
+      properties:
+        routing:
+          $ref: '#/components/schemas/UpdateRouting'
+    UpdateNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - routing
+      properties:
+        routing:
+          type: object
+          description: The kinds of update to change. At least one.
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            progress:
+              $ref: '#/components/schemas/UpdateRoute'
+            decision:
+              $ref: '#/components/schemas/UpdateRoute'
+            question:
+              $ref: '#/components/schemas/UpdateRoute'
+            attention:
+              $ref: '#/components/schemas/UpdateRoute'
+    BotNotifyLevel:
+      type: string
+      enum:
+        - all
+        - needs_input
+        - none
+      description: 'How much one Bot may reach the person outside OpenBot: all of it, only what needs them (its questions and approvals), or nothing.'
+    BotNotificationSettings:
+      type: object
+      required:
+        - botId
+        - notify
+      properties:
+        botId:
+          type: string
+          description: The Bot.
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    UpdateBotNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - notify
+      properties:
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    NotificationTransportOption:
+      type: object
+      required:
+        - id
+        - title
+      properties:
+        id:
+          $ref: '#/components/schemas/NotificationTransport'
+        title:
+          type: string
+          description: Its name, as a person reads it.
+    NotificationTransportPage:
+      type: object
+      required:
+        - notificationTransports
+        - nextCursor
+      properties:
+        notificationTransports:
+          type: array
+          description: Push, then Slack, Microsoft Teams and text messages, as set up.
+          items:
+            $ref: '#/components/schemas/NotificationTransportOption'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     RoutineConversation:
       type: object
       description: Where a routine posts.
@@ -13614,36 +14626,6 @@ components:
         - nextRunAt
         - lastRun
         - goalId
-    AddConversationMemberRequest:
-      type: object
-      required:
-        - email
-      additionalProperties: false
-      properties:
-        email:
-          type: string
-          description: The email address the person signs in to this OpenBot with.
-          format: email
-          minLength: 3
-          maxLength: 320
-    AddedConversationMember:
-      type: object
-      required:
-        - personId
-      properties:
-        personId:
-          type: string
-          description: The person who is now in the conversation.
-    ConversationMessage:
-      type: object
-      description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
-      required:
-        - id
-        - role
-        - personId
-        - botId
-        - text
-        - status
         - createdAt
       properties:
         id:
@@ -14606,28 +15588,6 @@ components:
         id:
           type: string
           description: The run's id.
-          description: The message's id.
-        role:
-          type: string
-          enum:
-            - person
-            - bot
-            - tool
-            - system
-          description: Who it is from. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group.
-        personId:
-          type:
-            - string
-            - 'null'
-          description: Who sent it, for a person's message; whose turn it answered, for a Bot's reply.
-        botId:
-          type:
-            - string
-            - 'null'
-          description: The Bot that replied. Null for a person's message.
-        text:
-          type: string
-          description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
           enum:
@@ -14689,46 +15649,6 @@ components:
           description: Newest first.
           items:
             $ref: '#/components/schemas/GoalRun'
-            - completed
-            - failed
-          description: Where a Bot's reply stands. A person's message is completed.
-        createdAt:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When it was said. Null where the time was not kept.
-        reason:
-          type: string
-          description: Why a waiting Bot is waiting.
-        answeredBy:
-          type: string
-          description: 'For an answer passed on from another Bot: which Bot answered.'
-        consent:
-          type: object
-          description: A Team Bot asking the person whose turn it was to use their own account.
-          required:
-            - botId
-            - serverId
-          properties:
-            botId:
-              type: string
-            serverId:
-              type: string
-        toolCalls:
-          type: integer
-          minimum: 0
-          description: How many tools the Bot called in this message, when it called any.
-    ConversationMessagePage:
-      type: object
-      required:
-        - messages
-        - nextCursor
-      properties:
-        messages:
-          type: array
-          items:
-            $ref: '#/components/schemas/ConversationMessage'
         nextCursor:
           type:
             - string
@@ -14936,304 +15856,6 @@ components:
         - enabled
         - path
         - address
-    SendConversationMessageRequest:
-      type: object
-      required:
-        - id
-        - text
-      additionalProperties: false
-      properties:
-        id:
-          type: string
-          description: The caller's own id for the message, so a retry is the same message.
-          minLength: 1
-          maxLength: 160
-        text:
-          type: string
-          description: The message.
-          minLength: 1
-          maxLength: 16000
-          pattern: \S
-        botId:
-          type:
-            - string
-            - 'null'
-          minLength: 1
-          maxLength: 200
-          description: The one Bot to answer. Needed in a conversation that is not a group; in a group, leave it out for every Bot or the ones the message names.
-    SentConversationMessage:
-      type: object
-      required:
-        - queued
-      properties:
-        id:
-          type: string
-          description: The message's id.
-        queued:
-          type: boolean
-          description: True when the message is waiting for its answer. False when the same message was already accepted.
-    AttachmentUpload:
-      type: object
-      required:
-        - file
-      properties:
-        file:
-          type: string
-          format: binary
-          description: The file.
-        uploadGroup:
-          type: string
-          description: Names the message being written, so the files of two windows are counted apart.
-          maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
-    VoiceCallRequest:
-      type: object
-      properties:
-        sdp:
-          type: string
-          description: The caller's audio offer, where calls run over WebRTC.
-          minLength: 1
-          maxLength: 65536
-    VoiceConnection:
-      type: object
-      description: 'How to connect a call. Over WebRTC: the answer to the caller''s offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.'
-      required:
-        - transport
-      properties:
-        transport:
-          type: string
-          enum:
-            - webrtc
-            - websocket
-        sdp:
-          type: string
-          description: The answer to the caller's offer.
-        url:
-          type: string
-          description: The socket to open.
-        clientSecret:
-          type: string
-          description: A secret that opens that socket once, for a few minutes.
-        session:
-          type: object
-          description: The session to open on the socket, as the voice service reads it.
-          additionalProperties: true
-    VoiceTranscriptEntry:
-      type: object
-      required:
-        - id
-        - role
-        - text
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 256
-          pattern: \S
-        role:
-          type: string
-          enum:
-            - user
-            - assistant
-          description: The person, or the Bot.
-        text:
-          type: string
-          minLength: 1
-          maxLength: 60000
-          pattern: \S
-    VoiceSession:
-      type: object
-      description: A saved voice call.
-      required:
-        - id
-        - conversationId
-        - anchorMessageId
-        - startedAt
-        - endedAt
-        - transcript
-        - durationSeconds
-        - summary
-        - summaryStatus
-      properties:
-        id:
-          type: string
-        conversationId:
-          type: string
-          description: The conversation the call was in.
-        anchorMessageId:
-          type:
-            - string
-            - 'null'
-          description: The message the call followed.
-        startedAt:
-          type: string
-          format: date-time
-          description: When the call started.
-        endedAt:
-          type: string
-          format: date-time
-          description: When it ended.
-        transcript:
-          type: array
-          items:
-            $ref: '#/components/schemas/VoiceTranscriptEntry'
-        durationSeconds:
-          type: integer
-          minimum: 0
-        summary:
-          type:
-            - string
-            - 'null'
-          description: What the call was about, in a few lines. Null when it could not be written.
-        summaryStatus:
-          type: string
-          enum:
-            - ready
-            - failed
-    VoiceSessionPage:
-      type: object
-      required:
-        - sessions
-        - nextCursor
-      properties:
-        sessions:
-          type: array
-          items:
-            $ref: '#/components/schemas/VoiceSession'
-        nextCursor:
-          type:
-            - string
-            - 'null'
-          maxLength: 4096
-          pattern: ^[A-Za-z0-9_-]+$
-          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    VoiceSessionInput:
-      type: object
-      required:
-        - id
-        - anchorMessageId
-        - startedAt
-        - endedAt
-        - transcript
-      properties:
-        id:
-          type: string
-          description: The caller's own id for the call.
-          minLength: 1
-          maxLength: 256
-          pattern: \S
-        anchorMessageId:
-          type:
-            - string
-            - 'null'
-          minLength: 1
-          maxLength: 256
-          pattern: \S
-          description: The message the call followed, so it is shown after it. Null at the start of a conversation.
-        startedAt:
-          type: string
-          format: date-time
-          description: When the call started.
-        endedAt:
-          type: string
-          format: date-time
-          description: 'When it ended: after it started, within a day.'
-        transcript:
-          type: array
-          minItems: 1
-          maxItems: 300
-          description: What was said, in order, at most 60,000 characters in all.
-          items:
-            $ref: '#/components/schemas/VoiceTranscriptEntry'
-    VoiceSessionResponse:
-      type: object
-      required:
-        - session
-      properties:
-        session:
-          $ref: '#/components/schemas/VoiceSession'
-        notice:
-          type: string
-          description: Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it.
-    VoiceConfiguration:
-      type: object
-      required:
-        - transport
-      properties:
-        transport:
-          type: string
-          enum:
-            - webrtc
-            - websocket
-          description: How a call connects.
-    ConversationThread:
-      type: object
-      required:
-        - threadId
-      properties:
-        threadId:
-          type: string
-          description: The new thread's id.
-    ConversationThreadStatus:
-      type: object
-      required:
-        - threadId
-        - known
-      properties:
-        threadId:
-          type: string
-        known:
-          type: boolean
-          description: Whether the thread still holds the caller's conversation.
-    TaskStatus:
-      type: string
-      enum:
-        - needs_input
-        - working
-        - resolved
-        - failed
-        - ready_for_review
-      description: 'Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.'
-    Task:
-      type: object
-      description: A piece of work a Bot does for a person in a conversation of its own.
-      required:
-        - id
-        - botId
-        - conversationId
-        - threadId
-        - title
-        - why
-        - origin
-        - suggestionId
-        - sourceApp
-        - sourceLink
-        - originConversationId
-        - status
-        - failure
-        - failedAt
-        - next
-        - resolvedAt
         - createdAt
         - updatedAt
       properties:
@@ -15277,80 +15899,6 @@ components:
           type: string
           format: date-time
           description: When it was added.
-          description: The task's id.
-        botId:
-          type: string
-          description: The Bot doing it.
-        conversationId:
-          type: string
-          description: The task's own conversation, where the person reads it and replies.
-        threadId:
-          type:
-            - string
-            - 'null'
-          description: That conversation's thread. Null once it is gone.
-        title:
-          type: string
-          description: What the task is.
-        why:
-          type:
-            - string
-            - 'null'
-          description: Why it was raised.
-        origin:
-          type: string
-          enum:
-            - check_in
-            - delegated
-          description: Whether the person started it from a check-in, or a Bot was asked to do it.
-        suggestionId:
-          type:
-            - string
-            - 'null'
-          description: The check-in item it was started from.
-        sourceApp:
-          type:
-            - string
-            - 'null'
-          description: The app the item came from.
-        sourceLink:
-          type:
-            - string
-            - 'null'
-          description: Where the item is in that app.
-        originConversationId:
-          type:
-            - string
-            - 'null'
-          description: The conversation a delegated task was asked for in, where its result is said.
-        status:
-          $ref: '#/components/schemas/TaskStatus'
-        failure:
-          type:
-            - string
-            - 'null'
-          description: Why its turn could not finish, while it is failed.
-        failedAt:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When it failed.
-        next:
-          type:
-            - string
-            - 'null'
-          description: One line on what comes next.
-        resolvedAt:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When the person marked it done.
-        createdAt:
-          type: string
-          format: date-time
-          description: When it was started.
         updatedAt:
           type: string
           format: date-time
@@ -15366,16 +15914,6 @@ components:
           description: Oldest first.
           items:
             $ref: '#/components/schemas/GoalTrigger'
-    TaskPage:
-      type: object
-      required:
-        - tasks
-        - nextCursor
-      properties:
-        tasks:
-          type: array
-          items:
-            $ref: '#/components/schemas/Task'
         nextCursor:
           type:
             - string
@@ -19966,26 +20504,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    InvalidRoutine:
-      description: A field is missing or out of bounds, the schedule is not five cron fields or runs more often than hourly, the Bot is not in that conversation, the routine is paused or already running, or the caller has 20 routines switched on.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            invalid:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: Choose when it runs.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    RoutineNotFound:
-      description: The routine does not exist or is somebody else's, or the organization does not exist.
     TaskNotFound:
       description: The task does not exist or is another person's, or the organization does not exist.
       content:
@@ -19995,11 +20513,6 @@ components:
           examples:
             missing:
               value:
-                type: https://open.bot/errors/routine-not-found
-                title: Routine not found.
-                status: 404
-                detail: That routine does not exist.
-                code: ROUTINE_NOT_FOUND
                 type: https://open.bot/errors/not-found
                 title: Not found.
                 status: 404
@@ -20009,8 +20522,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    InvalidCheckIn:
-      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, or a check-in is running already or ran in the last ten minutes.
     TaskConflict:
       description: The task is not in a state this can change. Or the Idempotency-Key was already used for a different request.
       content:
@@ -20018,57 +20529,17 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            invalid:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: Invalid settings.
-                code: VALIDATION_ERROR
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    CheckInConflict:
-      description: The Bot already checks in on this and refuseExisting was asked for, or the Idempotency-Key was already used for a different request.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            sameCheckIn:
             notFailed:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: This Bot already checks in on this. Give this one a different name, or change that one on its row.
                 detail: Only a task that failed can be tried again.
                 code: CONFLICT
                 category: conflict
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    CheckInNotFound:
-      description: The check-in does not exist or is somebody else's, or the organization does not exist.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            missing:
-              value:
-                type: https://open.bot/errors/check-in-not-found
-                title: Check-in not found.
-                status: 404
-                detail: This could not be found.
-                code: CHECK_IN_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    CheckInItemNotFound:
-      description: The item does not exist, is somebody else's or is no longer open, or the organization does not exist.
             reused:
               value:
                 type: https://open.bot/errors/idempotency-key-conflict
@@ -20087,30 +20558,6 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            missing:
-              value:
-                type: https://open.bot/errors/check-in-item-not-found
-                title: Item not found.
-                status: 404
-                detail: This could not be found.
-                code: CHECK_IN_ITEM_NOT_FOUND
-                category: not_found
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    InvalidGoal:
-      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, the goal both repeats and ends when met, the goal is paused or completed, or a trigger's configuration or secret is not one its kind takes.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            invalid:
-              value:
-                type: https://open.bot/errors/validation-error
-                title: Request validation failed.
-                status: 400
-                detail: A goal can't both repeat and end when it's met. Turn one of them off.
             silent:
               value:
                 type: https://open.bot/errors/validation-error
@@ -20122,8 +20569,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    GoalNotFound:
-      description: The goal does not exist or is somebody else's, or the organization does not exist.
     TransportUnavailable:
       description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
       content:
@@ -20180,11 +20625,6 @@ components:
           examples:
             missing:
               value:
-                type: https://open.bot/errors/goal-not-found
-                title: Goal not found.
-                status: 404
-                detail: This goal could not be found.
-                code: GOAL_NOT_FOUND
                 type: https://open.bot/errors/device-not-found
                 title: Device not found.
                 status: 404
@@ -20194,8 +20634,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    GoalTriggerNotFound:
-      description: The trigger does not exist, is not this goal's or is somebody else's, or the organization does not exist.
     InvalidDestination:
       description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
       content:
@@ -20282,6 +20720,168 @@ components:
           examples:
             missing:
               value:
+                type: https://open.bot/errors/destination-not-found
+                title: Destination not found.
+                status: 404
+                detail: Connection not found.
+                code: DESTINATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidRoutine:
+      description: A field is missing or out of bounds, the schedule is not five cron fields or runs more often than hourly, the Bot is not in that conversation, the routine is paused or already running, or the caller has 20 routines switched on.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose when it runs.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    RoutineNotFound:
+      description: The routine does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/routine-not-found
+                title: Routine not found.
+                status: 404
+                detail: That routine does not exist.
+                code: ROUTINE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidCheckIn:
+      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, or a check-in is running already or ran in the last ten minutes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Invalid settings.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInConflict:
+      description: The Bot already checks in on this and refuseExisting was asked for, or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sameCheckIn:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This Bot already checks in on this. Give this one a different name, or change that one on its row.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInNotFound:
+      description: The check-in does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/check-in-not-found
+                title: Check-in not found.
+                status: 404
+                detail: This could not be found.
+                code: CHECK_IN_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CheckInItemNotFound:
+      description: The item does not exist, is somebody else's or is no longer open, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/check-in-item-not-found
+                title: Item not found.
+                status: 404
+                detail: This could not be found.
+                code: CHECK_IN_ITEM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidGoal:
+      description: A field is missing or out of bounds, the Bot or the conversation is not one the caller can use, the goal both repeats and ends when met, the goal is paused or completed, or a trigger's configuration or secret is not one its kind takes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A goal can't both repeat and end when it's met. Turn one of them off.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GoalNotFound:
+      description: The goal does not exist or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/goal-not-found
+                title: Goal not found.
+                status: 404
+                detail: This goal could not be found.
+                code: GOAL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    GoalTriggerNotFound:
+      description: The trigger does not exist, is not this goal's or is somebody else's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
                 type: https://open.bot/errors/goal-trigger-not-found
                 title: Trigger not found.
                 status: 404
@@ -20323,11 +20923,6 @@ components:
                 status: 404
                 detail: That follow-up has already run or was cancelled.
                 code: FOLLOW_UP_NOT_FOUND
-                type: https://open.bot/errors/destination-not-found
-                title: Destination not found.
-                status: 404
-                detail: Connection not found.
-                code: DESTINATION_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -21690,6 +22285,211 @@ components:
       value:
         model: gpt-6.1-pro
         effort: xhigh
+    ConversationPageExample:
+      summary: One page of conversations, and the last.
+      value:
+        conversations:
+          - id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            name: General Assistant
+            botIds:
+              - general-assistant
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            active: true
+            lastMessageAt: '2026-11-14T12:00:00.000Z'
+            summary: Quarterly forecast
+            opening: Can you draft the quarterly forecast?
+            lastMessage: Here is the first draft.
+            lastMessageBotId: general-assistant
+            createdAt: '2026-11-13T09:00:00.000Z'
+            pinned: false
+            lastReadAt: '2026-11-14T12:00:05.000Z'
+            canRename: true
+            task: false
+            work: []
+        nextCursor: null
+    ConversationResponseExample:
+      summary: A conversation with one Bot.
+      value:
+        conversation:
+          id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          name: General Assistant
+          botIds:
+            - general-assistant
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          active: true
+          lastMessageAt: '2026-11-14T12:00:00.000Z'
+          work: []
+    RoutedMessageExample:
+      summary: A message the default Bot takes.
+      value:
+        botId: general-assistant
+        name: General Assistant
+        reason: fallback
+        fallback: true
+        viaMention: false
+        undecided: null
+    UpdatedConversationExample:
+      summary: A conversation renamed and pinned.
+      value:
+        summary: Quarterly forecast
+        pinned: true
+    ConversationMemberPageExample:
+      summary: A group of two Bots and one person.
+      value:
+        members:
+          - kind: bot
+            id: general-assistant
+            name: General Assistant
+          - kind: bot
+            id: research-helper
+            name: Research Helper
+          - kind: person
+            id: usr_9b1c6f0e
+            name: Ada Lovelace
+            email: ada@example.com
+            creator: true
+        nextCursor: null
+    AddedConversationMemberExample:
+      summary: The person who was added.
+      value:
+        personId: usr_2f4a8c1b
+    ConversationMessagePageExample:
+      summary: A person's message and a Bot's reply, newest first.
+      value:
+        messages:
+          - id: m2
+            role: bot
+            personId: usr_9b1c6f0e
+            botId: general-assistant
+            text: Ship the importer first.
+            status: completed
+            createdAt: '2026-11-14T12:00:20.000Z'
+          - id: m1
+            role: person
+            personId: usr_9b1c6f0e
+            botId: null
+            text: What should we ship?
+            status: completed
+            createdAt: '2026-11-14T12:00:00.000Z'
+        nextCursor: null
+    SentConversationMessageExample:
+      summary: A message waiting for its answer.
+      value:
+        id: m1
+        queued: true
+    AttachmentExample:
+      summary: A spreadsheet held for the next message.
+      value:
+        id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        name: budget.csv
+        mimeType: text/csv
+        sizeBytes: 2048
+    VoiceConnectionExample:
+      summary: A call over WebRTC.
+      value:
+        transport: webrtc
+        sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    VoiceSessionPageExample:
+      summary: One saved call.
+      value:
+        sessions:
+          - id: call-1
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            anchorMessageId: null
+            startedAt: '2026-11-14T12:00:00.000Z'
+            endedAt: '2026-11-14T12:00:30.000Z'
+            transcript:
+              - id: '1'
+                role: user
+                text: When do we launch?
+              - id: '2'
+                role: assistant
+                text: On Friday.
+            durationSeconds: 30
+            summary: They agreed to launch on Friday.
+            summaryStatus: ready
+        nextCursor: null
+    VoiceSessionResponseExample:
+      summary: A saved call with its summary.
+      value:
+        session:
+          id: call-1
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          anchorMessageId: null
+          startedAt: '2026-11-14T12:00:00.000Z'
+          endedAt: '2026-11-14T12:00:30.000Z'
+          transcript:
+            - id: '1'
+              role: user
+              text: When do we launch?
+            - id: '2'
+              role: assistant
+              text: On Friday.
+          durationSeconds: 30
+          summary: They agreed to launch on Friday.
+          summaryStatus: ready
+    VoiceConfigurationExample:
+      summary: Calls over WebRTC.
+      value:
+        transport: webrtc
+    ConversationThreadExample:
+      summary: A new thread id.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+    ConversationThreadStatusExample:
+      summary: A thread that is still there.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+        known: true
+    TaskPageExample:
+      summary: One task, ready to read.
+      value:
+        tasks:
+          - id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+            botId: general-assistant
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            title: Reply to Sam about the spec
+            why: Sam asked for the spec by Friday.
+            origin: check_in
+            suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            sourceApp: Gmail
+            sourceLink: null
+            originConversationId: null
+            status: ready_for_review
+            failure: null
+            failedAt: null
+            next: Read the draft and send it.
+            resolvedAt: null
+            createdAt: '2026-11-14T09:00:00.000Z'
+            updatedAt: '2026-11-14T09:05:00.000Z'
+        nextCursor: null
+    TaskResponseExample:
+      summary: A task ready to read.
+      value:
+        task:
+          id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+          botId: general-assistant
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          title: Reply to Sam about the spec
+          why: Sam asked for the spec by Friday.
+          origin: check_in
+          suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          sourceApp: Gmail
+          sourceLink: null
+          originConversationId: null
+          status: ready_for_review
+          failure: null
+          failedAt: null
+          next: Read the draft and send it.
+          resolvedAt: null
+          createdAt: '2026-11-14T09:00:00.000Z'
+          updatedAt: '2026-11-14T09:05:00.000Z'
+    TranscriptionExample:
+      summary: What was said.
+      value:
+        text: Remind me to send the forecast on Friday.
     DevicePageLast:
       summary: A person's iPhone, on one page.
       value:
