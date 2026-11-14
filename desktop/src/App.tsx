@@ -169,6 +169,8 @@ function Setup() {
   const interruptedAtLaunch = useRef(false);
   // What stopped the last run, shown until Start runs.
   const launchNotice = useRef<Problem | null>(null);
+  // A Start has run in this window: what the last quit left is no longer news.
+  const startedSinceLaunch = useRef(false);
   const [refreshIntelligence, setRefreshIntelligence] = useState(false);
   const [preparation, setPreparation] = useState<{
     key: string;
@@ -279,13 +281,19 @@ function Setup() {
     installAgain: () => installAfresh(),
   });
   /*
-   * What stopped the last run (`last_failure` at launch, such as "OpenBot had trouble shutting down
-   * last time.") is about that run. Once Start runs, it goes: a Start that then stops says why in
-   * its own row. Kept, it read as the reason this run stopped, through Start and every Retry.
+   * Every notice about the last quit or stop is about that run: what stopped it (`last_failure` at
+   * launch, such as "OpenBot had trouble shutting down last time.") and the services it left
+   * running ("When OpenBot last quit, some of its services didn't stop."). Once Start runs, they
+   * go: a Start that then stops says why in its own row. Kept, they read as the reason this run
+   * stopped, through Start and every Retry. Stop still asks those services to stop, and says so
+   * again if they don't.
    */
   useEffect(() => {
+    if (!local.running) return;
+    startedSinceLaunch.current = true;
+    setIntelligenceNotice(null);
     const notice = launchNotice.current;
-    if (!local.running || !notice) return;
+    if (!notice) return;
     launchNotice.current = null;
     setRecoveryFailure((current) => (current === notice ? null : current));
   }, [local.running]);
@@ -369,7 +377,10 @@ function Setup() {
     // Read once and kept apart from `last_failure`, which would hold auto-start.
     invoke<Problem | null>("last_local_eval_stop_failure")
       .then((found) => {
-        if (active && found) setIntelligenceNotice(found);
+        // Arriving after a Start has run, it is already old news.
+        if (active && found && !startedSinceLaunch.current) {
+          setIntelligenceNotice(found);
+        }
       })
       .catch(() => {});
     // A supervisor that stopped retrying must stay stopped when it returns to this window.
