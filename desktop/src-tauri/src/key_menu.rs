@@ -22,14 +22,17 @@
 //! this command and are not touched, so its Alt shortcuts work as they did.
 
 /// `SC_KEYMENU` (winuser.h).
+#[cfg_attr(not(windows), allow(dead_code))]
 const SC_KEYMENU: usize = 0xF100;
 
 /// The bits of a `WM_SYSCOMMAND` `wParam` that name the command: "the four low-order bits of the
 /// wParam parameter are used internally by the system" (`WM_SYSCOMMAND`).
+#[cfg_attr(not(windows), allow(dead_code))]
 const COMMAND: usize = 0xFFF0;
 
 /// Whether a `WM_SYSCOMMAND` with `wparam` and `lparam` is a menu key pressed alone: Alt or F10,
 /// with no character after it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn lone_menu_key(wparam: usize, lparam: isize) -> bool {
     wparam & COMMAND == SC_KEYMENU && lparam == 0
 }
