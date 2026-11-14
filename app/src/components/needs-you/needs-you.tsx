@@ -74,7 +74,9 @@ export function useNeedsYou(agentId?: string) {
     },
     tasks: listed.filter(({ status }) => status !== "resolved"),
     done: listed.filter(({ status }) => status === "resolved"),
-    items: (suggestions.data ?? []).filter(mine),
+    items: (suggestions.data ?? []).filter(
+      (item) => agentId === undefined || item.botId === agentId,
+    ),
   };
 }
 
@@ -111,7 +113,7 @@ export function NeedsYouRows({
     })),
     ...shown.map((item) => ({
       key: `item-${item.id}`,
-      row: <SuggestionRow botName={botName(item.agentId)} suggestion={item} />,
+      row: <SuggestionRow botName={botName(item.botId)} suggestion={item} />,
     })),
   ];
   if (rows.length === 0) return null;

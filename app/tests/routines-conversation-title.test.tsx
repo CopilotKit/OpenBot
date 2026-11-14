@@ -11,6 +11,7 @@ import { cleanup, render } from "@testing-library/react";
 import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -42,13 +43,13 @@ const PAGE: RoutinesPage = {
   routines: [
     {
       id: "routine-eks",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Every 15 minutes",
       timezone: "UTC",
       instruction:
         "Reply with the current UTC time and the words 'routine check from EKS'.",
       title: null,
-      channel: {
+      conversation: {
         id: "conversation-eks",
         name: "General Assistant",
         title: "15-Minute EKS UTC Routine",
@@ -57,15 +58,17 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-05T07:45:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
     {
       id: "routine-new",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Every day at 09:00",
       timezone: "UTC",
       instruction: "Post the morning summary.",
       title: null,
-      channel: {
+      conversation: {
         id: "conversation-new",
         name: "General Assistant",
         title: "New conversation",
@@ -74,17 +77,17 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-06T09:00:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
   ],
-  sweep: { lastSweptAt: "2026-11-05T07:30:00.000Z", working: true },
 };
 
 /** One routine's page, as its row's link opens it. */
 function draw(routineId: string) {
   global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).startsWith("/api/routines")
-      ? Response.json(PAGE)
-      : Response.json({})) as unknown as typeof fetch;
+    answerScheduleLists(input, undefined, PAGE) ??
+    Response.json({ runs: [], nextCursor: null })) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({

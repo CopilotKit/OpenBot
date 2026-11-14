@@ -20,6 +20,7 @@ import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { answerBotsList } from "./bots-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -79,8 +80,8 @@ function serving(
     const url = String(input);
     if (url.includes("/api/bots/attention"))
       return Response.json({ bots: attention, lastPingId: null });
-    if (url === "/api/proactive/suggestions")
-      return Response.json({ suggestions: [] });
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: [], nextCursor: null });
     if (url === "/api/tasks") return Response.json({ tasks: [] });
     if (url.startsWith("/api/channels"))
       return Response.json({ channels: [], nextCursor: null });

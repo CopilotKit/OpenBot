@@ -30,6 +30,12 @@ import {
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
 import { answerBotsList } from "./bots-api";
+import {
+  answerScheduleLists,
+  CHECK_IN_ITEMS_PATH,
+  ORGANIZATION_PATH,
+  pathOf,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -57,7 +63,7 @@ const now = new Date().toISOString();
 
 type Item = {
   id: string;
-  agentId: string;
+  botId: string;
   title: string;
   detail: string;
   sourceApp: string | null;
@@ -93,7 +99,7 @@ type Task = {
 };
 
 const item = (overrides: Partial<Item> & { id: string; title: string }) => ({
-  agentId: "inbox",
+  botId: "inbox",
   detail: "Dana asked for the Q3 numbers by Friday.",
   sourceApp: "Gmail",
   sourceRef: "gmail/message/1",
@@ -140,19 +146,24 @@ const sent: { method: string; path: string }[] = [];
 function serving() {
   sent.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
+    // A list in the API is asked for with `limit`; the address is what names it.
+    const path = String(input).startsWith(ORGANIZATION_PATH)
+      ? pathOf(input)
+      : String(input);
     const method = init?.method ?? "GET";
     if (method !== "GET") sent.push({ method, path });
     if (method === "GET" && failing.has(path))
       return Response.json({ error: "Server error" }, { status: 500 });
-    const started = path.match(/^\/api\/proactive\/suggestions\/(.+)\/start$/);
+    const started = path.startsWith(`${CHECK_IN_ITEMS_PATH}/`)
+      ? path.slice(CHECK_IN_ITEMS_PATH.length).match(/^\/(.+)\/start$/)
+      : null;
     if (started) {
       const found = items.find((entry) => entry.id === started[1]);
       if (!found) return Response.json({ error: "Not open" }, { status: 404 });
       items = items.filter((entry) => entry !== found);
       const opened = task({
         id: `task-${found.id}`,
-        agentId: found.agentId,
+        agentId: found.botId,
         title: found.title,
         why: found.detail,
         suggestionId: found.id,
@@ -160,15 +171,17 @@ function serving() {
       });
       tasks = [opened, ...tasks];
       return Response.json({
-        suggestion: { ...found, status: "started" },
-        task: { id: opened.id, channelId: opened.channelId },
+        checkInItem: { ...found, status: "started" },
+        task: { id: opened.id, conversationId: opened.channelId },
       });
     }
-    const hidden = path.match(/^\/api\/proactive\/suggestions\/(.+)\/dismiss$/);
+    const hidden = path.startsWith(`${CHECK_IN_ITEMS_PATH}/`)
+      ? path.slice(CHECK_IN_ITEMS_PATH.length).match(/^\/(.+)\/dismiss$/)
+      : null;
     if (hidden) {
       const found = items.find((entry) => entry.id === hidden[1]);
       items = items.filter((entry) => entry !== found);
-      return Response.json({ suggestion: { ...found, status: "dismissed" } });
+      return Response.json({ checkInItem: { ...found, status: "dismissed" } });
     }
     const acted = path.match(/^\/api\/tasks\/(.+)\/(resolve|reopen|again)$/);
     if (acted) {
@@ -184,8 +197,8 @@ function serving() {
       );
       return Response.json({ task: tasks.find((entry) => entry.id === id) });
     }
-    if (path === "/api/proactive/suggestions")
-      return Response.json({ suggestions: items });
+    if (path === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: items, nextCursor: null });
     if (path === "/api/tasks") return Response.json({ tasks });
     if (path.startsWith("/api/channels"))
       return Response.json({
@@ -216,10 +229,8 @@ function serving() {
       });
     if (path === "/api/bots/attention")
       return Response.json({ bots: [], lastPingId: null });
-    if (path === "/api/routines")
-      return Response.json({ routines: [], sweep: null });
-    if (path === "/api/responsibilities")
-      return Response.json({ responsibilities: [] });
+    const schedules = answerScheduleLists(input, init);
+    if (schedules) return schedules;
     const bots = answerBotsList(input, init, {
       visible: [
         { id: "inbox", name: "Inbox Bot", mine: true },
@@ -356,7 +367,7 @@ test("Dismiss takes an item off the Bots page, the Bot's page and OpenDuet at on
   );
   expect(sent).toContainEqual({
     method: "POST",
-    path: "/api/proactive/suggestions/s1/dismiss",
+    path: `${CHECK_IN_ITEMS_PATH}/s1/dismiss`,
   });
   // The other item stays on all three.
   expect(view.getAllByText("Renew the studio insurance")).toHaveLength(3);
@@ -370,7 +381,7 @@ test("Work on it takes the item off and shows its task, Working, opening its own
   fireEvent.click(await bots.findByRole("button", { name: "Work on it" }));
   await waitFor(() => expect(bots.getByText("Working")).toBeTruthy());
   expect(sent).toEqual([
-    { method: "POST", path: "/api/proactive/suggestions/s1/start" },
+    { method: "POST", path: `${CHECK_IN_ITEMS_PATH}/s1/start` },
   ]);
   // The item became the task: nothing left to start or dismiss for it anywhere.
   expect(view.queryAllByRole("button", { name: "Work on it" })).toHaveLength(0);
@@ -507,7 +518,7 @@ test("OpenDuet's Active lists the tasks under OpenDuet's headings, in its order"
  */
 const APPROVALS = "/api/approvals";
 const TASKS = "/api/tasks";
-const CHECK_INS = "/api/proactive/suggestions";
+const CHECK_INS = CHECK_IN_ITEMS_PATH;
 
 async function botPage() {
   const { region } = await drawAll();

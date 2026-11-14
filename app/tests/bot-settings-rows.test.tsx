@@ -13,6 +13,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { notificationsResponse } from "./notifications-api";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The "Settings for this Bot" card: each row says its current answer and opens its page. */
@@ -59,26 +60,20 @@ function serving(
 ) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/api/routines")) {
-      return Response.json({
-        routines: [{ id: "r1", agentId: "expenses" }],
-        sweep: null,
-      });
-    }
+    const schedules = answerScheduleLists(input, undefined, {
+      routines: [{ id: "r1", botId: "expenses" }],
+      goals: [
+        { id: "g1", botId: "expenses", status: "active" },
+        { id: "g2", botId: "expenses", status: "paused" },
+        { id: "g3", botId: "knowledge", status: "active" },
+      ],
+    });
+    if (schedules) return schedules;
     if (url.includes("/api/plugins/for/")) {
       return Response.json({ tools: [], skills: [] });
     }
     if (url.includes("/api/team-bots")) {
       return Response.json({ teamBots, publishable: [] });
-    }
-    if (url === "/api/responsibilities") {
-      return Response.json({
-        responsibilities: [
-          { id: "g1", agentId: "expenses", status: "active" },
-          { id: "g2", agentId: "expenses", status: "paused" },
-          { id: "g3", agentId: "knowledge", status: "active" },
-        ],
-      });
     }
     const reach = notificationsResponse("GET", url, {
       bindings: [
@@ -92,9 +87,6 @@ function serving(
       return Response.json({
         sources: [{ id: "s1", agentId: "expenses", enabled: true }],
       });
-    }
-    if (url === "/api/proactive/settings") {
-      return Response.json({ settings: [], allowed: true });
     }
     if (url === "/api/approvals") {
       return Response.json({

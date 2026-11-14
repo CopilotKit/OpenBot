@@ -27,6 +27,7 @@ import {
 } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { MODEL_CATALOGUE_PATH } from "./models-api";
+import { CHECK_IN_USAGE_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -118,7 +119,7 @@ function servePersonal() {
         ],
         recent: [],
       });
-    if (path === "/api/admin/proactive")
+    if (path === CHECK_IN_USAGE_PATH)
       return Response.json({
         days: 7,
         dailyRuns: 24,
