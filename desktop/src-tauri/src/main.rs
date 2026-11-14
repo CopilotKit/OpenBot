@@ -16646,6 +16646,51 @@ mod tests {
         for flag in ["SWP_NOMOVE", "SWP_NOSIZE", "SWP_NOZORDER", "SWP_NOACTIVATE"] {
             assert!(tint[redraw..].contains(flag), "{flag}: {tint}");
         }
+        let body = |name: &str| {
+            let from = &main[main.find(name).unwrap_or_else(|| panic!("{name}"))..];
+            &from[..from.find("\n}\n").unwrap()]
+        };
+        let window = body("fn tint_title_bar<R: tauri::Runtime>");
+        assert!(
+            window.contains("tint_title_bar_of(hwnd.0 as isize, dark)"),
+            "{window}"
+        );
+        // A theme change from the system: the window's ThemeChanged event redraws the bar on every
+        // page but OpenBot's own, which reports its own theme (below).
+        let changed = &main[main
+            .find("tauri::WindowEvent::ThemeChanged(_) => {")
+            .unwrap()..];
+        let changed = &changed[..changed.find("\n            }\n").unwrap()];
+        assert!(
+            changed.contains("match_title_bar(window, window_page(app, &url));"),
+            "{changed}"
+        );
+        let matched = body("fn match_title_bar<R: tauri::Runtime>");
+        let windows = &matched[matched.find("#[cfg(target_os = \"windows\")]").unwrap()..];
+        assert!(windows.contains("WindowPage::Setup => {"), "{windows}");
+        assert!(
+            windows.contains("tint_title_bar(window, Some(dark));"),
+            "{windows}"
+        );
+        assert!(
+            windows.contains(
+                "WindowPage::LocalApp | WindowPage::Other => tint_title_bar(window, None)"
+            ),
+            "{windows}"
+        );
+        // A theme change from OpenBot's own page, through `desktop_page::appearance`.
+        let reported = body("pub(crate) fn page_appearance<R: tauri::Runtime>");
+        assert!(
+            reported.contains("tint_title_bar(window, Some(dark));"),
+            "{reported}"
+        );
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("crate::page_appearance(&window, dark);"),
+            "{command}"
+        );
         // As the main window first shows, before `build()` returns.
         let first_paint = include_str!("first_paint.rs");
         let shown = &first_paint[first_paint
