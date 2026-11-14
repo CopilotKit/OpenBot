@@ -90,6 +90,13 @@ struct Inner {
     shown_deadlines: Mutex<HashMap<String, u128>>,
 }
 
+/// The server being told a dialog is on screen, and the deadline it answers. See
+/// `Inner::report_prompt_shown`.
+struct PromptShown {
+    operation_id: String,
+    deadline: Option<JoinHandle<Option<u64>>>,
+}
+
 struct State {
     stopped: bool,
     thread: Option<JoinHandle<()>>,
@@ -885,14 +892,16 @@ impl Inner {
                     "Host operation was canceled before the folder was granted.".into(),
                 ));
             }
-            self.report_prompt_shown(operation);
-            self.approval.choose_folder(&ChooseFolderPrompt {
+            let shown = self.report_prompt_shown(operation);
+            let picked = self.approval.choose_folder(&ChooseFolderPrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
                 actor_id: operation.actor_id.clone(),
                 bot_name: operation.bot_name.clone(),
                 writable_requested: operation.writable == Some(true),
-            })?
+            });
+            self.keep_shown_deadline(shown);
+            picked?
         };
         let root = validate_grant_root(&approved.root, &self.config.forbidden_paths)?;
         self.ensure_operation_fresh(operation)?;
@@ -992,8 +1001,8 @@ impl Inner {
         {
             let _turn = self.prompt_turn();
             self.ensure_operation_still_allowed(operation, &grant)?;
-            self.report_prompt_shown(operation);
-            self.approval.confirm_write(&WritePrompt {
+            let shown = self.report_prompt_shown(operation);
+            let answered = self.approval.confirm_write(&WritePrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
                 bot_name: grant.bot_name.clone(),
@@ -1001,7 +1010,9 @@ impl Inner {
                 relative_path: relative_path.into(),
                 content: content.clone(),
                 writable: true,
-            })?;
+            });
+            self.keep_shown_deadline(shown);
+            answered?;
             self.ensure_approved_in_time(operation, &grant, LapsedAction::FileChange)?;
         }
         let relative = host_relative_for_write(&grant.root, &target)?;
@@ -1051,8 +1062,8 @@ impl Inner {
         {
             let _turn = self.prompt_turn();
             self.ensure_operation_still_allowed(operation, &grant)?;
-            self.report_prompt_shown(operation);
-            self.approval.confirm_command(&CommandPrompt {
+            let shown = self.report_prompt_shown(operation);
+            let answered = self.approval.confirm_command(&CommandPrompt {
                 operation_id: operation.operation_id.clone(),
                 bot_id: operation.bot_id.clone(),
                 bot_name: grant.bot_name.clone(),
@@ -1061,7 +1072,9 @@ impl Inner {
                 command: command.into(),
                 writable,
                 command_policy,
-            })?;
+            });
+            self.keep_shown_deadline(shown);
+            answered?;
             self.ensure_approved_in_time(operation, &grant, LapsedAction::Command)?;
         }
         let command_directory = if let Some(directory) = working_directory {
@@ -1161,50 +1174,81 @@ impl Inner {
     /// sat exactly on top of it, two identical dialogs nobody could tell apart. Each dialog waits
     /// for the one before it, the "didn't run" notice included, and an action that is no longer
     /// wanted by the time its turn comes is never shown (`ensure_operation_still_allowed`).
-    /// Tells the server this operation's dialog is about to be on screen, and keeps to the
-    /// deadline it answers with: the person's two minutes start now, not when the request was
-    /// queued behind another dialog. A server older than this answers 404, and one that has given
-    /// up on the operation answers 404 too; either way the operation keeps the time it had.
-    fn report_prompt_shown(&self, operation: &DesktopOperation) {
+    /// Tells the server this operation's dialog is going on screen, beside the dialog rather than
+    /// before it: a server that is slow or gone must not hold the dialog up (Windows takes about two
+    /// seconds to give up on a refused local connection). The answer is kept by
+    /// `keep_shown_deadline` once the person has answered, before the time is checked: the
+    /// person's two minutes start as the dialog shows, not when the request was queued behind
+    /// another. A server older than this answers 404, and one that has given up on the operation
+    /// answers 404 too; either way the operation keeps the time it had.
+    fn report_prompt_shown(&self, operation: &DesktopOperation) -> PromptShown {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Shown {
             expires_at: u64,
         }
         let url = endpoint(&self.config.base_url, "/api/host-access/desktop/shown");
-        let sent = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .and_then(|client| {
-                client
-                    .post(url)
-                    .bearer_auth(&self.config.token)
-                    .json(&serde_json::json!({ "operationId": operation.operation_id }))
-                    .send()
-            });
-        match sent {
-            Ok(response) if response.status().is_success() => match response.json::<Shown>() {
-                Ok(shown) => {
-                    self.shown_deadlines
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .insert(operation.operation_id.clone(), u128::from(shown.expires_at));
+        let token = self.config.token.clone();
+        let operation_id = operation.operation_id.clone();
+        let worker_operation_id = operation_id.clone();
+        let deadline = thread::Builder::new()
+            .name("openbot-host-shown".into())
+            .spawn(move || {
+                let operation_id = worker_operation_id;
+                let sent = Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .and_then(|client| {
+                        client
+                            .post(url)
+                            .bearer_auth(token)
+                            .json(&serde_json::json!({ "operationId": operation_id }))
+                            .send()
+                    });
+                match sent {
+                    Ok(response) if response.status().is_success() => {
+                        match response.json::<Shown>() {
+                            Ok(shown) => Some(shown.expires_at),
+                            Err(error) => {
+                                log::warn!("[host access] operation {operation_id} shown, but the deadline could not be read: {error}");
+                                None
+                            }
+                        }
+                    }
+                    Ok(response) => {
+                        log::info!(
+                            "[host access] operation {operation_id} shown; the server kept its time ({})",
+                            response.status()
+                        );
+                        None
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[host access] operation {operation_id} shown; could not tell the server: {error}"
+                        );
+                        None
+                    }
                 }
-                Err(error) => log::warn!(
-                    "[host access] operation {} shown, but the deadline could not be read: {error}",
-                    operation.operation_id
-                ),
-            },
-            Ok(response) => log::info!(
-                "[host access] operation {} shown; the server kept its time ({})",
-                operation.operation_id,
-                response.status()
-            ),
-            Err(error) => log::warn!(
-                "[host access] operation {} shown; could not tell the server: {error}",
-                operation.operation_id
-            ),
+            })
+            .ok();
+        PromptShown {
+            operation_id,
+            deadline,
         }
+    }
+
+    /// Keeps to the deadline the server answered `report_prompt_shown` with, if it answered one.
+    fn keep_shown_deadline(&self, shown: PromptShown) {
+        let Some(deadline) = shown
+            .deadline
+            .and_then(|worker| worker.join().ok().flatten())
+        else {
+            return;
+        };
+        self.shown_deadlines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(shown.operation_id, u128::from(deadline));
     }
 
     fn prompt_turn(&self) -> std::sync::MutexGuard<'_, ()> {
@@ -3470,13 +3514,12 @@ mod tests {
         }
     }
 
-    /// Records what the server had been told by the time the dialog went up, then is declined.
-    struct SeesServerOnAsk {
-        seen: Arc<Mutex<Vec<(String, String)>>>,
-        seen_on_ask: Mutex<Option<Vec<(String, String)>>>,
+    /// Notes when its command dialog went up, then is declined.
+    struct NotesWhenAsked {
+        asked_at: Mutex<Option<Instant>>,
     }
 
-    impl HostApprovalUi for SeesServerOnAsk {
+    impl HostApprovalUi for NotesWhenAsked {
         fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
             unreachable!("only commands are asked about here")
         }
@@ -3484,7 +3527,7 @@ mod tests {
             unreachable!("only commands are asked about here")
         }
         fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
-            *self.seen_on_ask.lock().unwrap() = Some(self.seen.lock().unwrap().clone());
+            *self.asked_at.lock().unwrap() = Some(Instant::now());
             Err(HostAccessError::Denied(
                 "Declined in OpenBot Desktop.".into(),
             ))
@@ -3499,9 +3542,8 @@ mod tests {
     #[test]
     fn the_server_is_told_as_a_dialog_goes_on_screen() {
         let server = ShownServer::start(404, r#"{"error":"old server"}"#.into());
-        let approval = Arc::new(SeesServerOnAsk {
-            seen: server.seen.clone(),
-            seen_on_ask: Mutex::new(None),
+        let approval = Arc::new(NotesWhenAsked {
+            asked_at: Mutex::new(None),
         });
         let inner = shown_inner(&server.base_url, approval.clone());
         let deadline = u64::try_from(now_millis()).unwrap() + 60_000;
@@ -3514,11 +3556,36 @@ mod tests {
             public_error_message(&refused, &inner.config),
             "Declined in OpenBot Desktop."
         );
-        let told = approval.seen_on_ask.lock().unwrap().clone().unwrap();
+        let told = server.seen.lock().unwrap().clone();
         assert_eq!(told.len(), 1, "{told:?}");
         assert_eq!(told[0].0, "/api/host-access/desktop/shown");
         let body: serde_json::Value = serde_json::from_str(&told[0].1).unwrap();
         assert_eq!(body["operationId"], "op-shown");
+    }
+
+    /*
+     * FOUND ON WINDOWS CI: telling the server before showing the dialog held the dialog up for as
+     * long as the server took to answer, about two seconds where nothing listens (Windows retries a
+     * refused local connection). A server that never answers must not hold up the person.
+     */
+    #[test]
+    fn a_server_that_does_not_answer_does_not_hold_up_the_dialog() {
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", silent.local_addr().unwrap());
+        let approval = Arc::new(NotesWhenAsked {
+            asked_at: Mutex::new(None),
+        });
+        let inner = shown_inner(&base_url, approval.clone());
+        let deadline = u64::try_from(now_millis()).unwrap() + 60_000;
+
+        let started = Instant::now();
+        let _ = inner.handle_operation(&shown_command("op-silent", deadline));
+        let asked_after = approval.asked_at.lock().unwrap().unwrap() - started;
+        assert!(
+            asked_after < Duration::from_millis(500),
+            "the dialog waited {asked_after:?} for the server"
+        );
+        drop(silent);
     }
 
     #[test]
@@ -3530,7 +3597,7 @@ mod tests {
         let server = ShownServer::start(200, format!(r#"{{"expiresAt":{later}}}"#));
         let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
         let operation = shown_command("op-new-time", soon());
-        inner.report_prompt_shown(&operation);
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
         thread::sleep(Duration::from_millis(120));
         assert!(!inner.operation_expired(&operation));
 
@@ -3538,14 +3605,14 @@ mod tests {
         let server = ShownServer::start(404, r#"{"error":"not waiting"}"#.into());
         let inner = shown_inner(&server.base_url, Arc::new(DenyAllApprovalUi));
         let operation = shown_command("op-old-server", soon());
-        inner.report_prompt_shown(&operation);
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
         thread::sleep(Duration::from_millis(120));
         assert!(inner.operation_expired(&operation));
 
         // A server nobody answers for: the same, and nothing breaks.
         let inner = shown_inner("http://127.0.0.1:9", Arc::new(DenyAllApprovalUi));
         let operation = shown_command("op-no-server", soon());
-        inner.report_prompt_shown(&operation);
+        inner.keep_shown_deadline(inner.report_prompt_shown(&operation));
         thread::sleep(Duration::from_millis(120));
         assert!(inner.operation_expired(&operation));
     }
