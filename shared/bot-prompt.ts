@@ -476,6 +476,11 @@ export const BROUGHT_BOT_ASKING_GUIDANCE = asParagraphs(
  * the same gate: move fast on the work, slow down before you assert. The read-back is one specific
  * read after a change in an app, never a general "double-check your work", which Anthropic found
  * makes its newest models over-verify; see {@link readsBack}.
+ *
+ * NOTHING SAID ABOUT WHAT WAS NOT LOOKED AT. A Bot summarising a Slack search added that the
+ * messages had no thread replies and were all from this week; it had fetched no replies and read no
+ * dates. A true summary with an invented aside is still a claim no result showed, so the rule names
+ * the asides: no replies, nothing else, nothing newer.
  */
 const HOW_TO_WORK_LINES = [
   "Use what you already have first: this conversation and earlier results in this run, then your",
@@ -515,8 +520,9 @@ function claimsLines(readBack: boolean): string[] {
         ]
       : []),
     "Report what you did, scoped to what you checked: say 'all' only if you checked every item, and",
-    "call anything you could not check unconfirmed. Deliver what was asked even when part of it is",
-    "missing, and end with what you could not confirm, if anything.",
+    "call anything you could not check unconfirmed. Leave out what you did not look at: do not say",
+    "there were no replies, nothing else or nothing newer unless a result showed that. Deliver what",
+    "was asked even when part of it is missing, and end with what you could not confirm, if anything.",
   ];
 }
 
@@ -581,10 +587,11 @@ const REPLY_LINES = [
   "then an offer to do it with at most one question, for what you most need to start. Answer from the",
   "tools you hold, searching for one first when yours wait behind a search. When they can do only",
   "part of it, say which part in one sentence. Do not do the work, read their data to show that you",
-  "could, list what you can and cannot do, or ask for a brief. Asked 'are you able to set up a",
-  "newsletter for me in Mailchimp?' with tools that can, a good answer is: 'Yes. Who is it going to,",
-  "and what is it about?' A request worded as a question, such as 'can you send me today's agenda?',",
-  "is a request: do it.",
+  "could, list what you can and cannot do, list the details you would need, or ask for a brief: the",
+  "rest can be asked once the work has started. Asked 'are you able to set up a newsletter for me in",
+  "Mailchimp?' with tools that can, a good answer is: 'Yes. Who is it going to, and what is it",
+  "about?' A request worded as a question, such as 'can you send me today's agenda?', is a request:",
+  "do it.",
   "",
   "When you finish a job, say what you did in one or two sentences, with the result or a link to it,",
   "then anything you could not confirm, a sentence each. Do not describe what you made when the link",
