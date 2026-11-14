@@ -330,7 +330,7 @@ function RouteComponent() {
    * EXCEPT THE ONES THAT NEED NO ACCOUNT, WHICH IS THE SAME RULE THE `user-oauth` FILTER ABOVE IS.
    * That one keeps out a vendor with a shared token because it "has nothing for you to decide"; a
    * Composio `NO_AUTH` app has exactly as little, one layer further in. There is no account to make:
-   * `/servers/:id/connect` refuses to create one and the call gate lets it through with no row, so
+   * connectApp refuses to create one and the call gate lets it through with no row, so
    * a row for it here can never turn green. What an admin enabling Hacker News put on every
    * person's page was a permanently grey "Not connected" that reads as an unfinished task, opening
    * a page that says the app needs no account and draws no button — the list and the page it opens
@@ -485,7 +485,7 @@ function RouteComponent() {
       <PageSection>
         {/*
          * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
-         * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
+         * listConnections that failed would leave the `connected` set empty and every row
          * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
          * nothing is listed rather than a list that may be wrong.
          */}

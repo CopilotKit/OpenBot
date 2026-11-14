@@ -26,6 +26,7 @@ import {
   pluginKeys,
 } from "@/lib/plugins/queries";
 import { settleReactWork } from "./settle-react-work";
+import { connectionPage, MY_CONNECTIONS_PATH } from "./connections-api";
 
 /*
  * An app's page in the personal edition is read by the one person running OpenBot on their own
@@ -52,8 +53,8 @@ beforeAll(() => {
     async (input: RequestInfo | URL) => {
       const path = String(input).split("?")[0] ?? "";
       if (served && path === "/api/plugins") return Response.json(served.page);
-      if (served && path === "/api/plugins/connections")
-        return Response.json({ connections: served.connections });
+      if (served && path === MY_CONNECTIONS_PATH)
+        return connectionPage(served.connections);
       return Response.json({ error: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

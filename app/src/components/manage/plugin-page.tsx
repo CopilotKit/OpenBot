@@ -76,6 +76,7 @@ import {
   personalConnections,
   pluginsPageQueryOptions,
   pluginsProvider,
+  sharedConnectionQueryOptions,
 } from "@/lib/plugins/queries";
 import {
   botSharedAppsQueryOptions,
@@ -215,7 +216,7 @@ export function connectionKindFor(
 /**
  * A row whose whole content is connection state, standing in for it when it could not be read.
  *
- * DRAWN BY BOTH ROWS THAT READ `/api/plugins/connections` — the brokered account and the
+ * DRAWN BY BOTH ROWS THAT READ listConnections — the brokered account and the
  * `user-oauth` one — because the defaulting they suffer from is the same and so is the honest
  * answer to it. Neither is drawn on a deployment-token server, which has no connection state to
  * fail on.
@@ -289,7 +290,7 @@ export function PluginPage({
   /*
    * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
    *
-   * Nothing read `connections.error` at all, so a 500 from `/api/plugins/connections` degraded an
+   * Nothing read `connections.error` at all, so a 500 from listConnections degraded an
    * account whose last check did not come back clean to "not connected" — dropping the sentence and
    * withdrawing both Re-check and Disconnect — with no error text anywhere on the page.
    *
@@ -462,9 +463,12 @@ export function PluginPage({
    * per the rules of hooks; what changes is which row feeds it.
    */
   const shared = server?.accountMode === "shared";
-  const sharedConnection = (connections.data?.connections ?? []).find(
-    (row) => row.serverId === key && row.holder === "deployment",
-  );
+  // A Shared app's one account, read on its own: a person's connections never carry it.
+  const sharedAccount = useQuery({
+    ...sharedConnectionQueryOptions(key),
+    enabled: shared,
+  });
+  const sharedConnection = shared ? sharedAccount.data : undefined;
   const accountRow = shared ? sharedConnection : connection;
 
   /*
@@ -485,6 +489,7 @@ export function PluginPage({
     // Back to this page afterwards, not to the personal settings screen.
     returnTo: "admin",
     serverId: key,
+    shared,
     /*
      * Absent where this person has never connected the app, and false rather than asserted: with no
      * row there is nothing that could have been checked, which is exactly what the server's own

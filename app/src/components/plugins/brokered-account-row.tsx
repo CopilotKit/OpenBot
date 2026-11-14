@@ -264,6 +264,8 @@ export type BrokeredAccount = {
   rechecking: boolean;
   /** The app this row is about, for the account list beneath it. */
   serverId: string;
+  /** Whether this row is the app's one shared account, which lists no accounts of anybody's own. */
+  shared: boolean;
   /** Whether the last key handed over was taken, which closes the form it was typed into. */
   fieldsSubmitted: boolean;
   /** Leave for the app's sign-in page to add one more account beside the ones connected. */
@@ -321,6 +323,8 @@ export function useBrokeredAccount(input: {
   reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
+  /** Whether the account is the app's one shared account rather than the person's own. */
+  shared?: boolean;
   /**
    * Where this row's failures go: the screen's own banner.
    *
@@ -341,6 +345,7 @@ export function useBrokeredAccount(input: {
     report,
     returnTo,
     serverId,
+    shared = false,
     verified,
     verifiedAt,
   } = input;
@@ -363,7 +368,7 @@ export function useBrokeredAccount(input: {
    * that ends in the one state this row has a sentence for anyway.
    */
   const confirmation = useMutation(
-    confirmBrokeredConnectionMutationOptions(queryClient),
+    confirmBrokeredConnectionMutationOptions(queryClient, shared),
   );
   const confirmAccount = confirmation.mutate;
   /*
@@ -421,7 +426,7 @@ export function useBrokeredAccount(input: {
    * So the row says when it last checked, and the person decides when to check again.
    */
   const recheck = useMutation({
-    ...recheckBrokeredConnectionMutationOptions(queryClient),
+    ...recheckBrokeredConnectionMutationOptions(queryClient, shared),
     onError: (thrown: Error) =>
       report(readableRefusal(thrown.message, RECHECK_FAILED)),
   });
@@ -443,7 +448,7 @@ export function useBrokeredAccount(input: {
   const forgetRecheck = recheck.reset;
 
   const connect = useMutation({
-    ...connectAccountMutationOptions(returnTo),
+    ...connectAccountMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
@@ -526,7 +531,7 @@ export function useBrokeredAccount(input: {
    * `onSettled` here, where it WOULD shadow the refetch.
    */
   const disconnect = useMutation({
-    ...disconnectBrokeredMutationOptions(queryClient),
+    ...disconnectBrokeredMutationOptions(queryClient, shared),
     onError: (thrown: Error) => {
       report(thrown.message);
       forgetAnswers();
@@ -543,7 +548,7 @@ export function useBrokeredAccount(input: {
    * vendor's published list, which is metadata about the app and nobody's secret.
    */
   const fieldsRequest = useMutation({
-    ...brokeredConnectionFieldsMutationOptions(),
+    ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
   });
 
@@ -591,7 +596,7 @@ export function useBrokeredAccount(input: {
    * guaranteed to be refused, and withholds the Re-check and Disconnect buttons the sentence names.
    */
   const submission = useMutation({
-    ...connectBrokeredWithFieldsMutationOptions(queryClient),
+    ...connectBrokeredWithFieldsMutationOptions(queryClient, returnTo, shared),
     onError: (thrown: Error) => {
       report(readableRefusal(thrown.message, KEY_CHECK_FAILED));
       forgetAnswers();
@@ -779,6 +784,7 @@ export function useBrokeredAccount(input: {
     submittingFields: submission.isPending,
     submissionError: submission.error?.message ?? null,
     serverId,
+    shared,
     fieldsSubmitted: submission.isSuccess,
     connectAnother: () => {
       report(null);
@@ -1152,7 +1158,10 @@ export function BrokeredAccountRow({
   const listing = useQuery({
     ...brokeredAccountsQueryOptions(account.serverId),
     enabled:
-      account.configured && account.connected && account.kind !== "no-auth",
+      account.configured &&
+      account.connected &&
+      account.kind !== "no-auth" &&
+      !account.shared,
   });
   const accounts =
     account.connected && !listing.isPending && !listing.error && listing.data

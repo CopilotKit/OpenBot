@@ -1,6 +1,23 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
-import { desktopConsentQuery } from "@/lib/desktop/shell";
+import {
+  confirmConnection,
+  confirmSharedConnection,
+  connectApp,
+  connectSharedApp,
+  disconnectApp,
+  disconnectConnectedAccount,
+  disconnectSharedApp,
+  makeConnectedAccountDefault,
+  recheckConnection,
+  recheckSharedConnection,
+} from "@/lib/api/generated/connections/connections";
+import type {
+  ConnectionStart as ApiConnectionStart,
+  ConnectAppRequest,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError, client, tryClient } from "@/lib/client";
+import { desktopShell } from "@/lib/desktop/shell";
 import { type PluginServer, pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
 
@@ -72,7 +89,7 @@ const FALLBACK = "That didn't work. Try again.";
  * `POST /composio/apps` creates the authorization config at Composio, writes the row, and says so in
  * its own 409. `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each
  * commit and then file the trail row, and a failing audit insert is a 500 over a change that
- * happened. `DELETE /servers/:id/connection` revokes the account at the vendor before it deletes
+ * happened. disconnectApp revokes the account at the vendor before it deletes
  * anything here. And the two brokered writes the screens draw hardest on raise from inside the
  * store AFTER recording what they found: `recheckBrokeredConnection` writes the verdict and the
  * action it spent and then raises with Composio's refusal, and `connectBrokeredWithFields` records
@@ -509,10 +526,17 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  */
 export function connectAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
+  shared = false,
 ) {
   return mutationOptions({
-    mutationFn: (serverId: string): Promise<ConnectStart> =>
-      startConnect(serverId, returnTo, false),
+    mutationFn: async (serverId: string): Promise<ConnectStart> =>
+      startOf(
+        await startConnect(serverId, {
+          returnTo,
+          shared,
+          fallback: "Couldn't connect that account.",
+        }),
+      ),
   });
 }
 
@@ -525,34 +549,63 @@ export function connectAnotherAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
 ) {
   return mutationOptions({
-    mutationFn: (serverId: string): Promise<ConnectStart> =>
-      startConnect(serverId, returnTo, true),
+    mutationFn: async (serverId: string): Promise<ConnectStart> =>
+      startOf(
+        await startConnect(serverId, {
+          returnTo,
+          another: true,
+          fallback: "Couldn't connect that account.",
+        }),
+      ),
   });
 }
 
-async function startConnect(
+/**
+ * One press of Connect, at the person's own connection or, for a Shared app, the app's shared one.
+ * Where the person comes back to is one of OpenBot's own pages: the app's page for admins, the
+ * person's connection page, or OpenBot Desktop when the press came from its window.
+ */
+function startConnect(
   serverId: string,
-  returnTo: "settings" | "admin",
-  another: boolean,
-): Promise<ConnectStart> {
-  const fallback = "Couldn't connect that account.";
-  const response = await client(
-    `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}${another ? "&another=1" : ""}${desktopConsentQuery()}`,
-    { method: "POST", fallback },
-  );
-  // Read as `client` reads an envelope: a body that is not an object is a failed request.
-  const body = (await response.json().catch(() => null)) as unknown;
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error(fallback);
-  }
-  const answer = body as {
-    authorizationUrl?: unknown;
-    connected?: unknown;
+  press: {
+    returnTo: "settings" | "admin";
+    fallback: string;
+    shared?: boolean;
+    another?: boolean;
+    values?: Record<string, string>;
+  },
+): Promise<ApiConnectionStart> {
+  const headers = { "Idempotency-Key": idempotencyKey() };
+  const options = { fallback: press.fallback };
+  if (press.shared)
+    return connectSharedApp(
+      ORGANIZATION_ID,
+      serverId,
+      {
+        returnTo: desktopShell() ? "desktop" : "apps",
+        ...(press.values ? { values: press.values } : {}),
+      },
+      headers,
+      options,
+    );
+  const body: ConnectAppRequest = {
+    returnTo: desktopShell()
+      ? "desktop"
+      : press.returnTo === "admin"
+        ? "apps"
+        : "connections",
+    ...(press.another ? { anotherAccount: true } : {}),
+    ...(press.values ? { values: press.values } : {}),
   };
-  if (answer.connected === true) return { connected: true };
-  return typeof answer.authorizationUrl === "string"
-    ? { authorizationUrl: answer.authorizationUrl }
-    : null;
+  return connectApp(ORGANIZATION_ID, "me", serverId, body, headers, options);
+}
+
+/** A sign-in page to visit, an account already connected, or `null` for a key form. */
+function startOf(start: ApiConnectionStart): ConnectStart {
+  if (start.next === "connected") return { connected: true };
+  if (start.next === "consent")
+    return { authorizationUrl: start.authorizationUrl };
+  return null;
 }
 
 /**
@@ -594,16 +647,44 @@ export type BrokeredConnectionConfirmation = { connected: boolean };
  */
 export function confirmBrokeredConnectionMutationOptions(
   queryClient: QueryClient,
+  shared?: boolean,
 ) {
   return mutationOptions({
     mutationFn: async (
       serverId: string,
     ): Promise<BrokeredConnectionConfirmation> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/confirm`,
-        { method: "POST", fallback: "Couldn't confirm that connection." },
-      );
-      return response.json();
+      const options = { fallback: "Couldn't confirm that connection." };
+      const confirmShared = () =>
+        confirmSharedConnection(
+          ORGANIZATION_ID,
+          serverId,
+          { "Idempotency-Key": idempotencyKey() },
+          options,
+        );
+      if (shared) return confirmShared();
+      try {
+        return await confirmConnection(
+          ORGANIZATION_ID,
+          "me",
+          serverId,
+          { "Idempotency-Key": idempotencyKey() },
+          options,
+        );
+      } catch (error) {
+        /*
+         * The page a consent lands back on (`/desktop-return`) knows the app and not whose account
+         * it was: a person's own connection refuses an app with one shared account as a conflict,
+         * and that account is then the one to confirm. A caller that knows says so.
+         */
+        if (
+          shared === undefined &&
+          error instanceof ClientError &&
+          error.status === 409 &&
+          error.code === "CONFLICT"
+        )
+          return confirmShared();
+        throw error;
+      }
     },
     onSettled: () => invalidatePlugins(queryClient),
   });
@@ -616,16 +697,17 @@ export function confirmBrokeredConnectionMutationOptions(
  * the vendor still holding a live grant on somebody's mailbox, which is not what the person who
  * pressed disconnect was told would happen.
  */
-export function disconnectBrokeredMutationOptions(queryClient: QueryClient) {
+export function disconnectBrokeredMutationOptions(
+  queryClient: QueryClient,
+  shared = false,
+) {
   return mutationOptions({
     mutationFn: async (serverId: string) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection`,
-        {
-          method: "DELETE",
-          fallback: "Couldn't disconnect that account.",
-        },
-      );
+      const headers = { "Idempotency-Key": idempotencyKey() };
+      const options = { fallback: "Couldn't disconnect that account." };
+      await (shared
+        ? disconnectSharedApp(ORGANIZATION_ID, serverId, headers, options)
+        : disconnectApp(ORGANIZATION_ID, "me", serverId, headers, options));
     },
     onSettled: () => invalidatePlugins(queryClient),
   });
@@ -639,9 +721,13 @@ export function setDefaultBrokeredAccountMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (variables: { serverId: string; accountId: string }) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/accounts/${encodeURIComponent(variables.accountId)}/default`,
-        { method: "POST", fallback: ACCOUNT_FALLBACK },
+      await makeConnectedAccountDefault(
+        ORGANIZATION_ID,
+        "me",
+        variables.serverId,
+        variables.accountId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: ACCOUNT_FALLBACK },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),
@@ -657,9 +743,13 @@ export function disconnectBrokeredAccountMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (variables: { serverId: string; accountId: string }) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/accounts/${encodeURIComponent(variables.accountId)}`,
-        { method: "DELETE", fallback: "Couldn't disconnect that account." },
+      await disconnectConnectedAccount(
+        ORGANIZATION_ID,
+        "me",
+        variables.serverId,
+        variables.accountId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't disconnect that account." },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),
@@ -712,21 +802,25 @@ export type BrokerField = {
  * `null` for the reason spelled out over {@link connectAccountMutationOptions}: an `undefined` in
  * this position is inferred away by `useMutation` and reaches the caller as a plain `BrokerField[]`.
  */
-export function brokeredConnectionFieldsMutationOptions() {
+export function brokeredConnectionFieldsMutationOptions(
+  returnTo: "settings" | "admin" = "settings",
+  shared = false,
+) {
   return mutationOptions({
     mutationFn: async (serverId: string): Promise<KeyForm | null> => {
-      const fallback = "Couldn't find out what this app needs.";
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect`,
-        { method: "POST", fallback },
-      );
-      const body = (await response.json().catch(() => null)) as {
-        fields?: BrokerField[];
-        guide?: KeyGuide;
-      } | null;
-      if (!body || typeof body !== "object") throw new Error(fallback);
-      if (!body.fields) return null;
-      return { fields: body.fields, guide: body.guide ?? null };
+      const start = await startConnect(serverId, {
+        returnTo,
+        shared,
+        fallback: "Couldn't find out what this app needs.",
+      });
+      if (start.next !== "form") return null;
+      return {
+        // The form a person fills in: no default reads as no key at all, as it always has.
+        fields: start.fields.map(({ default: seeded, ...field }) =>
+          seeded === null ? field : { ...field, default: seeded },
+        ),
+        guide: start.guide,
+      };
     },
   });
 }
@@ -783,6 +877,8 @@ export type BrokeredKeyConnection = {
  */
 export function connectBrokeredWithFieldsMutationOptions(
   queryClient: QueryClient,
+  returnTo: "settings" | "admin" = "settings",
+  shared = false,
 ) {
   return mutationOptions({
     mutationFn: async (variables: {
@@ -790,15 +886,19 @@ export function connectBrokeredWithFieldsMutationOptions(
       values: Record<string, string>;
     }): Promise<BrokeredKeyConnection> => {
       try {
-        const response = await client(
-          `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/connect`,
-          {
-            method: "POST",
-            body: { values: variables.values },
-            fallback: "Couldn't connect that account.",
-          },
-        );
-        return response.json();
+        const start = await startConnect(variables.serverId, {
+          returnTo,
+          shared,
+          values: variables.values,
+          fallback: "Couldn't connect that account.",
+        });
+        return start.next === "connected"
+          ? {
+              connected: true,
+              verified: start.verified === true,
+              probe: start.checkedAction,
+            }
+          : { connected: false, verified: false, probe: null };
       } finally {
         // Taken or refused, the request is over and this copy has nothing left to do.
         variables.values = {};
@@ -842,14 +942,31 @@ export type BrokeredKeyCheck = {
  */
 export function recheckBrokeredConnectionMutationOptions(
   queryClient: QueryClient,
+  shared = false,
 ) {
   return mutationOptions({
     mutationFn: async (serverId: string): Promise<BrokeredKeyCheck> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/recheck`,
-        { method: "POST", fallback: "Couldn't check that connection." },
-      );
-      return response.json();
+      const headers = { "Idempotency-Key": idempotencyKey() };
+      const options = { fallback: "Couldn't check that connection." };
+      const check = shared
+        ? await recheckSharedConnection(
+            ORGANIZATION_ID,
+            serverId,
+            headers,
+            options,
+          )
+        : await recheckConnection(
+            ORGANIZATION_ID,
+            "me",
+            serverId,
+            headers,
+            options,
+          );
+      return {
+        verified: check.verified,
+        verifiedAt: check.verifiedAt,
+        probe: check.checkedAction,
+      };
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

@@ -28,6 +28,12 @@ import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 
 /**
  * ONE PRESS ON THE CHAT CARD, IN THE DESKTOP, FOR AN APP NOBODY HAS TURNED ON.
@@ -145,14 +151,11 @@ function serving(before: AppAccess, signIn: Promise<void>) {
         granted: ["composio-gmail/GMAIL_FETCH_EMAILS"],
       });
     }
-    if (
-      url === "/api/plugins/servers/composio-gmail/connect?returnTo=settings"
-    ) {
+    if (url === myConnectionPath("composio-gmail", "connect")) {
       await signIn;
-      return Response.json({ authorizationUrl: CONSENT });
+      return startResponse({ authorizationUrl: CONSENT });
     }
-    if (url.startsWith("/api/plugins/connections"))
-      return Response.json({ connections: [], redirectUri: null });
+    if (url.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
     return Response.json({});
   }) as unknown as typeof fetch;
   return writes;
@@ -226,7 +229,7 @@ test.each([
     await waitFor(() => expect(browser).toEqual([CONSENT]), { timeout: 3_000 });
     expect(writes).toEqual([
       "POST /api/plugins/for/assistant/apps/composio-gmail/approve",
-      "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
+      `POST ${myConnectionPath("composio-gmail", "connect")}`,
     ]);
     // And it says what it is doing while the person signs in.
     await view.findByText("Finish in the tab that opened.");

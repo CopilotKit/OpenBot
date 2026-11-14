@@ -44,7 +44,7 @@ const REASONS: readonly ConnectReason[] = [
 export type ConnectPrompt = {
   /**
    * The app, as the server names it: the plugin server to connect, as
-   * `POST /api/plugins/servers/:serverId/connect` names it, or the key an app nobody enabled would
+   * connectApp names it, or the key an app nobody enabled would
    * have. What the card asks `GET /api/plugins/for/:agentId/apps/:app` about.
    */
   serverId: string;

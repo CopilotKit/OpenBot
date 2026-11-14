@@ -131,7 +131,7 @@ function renderAccount(composioConfigured: boolean) {
     // Composio's answer: its auth config fixes one state for a whole toolkit.
     authorizesPerAction: false,
   };
-  const connections: PluginConnections = { connections: [], redirectUri: null };
+  const connections: PluginConnections = { connections: [] };
   client.setQueryData(pluginKeys.page(), page);
   client.setQueryData(pluginKeys.connections(), connections);
 

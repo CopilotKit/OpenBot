@@ -82,9 +82,7 @@ describe("Settings for a Shared app", () => {
       </QueryClientProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(
-      asked.filter((path) => path.endsWith("/connection/confirm")),
-    ).toEqual([]);
+    expect(asked.filter((path) => path.endsWith("/confirm"))).toEqual([]);
     global.fetch = originalFetch;
   });
 });

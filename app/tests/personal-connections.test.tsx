@@ -31,6 +31,12 @@ import { Route as ConnectionRoute } from "@/routes/_authed/_app/connections.$key
 import { Route as ConnectionsRoute } from "@/routes/_authed/_app/connections.index";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -134,19 +140,23 @@ beforeEach(() => {
           servers = [...servers, server(key)];
         }
         if (path.endsWith("/connect"))
-          return Response.json({ connected: true });
+          return startResponse({ connected: true });
         return Response.json({ ok: true });
       }
       if (failing.has(path))
         return Response.json({ error: "Server error" }, { status: 500 });
       if (path === "/api/plugins") return Response.json(page());
-      if (path === "/api/plugins/connections")
-        return Response.json({
-          connections: connected.map((serverId) => ({
-            serverId,
-            status: "connected",
-          })),
-        });
+      // One connection a page, so a screen that read only the first page would miss the rest.
+      if (path === MY_CONNECTIONS_PATH) {
+        const at = Number(
+          new URL(String(input), "http://t").searchParams.get("cursor") ?? "0",
+        );
+        const rest = connected.slice(at + 1);
+        return connectionPage(
+          connected.slice(at, at + 1).map((serverId) => ({ serverId })),
+          rest.length > 0 ? String(at + 1) : null,
+        );
+      }
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -304,7 +314,7 @@ describe("Connections in the personal edition", () => {
     const { view, user } = draw("personal");
     await user.click(await view.findByTestId("account-notion"));
     await waitFor(() =>
-      expect(writes).toEqual(["POST /api/plugins/servers/notion/connect"]),
+      expect(writes).toEqual([`POST ${myConnectionPath("notion", "connect")}`]),
     );
   });
 
@@ -333,6 +343,18 @@ describe("Connections in the personal edition", () => {
       expect(history.location.pathname).toBe("/connections/exa-authenticated"),
     );
     expect(writes).toEqual([]);
+  });
+
+  test("every connection is read, whichever page it is on", async () => {
+    servers = [server("notion"), server("google-drive")];
+    connected = ["notion", "google-drive"];
+    const { view } = draw("personal");
+    await waitFor(() =>
+      expect(within(tile(view, "notion")).getByText("Connected")).toBeTruthy(),
+    );
+    expect(
+      within(tile(view, "google-drive")).getByText("Connected"),
+    ).toBeTruthy();
   });
 
   test("a connected app opens its page, to choose which Bots use it", async () => {
@@ -488,7 +510,7 @@ describe("when Connections can't list apps", () => {
   });
 
   test("a failed read in the team edition keeps the admin guidance, with Retry and no Setup link", async () => {
-    failing = new Set(["/api/plugins/connections"]);
+    failing = new Set([MY_CONNECTIONS_PATH]);
     const { view } = draw("team", "/connections", { fetchApps: true });
     const alert = await appsAlert(view);
     expect(alert.textContent).toBe(
