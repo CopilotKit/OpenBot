@@ -37,12 +37,29 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * in a web shop's order form itself, until the person told it to hand the work off. So the kinds of
  * work that go to a task are listed, the ask the person makes is never needed, and the line comes
  * before the call, which is the order the person reads them in.
+ *
+ * ONLY WHAT THE PERSON ASKED FOR. "Hand everything else to a task, without waiting to be asked to"
+ * read as leave to start work: asked "are you able to build a sequence in Smartlead?", a Bot said
+ * yes and started a task that read the person's campaigns, which nobody had asked for. So the work
+ * handed off is the work the person asked for, and a question about whether the Bot can is named
+ * as a short ask: an answer and an offer.
+ *
+ * THE LINE IS WHAT THE WORK TAKES, NOT HOW BIG IT LOOKS. "With no tools or one quick read" left the
+ * size of an ask to the model's judgement, and Claude Sonnet 5.5 judged a chart of four figures
+ * and a sheet with a total small enough to do itself, three runs of three each, while GPT-6.1
+ * handed both off. So the line is drawn at the work itself: an app's tool, a computer, a search,
+ * or something made for the person is a task's, however small.
+ *
+ * WHAT IS ABOUT THE CONVERSATION STAYS IN IT. Asked for a routine or a follow-up, a Bot handed that
+ * to a task too. The routine then posted into the task's thread, which the person never opens, and
+ * the follow-up was refused there. A routine, a follow-up and a goal belong to the conversation they
+ * are asked for in, so the Bot sets them up in its own reply.
  */
 export const DELEGATING_GUIDANCE = [
-  `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and real work runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:`,
-  "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, with no tools or one quick read. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
+  `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:`,
+  "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, without a tool of an app, a computer or a search. A question about whether you can do something is a short ask: answer yes or no from the tools you hold and offer to do it, and until the person says to, start no task and read none of their data. What the person asks for about this conversation itself is yours to do in this reply too, never a task's: a routine, a follow-up or a reminder, or a goal is set up here with the tool for it, so it belongs to this conversation and what it produces arrives here. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
   `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer, so write nothing at all, not even the emoji. Never react to a message you answer or hand to a task.`,
-  `- Hand everything else to a task with ${DELEGATE_TOOL}, without waiting to be asked to: making something (a chart with a summary, a report, a plan, a document), working through figures, research, reading or browsing, a comparison, anything in an app or on a website, and every action such as an order, a purchase, a booking or a message. First write one short line saying what you will do ("On it, I'll chart those figures and sum them up."), then call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own: every figure, name, link and constraint from this conversation the work needs. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits. Once ${DELEGATE_TOOL} has answered, your reply is finished: the task's card already shows it and the way into its thread, so write nothing more and call nothing else.`,
+  `- Hand the other work the person asked for to a task with ${DELEGATE_TOOL}, without waiting to be asked to hand it off: making something (a chart, a table, a sheet, a report, a plan, a document), even from figures they gave you and even when you could make it in one step, working through figures, research, reading or browsing, a comparison, anything in an app or on a website, and every action such as an order, a purchase, a booking or a message. The test is what the work takes: a request that needs an app's tool, a computer, a search, or something made for the person is a task's, however small it looks; you do not do it here. Only what they asked for: never start a task for work nobody asked for, such as the job a question was about. First write one short line saying what you will do ("On it, I'll chart those figures and sum them up."), then call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own: every figure, name, link and constraint from this conversation the work needs. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits. Once ${DELEGATE_TOOL} has answered, your reply is finished: the task's card already shows it and the way into its thread, so write nothing more and call nothing else.`,
   `Only when the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link as a Markdown link, exactly as it comes back.`,
 ].join("\n\n");
 
@@ -172,13 +189,45 @@ export function readTaskReport(
 /**
  * The words in front of the brief, in the task thread's first message.
  *
- * Addressed to the model doing the work: it is in a thread of its own, and its answer is what the
- * person reads back in the conversation that asked, whole, with any component it draws. So it is
- * asked to lead with the result and to draw components as it would in that conversation, never to
- * write plainer because the work moved.
+ * Addressed to the model doing the work: it is in a thread of its own, and what it says last is
+ * what the person reads back in the conversation that asked, with any component it draws. So it is
+ * asked to draw components as it would in that conversation, never to write plainer because the
+ * work moved, and told what that last message is.
+ *
+ * THE REPORT IS THE RESULT, NOT THE WORKING. Told only to lead with the result, tasks came back with
+ * an account of themselves: "I checked the full message thread", "I resolved the channel and
+ * selected Alex Clarke because", 229 words for three facts. The person asked a question in one
+ * conversation and the working is in another, which they can open; what comes back is the answer,
+ * the size the question was.
+ *
+ * AND IT STANDS ON ITS OWN. Asked what changed in a contract, a task read the right email and
+ * reported that "the substantive changes are clear" without saying them. The person reads the
+ * conversation, not the task's thread, so the facts, figures and quotes they asked for are in the
+ * report itself.
+ *
+ * THE WORDS STILL SAY IT WHEN A CARD SHOWS IT. With "say in words what it shows" gone from the
+ * brief, a task drew a record card holding both contract changes and reported one line, "Source: I
+ * checked Gmail". A component goes with the answer's words, as it does in a direct answer.
+ *
+ * A COMPONENT IS A STEP OF ITS OWN, BEFORE THE WORDS. "Your words first" had a model write its
+ * summary and then the record card's call in the same message, as text: the card's JSON, after a
+ * few stray characters, in the person's conversation. Called on its own before the answer, it is a
+ * call. The conversation draws the words above it either way.
+ *
+ * NAMES, NOT IDS. A task that posted in Slack quoted its message back with the mention as Slack
+ * stores it, `<@U0E2EALEX0>`.
  */
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
+  "When the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, as you always do: call the component in a step of its own, once the results it shows have come back and before you write your answer. Never write out what a component already shows: no Markdown table or list of the same rows beside it, and never a component's data as text.",
+  "Your last message is your report. It alone is posted back in that conversation, with the components you drew; everything you say before it stays in this thread, where the person can open it. The person reads that conversation, not this thread, so the report must stand on its own: give the answer itself in words, with the facts, figures, dates and quotes they asked for, never only that you found them. A component goes with those words, never in place of them: when you drew one, say in a sentence or two what it shows and what stands out. Size it to the question: what you found, or what you did and its link, in a sentence or two when the ask was simple, then anything you could not confirm, a sentence each. Leave out how you got there: no account of what you searched, read, checked, resolved or chose, no list of steps, and no offer of more work.",
+  "Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'. Name people and channels the way the person would, never by an app's id or its markup for one.",
+  "The task:",
+];
+
+/** The frame before a task's report was told to be the result alone, with a component drawn first. */
+const WHOLE_ANSWER_FRAME = [
+  BRIEF_FRAME[0],
   "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.",
   "Lead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are, your words first; what you say while you work stays in this thread. Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'.",
   "The task:",
@@ -193,22 +242,29 @@ const POSTED_BACK =
  * still reads as the Bot's brief. First the answer's opening sentences were all that came back; then
  * the answer came back whole; then a component's rows were no longer to be written out again beside
  * it; then the answer was asked not to name the brief ("not the 25.8% in the brief") or say a chart
- * was "above" when the conversation draws it below the words.
+ * was "above" when the conversation draws it below the words; then the report was asked to be the
+ * result alone, standing on its own.
  */
 const BRIEF_PREFIXES = [
   BRIEF_FRAME,
-  [BRIEF_FRAME[0], BRIEF_FRAME[1], POSTED_BACK, BRIEF_FRAME[3]],
+  WHOLE_ANSWER_FRAME,
   [
-    BRIEF_FRAME[0],
-    "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
+    WHOLE_ANSWER_FRAME[0],
+    WHOLE_ANSWER_FRAME[1],
     POSTED_BACK,
-    BRIEF_FRAME[3],
+    WHOLE_ANSWER_FRAME[3],
   ],
   [
-    BRIEF_FRAME[0],
+    WHOLE_ANSWER_FRAME[0],
+    "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out, and say in words what it shows and what stands out.",
+    POSTED_BACK,
+    WHOLE_ANSWER_FRAME[3],
+  ],
+  [
+    WHOLE_ANSWER_FRAME[0],
     "Answer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component rather than writing it out.",
     "Begin your reply with one or two sentences that give the result and say plainly anything you could not confirm. Those sentences and any components you draw are posted back in that conversation; the rest stays in this thread.",
-    ...BRIEF_FRAME.slice(3),
+    ...WHOLE_ANSWER_FRAME.slice(3),
   ],
 ].map((frame) => [...frame, "", ""].join("\n"));
 
