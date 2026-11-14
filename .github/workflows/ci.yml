@@ -48,8 +48,11 @@ jobs:
         run: bun desktop/scripts/desktop-version.ts check
 
   # The API contract. api/openapi.yaml is the single source of truth every client is generated from,
-  # so three things are checked about it, each its own step so a red run names which:
+  # so four things are checked about it, each its own step so a red run names which:
   #
+  # - it is what its sources bundle to: each area's operations live in api/openapi/<area>.yaml and the
+  #   shared conventions in api/openapi/common.yaml, so builders editing different areas do not
+  #   collide, and api/openapi.yaml is the bundle of them, checked in so every consumer reads one file;
   # - it keeps OpenBot's API conventions (redocly.yaml, api/redocly/rules.mjs), which are Intelligence
   #   v2's, and takes no address Intelligence already serves (api/intelligence-reserved.yaml);
   # - the client generated from it is the one committed (app/src/lib/api/generated): generated code
@@ -78,6 +81,17 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: The bundled spec matches its sources
+        run: |
+          set -euo pipefail
+          bun run api:bundle
+          changed="$(git status --porcelain -- api/openapi.yaml)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git --no-pager diff -- api/openapi.yaml | head -n 200
+            echo "::error::api/openapi.yaml is not what api/openapi/*.yaml bundle to. Edit the sources, run bun run api:bundle and commit the result."
+            exit 1
+          fi
       - name: Lint the spec
         run: bun run api:lint
       - name: The generated client matches the spec
