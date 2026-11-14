@@ -61,6 +61,13 @@ tags:
   - { name: Check-ins, description: "A Bot's check-ins: quiet looks through what a person connected, the items a check-in raised for them, and an administrator's numbers for how check-ins are going." }
   - { name: Goals, description: "A person's goals: an outcome a Bot works toward, run on request, on a routine's schedule or when an outside event arrives through one of the goal's triggers." }
   - { name: Follow-ups, description: "Work a Bot scheduled for itself to come back to later in a conversation." }
+  - { name: Approvals, description: "What a person's Bots are waiting on them for: the actions that ask before they run, the questions a Bot asked, and what the person set for themselves about asking (their preferences, their own rules, and what they allowed for one conversation). Each person's are theirs alone." }
+  - { name: Approval rules, description: "The organization's approval rules: which actions every member's Bots take without asking, ask a person about first, or hand to the person. An administrator can describe rules in English, test them against what Bots already did, and save several as one change." }
+  - { name: Reviewer guidance, description: "What an administrator tells auto-review, in plain English: what to ask about and what is routine for the organization. Checked by an independent reading before it is saved, and never able to switch built-in safety off." }
+  - { name: Boundaries, description: "The rules that decide what every Bot may do, on its computer and in the apps it calls. A deny rule refuses, an allow rule permits, and an action no rule permits is refused. Only an administrator reads or sets them." }
+  - { name: What-if, description: "What OpenBot's controls would decide about one action a Bot might take, and what they say now about one already on the audit trail. Nothing is carried out. Only an administrator can ask." }
+  - { name: Shared use, description: "A Bot's use of a shared app's one account: the audience an administrator approved it for, and the requests a Bot's owner files when the Bot reaches further than that." }
+  - { name: Host access, description: "The folders on a person's own computer that they gave their Bots through OpenBot Desktop. Each person sees and ends only their own." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -151,6 +158,42 @@ paths:
   /api/v2/organizations/{organizationId}/github-event-sources: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources' }
   /api/v2/organizations/{organizationId}/github-event-sources/{githubEventSourceId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources~1{githubEventSourceId}' }
   /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1follow-ups~1{followUpId}~1cancel' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
+  /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
+  /api/v2/organizations/{organizationId}/people/{personId}/questions/{questionId}/respond: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions~1{questionId}~1respond' }
+  /api/v2/organizations/{organizationId}/people/{personId}/questions/{questionId}/dismiss: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions~1{questionId}~1dismiss' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approval-preferences: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approval-preferences' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approval-rules: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approval-rules' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approval-rules/{approvalRuleId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approval-rules~1{approvalRuleId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/conversation-grants: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1conversation-grants' }
+  /api/v2/organizations/{organizationId}/people/{personId}/conversation-grants/{conversationGrantId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1conversation-grants~1{conversationGrantId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/approval-modes/{conversationId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approval-modes~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/computer-steps: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1computer-steps' }
+  /api/v2/organizations/{organizationId}/approval-settings: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-settings' }
+  /api/v2/organizations/{organizationId}/approval-rules: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-rules' }
+  /api/v2/organizations/{organizationId}/approval-rules/{approvalRuleId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-rules~1{approvalRuleId}' }
+  /api/v2/organizations/{organizationId}/approval-rules/translate: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-rules~1translate' }
+  /api/v2/organizations/{organizationId}/approval-rules/replay: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-rules~1replay' }
+  /api/v2/organizations/{organizationId}/approval-rules/batch-create: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1approval-rules~1batch-create' }
+  /api/v2/organizations/{organizationId}/reviewer-guidance: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reviewer-guidance' }
+  /api/v2/organizations/{organizationId}/reviewer-guidance/check: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reviewer-guidance~1check' }
+  /api/v2/organizations/{organizationId}/reviewer-guidance/replay: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reviewer-guidance~1replay' }
+  /api/v2/organizations/{organizationId}/boundaries: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1boundaries' }
+  /api/v2/organizations/{organizationId}/boundaries/translate: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1boundaries~1translate' }
+  /api/v2/organizations/{organizationId}/boundaries/replay: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1boundaries~1replay' }
+  /api/v2/organizations/{organizationId}/what-if/vocabulary: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1what-if~1vocabulary' }
+  /api/v2/organizations/{organizationId}/what-if/ask: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1what-if~1ask' }
+  /api/v2/organizations/{organizationId}/what-if/check: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1what-if~1check' }
+  /api/v2/organizations/{organizationId}/what-if/explanations/{auditEventId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1what-if~1explanations~1{auditEventId}' }
+  /api/v2/organizations/{organizationId}/shared-use-requests: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shared-use-requests' }
+  /api/v2/organizations/{organizationId}/shared-use-requests/{sharedUseRequestId}/approve: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shared-use-requests~1{sharedUseRequestId}~1approve' }
+  /api/v2/organizations/{organizationId}/shared-use-requests/{sharedUseRequestId}/decline: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shared-use-requests~1{sharedUseRequestId}~1decline' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/shared-use: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1shared-use' }
+  /api/v2/organizations/{organizationId}/people/{personId}/host-access: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1host-access' }
+  /api/v2/organizations/{organizationId}/people/{personId}/host-access/grants: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1host-access~1grants' }
+  /api/v2/organizations/{organizationId}/people/{personId}/host-access/grants/{hostAccessGrantId}: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1host-access~1grants~1{hostAccessGrantId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/host-access/stop: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1host-access~1stop' }
 components:
   securitySchemes:
     webSession:
@@ -214,6 +257,16 @@ components:
             check-ins:write: Turn the signed-in person's check-ins on and off, change and run them, and start or hide the items they raised.
             goals:read: Read the signed-in person's goals, their runs, their triggers and their GitHub event sources. Reading a trigger's secret needs goals:write.
             goals:write: Create, change, pause, resume, complete, run and delete the signed-in person's goals, their triggers and their GitHub event sources.
+            approvals:read: Read what the signed-in person's Bots are waiting on them for, and their own approval preferences and rules.
+            approvals:write: Decide the signed-in person's approvals, answer their Bots' questions, and change their own approval preferences and rules.
+            approval-rules:read: Read the organization's approval rules and its guidance for auto-review, and describe, check and test them, when the signed-in person is an administrator.
+            approval-rules:write: Save the organization's approval rules and its guidance for auto-review, when the signed-in person is an administrator.
+            boundaries:read: Read the boundaries on what Bots may do, and describe and test a rule, when the signed-in person is an administrator.
+            boundaries:write: Set the boundaries on what Bots may do, when the signed-in person is an administrator.
+            shared-use:read: Read a Bot's use of shared app accounts, when the signed-in person owns the Bot, and the requests waiting for an answer, when they are an administrator.
+            shared-use:write: Ask that a Bot may use a shared app account, when the signed-in person owns the Bot, and approve or decline a request, when they are an administrator.
+            host-access:read: Read the folders on the signed-in person's own computer that they gave their Bots.
+            host-access:write: Give a Bot a folder on the signed-in person's own computer, take one away, and stop folder access.
     apiKey:
       type: http
       scheme: bearer
