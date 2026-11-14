@@ -3120,6 +3120,7 @@ mod tests {
 
     struct SameFolderApprovalUi {
         root: PathBuf,
+        asked_to_change: AtomicUsize,
     }
 
     impl HostApprovalUi for SameFolderApprovalUi {
@@ -3130,11 +3131,21 @@ mod tests {
         }
 
         fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
-            unreachable!("only folders are chosen here")
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
         }
 
-        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
-            unreachable!("only folders are chosen here")
+        fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()> {
+            assert!(
+                request.writable,
+                "only commands that change files are asked here"
+            );
+            self.asked_to_change.fetch_add(1, Ordering::SeqCst);
+            Err(HostAccessError::Denied(
+                "Declined in OpenBot Desktop.".into(),
+            ))
         }
     }
 
@@ -3146,6 +3157,11 @@ mod tests {
     #[test]
     fn choosing_a_folder_the_bot_already_has_keeps_one_grant_and_makes_it_live_again() {
         let root = fs::canonicalize(temp_root("host-access-same-folder")).unwrap();
+        fs::write(root.join("notes.txt"), "hello").unwrap();
+        let approval = Arc::new(SameFolderApprovalUi {
+            root: root.clone(),
+            asked_to_change: AtomicUsize::new(0),
+        });
         let inner = Inner {
             config: HostAccessConfig::new(
                 "http://127.0.0.1:9",
@@ -3154,7 +3170,7 @@ mod tests {
                 DEFAULT_IMAGE,
                 vec![],
             ),
-            approval: Arc::new(SameFolderApprovalUi { root: root.clone() }),
+            approval: approval.clone(),
             instance_label: "test-instance".into(),
             effect_lock: Mutex::new(()),
             prompt_lock: Mutex::new(()),
@@ -3210,6 +3226,29 @@ mod tests {
             assert_eq!(state.grants.len(), 1);
             assert!(!state.grants[&first].revoked);
         }
+        // A grant is read-only whichever time it was chosen: the grant it comes back as carries
+        // nothing over, and every change to the folder still asks the person, each time.
+        let change = |id: &str, kind: HostOperationKind| DesktopOperation {
+            kind,
+            grant_id: Some(first.clone()),
+            relative_path: matches!(kind, HostOperationKind::WriteFile).then(|| "notes.txt".into()),
+            content: matches!(kind, HostOperationKind::WriteFile).then(|| "changed".into()),
+            command: matches!(kind, HostOperationKind::RunCommand).then(|| "rm notes.txt".into()),
+            writable: Some(matches!(kind, HostOperationKind::RunCommand)),
+            command_policy: Some("allow".into()),
+            ..choose(id, "bot-a")
+        };
+        for (id, kind) in [
+            ("op-write", HostOperationKind::WriteFile),
+            ("op-edit", HostOperationKind::RunCommand),
+        ] {
+            let refused = inner.handle_operation(&change(id, kind)).map(|_| ());
+            assert_eq!(
+                public_error_message(&refused.unwrap_err(), &inner.config),
+                "Declined in OpenBot Desktop."
+            );
+        }
+        assert_eq!(approval.asked_to_change.load(Ordering::SeqCst), 2);
         // Another Bot given the same folder has its own grant.
         assert_ne!(granted("op-3", "bot-b"), first);
         assert_eq!(inner.state.lock().unwrap().grants.len(), 2);
