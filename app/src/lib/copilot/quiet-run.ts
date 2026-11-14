@@ -32,9 +32,12 @@ export type RunLiveness = "live" | "over" | "unreachable";
 export const RUN_ENDED_UNHEARD =
   "The Bot stopped before it finished. What it saved is shown here. Send a message to carry on.";
 
-/** Said under a turn whose run could not be asked about. */
+/**
+ * Said under a turn whose run could not be asked about. It does not say the message was sent: a
+ * run that never started goes quiet the same way, and nothing here can tell the two apart.
+ */
 export const RUN_UNREACHABLE =
-  "OpenBot lost touch with the Bot while it was working. Your message was sent. Try again in a moment, or reload to see what was saved.";
+  "OpenBot lost touch with the Bot before it finished. Try again in a moment, or reload to see what was saved.";
 
 /**
  * Ask the runtime whether this conversation has a run going, by the call a conversation is joined
