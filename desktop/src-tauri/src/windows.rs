@@ -132,14 +132,18 @@ impl Blocker {
 }
 
 /// Query the same current-user WSL registry value that upstream uses for the default version.
+///
+/// Windows treats an absent `DefaultVersion` as WSL 1, not WSL 2. Reporting 2 here skipped the
+/// WSL1 screen and sent setup to `wsl.exe --version`, which the legacy inbox binary does not
+/// understand.
 fn default_wsl_version_probe_command() -> &'static str {
     r#"$ErrorActionPreference = 'Stop';
 $path = 'Software\Microsoft\Windows\CurrentVersion\Lxss';
 $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path);
-if ($null -eq $key) { 2; return }
+if ($null -eq $key) { 'unset'; return }
 try {
   $value = $key.GetValue('DefaultVersion', $null);
-  if ($null -eq $value) { 2; return }
+  if ($null -eq $value) { 'unset'; return }
   if ($value -isnot [int]) { throw 'DefaultVersion is not a registry DWORD' }
   $value
 } finally {
@@ -149,6 +153,8 @@ try {
 
 fn parse_default_wsl_version(operation: &str, output: &str) -> Result<u8, Problem> {
     match output.trim() {
+        // No DefaultVersion value means new distributions default to WSL 1.
+        "unset" => Ok(1),
         "1" => Ok(1),
         "2" => Ok(2),
         other => Err(detection_failed(
@@ -1365,6 +1371,37 @@ mod tests {
             || Ok(false),
         );
         assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn an_unset_default_version_is_wsl_one() {
+        assert_eq!(
+            parse_default_wsl_version("the default WSL version (registry)", "unset"),
+            Ok(1)
+        );
+    }
+
+    #[test]
+    fn an_unset_default_version_reaches_the_wsl_one_screen() {
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                assert_probe_call(probe, program, args);
+                let output = if probe == 4 {
+                    "unset\n"
+                } else {
+                    PROBE_OUTPUTS[probe]
+                };
+                probe += 1;
+                Ok(probe_output(0, output, ""))
+            },
+            || panic!("WSL1 must be reported before the kernel check"),
+        );
+        assert_eq!(result, Ok(Some(Blocker::WslOne)));
+        assert_eq!(
+            probe, 5,
+            "the unsupported wsl.exe --version probe must not run"
+        );
     }
 
     fn probe_with_modern_wsl_service(

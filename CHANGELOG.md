@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **A Windows machine that has only WSL 1 is now told how to convert it.** When the WSL
+  `DefaultVersion` registry value was absent, setup reported WSL 2 and then tried
+  `wsl.exe --version`, which the older inbox binary does not understand, so it ended on "could not
+  check the WSL version" with no next step. An absent value now means WSL 1, and setup shows the
+  `wsl --set-default-version 2` instructions.
 - **OpenBot Desktop 1.0.2 and 1.0.3 can start an installation a newer version updated.** Put back
   over one, they stopped with "container-images.json for … names no agent-bot image". For one
   release, `container-images.json` names `agent-bot` and `agent-langgraph` again, both as the
