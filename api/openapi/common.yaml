@@ -546,6 +546,13 @@ components:
           description: >-
             The app the refusal is about, when it names one that is already
             here (APP_ALREADY_ADDED), so a client can open it.
+        problems:
+          type: array
+          description: >-
+            What is wrong, item by item, when a refusal has more than one
+            reason: each entry names the item and says what is wrong with it.
+          items:
+            type: object
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
