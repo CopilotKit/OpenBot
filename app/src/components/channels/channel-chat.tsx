@@ -44,6 +44,7 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
+  leftAnswers,
 } from "@/lib/approvals";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
@@ -1267,7 +1268,11 @@ export function ChannelChat({
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
-    const repaired = repairUnansweredToolCalls(target.messages);
+    const repaired = repairUnansweredToolCalls(
+      target.messages,
+      undefined,
+      leftAnswers(queryClient.getQueryData(approvalInboxOptions().queryKey)),
+    );
     if (repaired !== target.messages) {
       target.setMessages(repaired as typeof target.messages);
     }
