@@ -55,6 +55,16 @@ export const GetDeploymentResponse = zod
       .describe(
         "Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.",
       ),
+    builtInBots: zod
+      .boolean()
+      .describe(
+        "Whether a Bot can run inside OpenBot, with no address of its own.",
+      ),
+    isolatedBots: zod
+      .boolean()
+      .describe(
+        "Whether this OpenBot can give a Bot a computer of its own. Whether a person may is their Isolated Bots switch.",
+      ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
 

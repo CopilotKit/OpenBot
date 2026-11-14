@@ -28,4 +28,8 @@ export interface Deployment {
   ssoConfigured: boolean;
   /** Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in. */
   ssoRequired: boolean;
+  /** Whether a Bot can run inside OpenBot, with no address of its own. */
+  builtInBots: boolean;
+  /** Whether this OpenBot can give a Bot a computer of its own. Whether a person may is their Isolated Bots switch. */
+  isolatedBots: boolean;
 }
