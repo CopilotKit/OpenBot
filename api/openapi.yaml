@@ -66,6 +66,19 @@ tags:
     description: >-
       Where a person is signed in to OpenBot, so they can see each browser and
       device and sign one out.
+  - name: Organization settings
+    description: >-
+      What an administrator sets for everybody, and what this OpenBot offers:
+      sign-in, recording, idle computers, allowlists, the setup checklist,
+      and which models Bots ran on.
+  - name: Capabilities
+    description: >-
+      The permission switches that decide what people may do, set for the
+      organization, a role or a directory group, and each person's answer.
+  - name: Network policies
+    description: >-
+      Where Bot computers may connect, for the organization and for a
+      directory group.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -1741,6 +1754,975 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/deployment:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: getDeployment
+      summary: Read what this OpenBot offers
+      description: >-
+        Return what this OpenBot offers and how people sign in to it: the
+        edition, the features the apps draw, and the sign-in options. Anybody
+        may read it, signed in or not, because the sign-in screen reads it
+        first. It names no identity provider and no version: only whether
+        single sign-on is set up and required.
+      x-openbot-singleton: true
+      security:
+        - {}
+      responses:
+        '200':
+          description: What this OpenBot offers.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+              examples:
+                team:
+                  $ref: '#/components/examples/DeploymentExample'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: getOrganizationSettings
+      summary: Read the organization's settings
+      description: >-
+        Return the settings an administrator sets for everybody: single
+        sign-on, recording computer actions, stopping idle computers, the
+        model and app allowlists, sharing learned skills, check-ins a day and
+        choosing a model. Beside them, read only, what an administrator needs
+        to set them: the model OpenBot runs on, the directory groups, the apps
+        an allowlist can name, the hosts every computer may reach, and whether
+        SCIM and OpenTelemetry are set up. Only an administrator may read
+        them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [settings:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The organization's settings.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationSettings'
+              examples:
+                settings:
+                  $ref: '#/components/examples/OrganizationSettingsExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags: [Organization settings]
+      operationId: updateOrganizationSettings
+      summary: Change the organization's settings
+      description: >-
+        Change the settings sent and keep the rest. Each change is recorded on
+        the audit trail with what it was before. Requiring single sign-on needs
+        an identity provider registered first, and signs out everybody who
+        signed in another way, apart from the administrators the deployment's
+        configuration names and the caller. Only an administrator may change
+        them.
+      security:
+        - webSession: []
+        - appOAuth: [settings:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationSettingsRequest'
+            examples:
+              idle:
+                value:
+                  inactiveComputerDays: 14
+      responses:
+        '200':
+          description: Every setting, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationSettings'
+              examples:
+                settings:
+                  $ref: '#/components/examples/OrganizationSettingsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/SettingsConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignOutUnfinished'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/stop-inactive-computers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Organization settings]
+      operationId: stopInactiveComputers
+      summary: Stop idle computers now
+      description: >-
+        Stop now every Bot computer idle for longer than the organization's
+        setting allows, as the hourly sweep does. Nothing is stopped while
+        another server is sweeping or the setting is off, and the answer says
+        so. Only an administrator may do this.
+      security:
+        - webSession: []
+        - appOAuth: [settings:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The computers stopped, or why none were.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InactiveComputersStopped'
+              examples:
+                swept:
+                  value:
+                    stopped: [research-assistant]
+                    skipped: null
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/capabilities:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Capabilities]
+      operationId: listCapabilities
+      summary: List the permission switches
+      description: >-
+        Return one page of the switches that decide what people may do, each
+        with its default and what the organization, each role and each
+        directory group set it to. A person's own answer is the most specific
+        one set: their group's, then their role's, then the organization's,
+        then the default. Only an administrator may read them. A missing
+        cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [capabilities:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of switches.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityPage'
+              examples:
+                page:
+                  $ref: '#/components/examples/CapabilityPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/capabilities/{capabilityId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CapabilityIdParameter'
+    patch:
+      tags: [Capabilities]
+      operationId: updateCapability
+      summary: Change a permission switch
+      description: >-
+        Set the switch for the organization, a role or a directory group, or
+        clear it with null so the level beneath decides. Only what is sent
+        changes. Each change is recorded on the audit trail. Only an
+        administrator may change a switch.
+      security:
+        - webSession: []
+        - appOAuth: [capabilities:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCapabilityRequest'
+            examples:
+              members:
+                value:
+                  roles:
+                    user: false
+      responses:
+        '200':
+          description: The switch as it now stands.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capability'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CapabilityExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/CapabilityNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/capabilities/batch-update:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Capabilities]
+      operationId: batchUpdateCapabilities
+      summary: Change several permission switches at once
+      description: >-
+        Save up to 100 switch changes together, or none: a change the rule
+        would ignore, such as a group nobody is in, refuses them all and says
+        which. The audit trail records each change with what it was before and
+        one id for the batch, and the sentence it was written from when it was
+        described in English. Only an administrator may save them.
+      security:
+        - webSession: []
+        - appOAuth: [capabilities:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapabilityChanges'
+            examples:
+              members:
+                $ref: '#/components/examples/CapabilityChangesExample'
+      responses:
+        '200':
+          description: The changes, saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedCapabilityChanges'
+              examples:
+                answer:
+                  $ref: '#/components/examples/SavedCapabilityChangesExample'
+        '400':
+          $ref: '#/components/responses/InvalidCapabilityChanges'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/capabilities/translate:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Capabilities]
+      operationId: translateCapabilityChanges
+      summary: Write switch changes from a description
+      description: >-
+        Turn a description in English into switch changes, written by the
+        deployment's model and checked against the rule. Nothing is saved: the
+        answer is a proposal to preview and save. The audit trail records the
+        description and what it became. Only an administrator may ask.
+      security:
+        - webSession: []
+        - appOAuth: [capabilities:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeDescription'
+            examples:
+              contractors:
+                value:
+                  text: Contractors shouldn't use the password manager.
+      responses:
+        '200':
+          description: The proposed changes, and whether they pass the rule.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityTranslation'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CapabilityTranslationExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ModelFailed'
+        '503':
+          $ref: '#/components/responses/ModelNotConfigured'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/capabilities/preview:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Capabilities]
+      operationId: previewCapabilityChanges
+      summary: Preview switch changes
+      description: >-
+        Say what saving these changes would do, without saving them: who
+        gains, loses or keeps each permission, and what the audit trail shows
+        they did with one they would lose in the last 30 days. Only an
+        administrator may ask.
+      security:
+        - webSession: []
+        - appOAuth: [capabilities:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapabilityChangesToPreview'
+            examples:
+              members:
+                $ref: '#/components/examples/CapabilityChangesExample'
+      responses:
+        '200':
+          description: What the changes would do.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityPreview'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CapabilityPreviewExample'
+        '400':
+          $ref: '#/components/responses/InvalidCapabilityChanges'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/capabilities:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags: [Capabilities]
+      operationId: getPersonCapabilities
+      summary: Read what a person may do
+      description: >-
+        Return each permission switch as it applies to one person, so the apps
+        hide what they may not use. The caller reads their own, as me; an
+        administrator reads anybody's. enforced is false where the deployment
+        keeps no switches and every default applies.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What the person may do.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonCapabilities'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonCapabilitiesExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/stop-computers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags: [Capabilities]
+      operationId: stopPersonComputers
+      summary: Stop a person's computers
+      description: >-
+        Stop every Bot computer running for one person now, and record it on
+        the audit trail. Their Bots start a computer again when they next need
+        one. Only an administrator may do this.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The computers stopped, and any that would not stop.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonComputersStopped'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonComputersStoppedExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/network-policies:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Network policies]
+      operationId: listNetworkPolicies
+      summary: List where Bot computers may connect
+      description: >-
+        Return one page of the network policies: where Bot computers may
+        connect, for the organization and for a directory group. A group's
+        policy applies to its members unless the organization's is locked.
+        The organization's first, then each group's by name. Only an
+        administrator may read them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [network-policies:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of network policies.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkPolicyPage'
+              examples:
+                organization:
+                  $ref: '#/components/examples/NetworkPolicyPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/network-policies/{networkPolicyId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/NetworkPolicyId'
+    put:
+      tags: [Network policies]
+      operationId: replaceNetworkPolicy
+      summary: Set where Bot computers may connect
+      description: >-
+        Set the organization's network policy, or a directory group's, making
+        it if there is none. The list is checked as the computers read it, and
+        the policy reaches every running computer it covers. The audit trail
+        records the policy, and the sentence it was written from when it was
+        described in English. Only an administrator may set one.
+      security:
+        - webSession: []
+        - appOAuth: [network-policies:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkPolicyInput'
+            examples:
+              allowlist:
+                value:
+                  mode: allowlist_only
+                  rules:
+                    - type: domain
+                      value: salesforce.com
+                  locked: false
+      responses:
+        '200':
+          description: The policy, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkPolicy'
+              examples:
+                answer:
+                  $ref: '#/components/examples/NetworkPolicyExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags: [Network policies]
+      operationId: deleteNetworkPolicy
+      summary: Remove a network policy
+      description: >-
+        Remove the organization's network policy, or a group's, so the level
+        beneath decides: the group falls back to the organization's, and the
+        organization to the default list. Recorded on the audit trail. Only an
+        administrator may remove one. One that was never set is not found.
+      security:
+        - webSession: []
+        - appOAuth: [network-policies:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The policy was removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/NetworkPolicyNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/network-policies/translate:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Network policies]
+      operationId: translateNetworkPolicy
+      summary: Write a network list from a description
+      description: >-
+        Turn a description in English into a list of hosts and addresses Bot
+        computers may connect to, written by the deployment's model and
+        checked as a save would check it. Nothing is saved. The audit trail
+        records the description and what it became. Only an administrator may
+        ask.
+      security:
+        - webSession: []
+        - appOAuth: [network-policies:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeDescription'
+            examples:
+              crm:
+                value:
+                  text: Only our CRM and GitHub.
+      responses:
+        '200':
+          description: The proposed list, and what it makes reachable.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkTranslation'
+              examples:
+                answer:
+                  $ref: '#/components/examples/NetworkTranslationExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ModelFailed'
+        '503':
+          $ref: '#/components/responses/ModelNotConfigured'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/network-policies/replay:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Network policies]
+      operationId: replayNetworkPolicy
+      summary: Test a network policy against recent page visits
+      description: >-
+        Say what a policy would have done to the pages Bots visited lately,
+        without saving it: which sites it would block that are allowed today,
+        and the other way round. Only an administrator may ask.
+      security:
+        - webSession: []
+        - appOAuth: [network-policies:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkPolicyCandidate'
+      responses:
+        '200':
+          description: What the policy would have done.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkReplayReport'
+              examples:
+                answer:
+                  $ref: '#/components/examples/NetworkReplayReportExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/NoTrailToReplay'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/model-usage:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: getModelUsage
+      summary: Read which models Bots ran on
+      description: >-
+        Return which models Bots ran on over the last days, with how many runs,
+        refusals and people each had, and the newest 50 runs. Only an
+        administrator may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [model-usage:read]
+        - apiKey: []
+      parameters:
+        - name: days
+          in: query
+          description: How many days back, 1 to 365.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Which models Bots ran on.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelUsage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ModelUsageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computer-actions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: listComputerActions
+      summary: List recorded computer actions
+      description: >-
+        Return one page of the actions recorded on Bot computers while
+        recording computer actions is on, newest first. Records are kept for
+        actionRecordRetentionDays. Only an administrator may read them. A
+        missing cursor starts at the newest and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [computer-actions:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of recorded actions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputerActionPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/ComputerActionPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/setup-checklist:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organization settings]
+      operationId: getSetupChecklist
+      summary: Read the setup checklist
+      description: >-
+        Return what this OpenBot has set up and what it still needs, each row
+        with its fix. An administrator, or somebody running OpenBot on their
+        own, reads it as the one who sets it up; anybody else reads which
+        parts work, and that an administrator sets the rest up.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [setup-checklist:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The setup checklist.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupChecklist'
+              examples:
+                answer:
+                  $ref: '#/components/examples/SetupChecklistExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/setup-checklist/check:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Organization settings]
+      operationId: checkSetup
+      summary: Check the setup again
+      description: >-
+        Ask Intelligence, the model provider and the computers again, then
+        return the checklist as getSetupChecklist does.
+      security:
+        - webSession: []
+        - appOAuth: [setup-checklist:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The setup checklist, checked again.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupChecklist'
+              examples:
+                answer:
+                  $ref: '#/components/examples/SetupChecklistExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -1774,6 +2756,15 @@ components:
             linked-accounts:write: Link and unlink the signed-in person's accounts at other services.
             identity-providers:read: Read the organization's identity providers, when the signed-in person is an administrator.
             identity-providers:write: Remove the organization's identity providers, when the signed-in person is an administrator.
+            settings:read: Read the organization's settings, when the signed-in person is an administrator.
+            settings:write: Change the organization's settings and stop idle computers, when the signed-in person is an administrator.
+            capabilities:read: Read the permission switches, and describe and preview changes to them, when the signed-in person is an administrator.
+            capabilities:write: Change the permission switches, when the signed-in person is an administrator.
+            network-policies:read: Read where Bot computers may connect, and describe and test a policy, when the signed-in person is an administrator.
+            network-policies:write: Set and remove where Bot computers may connect, when the signed-in person is an administrator.
+            model-usage:read: Read which models Bots ran on, when the signed-in person is an administrator.
+            computer-actions:read: Read the actions recorded on Bot computers, when the signed-in person is an administrator.
+            setup-checklist:read: Read the setup checklist, and check it again.
     apiKey:
       type: http
       scheme: bearer
@@ -1847,6 +2838,23 @@ components:
         minLength: 1
         maxLength: 200
         pattern: \S
+    CapabilityIdParameter:
+      name: capabilityId
+      in: path
+      required: true
+      description: The permission switch.
+      schema:
+        $ref: '#/components/schemas/CapabilityId'
+    NetworkPolicyId:
+      name: networkPolicyId
+      in: path
+      required: true
+      description: organization, or group:<name> for a directory group's.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 206
+        pattern: ^(organization|group:[^\x00]*\S[^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -3189,6 +4197,864 @@ components:
         mapping:
           saml: '#/components/schemas/SamlIdentityProviderRequest'
           oidc: '#/components/schemas/OidcIdentityProviderRequest'
+    Deployment:
+      type: object
+      description: What this OpenBot offers and how people sign in to it.
+      required:
+        - edition
+        - localEvaluation
+        - generativeUi
+        - selfHostBanner
+        - transcription
+        - voice
+        - durableHistory
+        - authProviders
+        - ssoConfigured
+        - ssoRequired
+      properties:
+        edition:
+          type: string
+          enum: [team, personal]
+          description: >-
+            team is OpenBot as an organization runs it; personal is one person
+            on their own machine, with no sign-in and none of the screens that
+            govern other people.
+        localEvaluation:
+          type: boolean
+          description: Whether somebody is trying OpenBot on their own machine, with nobody else able to reach it.
+        generativeUi:
+          type: boolean
+          description: Whether a Bot may answer with an interface it wrote itself.
+        selfHostBanner:
+          type: boolean
+          description: Whether to offer help self-hosting OpenBot.
+        transcription:
+          type: boolean
+          description: Whether a person can dictate a message.
+        voice:
+          type: boolean
+          description: Whether a person can talk to a Bot.
+        durableHistory:
+          type: boolean
+          description: Whether conversations are kept between restarts.
+        authProviders:
+          type: array
+          description: The social sign-ins offered, by id.
+          items:
+            type: string
+            enum: [google, microsoft, okta]
+        ssoConfigured:
+          type: boolean
+          description: >-
+            Whether a company's own identity provider is registered, so an
+            email address can be sent to it. Never which.
+        ssoRequired:
+          type: boolean
+          description: >-
+            Whether an administrator requires single sign-on; social sign-in
+            then stays only as the configured administrators' way in.
+    AllowlistEntry:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: ^[^\x00]*\S[^\x00]*$
+    OrganizationSettingValues:
+      type: object
+      properties:
+        ssoRequired:
+          type: boolean
+          description: >-
+            Whether people must sign in through the organization's identity
+            provider. The administrators the deployment's configuration names
+            keep social sign-in as their way in.
+        actionRecording:
+          type: boolean
+          description: Whether what Bots do on their computers is recorded, to read in computer actions.
+        inactiveComputerDays:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          description: Days a Bot computer may sit idle before it is stopped. 0 never stops one.
+        modelAllowlist:
+          type: object
+          additionalProperties: false
+          required: [enabled, models]
+          properties:
+            enabled:
+              type: boolean
+              description: Whether the list limits anything. Off, every model is allowed.
+            models:
+              type: array
+              maxItems: 500
+              description: The models Bots may run on, as provider/model.
+              items:
+                $ref: '#/components/schemas/AllowlistEntry'
+        mcpAllowlist:
+          type: object
+          additionalProperties: false
+          required: [enabled, servers]
+          properties:
+            enabled:
+              type: boolean
+              description: Whether the list limits anything. Off, every app is allowed.
+            servers:
+              type: array
+              maxItems: 500
+              description: The apps Bots may use, by id.
+              items:
+                $ref: '#/components/schemas/AllowlistEntry'
+        skillSharing:
+          type: boolean
+          description: Whether people may open the skills learned from their recordings to every Bot.
+        proactiveDailyRuns:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: How many check-ins each Bot may run for one person in a day.
+        modelSelection:
+          type: boolean
+          description: Whether people may pick the model a built-in Bot answers on, per conversation.
+    OrganizationSettings:
+      allOf:
+        - $ref: '#/components/schemas/OrganizationSettingValues'
+        - type: object
+          required:
+            - ssoRequired
+            - actionRecording
+            - inactiveComputerDays
+            - modelAllowlist
+            - mcpAllowlist
+            - skillSharing
+            - proactiveDailyRuns
+            - modelSelection
+            - context
+          properties:
+            context:
+              $ref: '#/components/schemas/OrganizationSettingsContext'
+    OrganizationSettingsContext:
+      type: object
+      readOnly: true
+      description: What an administrator needs to set the settings. Read only.
+      required:
+        - builtInModel
+        - directoryGroups
+        - apps
+        - defaultDestinations
+        - scim
+        - otel
+        - actionRecordRetentionDays
+      properties:
+        builtInModel:
+          type: [string, 'null']
+          description: The model OpenBot's own Bots run on, when one is set.
+        directoryGroups:
+          type: array
+          description: The directory groups people belong to, by name.
+          items:
+            type: string
+        apps:
+          type: array
+          description: The apps an allowlist can name.
+          items:
+            type: object
+            required: [id, title, url]
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              url:
+                type: string
+        defaultDestinations:
+          type: array
+          description: The package registries and source hosts every computer may reach unless the list is the only thing allowed.
+          items:
+            type: string
+        scim:
+          type: object
+          required: [configured, connectionId, baseUrl, rotating]
+          properties:
+            configured:
+              type: boolean
+            connectionId:
+              type: string
+            baseUrl:
+              type: [string, 'null']
+            rotating:
+              type: boolean
+              description: Whether a second token is set while the first is being replaced.
+        otel:
+          type: object
+          required: [configured]
+          properties:
+            configured:
+              type: boolean
+        actionRecordRetentionDays:
+          type: integer
+          description: How many days recorded computer actions are kept.
+    UpdateOrganizationSettingsRequest:
+      allOf:
+        - $ref: '#/components/schemas/OrganizationSettingValues'
+      description: The settings to change. At least one; the rest stay as they are.
+      minProperties: 1
+    InactiveComputersStopped:
+      type: object
+      required: [stopped, skipped]
+      properties:
+        stopped:
+          type: array
+          description: The Bots whose computers stopped.
+          items:
+            type: string
+        skipped:
+          type: [string, 'null']
+          description: Why nothing was stopped, when nothing was looked at.
+    PersonComputersStopped:
+      type: object
+      required: [stopped, failed]
+      properties:
+        stopped:
+          type: array
+          description: The Bots whose computers stopped.
+          items:
+            type: string
+        failed:
+          type: array
+          description: The ones that would not stop, and why.
+          items:
+            type: object
+            required: [botId, reason]
+            properties:
+              botId:
+                type: string
+              reason:
+                type: string
+    CapabilityId:
+      type: string
+      enum:
+        - useBots
+        - cloudBrowser
+        - cloudNetwork
+        - cloudComputer
+        - localComputer
+        - customRules
+        - passwordManager
+        - slackTeams
+        - teamBots
+        - ownerApps
+        - isolatedComputers
+        - proactive
+      description: A permission switch.
+    Capability:
+      type: object
+      description: >-
+        A permission switch, and what each level set it to. Null at a level
+        means it sets nothing and the level beneath decides.
+      required: [id, title, description, default, organization, roles, groups]
+      properties:
+        id:
+          $ref: '#/components/schemas/CapabilityId'
+        title:
+          type: string
+        description:
+          type: string
+        default:
+          type: boolean
+          description: What applies where nothing is set.
+        organization:
+          type: [boolean, 'null']
+        roles:
+          type: object
+          description: What each role is set to, by role. A role absent sets nothing.
+          properties:
+            admin:
+              type: boolean
+            user:
+              type: boolean
+        groups:
+          type: object
+          description: What each directory group is set to, by name. A group absent sets nothing.
+          additionalProperties:
+            type: boolean
+    CapabilityPage:
+      type: object
+      required: [capabilities, nextCursor]
+      properties:
+        capabilities:
+          type: array
+          description: In the order the screens show them.
+          items:
+            $ref: '#/components/schemas/Capability'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    SwitchValue:
+      type: [boolean, 'null']
+      description: On, off, or null to clear it so the level beneath decides.
+    UpdateCapabilityRequest:
+      type: object
+      description: The levels to set or clear. At least one.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        organization:
+          $ref: '#/components/schemas/SwitchValue'
+        roles:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            admin:
+              $ref: '#/components/schemas/SwitchValue'
+            user:
+              $ref: '#/components/schemas/SwitchValue'
+        groups:
+          type: object
+          minProperties: 1
+          maxProperties: 100
+          description: By directory group name, 1 to 200 characters.
+          propertyNames:
+            minLength: 1
+            maxLength: 200
+            pattern: ^[^\x00]*\S[^\x00]*$
+          additionalProperties:
+            $ref: '#/components/schemas/SwitchValue'
+    CapabilityChange:
+      type: object
+      additionalProperties: false
+      required: [scopeKind, capability, allowed]
+      properties:
+        scopeKind:
+          type: string
+          enum: [organization, role, group]
+        scopeId:
+          type: string
+          maxLength: 200
+          pattern: ^[^\x00]*$
+          description: Empty for the organization; admin or user for a role; the group's name for a group.
+        capability:
+          $ref: '#/components/schemas/CapabilityId'
+        allowed:
+          $ref: '#/components/schemas/SwitchValue'
+    Authoring:
+      type: object
+      additionalProperties: false
+      required: [source, text]
+      description: The sentence in English a change was written from, recorded with it.
+      properties:
+        source:
+          type: string
+          const: english
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: ^[^\x00]*\S[^\x00]*$
+    CapabilityChangesToPreview:
+      type: object
+      additionalProperties: false
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CapabilityChange'
+    CapabilityChanges:
+      type: object
+      additionalProperties: false
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CapabilityChange'
+        authoring:
+          $ref: '#/components/schemas/Authoring'
+    SavedCapabilityChanges:
+      type: object
+      required: [saved]
+      properties:
+        saved:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapabilityChange'
+    ChangeDescription:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: The change in a sentence or two, at most 1,000 characters once trimmed.
+    RuleCheck:
+      type: object
+      description: Whether a proposal passes the rule a save applies, and what is wrong when it doesn't.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+        problems:
+          type: array
+          items: {}
+    CapabilityTranslation:
+      type: object
+      required: [changes, summary, explanation, check, warning]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapabilityChange'
+        summary:
+          type: [string, 'null']
+        explanation:
+          type: [string, 'null']
+        check:
+          $ref: '#/components/schemas/RuleCheck'
+        warning:
+          type: [string, 'null']
+    CapabilityAnswer:
+      type: object
+      required: [allowed, decidedBy, scopeId]
+      properties:
+        allowed:
+          type: boolean
+        decidedBy:
+          type: string
+          enum: [default, organization, role, group]
+        scopeId:
+          type: string
+          description: The role or group that decided it. Empty otherwise.
+    CapabilityPreview:
+      type: object
+      required: [check, people, counts, activity, warning]
+      properties:
+        check:
+          $ref: '#/components/schemas/RuleCheck'
+        people:
+          type: array
+          items:
+            type: object
+            required: [id, email, name, role, groups, capabilities]
+            properties:
+              id:
+                type: string
+              email:
+                type: string
+              name:
+                type: [string, 'null']
+              role:
+                $ref: '#/components/schemas/PersonRole'
+              groups:
+                type: array
+                items:
+                  type: string
+              capabilities:
+                type: array
+                items:
+                  type: object
+                  required: [capability, title, before, after]
+                  properties:
+                    capability:
+                      $ref: '#/components/schemas/CapabilityId'
+                    title:
+                      type: string
+                    before:
+                      $ref: '#/components/schemas/CapabilityAnswer'
+                    after:
+                      $ref: '#/components/schemas/CapabilityAnswer'
+                    activity:
+                      type: object
+                      required: [what, count, more, recent]
+                      properties:
+                        what:
+                          type: string
+                        count:
+                          type: integer
+                        more:
+                          type: boolean
+                        recent:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/AuditEvent'
+        counts:
+          type: object
+          required: [people, losing, gaining, keeping, unchanged]
+          properties:
+            people:
+              type: integer
+            losing:
+              type: integer
+            gaining:
+              type: integer
+            keeping:
+              type: integer
+            unchanged:
+              type: integer
+        activity:
+          type: object
+          required: [days, unmapped]
+          properties:
+            days:
+              type: integer
+            unmapped:
+              type: array
+              items:
+                type: object
+                required: [capability, title]
+                properties:
+                  capability:
+                    $ref: '#/components/schemas/CapabilityId'
+                  title:
+                    type: string
+        warning:
+          type: [string, 'null']
+    PersonCapabilities:
+      type: object
+      required: [capabilities, enforced]
+      properties:
+        capabilities:
+          type: object
+          description: Each switch, on or off for this person.
+          additionalProperties:
+            type: boolean
+        enforced:
+          type: boolean
+          description: False where the deployment keeps no switches and every default applies.
+    NetworkMode:
+      type: string
+      enum: [allow_all, defaults_plus_allowlist, allowlist_only]
+      description: >-
+        allow_all lets computers connect anywhere; defaults_plus_allowlist to
+        the list and the default destinations; allowlist_only to the list
+        alone.
+    EgressRule:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [domain, cidr]
+        value:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: A host, which covers its subdomains, or an IP range in CIDR form.
+        ports:
+          type: string
+          maxLength: 100
+          description: Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.
+    NetworkPolicy:
+      type: object
+      required: [id, scopeKind, scopeId, mode, rules, locked, updatedBy, updatedAt]
+      properties:
+        id:
+          type: string
+          description: organization, or group:<name> for a directory group.
+        scopeKind:
+          type: string
+          enum: [organization, group]
+        scopeId:
+          type: string
+          description: The group's name. Empty for the organization.
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/EgressRule'
+        locked:
+          type: boolean
+          description: For the organization's, whether it applies to every group too.
+        updatedBy:
+          type: [string, 'null']
+        updatedAt:
+          type: string
+          format: date-time
+    NetworkPolicyPage:
+      type: object
+      required: [networkPolicies, nextCursor]
+      properties:
+        networkPolicies:
+          type: array
+          description: The organization's first, then each group's by name.
+          items:
+            $ref: '#/components/schemas/NetworkPolicy'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    NetworkPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [mode, rules]
+      properties:
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        rules:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/EgressRule'
+        locked:
+          type: boolean
+          default: false
+        authoring:
+          $ref: '#/components/schemas/Authoring'
+    NetworkPolicyCandidate:
+      type: object
+      additionalProperties: false
+      required: [scopeKind, mode, rules]
+      properties:
+        scopeKind:
+          type: string
+          enum: [organization, group]
+        scopeId:
+          type: string
+          maxLength: 200
+          pattern: ^[^\x00]*$
+          description: The group's name. Empty for the organization.
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        rules:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/EgressRule'
+        locked:
+          type: boolean
+          default: false
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          description: How many recent page visits to test against. 500 when absent.
+    NetworkTranslation:
+      type: object
+      required: [mode, rules, summary, reachable, explanation, check, warning]
+      properties:
+        mode:
+          type: string
+          enum: [allowlist_only, defaults_plus_allowlist]
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/EgressRule'
+        summary:
+          type: [string, 'null']
+        reachable:
+          type: array
+          description: What becomes reachable, one line per service.
+          items:
+            type: string
+        explanation:
+          type: [string, 'null']
+        check:
+          $ref: '#/components/schemas/RuleCheck'
+        warning:
+          type: [string, 'null']
+    NetworkReplayReport:
+      type: object
+      required: [scanned, covered, wouldBlock, wouldAllow, undecided, unchanged, hosts, sites]
+      properties:
+        scanned:
+          type: integer
+        covered:
+          type: integer
+        wouldBlock:
+          type: integer
+        wouldAllow:
+          type: integer
+        undecided:
+          type: integer
+        unchanged:
+          type: integer
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [host, change, visits, bots, lastVisit]
+            properties:
+              host:
+                type: string
+              change:
+                type: string
+                enum: [block, allow]
+              visits:
+                type: integer
+              bots:
+                type: array
+                items:
+                  type: string
+              lastVisit:
+                type: string
+        sites:
+          type: integer
+    ModelUsage:
+      type: object
+      required: [days, summary, recent]
+      properties:
+        days:
+          type: integer
+        summary:
+          type: array
+          items:
+            type: object
+            required: [model, source, runs, refused, people, lastUsedAt]
+            properties:
+              model:
+                type: string
+              source:
+                type: string
+              runs:
+                type: integer
+              refused:
+                type: integer
+              people:
+                type: integer
+              lastUsedAt:
+                type: string
+                format: date-time
+        recent:
+          type: array
+          description: The newest 50 runs.
+          items:
+            type: object
+            required: [id, email, agentId, model, source, allowed, createdAt]
+            properties:
+              id:
+                type: string
+              email:
+                type: [string, 'null']
+              agentId:
+                type: string
+              model:
+                type: string
+              source:
+                type: string
+              allowed:
+                type: boolean
+              createdAt:
+                type: string
+                format: date-time
+    ComputerAction:
+      type: object
+      required: [id, surface, botId, toolName, command, outcome, createdAt]
+      properties:
+        id:
+          type: string
+        surface:
+          type: string
+          enum: [cloud, local]
+        botId:
+          type: [string, 'null']
+        toolName:
+          type: string
+        command:
+          type: string
+        outcome:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ComputerActionPage:
+      type: object
+      required: [computerActions, nextCursor]
+      properties:
+        computerActions:
+          type: array
+          description: Newest first, then by id.
+          items:
+            $ref: '#/components/schemas/ComputerAction'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    SetupChecklist:
+      type: object
+      required: [audience, rows]
+      properties:
+        audience:
+          type: string
+          enum: [admin, member]
+          description: Who the checklist was written for.
+        rows:
+          type: array
+          items:
+            type: object
+            required: [id, scope, title, required, status, ready, detail, fix]
+            properties:
+              id:
+                type: string
+                enum: [intelligence, model, computer, apps, chat]
+              scope:
+                type: string
+                const: deployment
+              title:
+                type: string
+              required:
+                type: boolean
+              status:
+                type: string
+                enum: [ready, needs_setup, not_checked]
+              ready:
+                type: boolean
+              detail:
+                type: string
+              fix:
+                oneOf:
+                  - type: object
+                    required: [kind, names, docsUrl]
+                    properties:
+                      kind:
+                        type: string
+                        const: env
+                      names:
+                        type: array
+                        items:
+                          type: string
+                      docsUrl:
+                        type: string
+                      page:
+                        type: object
+                        required: [label, path]
+                        properties:
+                          label:
+                            type: string
+                          path:
+                            type: string
+                  - type: object
+                    required: [kind, label, path]
+                    properties:
+                      kind:
+                        type: string
+                        const: page
+                      label:
+                        type: string
+                      path:
+                        type: string
+                      docsUrl:
+                        type: string
+                  - type: 'null'
     Problem:
       type: object
       description: >-
@@ -3864,6 +5730,120 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    SettingsConflict:
+      description: >-
+        Single sign-on can't be required before an identity provider is
+        registered, or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noProvider:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Register an identity provider before requiring SSO, or nobody but the break-glass administrators can sign in.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SignOutUnfinished:
+      description: >-
+        Single sign-on is now required, but not everybody could be signed out
+        yet. Saving it again finishes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            again:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: SSO is now required, but not everybody could be signed out yet. Save it again to finish.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    CapabilityNotFound:
+      description: No permission switch has that id, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/capability-not-found
+                title: Permission not found.
+                status: 404
+                detail: There is no such permission.
+                code: CAPABILITY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidCapabilityChanges:
+      description: >-
+        A change is malformed, or one the rule would ignore, such as a group
+        nobody is in. problems says which.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            empty:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Add at least one change.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    NetworkPolicyNotFound:
+      description: No such network policy is set, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/network-policy-not-found
+                title: Network policy not found.
+                status: 404
+                detail: There is no such network policy.
+                code: NETWORK_POLICY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    NoTrailToReplay:
+      description: This OpenBot keeps no audit trail it can read, so there is nothing to test against.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noTrail:
+              value:
+                type: https://open.bot/errors/no-trail
+                title: There is no history to test against.
+                status: 503
+                detail: This OpenBot records no readable trail, so there is no history to test against.
+                code: NO_TRAIL
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:
@@ -4277,3 +6257,279 @@ components:
           domain: acme.com
           protocol: saml
           registeredBy: 8kq2m4x7p1rvz3a9c5d0
+    DeploymentExample:
+      summary: A team's OpenBot with single sign-on set up.
+      value:
+        edition: team
+        localEvaluation: false
+        generativeUi: true
+        selfHostBanner: false
+        transcription: true
+        voice: false
+        durableHistory: true
+        authProviders: [google, microsoft]
+        ssoConfigured: true
+        ssoRequired: false
+    OrganizationSettingsExample:
+      summary: The settings, with what an administrator needs beside them.
+      value:
+        ssoRequired: false
+        actionRecording: true
+        inactiveComputerDays: 14
+        modelAllowlist:
+          enabled: true
+          models: [openai/gpt-5.6-terra, anthropic/claude-sonnet-5]
+        mcpAllowlist:
+          enabled: false
+          servers: []
+        skillSharing: false
+        proactiveDailyRuns: 24
+        modelSelection: true
+        context:
+          builtInModel: openai/gpt-5.6-terra
+          directoryGroups: [Finance, Sales]
+          apps:
+            - id: composio-gmail
+              title: Gmail
+              url: https://mcp.composio.dev/gmail
+          defaultDestinations: [github.com, registry.npmjs.org]
+          scim:
+            configured: true
+            connectionId: directory
+            baseUrl: https://openbot.acme.com/api/auth/scim/v2
+            rotating: false
+          otel:
+            configured: false
+          actionRecordRetentionDays: 30
+    CapabilityPageExample:
+      summary: One switch, set for members and one group.
+      value:
+        capabilities:
+          - id: passwordManager
+            title: Password manager
+            description: People may save logins and hand sign-ins to a Bot's browser.
+            default: true
+            organization: null
+            roles:
+              user: false
+            groups:
+              Finance: true
+        nextCursor: null
+    CapabilityChangesExample:
+      summary: Members lose the password manager, Finance keeps it.
+      value:
+        changes:
+          - scopeKind: role
+            scopeId: user
+            capability: passwordManager
+            allowed: false
+          - scopeKind: group
+            scopeId: Finance
+            capability: passwordManager
+            allowed: true
+    NetworkPolicyPageExample:
+      summary: The organization's policy.
+      value:
+        networkPolicies:
+          - id: organization
+            scopeKind: organization
+            scopeId: ''
+            mode: defaults_plus_allowlist
+            rules:
+              - type: domain
+                value: salesforce.com
+              - type: cidr
+                value: 10.20.0.0/16
+                ports: '443'
+            locked: false
+            updatedBy: dana.whitfield@acme.com
+            updatedAt: '2026-11-14T09:00:00.000Z'
+        nextCursor: null
+    CapabilityExample:
+      summary: Members can't use the password manager.
+      value:
+        id: passwordManager
+        title: Password manager
+        description: People may save logins and hand sign-ins to a Bot's browser.
+        default: true
+        organization: null
+        roles:
+          user: false
+        groups: {}
+    SavedCapabilityChangesExample:
+      summary: Both changes, saved.
+      value:
+        saved:
+          - scopeKind: role
+            scopeId: user
+            capability: passwordManager
+            allowed: false
+          - scopeKind: group
+            scopeId: Finance
+            capability: passwordManager
+            allowed: true
+    CapabilityTranslationExample:
+      summary: One change, which passes the rule.
+      value:
+        changes:
+          - scopeKind: group
+            scopeId: Contractors
+            capability: passwordManager
+            allowed: false
+        summary: Contractors can't use the password manager.
+        explanation: Everybody else keeps it.
+        check:
+          ok: true
+        warning: null
+    CapabilityPreviewExample:
+      summary: One person loses the password manager.
+      value:
+        check:
+          ok: true
+        people:
+          - id: 2fn8w1c6y4tq7h0mbe3s
+            email: sam.ortiz@acme.com
+            name: Sam Ortiz
+            role: user
+            groups: []
+            capabilities:
+              - capability: passwordManager
+                title: Password manager
+                before:
+                  allowed: true
+                  decidedBy: default
+                  scopeId: ''
+                after:
+                  allowed: false
+                  decidedBy: role
+                  scopeId: user
+        counts:
+          people: 1
+          losing: 1
+          gaining: 0
+          keeping: 0
+          unchanged: 0
+        activity:
+          days: 30
+          unmapped: []
+        warning: null
+    PersonCapabilitiesExample:
+      summary: A member's switches.
+      value:
+        capabilities:
+          useBots: true
+          cloudBrowser: true
+          cloudNetwork: true
+          cloudComputer: true
+          localComputer: true
+          customRules: true
+          passwordManager: false
+          slackTeams: true
+          teamBots: true
+          ownerApps: true
+          isolatedComputers: false
+          proactive: true
+        enforced: true
+    PersonComputersStoppedExample:
+      summary: One computer stopped.
+      value:
+        stopped: [research-assistant]
+        failed: []
+    NetworkPolicyExample:
+      summary: The organization's list.
+      value:
+        id: organization
+        scopeKind: organization
+        scopeId: ''
+        mode: allowlist_only
+        rules:
+          - type: domain
+            value: salesforce.com
+        locked: false
+        updatedBy: dana.whitfield@acme.com
+        updatedAt: '2026-11-14T09:00:00.000Z'
+    NetworkTranslationExample:
+      summary: A list for one service.
+      value:
+        mode: allowlist_only
+        rules:
+          - type: domain
+            value: salesforce.com
+        summary: Only Salesforce.
+        reachable:
+          - 'Salesforce: salesforce.com'
+        explanation: Bots can reach Salesforce and nothing else.
+        check:
+          ok: true
+        warning: null
+    NetworkReplayReportExample:
+      summary: One site would be blocked.
+      value:
+        scanned: 120
+        covered: 120
+        wouldBlock: 3
+        wouldAllow: 0
+        undecided: 0
+        unchanged: 117
+        hosts:
+          - host: news.example
+            change: block
+            visits: 3
+            bots: [research-assistant]
+            lastVisit: '2026-11-13T17:20:00.000Z'
+        sites: 1
+    ModelUsageExample:
+      summary: One model over 30 days.
+      value:
+        days: 30
+        summary:
+          - model: openai/gpt-5.6-terra
+            source: configured
+            runs: 42
+            refused: 0
+            people: 3
+            lastUsedAt: '2026-11-14T08:59:00.000Z'
+        recent:
+          - id: 7c1e9d2a-3b4f-4e6a-9c8d-1f2e3a4b5c6d
+            email: sam.ortiz@acme.com
+            agentId: general-assistant
+            model: openai/gpt-5.6-terra
+            source: configured
+            allowed: true
+            createdAt: '2026-11-14T08:59:00.000Z'
+    ComputerActionPageExample:
+      summary: One recorded action.
+      value:
+        computerActions:
+          - id: 4a5b6c7d-8e9f-4a1b-9c2d-3e4f5a6b7c8d
+            surface: cloud
+            botId: research-assistant
+            toolName: computer_navigate
+            command: https://acme.my.salesforce.com
+            outcome: allowed
+            createdAt: '2026-11-14T08:58:00.000Z'
+        nextCursor: null
+    SetupChecklistExample:
+      summary: Set up but for the apps.
+      value:
+        audience: admin
+        rows:
+          - id: model
+            scope: deployment
+            title: Model
+            required: true
+            status: ready
+            ready: true
+            detail: Bots answer with openai/gpt-5.6-terra.
+            fix: null
+          - id: apps
+            scope: deployment
+            title: Apps
+            required: false
+            status: needs_setup
+            ready: false
+            detail: Bots can't use Gmail, Calendar or Drive yet.
+            fix:
+              kind: page
+              label: Apps
+              path: /admin/plugins

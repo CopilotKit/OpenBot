@@ -46,7 +46,10 @@ rules:
   paths-kebab-case: error
   no-ambiguous-paths: error
   path-not-include-query: error
-  no-http-verbs-in-paths: error
+  # Whole words only: a verb inside a word ("put" in computers) is not a verb in the path.
+  no-http-verbs-in-paths:
+    severity: error
+    splitIntoWords: true
   tag-description: error
   info-license: error
   info-license-strict: error
