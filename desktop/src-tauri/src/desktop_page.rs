@@ -61,21 +61,21 @@ pub const PERMISSIONS: [&str; 21] = [
 The page's own light or dark, for the window: macOS draws a window's outline from the window's
 appearance, and a dark one is a black line around a light page.
 
+`system` says the page is following the system, and then the window follows it too and is not
+pinned (`window_theme`). An OpenBot from before it followed the system sends none, and is pinned.
+
 Its own command rather than the window plugin's `set_theme`: granted to this origin, that call was
 refused (the window stayed dark), and this one is ours to see.
 
 Async, like every command here: on Windows a sync one deadlocked the window (see the test below).
 */
 #[tauri::command]
-async fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
+async fn appearance(window: tauri::Window, dark: bool, system: Option<bool>) -> Result<(), String> {
+    let system = system.unwrap_or(false);
     window
-        .set_theme(Some(if dark {
-            tauri::Theme::Dark
-        } else {
-            tauri::Theme::Light
-        }))
+        .set_theme(crate::window_theme(dark, system))
         .map_err(|error| error.to_string())?;
-    crate::page_appearance(&window, dark);
+    crate::page_appearance(&window, dark, system);
     Ok(())
 }
 

@@ -40,6 +40,7 @@ type ThemeEffects = {
   removeStoredValue: (key: string) => void;
   toggleRootClass: (name: string, force: boolean) => void;
   setRootColorScheme: (scheme: "dark" | "light") => void;
+  setRootChoice: (preference: ThemePreference) => void;
 };
 
 export function applyTheme(
@@ -55,4 +56,6 @@ export function applyTheme(
   effects.toggleRootClass("dark", dark);
   // `index.html` sets this inline before paint, and an inline style outranks the palette.
   effects.setRootColorScheme(dark ? "dark" : "light");
+  // OpenBot Desktop reads this to let its window follow the system, or to pin it to the choice.
+  effects.setRootChoice(preference);
 }
