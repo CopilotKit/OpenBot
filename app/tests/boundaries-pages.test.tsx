@@ -23,6 +23,7 @@ import type { ActionPolicy } from "@/lib/computers/queries";
 import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
 import { Route as RuleRoute } from "@/routes/_authed/admin/boundaries_.$index";
 import { Route as NewRuleRoute } from "@/routes/_authed/admin/boundaries_.new";
+import { answerBotsList } from "./bots-api";
 
 /**
  * The Boundaries screens: the list reads rules by name, adding one saves its name beside it, and
@@ -101,10 +102,10 @@ function serving(policy: ActionPolicy) {
       replayed.push(candidate);
       return replay(candidate);
     }
-    if (path.includes("/api/agents"))
-      return Response.json({
-        agents: [{ id: "general-assistant", name: "General Assistant" }],
-      });
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: "general-assistant", name: "General Assistant" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "unexpected" }, { status: 404 });
   }) as typeof fetch;
 }

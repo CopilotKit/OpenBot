@@ -476,12 +476,19 @@ A relaunch after a restart finds Docker Desktop quit, or OpenBot's Podman machin
 Intelligence CLI call needs the engine. The window's relaunch sequence starts with the CLI, so
 before this, the CLI answered "docker-unavailable" and setup stopped at "Waiting for the back end",
 never reaching Start, which is where the engine used to be woken. Nothing is done while OpenBot's
-own containers are up, or when the engine already answers.
+own containers are up on an engine that answers (`own_containers_up`), or when the engine already
+answers.
 */
 #[tauri::command]
 async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
     let root = stack::root_from(&root);
-    if app.state::<Shell>().containers.lock().unwrap().is_some() {
+    let shell_app = app.clone();
+    let up = tauri::async_runtime::spawn_blocking(move || {
+        own_containers_up(&shell_app.state::<Shell>(), engine::Address::responds)
+    })
+    .await
+    .unwrap_or(false);
+    if up {
         return Ok(());
     }
     let asked = std::time::Instant::now();
@@ -512,6 +519,24 @@ async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem>
     };
     logging::outcome("wake engine", asked, &woken);
     woken
+}
+
+/**
+Whether `wake_engine` leaves the engine alone because OpenBot's own containers are up on it.
+
+Held containers are up only while their engine answers. OpenBot's Podman machine stopped under a
+running OpenBot leaves this session holding them, and the window's Retry then skipped the engine as
+if they ran: the back end's check said "docker_unavailable" at once, and only Quit and a relaunch
+started the machine. Docker Desktop quit under a running OpenBot is the same.
+*/
+fn own_containers_up(shell: &Shell, answers: impl FnOnce(&engine::Address) -> bool) -> bool {
+    let held = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    held.is_some_and(|address| answers(&address))
 }
 
 /// The engine woken, then healed, then OpenBot's own machine made ready for the back end, in that
@@ -4871,8 +4896,16 @@ fn stop_for_update<R: tauri::Runtime>(
 }
 
 /// Stop as the button and the menu bar run it.
+///
+/// The person stopped OpenBot, so nothing starts it again on its own in this session. Only here:
+/// an update's stop (`stop_for_update`) is not theirs, and once it had marked the session, OpenBot
+/// stopped under the window after an update never started again by itself.
 fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
+    shell
+        .stopped_in_session
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let root = root_for_stop(shell, fallback_root);
+    let engine = engine_at_stop(shell, &root);
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -4882,9 +4915,10 @@ fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
         |root: &Path| down_owned_containers(shell, root),
         intelligence_step(Shutdown::Stop),
     );
-    stop_everything_then(
+    stop_everything_at(
         shell,
         &root,
+        engine,
         stack::stop_processes_under,
         down,
         intelligence,
@@ -4898,6 +4932,7 @@ where
 {
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
+    let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -4907,9 +4942,10 @@ where
         |root: &Path| down_containers_on_quit(shell, root),
         intelligence_step(Shutdown::Quit),
     );
-    let stopped = exit_cleanup_reporting(
+    let stopped = exit_cleanup_reporting_at(
         shell,
         &stack::default_root(),
+        engine,
         stack::stop_processes_under,
         down,
         intelligence,
@@ -5177,10 +5213,31 @@ where
     D: FnOnce(&Path) -> Result<(), String>,
     I: FnOnce(&Path) -> Result<(), String>,
 {
+    stop_everything_at(
+        shell,
+        fallback_root,
+        EngineAtStop::Answers,
+        cleanup,
+        down,
+        intelligence,
+    )
+}
+
+/// `stop_everything_then`, with what was found of the engine first (`EngineAtStop`).
+fn stop_everything_at<C, D, I>(
+    shell: &Shell,
+    fallback_root: &Path,
+    engine: EngineAtStop,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+{
     let _closing = local_eval::closing_for_stop();
-    shell
-        .stopped_in_session
-        .store(true, std::sync::atomic::Ordering::SeqCst);
     shell
         .start_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -5190,13 +5247,14 @@ where
     let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
-    if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
+    if let Err(problem) = cleanup_host_state_at(shell, &root, engine, cleanup) {
         failures.push(problem_detail(problem));
     }
 
-    if let Err(problem) = down_containers_with(shell, &root, down) {
+    if let Err(problem) = down_containers_with(shell, &root, engine.down(down)) {
         failures.push(format!("Compose down failed: {problem}"));
     }
+    engine.say_first(&mut failures);
 
     // Recovery is about what OpenBot runs, so only OpenBot's own failures keep it.
     if failures.is_empty() {
@@ -5205,7 +5263,7 @@ where
     drop(startup);
     Stopped {
         openbot: failures,
-        intelligence: intelligence(&root)
+        intelligence: engine.intelligence(intelligence)(&root)
             .err()
             .map(|problem| format!("{INTELLIGENCE_STOP_FAILED}{problem}")),
     }
@@ -5304,20 +5362,35 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
     i32::from(!failures.is_empty())
 }
 
-/// The app's identifier, the name of each folder Tauri keeps for it.
+/// The app's identifier as built, the name of each folder Tauri keeps for it. Beside an installed
+/// OpenBot the app goes by another (`side_by_side`).
 const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
+
+/**
+The app's context, under an identifier of its own when it is a second OpenBot beside an installed
+one (`stack::identifier_for`). Set before the app is built, so the single-instance lock and every
+folder Tauri resolves for the app follow it.
+*/
+fn side_by_side<R: tauri::Runtime>(mut context: tauri::Context<R>) -> tauri::Context<R> {
+    let identifier = stack::identifier_for(&context.config().identifier);
+    context.config_mut().identifier = identifier;
+    context
+}
 
 /// Tauri's `app_local_data_dir`, for a process with no app around it: the same folder, found the
 /// way Tauri 2 finds it (`dirs::data_local_dir`, then the identifier).
 fn headless_local_data_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join(APP_IDENTIFIER))
+    dirs::data_local_dir().map(|dir| dir.join(stack::identifier_for(APP_IDENTIFIER)))
 }
 
 /// Tauri's `app_log_dir`, for a process with no app around it: `~/Library/Logs/<identifier>` on a
 /// Mac, `logs` in the local data folder elsewhere, as Tauri 2 finds it.
 fn headless_log_dir() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|home| home.join("Library/Logs").join(APP_IDENTIFIER))
+        dirs::home_dir().map(|home| {
+            home.join("Library/Logs")
+                .join(stack::identifier_for(APP_IDENTIFIER))
+        })
     } else {
         headless_local_data_dir().map(|data| data.join("logs"))
     }
@@ -5497,6 +5570,131 @@ fn answering_before_stop(address: &engine::Address) {
     }
 }
 
+/// What Stop says, first, when the software OpenBot runs on did not answer and its machine did not
+/// say it was stopped. The next launch says it of a Quit that found the same, as its headline.
+const ENGINE_UNREACHABLE_AT_STOP: &str = "OpenBot couldn't reach the software it runs on, so some of OpenBot may still be running. Stop OpenBot again to retry.";
+
+/**
+What Stop and Quit find of the engine before they stop anything.
+
+On the EC2 Mac, OpenBot's Podman machine was stopped and then OpenBot quit. Every stop asked an
+engine that could not answer: the Bots' computers, `compose down`, the back end's `local stop` and
+the folder operations' check each failed, and the next launch said "OpenBot had trouble shutting
+down last time." Nothing could have been running: every container stops with its machine.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngineAtStop {
+    /// It answers, or it is not a Podman machine's, with no machine to ask. The stops run as they
+    /// always have.
+    Answers,
+    /// It does not answer, and its machine says it is stopped. Each stop is done already.
+    MachineStopped,
+    /// It does not answer, and its machine says it is running, or says nothing. The stops run, and
+    /// their failures are said as what they are.
+    Unreachable,
+}
+
+impl EngineAtStop {
+    /// From whether the engine answers and its machine's state as `podman machine inspect` says it.
+    fn from(answers: bool, machine_state: Option<&str>) -> Self {
+        if answers {
+            EngineAtStop::Answers
+        } else if machine_state.is_some_and(|state| state.eq_ignore_ascii_case("stopped")) {
+            EngineAtStop::MachineStopped
+        } else {
+            EngineAtStop::Unreachable
+        }
+    }
+
+    /// `compose down`, or nothing to do with the machine stopped.
+    fn down<'a>(self, down: impl FnOnce(&Path) -> Result<(), String> + 'a) -> StopStep<'a> {
+        if self == EngineAtStop::MachineStopped {
+            Box::new(|_| {
+                log::info!("[stop] OpenBot's machine is stopped: its containers stopped with it");
+                Ok(())
+            })
+        } else {
+            Box::new(down)
+        }
+    }
+
+    /// The back end's stop, or nothing to do with the machine stopped. Its calls in flight were
+    /// cancelled when Stop or Quit closed local evaluation.
+    fn intelligence<'a>(
+        self,
+        intelligence: impl FnOnce(&Path) -> Result<(), String> + 'a,
+    ) -> StopStep<'a> {
+        if self == EngineAtStop::MachineStopped {
+            Box::new(|_| Ok(()))
+        } else {
+            Box::new(intelligence)
+        }
+    }
+
+    /// With the engine unreachable, its failures start by saying so.
+    fn say_first(self, failures: &mut Vec<String>) {
+        if self == EngineAtStop::Unreachable
+            && failures
+                .first()
+                .is_some_and(|first| !first.starts_with(ENGINE_UNREACHABLE_AT_STOP))
+        {
+            failures.insert(0, ENGINE_UNREACHABLE_AT_STOP.to_string());
+        }
+    }
+}
+
+/// `EngineAtStop` for the engine Stop or Quit would stop things on: OpenBot's own containers'
+/// while they run, otherwise the Podman the installation at `root` was set up on.
+fn engine_at_stop(shell: &Shell, root: &Path) -> EngineAtStop {
+    // Only a Podman machine on a Mac or a PC has a machine of its own to ask.
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return EngineAtStop::Answers;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone());
+    let address = match owned {
+        Some(address) => address,
+        None => {
+            if preparation::saved_engine(root) != Some(engine::Engine::Podman) {
+                return EngineAtStop::Answers;
+            }
+            let found = engine::detect_saved(Some(engine::Engine::Podman));
+            if found.responding {
+                return EngineAtStop::Answers;
+            }
+            found.address.unwrap_or_else(|| {
+                engine::Address::new(engine::Engine::Podman, Some(acquire::MACHINE.into()))
+            })
+        }
+    };
+    // Docker, or a Podman reached through a URL, has no machine of its own to ask.
+    if address.engine != engine::Engine::Podman || address.responds() {
+        return EngineAtStop::Answers;
+    }
+    let machine = acquire::machine_reached(&address);
+    let state =
+        machine
+            .as_deref()
+            .and_then(|machine| match acquire::machine_state_named(machine) {
+                Ok(state) => state,
+                Err(error) => {
+                    log::warn!("[stop] could not ask {machine} for its state: {error}");
+                    None
+                }
+            });
+    let found = EngineAtStop::from(false, state.as_deref());
+    log::info!(
+        "[stop] the engine does not answer; its machine {} is {}: {found:?}",
+        machine.as_deref().unwrap_or("(none)"),
+        state.as_deref().unwrap_or("unknown")
+    );
+    found
+}
+
 /// The engine Stop and Quit stop things on: OpenBot's own containers' while they run, otherwise
 /// the one the installation at `root` was set up on, when it answers.
 fn engine_for_stop(shell: &Shell, root: &Path) -> Option<engine::Address> {
@@ -5574,11 +5772,28 @@ fn cleanup_host_state<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize
 where
     C: FnOnce(&Path) -> Result<usize, Problem>,
 {
+    cleanup_host_state_at(shell, root, EngineAtStop::Answers, cleanup)
+}
+
+/// `cleanup_host_state`, with what Stop or Quit found of the engine first (`EngineAtStop`).
+fn cleanup_host_state_at<C>(
+    shell: &Shell,
+    root: &Path,
+    engine: EngineAtStop,
+    cleanup: C,
+) -> Result<usize, Problem>
+where
+    C: FnOnce(&Path) -> Result<usize, Problem>,
+{
     // Also runs for startup replacement and failure recovery, so a retired authorization session
     // cannot leave a job running beside a new server.
     let host_access_result = {
         let mut slot = shell.host_access.lock().unwrap();
         let result = slot.as_ref().map_or(Ok(()), |broker| {
+            if engine == EngineAtStop::MachineStopped {
+                broker.stop_with_machine_stopped();
+                return Ok(());
+            }
             broker.stop().map_err(|error| error.to_string())
         });
         if result.is_ok() {
@@ -5595,6 +5810,9 @@ where
     let result = cleanup(&selected);
     let result = match (host_access_result, result) {
         (Ok(()), result) => result,
+        (Err(error), Ok(_)) if engine == EngineAtStop::Unreachable => {
+            Err(Problem::with(ENGINE_UNREACHABLE_AT_STOP, error))
+        }
         (Err(error), Ok(_)) => Err(Problem::with(
             "OpenBot could not stop a folder operation.",
             error,
@@ -5741,6 +5959,16 @@ fn quit_cleanup_notice_path(root: &Path) -> PathBuf {
 struct QuitCleanupNotice {
     version: u8,
     failures: Vec<QuitCleanupFailure>,
+    /**
+    The Quit could not reach the software OpenBot runs on (`ENGINE_UNREACHABLE_AT_STOP`), said as the
+    notice's headline when it is read.
+
+    A field of its own, never a failure of its own: an app rolled back to an earlier release reads
+    this file too, and its reader knows only `failures` and the two kinds in it. It skips a field it
+    does not know and says those as it always has.
+    */
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    engine_unreachable: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -5748,6 +5976,12 @@ struct QuitCleanupNotice {
 enum QuitCleanupFailure {
     HostProcesses,
     Containers,
+}
+
+/// What follows `ENGINE_UNREACHABLE_AT_STOP` in a Quit's failure line, when the line starts with it.
+fn after_engine_unreachable(line: &str) -> Option<&str> {
+    line.strip_prefix("[exit] cleanup failed: ")
+        .and_then(|failure| failure.strip_prefix(ENGINE_UNREACHABLE_AT_STOP))
 }
 
 fn known_safe_quit_cleanup_failure(line: &str) -> QuitCleanupFailure {
@@ -5820,14 +6054,23 @@ fn write_openbot_quit_cleanup_notice(root: &Path, lines: &[&String]) -> Result<(
     if lines.is_empty() {
         return Ok(());
     }
+    let engine_unreachable = lines
+        .iter()
+        .any(|line| after_engine_unreachable(line).is_some());
+    let mut failures = lines
+        .iter()
+        // The sentence alone says only that the engine did not answer, which is its own field.
+        .filter(|line| after_engine_unreachable(line) != Some(""))
+        .map(|line| known_safe_quit_cleanup_failure(line))
+        .collect::<std::collections::BTreeSet<_>>();
+    if failures.is_empty() {
+        // An earlier release reads only `failures`, and an empty list to it is nothing to say.
+        failures.insert(QuitCleanupFailure::HostProcesses);
+    }
     let notice = QuitCleanupNotice {
         version: 1,
-        failures: lines
-            .iter()
-            .map(|line| known_safe_quit_cleanup_failure(line))
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect(),
+        failures: failures.into_iter().collect(),
+        engine_unreachable,
     };
     let bytes = serde_json::to_vec(&notice)
         .map_err(|error| format!("could not serialize shutdown notice: {error}"))?;
@@ -5900,10 +6143,13 @@ fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
     if detail.is_empty() {
         return Ok(None);
     }
-    Ok(Some(Problem::with(
-        "OpenBot had trouble shutting down last time.",
-        detail,
-    )))
+    // The sentence a person reads first: why, when it was the engine that did not answer.
+    let said = if notice.engine_unreachable {
+        ENGINE_UNREACHABLE_AT_STOP
+    } else {
+        "OpenBot had trouble shutting down last time."
+    };
+    Ok(Some(Problem::with(said, detail)))
 }
 
 fn recovery_required_or_pending_quit_notice(shell: &Shell, root: &Path) -> bool {
@@ -5958,9 +6204,37 @@ when a stack OpenBot created is recorded, which is when its step stops anything;
 way, as before. A failure always gets its row, so the screen never says everything stopped when
 something did not.
 */
+#[cfg(test)]
 fn exit_cleanup_reporting<C, D, I, P>(
     shell: &Shell,
     fallback_root: &Path,
+    cleanup: C,
+    down: D,
+    intelligence: I,
+    progress: P,
+) -> Stopped
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+    I: FnOnce(&Path) -> Result<(), String>,
+    P: FnMut(QuitStep, QuitStepState),
+{
+    exit_cleanup_reporting_at(
+        shell,
+        fallback_root,
+        EngineAtStop::Answers,
+        cleanup,
+        down,
+        intelligence,
+        progress,
+    )
+}
+
+/// `exit_cleanup_reporting`, with what was found of the engine first (`EngineAtStop`).
+fn exit_cleanup_reporting_at<C, D, I, P>(
+    shell: &Shell,
+    fallback_root: &Path,
+    engine: EngineAtStop,
     cleanup: C,
     down: D,
     intelligence: I,
@@ -5989,12 +6263,13 @@ where
     let startup = shell.startup.lock().unwrap();
     let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
-    if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
+    if let Err(problem) = cleanup_host_state_at(shell, &root, engine, cleanup) {
         failures.push(problem_detail(problem));
     }
-    if let Err(problem) = down_containers_with(shell, &root, down) {
+    if let Err(problem) = down_containers_with(shell, &root, engine.down(down)) {
         failures.push(format!("Compose down failed: {problem}"));
     }
+    engine.say_first(&mut failures);
     #[cfg(target_os = "linux")]
     if let Err(problem) = shell.podman_api.lock().unwrap().stop() {
         failures.push(format!(
@@ -6018,7 +6293,7 @@ where
     if created {
         progress(QuitStep::Intelligence, QuitStepState::Running);
     }
-    let stopped = intelligence(&root);
+    let stopped = engine.intelligence(intelligence)(&root);
     if created || stopped.is_err() {
         progress(QuitStep::Intelligence, QuitStepState::of(&stopped));
     }
@@ -6342,7 +6617,7 @@ fn setup_palette<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> first_paint::P
 }
 
 /// The setup screens' ground as a window colour.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
     let (red, green, blue) = palette.ground;
     tauri::window::Color(red, green, blue, 0xff)
@@ -6479,13 +6754,14 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         None => builder,
     };
     /*
-     * Never blank white while WebView2 starts (`first_paint`): on Windows the window, and the
-     * webview's default background under the page, are the setup screens' ground, and from its
-     * first show until the setup page paints, "Getting OpenBot ready" covers it. The cover goes up
-     * while `build()` waits for WebView2, and is put back on top of WebView2's own window after.
+     * Never a blank grey or white window before the page paints (`first_paint`): on macOS and
+     * Windows the window, and the webview's background under the page, are the setup screens'
+     * ground, in light or dark, from the first frame. On Windows, from its first show until the
+     * setup page paints, "Getting OpenBot ready" covers it too. The cover goes up while `build()`
+     * waits for WebView2, and is put back on top of WebView2's own window after.
      */
     let palette = setup_palette(app);
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let builder = builder.background_color(ground_color(palette));
     let watching = first_paint::watch(palette);
     let building = std::time::Instant::now();
@@ -6745,26 +7021,38 @@ pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark
 
 /**
 Windows 11's title bar in the ground of the page under it, or Windows's own colours for `None`.
-
-`Some(dark)` is the setup screens' ground, which OpenBot's own pages share (`--background` in the
-app's styles): the bar, its text and the window's border become one surface with the page instead
-of a white band across its top. Windows 10 has no such attributes and keeps its bar; the calls fail
-there and are ignored.
+See `tint_title_bar_of`.
 */
 #[cfg(target_os = "windows")]
 fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<bool>) {
-    #[link(name = "dwmapi")]
-    extern "system" {
-        fn DwmSetWindowAttribute(
-            window: *mut std::ffi::c_void,
-            attribute: u32,
-            value: *const std::ffi::c_void,
-            size: u32,
-        ) -> i32;
+    if let Ok(hwnd) = window.hwnd() {
+        tint_title_bar_of(hwnd.0 as isize, dark);
     }
-    const BORDER_COLOR: u32 = 34;
-    const CAPTION_COLOR: u32 = 35;
-    const TEXT_COLOR: u32 = 36;
+}
+
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE`: Windows's own dark title bar, on Windows 10 (build 18985 on,
+/// so Windows Server 2022 too) and Windows 11.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const IMMERSIVE_DARK_MODE: u32 = 20;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const BORDER_COLOR: u32 = 34;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const CAPTION_COLOR: u32 = 35;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const TEXT_COLOR: u32 = 36;
+
+/**
+The window attributes, in the order they are set, that give the title bar `dark`'s look.
+
+`Some(dark)`: Windows's own dark or light bar, then (Windows 11) the setup screens' ground, which
+OpenBot's own pages share (`--background` in the app's styles), so the bar, its text and the
+window's border are one surface with the page instead of a band across its top. Windows 10 and
+Windows Server 2022 have no colour attributes; those calls fail there and the dark or light bar is
+what shows. `None`: Windows's own colours, and its dark or light left to the window's theme.
+*/
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn title_bar_attributes(dark: Option<bool>) -> Vec<(u32, u32)> {
     /// `DWMWA_COLOR_DEFAULT`: give the attribute back to Windows.
     const DEFAULT: u32 = 0xFFFF_FFFF;
     // COLORREF is 0x00BBGGRR.
@@ -6776,26 +7064,71 @@ fn tint_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, dark: Option<boo
         Some(false) => (colorref(SETUP_BACKGROUND), colorref(SETUP_BACKGROUND_DARK)),
         None => (DEFAULT, DEFAULT),
     };
-    let Ok(hwnd) = window.hwnd() else {
-        return;
+    dark.map(|dark| (IMMERSIVE_DARK_MODE, u32::from(dark)))
+        .into_iter()
+        .chain([
+            (CAPTION_COLOR, caption),
+            (BORDER_COLOR, caption),
+            (TEXT_COLOR, text),
+        ])
+        .collect()
+}
+
+/**
+The title bar of the window `hwnd` in `dark`'s look (`title_bar_attributes`), repainted now.
+
+MEASURED on Windows Server 2022 (box H) in dark: the bar stayed light until the window was resized.
+Windows applies these attributes to the frame only when it next draws it, and nothing here moved or
+resized the window, so the frame is redrawn on the spot (`SWP_FRAMECHANGED`). Called as the main
+window first shows (`first_paint`), for each page it loads, on every theme change, and whenever
+OpenBot's own page reports its light or dark.
+*/
+#[cfg(target_os = "windows")]
+pub(crate) fn tint_title_bar_of(hwnd: isize, dark: Option<bool>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SWP_NOZORDER,
     };
-    let hwnd = hwnd.0;
-    for (attribute, value) in [
-        (CAPTION_COLOR, caption),
-        (BORDER_COLOR, caption),
-        (TEXT_COLOR, text),
-    ] {
-        // SAFETY: `hwnd` is this window's live handle, and `value` is a u32 that outlives the call,
-        // which is the size and type these three attributes take.
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            window: *mut std::ffi::c_void,
+            attribute: u32,
+            value: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
+    }
+    let window = HWND(hwnd as *mut std::ffi::c_void);
+    for (attribute, value) in title_bar_attributes(dark) {
+        // SAFETY: `window` is a live window handle, and `value` is a u32 that outlives the call,
+        // which is the size and type these attributes take (a BOOL or a COLORREF).
         unsafe {
             DwmSetWindowAttribute(
-                hwnd,
+                window.0,
                 attribute,
                 (&value as *const u32).cast(),
                 std::mem::size_of::<u32>() as u32,
             );
         }
     }
+    // SAFETY: a plain call on a window handle; it neither moves, sizes, reorders nor activates it.
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER
+                | SWP_NOOWNERZORDER
+                | SWP_NOACTIVATE,
+        )
+    };
 }
 
 /// The title text in the title bar. AppKit, so on the main thread.
@@ -7019,7 +7352,7 @@ mod app_page_tests {
             .plugin(tauri_plugin_notification::init())
             .plugin(intelligence_bridge::plugin())
             .manage(Shell::default())
-            .build(tauri::generate_context!(test = true))
+            .build(side_by_side(tauri::generate_context!(test = true)))
             .unwrap();
         // As the app's setup does: this context compiles the page's permissions in.
         know_app_page_grants(app.handle());
@@ -7377,6 +7710,144 @@ mod app_page_tests {
             app.path().app_local_data_dir().ok()
         );
         assert_eq!(headless_log_dir(), app.path().app_log_dir().ok());
+    }
+
+    /// Box G: a second OpenBot beside an installed one (`stack::PROJECT_VARIABLE`) went by the
+    /// installed one's identifier. Its launch was handed to the installed app by the single-instance
+    /// lock, and with that app quit it opened the installed one's folder from the installed one's
+    /// `last-launched-root.json`, and its Quit stopped the installed one's back end. It goes by an
+    /// identifier of its own now: every folder Tauri gives it, the record of its installation and the
+    /// lock are its own, and it leaves the browsers' Recorder alone. Run in a process of its own, with
+    /// the variable set and a home of its own.
+    #[test]
+    fn a_second_openbot_keeps_its_own_lock_folders_and_installation() {
+        const CHILD: &str = "OPENBOT_TEST_SIDE_BY_SIDE_CHILD";
+        let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) else {
+            let home =
+                std::env::temp_dir().join(format!("openbot-side-by-side-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "app_page_tests::a_second_openbot_keeps_its_own_lock_folders_and_installation",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, &home)
+                // Unique, so the folders it makes where Windows keeps them are this run's alone.
+                .env(
+                    stack::PROJECT_VARIABLE,
+                    format!("openbot-test-{}", std::process::id()),
+                )
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", home.join(".config"))
+                .env("XDG_DATA_HOME", home.join(".local").join("share"))
+                .env(RECORDER_HOST_TEST_HOME, &home)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&home);
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.status.success(), "{said}");
+            assert!(said.contains("1 passed"), "{said}");
+            return;
+        };
+        let project = stack::side_by_side_project().expect("the child names a project");
+        let identifier = format!("{APP_IDENTIFIER}.{project}");
+        let (app, _) = app();
+        // The single-instance lock is keyed by this on every platform (Windows' mutex, a Mac's
+        // socket, Linux's D-Bus name), so a launch of this app is never handed to the installed one.
+        assert_eq!(app.config().identifier, identifier);
+        let folders = [
+            app.path().app_config_dir().unwrap(),
+            app.path().app_data_dir().unwrap(),
+            app.path().app_local_data_dir().unwrap(),
+            app.path().app_cache_dir().unwrap(),
+        ];
+        for folder in &folders {
+            assert_eq!(
+                folder.file_name().and_then(|name| name.to_str()),
+                Some(identifier.as_str()),
+                "{}",
+                folder.display()
+            );
+        }
+        let logs = app.path().app_log_dir().unwrap();
+        assert!(
+            logs.components()
+                .any(|part| part.as_os_str() == std::ffi::OsStr::new(&identifier)),
+            "{}",
+            logs.display()
+        );
+        assert_eq!(
+            headless_local_data_dir(),
+            app.path().app_local_data_dir().ok()
+        );
+        assert_eq!(headless_log_dir(), Some(logs));
+
+        // The installation it last opened is read from its own folder, never the installed one's.
+        let config = app.path().app_config_dir().unwrap();
+        let installed = config.with_file_name(APP_IDENTIFIER);
+        let first = home.join("OpenBot");
+        let second = home.join("second").join("OpenBot");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        // Where Windows keeps them is not under HOME: the installed app's record there is a real one.
+        if !cfg!(windows) {
+            preparation::save_selected_root(&installed, &first).unwrap();
+            assert_eq!(
+                preparation::selected_root(&installed),
+                Some(std::fs::canonicalize(&first).unwrap())
+            );
+        }
+        assert_eq!(last_launched_root(), None);
+        preparation::save_selected_root(&config, &second).unwrap();
+        assert_eq!(
+            last_launched_root(),
+            Some(openbot_desktop_lib::paths::plain(
+                std::fs::canonicalize(&second).unwrap()
+            ))
+        );
+        if cfg!(windows) {
+            for folder in folders {
+                let _ = std::fs::remove_dir_all(folder);
+            }
+        }
+
+        // The browsers' Recorder stays the installed app's: with a Chrome and an Edge here, nothing
+        // is registered and nothing under this home is written.
+        for browser in [
+            home.join("Library/Application Support/Google/Chrome"),
+            home.join("Library/Application Support/Microsoft Edge"),
+            home.join(".config/google-chrome"),
+            home.join(".config/microsoft-edge"),
+        ] {
+            std::fs::create_dir_all(browser).unwrap();
+        }
+        let files = |home: &Path| {
+            let mut found = Vec::new();
+            let mut pending = vec![home.to_path_buf()];
+            while let Some(folder) = pending.pop() {
+                for entry in std::fs::read_dir(folder).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        pending.push(path.clone());
+                    }
+                    found.push(path);
+                }
+            }
+            found.sort();
+            found
+        };
+        let before = files(&home);
+        assert_eq!(
+            install_recorder_host_for_this_user().unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(files(&home), before);
     }
 
     /// Box I: the uninstaller's stop ran `podman compose` with none of what the app sets up when it
@@ -8696,14 +9167,19 @@ async fn run_local_eval<R: tauri::Runtime>(
     action: local_eval::Action,
     stack: String,
 ) -> Result<local_eval::Report, local_eval::Failure> {
+    log::info!(
+        "{}",
+        window_call_arrived(action, handed_back().as_ref(), std::time::SystemTime::now())
+    );
     let stack = local_eval::StackId::parse(&stack)?;
     let root = {
         let shell = app.state::<Shell>();
         let selected = shell.selected_root.lock().unwrap().clone();
         selected.unwrap_or_else(stack::default_root)
     };
+    let asked = attempt.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
-        local_eval_answer(&root, &attempt, action, &stack)
+        local_eval_answer(&root, &asked, action, &stack)
     })
     .await
     .map_err(|_| local_eval::Failure::Spawn)
@@ -8725,9 +9201,105 @@ async fn run_local_eval<R: tauri::Runtime>(
             log::info!("{line}");
         }
     }
-    let report = report?;
-    learn_dashboards(&app, report.stack.iter());
-    Ok(report)
+    if let Ok(answered) = &report {
+        learn_dashboards(&app, answered.stack.iter());
+    }
+    *handed_back() = Some(HandedBack {
+        attempt,
+        action,
+        at: std::time::SystemTime::now(),
+    });
+    log::info!(
+        "[window ipc] local {} answer handed to the window",
+        action.as_str()
+    );
+    report
+}
+
+/**
+The round trip between the setup window and `run_local_eval`, in the log: when a call arrives, when
+its answer is handed back, and when the window says the answer reached it
+(`local_eval_answer_landed`).
+
+On Windows box D a Start stood still for 11 minutes after `local start` finished, until a click
+on the taskbar, with nothing in the log: the window asks `local status` straight after `local
+start` answers, and that call arrived 11 minutes late. These lines say which hop held it next time:
+the answer reaching the window, or the window's next call reaching here.
+*/
+struct HandedBack {
+    attempt: String,
+    action: local_eval::Action,
+    at: std::time::SystemTime,
+}
+
+static HANDED_BACK: Mutex<Option<HandedBack>> = Mutex::new(None);
+
+fn handed_back() -> std::sync::MutexGuard<'static, Option<HandedBack>> {
+    HANDED_BACK.lock().unwrap_or_else(|held| held.into_inner())
+}
+
+/// Seconds from `earlier` to `later`, negative when the clock says `later` came first.
+fn seconds_from(earlier: std::time::SystemTime, later: std::time::SystemTime) -> f64 {
+    match later.duration_since(earlier) {
+        Ok(after) => after.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    }
+}
+
+fn window_call_arrived(
+    action: local_eval::Action,
+    last: Option<&HandedBack>,
+    now: std::time::SystemTime,
+) -> String {
+    match last {
+        Some(last) => format!(
+            "[window ipc] local {} asked by the window {:.1}s after the local {} answer was handed to it",
+            action.as_str(),
+            seconds_from(last.at, now),
+            last.action.as_str()
+        ),
+        None => format!("[window ipc] local {} asked by the window", action.as_str()),
+    }
+}
+
+fn window_answer_landed(
+    action: local_eval::Action,
+    attempt: &str,
+    last: Option<&HandedBack>,
+    landed: std::time::SystemTime,
+    now: std::time::SystemTime,
+) -> String {
+    let handed = last
+        .filter(|last| last.attempt == attempt)
+        .map(|last| {
+            format!(
+                "{:.1}s after it was handed to it",
+                seconds_from(last.at, landed)
+            )
+        })
+        .unwrap_or_else(|| "after a later call's answer was handed to it".into());
+    format!(
+        "[window ipc] the local {} answer reached the window {handed}; the window's note of it took {:.1}s to arrive",
+        action.as_str(),
+        seconds_from(landed, now)
+    )
+}
+
+/// The setup window's note that a `run_local_eval` answer reached it, at `landed_at_ms` by its
+/// clock (milliseconds since 1970), for the round trip in the log.
+#[tauri::command]
+fn local_eval_answer_landed(attempt: String, action: local_eval::Action, landed_at_ms: u64) {
+    let landed = std::time::UNIX_EPOCH + std::time::Duration::from_millis(landed_at_ms);
+    log::info!(
+        "{}",
+        window_answer_landed(
+            action,
+            &attempt,
+            handed_back().as_ref(),
+            landed,
+            std::time::SystemTime::now()
+        )
+    );
 }
 
 /// The window's wait for the back end to report ready, as the log says it (`logging::WaitLog`):
@@ -9111,20 +9683,39 @@ async fn podman_machine_plan(short: machine_size::Short) -> Option<machine_size:
         .flatten()
 }
 
+/// Why `resize_podman_machine` did not end with a machine ready for setup, said plainly. `resized`
+/// when the machine is bigger and running but never got ready (`machine_size::Stopped::NotReady`):
+/// the window then offers Retry alone, since the steps to resize by hand are already done.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResizeStopped {
+    said: String,
+    resized: bool,
+}
+
 /// The person said yes: stop the Podman machine OpenBot runs on, give it `cpus` CPUs and
-/// `memory_mib` MiB, and start it again with the containers that were running in it. The window
-/// then retries the setup. A failure is said plainly; Podman's own words are in the log.
+/// `memory_mib` MiB, start it again with the containers that were running in it, and wait until it
+/// answers and reaches a registry (`machine_size::ready_with`). The window then retries the setup.
+/// A failure is said plainly; Podman's own words are in the log.
 #[tauri::command]
-async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+async fn resize_podman_machine(cpus: u64, memory_mib: u64) -> Result<(), ResizeStopped> {
+    let resized = tauri::async_runtime::spawn_blocking(move || {
         machine_size::resize_here(machine_size::Size { cpus, memory_mib })
     })
     .await
-    .map_err(|error| error.to_string())
-    .and_then(|resized| resized)
-    .map_err(|_| {
-        "OpenBot couldn't resize your Podman machine. Use the steps below instead.".to_string()
-    })
+    .unwrap_or_else(|error| Err(machine_size::Stopped::Refused(error.to_string())));
+    match resized {
+        Ok(()) => Ok(()),
+        Err(machine_size::Stopped::NotReady(_)) => Err(ResizeStopped {
+            said: machine_size::NOT_READY.to_string(),
+            resized: true,
+        }),
+        Err(machine_size::Stopped::Refused(_)) => Err(ResizeStopped {
+            said: "OpenBot couldn't resize your Podman machine. Use the steps below instead."
+                .to_string(),
+            resized: false,
+        }),
+    }
 }
 
 /// The step the back end update `attempt` is in and for how long, once it is in one that waits,
@@ -9787,7 +10378,11 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    bring_onto_a_screen(&window);
+    // Maximized or full screen, the system placed it and sized it to its screen: moving it or
+    // resizing it here would take it out of that (`onto_a_screen`).
+    if bring_onto_a_screen(&window) == Placing::System {
+        return;
+    }
     let (Some((area, frame)), Ok(scale), Ok(inner)) = (
         screen_room(&window),
         window.scale_factor(),
@@ -9804,16 +10399,40 @@ fn fit_main_window_to_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Where launch puts the main window, from where it finds it (`onto_a_screen`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Placing {
+    /// Maximized or full screen: where the system put it, on a screen and sized to it. Left as it
+    /// is, neither moved nor resized.
+    System,
+    /// Its title bar on a screen: it stays, fitted into that screen's work area.
+    Stays,
+    /// Off every screen: moved here, onto the primary one.
+    Onto(tauri::LogicalPosition<f64>),
+}
+
 /**
-Where a window at `window` goes so that its title bar is on one of `areas` (each monitor's work
-area, the primary first), or None when it already is. A window put back where it was last time
-(`tauri_plugin_window_state`) can be on a monitor that is no longer there: it goes to the middle of
-the primary one, as far as it fits.
+Where a window at `window`, `maximized` or not (full screen counts), goes so that its title bar is
+on one of `areas` (each monitor's work area, the primary first). A window put back where it was last
+time (`tauri_plugin_window_state`) can be on a monitor that is no longer there: it goes to the
+middle of the primary one, as far as it fits.
+
+A maximized window is where the system put it, on a screen, and stays maximized. Windows hangs a
+maximized window's frame past the screen's edges by its resize border: on a 1920 by 1080 screen its
+outer position is -8,-8, so the top 8 pixels of its title bar are above the work area. Measured as a
+window the person placed, that read as off every screen, and moving it un-maximized it: a window
+maximized when OpenBot was quit from the tray came back at 1000 by 800 in the middle of the screen.
+A maximized window whose screen is gone never gets here: `place_saved_window` builds it on the
+primary one.
 */
 fn onto_a_screen(
     window: tauri::LogicalRect<f64, f64>,
+    maximized: bool,
     areas: &[tauri::LogicalRect<f64, f64>],
-) -> Option<tauri::LogicalPosition<f64>> {
+) -> Placing {
+    if maximized {
+        return Placing::System;
+    }
     // Enough of the title bar to take hold of: 120 by 24 logical pixels of it.
     let reachable = |area: &tauri::LogicalRect<f64, f64>| {
         let left = window.position.x.max(area.position.x);
@@ -9823,23 +10442,32 @@ fn onto_a_screen(
         right - left >= 120.0 && bottom - top >= 24.0
     };
     if areas.iter().any(reachable) {
-        return None;
+        return Placing::Stays;
     }
-    let area = areas.first()?;
-    Some(tauri::LogicalPosition::new(
+    let Some(area) = areas.first() else {
+        return Placing::Stays;
+    };
+    Placing::Onto(tauri::LogicalPosition::new(
         area.position.x + ((area.size.width - window.size.width) / 2.0).max(0.0),
         area.position.y + ((area.size.height - window.size.height) / 2.0).max(0.0),
     ))
 }
 
-/// Move `window` onto a screen that is there, if it was put back somewhere that is not.
-fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+/// Move `window` onto a screen that is there, if it was put back somewhere that is not, and say
+/// where it was put (`onto_a_screen`).
+fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Placing {
+    let maximized =
+        window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false);
     let (Ok(scale), Ok(position), Ok(size)) = (
         window.scale_factor(),
         window.outer_position(),
         window.outer_size(),
     ) else {
-        return;
+        return if maximized {
+            Placing::System
+        } else {
+            Placing::Stays
+        };
     };
     let primary = window.primary_monitor().ok().flatten();
     let mut monitors = window.available_monitors().unwrap_or_default();
@@ -9861,10 +10489,16 @@ fn bring_onto_a_screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         position: position.to_logical(scale),
         size: size.to_logical(scale),
     };
-    if let Some(onto) = onto_a_screen(rect, &areas) {
-        log::info!("[window] put back off every screen; moved onto the primary one");
-        let _ = window.set_position(onto);
+    let placing = onto_a_screen(rect, maximized, &areas);
+    match placing {
+        Placing::Onto(onto) => {
+            log::info!("[window] put back off every screen; moved onto the primary one");
+            let _ = window.set_position(onto);
+        }
+        Placing::System => log::info!("[window] put back maximized; left as the system placed it"),
+        Placing::Stays => {}
     }
+    placing
 }
 
 /// Mark this run as needing its connection refreshed, and send the window to setup to do it.
@@ -9901,6 +10535,10 @@ fn publish_connection_failure<R: tauri::Runtime>(
     Ok(true)
 }
 
+/// How long a running OpenBot's server goes unanswered before the watcher asks whether it is still
+/// up. Longer than the server takes to come back after its restart policy restarts it.
+const SERVER_GONE_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+
 /**
 Watch a running OpenBot for a connection it reports refused, and send the window back to setup to
 refresh it.
@@ -9927,6 +10565,9 @@ fn watch_connections<R: tauri::Runtime>(
         };
         let mut notice_sent = false;
         let mut poll_failed = false;
+        // Since when the server has not answered, and whether setup has been shown for it.
+        let mut unanswered_since: Option<std::time::Instant> = None;
+        let mut setup_shown = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -9944,7 +10585,13 @@ fn watch_connections<R: tauri::Runtime>(
             if notice_sent {
                 continue;
             }
-            match desktop_connection::poll(&client, server_port, &token) {
+            let polled = desktop_connection::poll(&client, server_port, &token);
+            if polled.is_ok() {
+                poll_failed = false;
+                unanswered_since = None;
+                setup_shown = false;
+            }
+            match polled {
                 Ok(Some(connection)) => {
                     match publish_connection_failure(&app, &root, generation, connection) {
                         Ok(published) => notice_sent = published,
@@ -9953,16 +10600,83 @@ fn watch_connections<R: tauri::Runtime>(
                         }
                     }
                 }
-                Ok(None) => poll_failed = false,
+                Ok(None) => {}
                 Err(error) => {
                     if !poll_failed {
                         log::warn!("[watch] {error}");
                     }
                     poll_failed = true;
+                    let since = *unanswered_since.get_or_insert_with(std::time::Instant::now);
+                    if setup_shown || since.elapsed() < SERVER_GONE_AFTER {
+                        continue;
+                    }
+                    match show_setup_when_stopped(&app, &root, generation) {
+                        Ok(Unanswered::Stopped) => setup_shown = true,
+                        // Still up after all: ask again only after as long a silence again.
+                        Ok(Unanswered::Running) => unanswered_since = None,
+                        Ok(Unanswered::NotNow) => {}
+                        Err(error) => log::warn!("[watch] could not show setup: {error}"),
+                    }
                 }
             }
         }
     })
+}
+
+/// What [`show_setup_when_stopped`] found.
+#[derive(Debug, PartialEq)]
+enum Unanswered {
+    /// OpenBot is not running, and the window shows setup.
+    Stopped,
+    /// OpenBot is running after all.
+    Running,
+    /// Not the watcher's to decide now: setup is at work, the run is over, or it needs recovery.
+    NotNow,
+}
+
+/**
+A running OpenBot's server stopped answering: when OpenBot is no longer running, send the window to
+setup, which shows it stopped with its Start.
+
+The same decision bringing the window forward makes (`restore_window_on`), taken by the watcher on
+its own. Without it, the engine's machine stopped or the back end gone under a window on OpenBot
+left that window as it was, unable to load anything, until the person brought it forward. Setup is
+shown without bringing the window forward: the person finds it there when they look. The run stays
+this session's, as it does when the window is brought forward, so Start raises it again.
+*/
+fn show_setup_when_stopped<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    generation: u64,
+) -> Result<Unanswered, String> {
+    let shell = app.state::<Shell>();
+    // Busy means setup is at work (a Start, a Stop, an update): it decides what the window shows.
+    let _startup = match shell.startup.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(Unanswered::NotNow),
+        Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+    };
+    if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+        || shell.root.lock().unwrap().as_deref() != Some(root)
+        || recovery_required_or_pending_quit_notice(&shell, root)
+    {
+        return Ok(Unanswered::NotNow);
+    }
+    let ports = openbot_env::Ports::read(root).map_err(|error| error.to_string())?;
+    if owned_app(&shell, root, &ports).is_some() {
+        return Ok(Unanswered::Running);
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
+        return Ok(Unanswered::Stopped);
+    }
+    log::info!("[watch] OpenBot stopped answering and is not running; the window shows setup");
+    window
+        .navigate(setup_destination(app)?)
+        .map_err(|error| format!("could not go back to setup: {error}"))?;
+    Ok(Unanswered::Stopped)
 }
 
 /// Point the window at OpenBot if it is up, and at the setup screen if it is not.
@@ -11086,6 +11800,11 @@ fn non_empty_var(name: &str) -> Option<std::ffi::OsString> {
 /// One round at a time: the launch's rounds and a Start's may overlap, and both read and write Desktop's note of what
 /// it registered.
 fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
+    // A second OpenBot beside an installed one leaves the browsers' Recorder to the installed one,
+    // whose host manifests would otherwise be pointed at this app.
+    if stack::side_by_side_project().is_some() {
+        return Ok(Vec::new());
+    }
     static ONE_ROUND: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _round = ONE_ROUND
         .lock()
@@ -11213,7 +11932,7 @@ fn main() {
     let local_offset = time::UtcOffset::current_local_offset().ok();
     // After an in-app update, or from the installer's last page: in front as the window first shows.
     let from_installer = started_by_installer(&args);
-    let context = tauri::generate_context!();
+    let context = side_by_side(tauri::generate_context!());
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
     #[cfg(feature = "shell-updater")]
@@ -11260,6 +11979,7 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             back_end_wait_ended,
+            local_eval_answer_landed,
             start_early_downloads,
             early_downloads_now,
             early_downloads_measured,
@@ -12728,6 +13448,50 @@ mod tests {
         );
     }
 
+    /// The round trip lines say which hop held a stalled Start: box D's `local status` arrived 11
+    /// minutes after `local start` answered.
+    #[test]
+    fn the_log_says_how_long_each_hop_of_a_setup_window_call_took() {
+        let handed = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        let last = HandedBack {
+            attempt: "start-attempt".into(),
+            action: local_eval::Action::Start,
+            at: handed,
+        };
+        assert_eq!(
+            window_call_arrived(
+                local_eval::Action::Status,
+                Some(&last),
+                handed + std::time::Duration::from_secs(658)
+            ),
+            "[window ipc] local status asked by the window 658.0s after the local start answer was handed to it"
+        );
+        assert_eq!(
+            window_call_arrived(local_eval::Action::Status, None, handed),
+            "[window ipc] local status asked by the window"
+        );
+        assert_eq!(
+            window_answer_landed(
+                local_eval::Action::Start,
+                "start-attempt",
+                Some(&last),
+                handed + std::time::Duration::from_millis(400),
+                handed + std::time::Duration::from_secs(658)
+            ),
+            "[window ipc] the local start answer reached the window 0.4s after it was handed to it; the window's note of it took 657.6s to arrive"
+        );
+        assert_eq!(
+            window_answer_landed(
+                local_eval::Action::Start,
+                "another-attempt",
+                Some(&last),
+                handed,
+                handed
+            ),
+            "[window ipc] the local start answer reached the window after a later call's answer was handed to it; the window's note of it took 0.0s to arrive"
+        );
+    }
+
     #[test]
     fn runtime_connection_recovery_retains_installation_and_rejects_stale_run_notifications() {
         let root = temp_root("runtime-connection-recovery");
@@ -12782,6 +13546,97 @@ mod tests {
             last_failure_now(app.handle()).is_none(),
             "one refresh per run; a second signal cannot replace the pending screen"
         );
+    }
+
+    /// The bug: with OpenBot's engine stopped under a window showing OpenBot, the watcher logged
+    /// "Connection status request failed" once and left the window on a page that could no longer
+    /// load anything. Only bringing the window forward showed OpenBot as stopped. The watcher now
+    /// sends the window to setup by itself once the server has stopped answering for a while, and
+    /// leaves it where it is while the server answers.
+    #[test]
+    fn a_running_openbot_whose_server_goes_away_shows_setup_by_itself() {
+        use std::io::{BufRead, BufReader, Write};
+        let root = temp_root("server-gone-under-window");
+        std::fs::create_dir_all(&root).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(root.join(".env"), format!("SERVER_PORT={port}\n")).unwrap();
+        let setup = "http://tauri.localhost/setup";
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        remember_selected_root(&shell, &root);
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        shell
+            .generation
+            .store(3, std::sync::atomic::Ordering::SeqCst);
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let home = "http://127.0.0.1:3010/";
+        window.navigate(home.parse().unwrap()).unwrap();
+
+        // The server answers "nothing refused" to the watcher's first few asks, then goes away.
+        let answered = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server = {
+            let answered = answered.clone();
+            std::thread::spawn(move || {
+                for _ in 0..3 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        if line == "\r\n" || line.is_empty() {
+                            break;
+                        }
+                    }
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnull").unwrap();
+                    answered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            })
+        };
+        watch_connections(
+            app.handle().clone(),
+            root.clone(),
+            "synthetic-run-token".into(),
+            3,
+            port,
+        );
+        server.join().unwrap();
+        assert_eq!(answered.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            home,
+            "a server that answers keeps the window on OpenBot"
+        );
+
+        let gone = std::time::Instant::now();
+        while window.url().unwrap().as_str() != setup {
+            assert!(
+                gone.elapsed() < SERVER_GONE_AFTER + std::time::Duration::from_secs(8),
+                "the window was still on {} after the server went away",
+                window.url().unwrap()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(
+            gone.elapsed() >= SERVER_GONE_AFTER,
+            "a moment's silence is not a stopped OpenBot"
+        );
+        // Shown as stopped, the way bringing the window forward shows it: no failure to explain,
+        // and the run is still this session's for Start to raise again.
+        let shell = app.state::<Shell>();
+        assert!(last_failure_now(app.handle()).is_none());
+        assert!(!recovery_required(&shell, &root));
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&root));
+        shell
+            .generation
+            .store(4, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -14667,6 +15522,62 @@ mod tests {
         assert_eq!(run(Some(Podman), false, false, true), none);
     }
 
+    /// The EC2 Mac pass: OpenBot's Podman machine stopped under a running OpenBot, the window said
+    /// "The software OpenBot runs on isn't running. Retry to start it.", and Retry gave up at once
+    /// on `docker_unavailable`. This session still held OpenBot's containers, so waking the engine
+    /// was skipped as if they were running, and the machine was never started. Only Quit and a
+    /// relaunch, which hold no containers, started it.
+    #[test]
+    fn retry_starts_the_machine_stopped_under_a_running_openbot() {
+        use std::cell::RefCell;
+        let shell = Shell::default();
+        let address = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: PathBuf::from("/fixture/OpenBot"),
+            address: address.clone(),
+        });
+
+        // The machine is stopped: nothing answers on the engine OpenBot's containers ran on.
+        let asked = RefCell::new(Vec::new());
+        let up = own_containers_up(&shell, |on| {
+            asked.borrow_mut().push(on.clone());
+            false
+        });
+        assert!(
+            !up,
+            "containers on an engine that does not answer are not up"
+        );
+        assert_eq!(
+            asked.into_inner().len(),
+            1,
+            "the containers' own engine is asked"
+        );
+
+        // So Retry wakes the engine the installation runs on, which starts OpenBot's machine.
+        let started = RefCell::new(false);
+        wake_saved_engine(
+            Some(engine::Engine::Podman),
+            true,
+            || false,
+            || panic!("a Podman installation never opens Docker Desktop"),
+            || true,
+            || {
+                *started.borrow_mut() = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(started.into_inner(), "OpenBot's machine is started");
+
+        // While the machine answers, a running OpenBot's engine is still left alone.
+        assert!(own_containers_up(&shell, |_| true));
+        // And with no containers held, there is nothing to leave alone.
+        *shell.containers.lock().unwrap() = None;
+        assert!(!own_containers_up(&shell, |_| panic!(
+            "no containers, no engine to ask"
+        )));
+    }
+
     /// Box I, step 7: "Delete the application data" took OpenBot's machine, the installation folder
     /// stayed, and Podman made the person's rootless `mine` its default connection. The relaunch
     /// found nothing answering, did nothing, and the backend's tool, told no engine, judged `mine`:
@@ -15753,27 +16664,105 @@ mod tests {
         let left = rect(-1280.0, 0.0, 1280.0, 760.0);
         // Where it was left, on the primary screen or the second one: it stays.
         assert_eq!(
-            onto_a_screen(rect(78.0, 24.0, 1016.0, 992.0), &[primary, left]),
-            None
+            onto_a_screen(rect(78.0, 24.0, 1016.0, 992.0), false, &[primary, left]),
+            Placing::Stays
         );
         assert_eq!(
-            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary, left]),
-            None
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), false, &[primary, left]),
+            Placing::Stays
         );
         // Mostly off the right edge, with its title bar still reachable: it stays.
         assert_eq!(
-            onto_a_screen(rect(1700.0, 100.0, 1016.0, 839.0), &[primary]),
-            None
+            onto_a_screen(rect(1700.0, 100.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Stays
         );
         // The second screen is unplugged: onto the primary one, in the middle.
         assert_eq!(
-            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), &[primary]),
-            Some(tauri::LogicalPosition::new(452.0, 96.5))
+            onto_a_screen(rect(-1100.0, 40.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Onto(tauri::LogicalPosition::new(452.0, 96.5))
         );
         // Its title bar above the top of every screen: the same.
-        assert!(onto_a_screen(rect(200.0, -500.0, 1016.0, 839.0), &[primary]).is_some());
+        assert!(matches!(
+            onto_a_screen(rect(200.0, -500.0, 1016.0, 839.0), false, &[primary]),
+            Placing::Onto(_)
+        ));
         // No screen known: left as it is.
-        assert_eq!(onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), &[]), None);
+        assert_eq!(
+            onto_a_screen(rect(-5000.0, 0.0, 1016.0, 839.0), false, &[]),
+            Placing::Stays
+        );
+    }
+
+    /// Windows, after tray Quit with the window maximized on a 1920 by 1080 screen: the saved place
+    /// was maximized, and the window was built maximized, its frame at -8,-8 and 1936 by 1056, past
+    /// the work area's edges by the resize border. That read as off every screen, and moving it onto
+    /// the primary one un-maximized it: it came back at 1000 by 800. A maximized window is left as
+    /// the system placed it, neither moved nor resized, on Windows and zoomed on a Mac; a window that
+    /// really is off every screen still comes onto the primary one.
+    #[test]
+    fn a_maximized_window_reopens_maximized_where_the_system_put_it() {
+        let rect = |x: f64, y: f64, width: f64, height: f64| tauri::LogicalRect {
+            position: tauri::LogicalPosition::new(x, y),
+            size: tauri::LogicalSize::new(width, height),
+        };
+        // 1920 by 1080 at 100%, the taskbar's 40 pixels below the work area.
+        let primary = rect(0.0, 0.0, 1920.0, 1040.0);
+        let maximized = rect(-8.0, -8.0, 1936.0, 1056.0);
+        assert_eq!(onto_a_screen(maximized, true, &[primary]), Placing::System);
+        // Maximized on a second screen, left of the primary.
+        let left = rect(-1920.0, 0.0, 1920.0, 1040.0);
+        assert_eq!(
+            onto_a_screen(rect(-1928.0, -8.0, 1936.0, 1056.0), true, &[primary, left]),
+            Placing::System
+        );
+        // Zoomed on a MacBook's 1512 by 982 screen, under the 33-point menu bar, filling the work
+        // area: before, it stayed but launch shrank it to the work area less its margins, which
+        // un-zoomed it.
+        let mac = rect(0.0, 33.0, 1512.0, 949.0);
+        assert_eq!(
+            onto_a_screen(rect(0.0, 33.0, 1512.0, 949.0), true, &[mac]),
+            Placing::System
+        );
+        // Really off every screen: left on a screen to the right that has been unplugged. Onto
+        // the primary one, in the middle.
+        assert_eq!(
+            onto_a_screen(rect(2100.0, 177.0, 1000.0, 800.0), false, &[primary]),
+            Placing::Onto(tauri::LogicalPosition::new(460.0, 120.0))
+        );
+        // The place it was saved at reads back maximized, where it was before it was maximized.
+        let saved = SavedWindow {
+            width: 1000,
+            height: 800,
+            x: -8,
+            y: -8,
+            prev_x: 182,
+            prev_y: 177,
+            maximized: true,
+        };
+        let screen = Screen {
+            position: (0, 0),
+            size: (1920, 1080),
+            work: (0, 0, 1920, 1040),
+            scale: 1.0,
+        };
+        assert_eq!(
+            place_saved_window(saved, &[screen]),
+            Some(Place {
+                x: 182.0,
+                y: 177.0,
+                width: 1000.0,
+                height: 800.0,
+                maximized: true,
+            })
+        );
+        // And launch leaves it alone: no move, no resize, once it is maximized.
+        let main = include_str!("main.rs");
+        let fit = &main[main.find("fn fit_main_window_to_screen<").unwrap()..];
+        let fit = &fit[..fit.find("\n}\n").unwrap()];
+        let left_alone = fit.find("== Placing::System").unwrap();
+        for change in ["set_window_height(", "lift_into_work_area("] {
+            assert!(fit.find(change).unwrap() > left_alone, "{change}");
+        }
     }
 
     /// Another app holds the foreground (the browser, signing in): Windows refuses
@@ -16145,6 +17134,127 @@ mod tests {
         assert!(window.is_visible().unwrap_or(true));
     }
 
+    /// The Mac pass on 806a8317f, recorded at 30 fps: before the setup page painted, the window
+    /// showed the system's dark grey for up to half a second, then WKWebView's white for a few
+    /// frames, and blank white in light. The main window is built on the setup screens' ground on
+    /// macOS as on Windows, the ground the title bar takes once the setup page loads, so the first
+    /// frame is already OpenBot's own colour in light and in dark.
+    #[test]
+    fn the_main_window_is_built_on_the_setup_ground_on_macos_and_windows() {
+        let main = include_str!("main.rs");
+        let body = &main[main.find("fn build_main_window").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let set = body
+            .find("let builder = builder.background_color(ground_color(palette));")
+            .expect("the main window's builder takes the setup ground");
+        let gate = body[..set].trim_end().lines().last().unwrap().trim();
+        assert_eq!(
+            gate, r#"#[cfg(any(target_os = "macos", target_os = "windows"))]"#,
+            "the setup ground is set on the builder on macOS and Windows"
+        );
+        assert!(body.contains("let palette = setup_palette(app);"), "{body}");
+        assert!(set < body.find(".build()?").unwrap(), "{body}");
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            assert_eq!(ground_color(first_paint::palette(false)), SETUP_BACKGROUND);
+            assert_eq!(
+                ground_color(first_paint::palette(true)),
+                SETUP_BACKGROUND_DARK
+            );
+        }
+    }
+
+    /// Box H (Windows Server 2022) in dark: the title bar stayed light until the window was
+    /// resized. Server 2022 has none of Windows 11's colour attributes, so its bar is Windows's own
+    /// dark or light, which is set with the colours and drawn on the spot, from the window's first
+    /// show and on every change after.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn the_windows_title_bar_is_dark_from_its_first_show_and_redrawn_on_every_change() {
+        let dark = title_bar_attributes(Some(true));
+        assert_eq!(dark[0], (IMMERSIVE_DARK_MODE, 1), "{dark:?}");
+        assert!(dark.contains(&(CAPTION_COLOR, 0x0013_0b0d)), "{dark:?}");
+        let light = title_bar_attributes(Some(false));
+        assert_eq!(light[0], (IMMERSIVE_DARK_MODE, 0), "{light:?}");
+        assert!(light.contains(&(CAPTION_COLOR, 0x00f5_eded)), "{light:?}");
+        // Windows's own colours, and the window's theme left to decide its dark or light.
+        let own = title_bar_attributes(None);
+        assert!(own
+            .iter()
+            .all(|&(attribute, _)| attribute != IMMERSIVE_DARK_MODE));
+        assert!(
+            own.iter().all(|&(_, value)| value == 0xFFFF_FFFF),
+            "{own:?}"
+        );
+
+        let main = include_str!("main.rs");
+        let tint = &main[main.find("pub(crate) fn tint_title_bar_of").unwrap()..];
+        let tint = &tint[..tint.find("\n}\n").unwrap()];
+        let set = tint.find("title_bar_attributes(dark)").expect("{tint}");
+        let redraw = tint
+            .find("SWP_FRAMECHANGED\n")
+            .expect("the frame is redrawn");
+        assert!(set < redraw, "{tint}");
+        for flag in ["SWP_NOMOVE", "SWP_NOSIZE", "SWP_NOZORDER", "SWP_NOACTIVATE"] {
+            assert!(tint[redraw..].contains(flag), "{flag}: {tint}");
+        }
+        let body = |name: &str| {
+            let from = &main[main.find(name).unwrap_or_else(|| panic!("{name}"))..];
+            &from[..from.find("\n}\n").unwrap()]
+        };
+        let window = body("fn tint_title_bar<R: tauri::Runtime>");
+        assert!(
+            window.contains("tint_title_bar_of(hwnd.0 as isize, dark)"),
+            "{window}"
+        );
+        // A theme change from the system: the window's ThemeChanged event redraws the bar on every
+        // page but OpenBot's own, which reports its own theme (below).
+        let changed = &main[main
+            .find("tauri::WindowEvent::ThemeChanged(_) => {")
+            .unwrap()..];
+        let changed = &changed[..changed.find("\n            }\n").unwrap()];
+        assert!(
+            changed.contains("match_title_bar(window, window_page(app, &url));"),
+            "{changed}"
+        );
+        let matched = body("fn match_title_bar<R: tauri::Runtime>");
+        let windows = &matched[matched.find("#[cfg(target_os = \"windows\")]").unwrap()..];
+        assert!(windows.contains("WindowPage::Setup => {"), "{windows}");
+        assert!(
+            windows.contains("tint_title_bar(window, Some(dark));"),
+            "{windows}"
+        );
+        assert!(
+            windows.contains(
+                "WindowPage::LocalApp | WindowPage::Other => tint_title_bar(window, None)"
+            ),
+            "{windows}"
+        );
+        // A theme change from OpenBot's own page, through `desktop_page::appearance`.
+        let reported = body("pub(crate) fn page_appearance<R: tauri::Runtime>");
+        assert!(
+            reported.contains("tint_title_bar(window, Some(dark));"),
+            "{reported}"
+        );
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("crate::page_appearance(&window, dark);"),
+            "{command}"
+        );
+        // As the main window first shows, before `build()` returns.
+        let first_paint = include_str!("first_paint.rs");
+        let shown = &first_paint[first_paint
+            .find("unsafe extern \"system\" fn shown")
+            .unwrap()..];
+        let shown = &shown[..shown.find("\n    }\n").unwrap()];
+        assert!(
+            shown.contains("crate::tint_title_bar_of(window.0 as isize, Some(dark));"),
+            "{shown}"
+        );
+    }
+
     /// The developer's app is trusted only at a loopback IP, so `localhost` is read as `127.0.0.1`.
     #[test]
     fn the_developers_app_at_localhost_is_shown_at_127_0_0_1() {
@@ -16395,6 +17505,193 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    /// A run OpenBot holds on a Podman machine that no longer answers, with folder access running:
+    /// what the EC2 Mac had when its machine was stopped and OpenBot then quit.
+    fn running_on_a_gone_engine(label: &str) -> (Shell, PathBuf) {
+        let root = local_eval_root(label, Some(local_eval_state::Ownership::Created));
+        let shell = Shell::default();
+        let gone = engine::Address::new(engine::Engine::Podman, Some(format!("{label}-gone")));
+        *shell.root.lock().unwrap() = Some(root.clone());
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: gone.clone(),
+        });
+        *shell.host_access.lock().unwrap() = Some(
+            host_access::HostAccess::start(
+                "http://127.0.0.1:9",
+                "host-token",
+                gone,
+                "openbot-agent-computer:test",
+                Vec::new(),
+            )
+            .unwrap(),
+        );
+        mark_recovery_required(&shell, &root, 0);
+        (shell, root)
+    }
+
+    /// Each stop as the EC2 Mac's log had it, against an engine that could not answer.
+    fn down_on_a_gone_engine(_: &Path) -> Result<(), String> {
+        Err(
+            "could not resolve computer namespace: Compose configuration failed (exit status: 125)"
+                .into(),
+        )
+    }
+
+    fn intelligence_on_a_gone_engine(_: &Path) -> Result<(), String> {
+        Err("the backend's command-line tool did not stop the backend (blocked: docker-unavailable)".into())
+    }
+
+    /// Quit's failures as the exit handler records them, for the next launch.
+    fn record_quit(root: &Path, stopped: Stopped) {
+        report_exit_cleanup_failures(stopped.lines(), |lines| {
+            write_quit_cleanup_notice(root, &lines)
+        })
+        .unwrap();
+    }
+
+    /**
+    The EC2 Mac: OpenBot's machine was stopped, then OpenBot quit. Every stop failed against the
+    engine ("could not resolve computer namespace", `local stop` "docker_unavailable", and "OpenBot
+    could not stop a folder operation"), and the next launch said "OpenBot had trouble shutting down
+    last time." With the machine stopped nothing of OpenBot's can run, so Quit and Stop each find
+    every stop done, and the next launch says nothing.
+    */
+    #[test]
+    fn quit_and_stop_with_the_machine_stopped_find_everything_stopped() {
+        for quit in [true, false] {
+            let (shell, root) = running_on_a_gone_engine("openbot-machine-stopped");
+            let stopped = if quit {
+                exit_cleanup_reporting_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::MachineStopped,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                    |_, _| {},
+                )
+            } else {
+                stop_everything_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::MachineStopped,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                )
+            };
+
+            assert_eq!(stopped, Stopped::default(), "quit: {quit}");
+            assert!(shell.containers.lock().unwrap().is_none(), "quit: {quit}");
+            assert!(shell.host_access.lock().unwrap().is_none(), "quit: {quit}");
+            assert!(!recovery_required(&shell, &root), "quit: {quit}");
+            record_quit(&root, stopped);
+            assert!(read_quit_cleanup_notice(&root).unwrap().is_none());
+            assert!(take_local_eval_stop_notice(&root).is_none());
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// The engine does not answer and its machine says it is running: still a failure, said as the
+    /// engine not answering, never as a folder operation that would not stop.
+    #[test]
+    fn quit_and_stop_that_cannot_reach_a_running_machine_say_so() {
+        for quit in [true, false] {
+            let (shell, root) = running_on_a_gone_engine("openbot-engine-unreachable");
+            let stopped = if quit {
+                exit_cleanup_reporting_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::Unreachable,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                    |_, _| {},
+                )
+            } else {
+                stop_everything_at(
+                    &shell,
+                    &root,
+                    EngineAtStop::Unreachable,
+                    |_| Ok(0),
+                    down_on_a_gone_engine,
+                    intelligence_on_a_gone_engine,
+                )
+            };
+
+            assert!(
+                stopped
+                    .openbot
+                    .first()
+                    .is_some_and(|first| first.starts_with(ENGINE_UNREACHABLE_AT_STOP)),
+                "{stopped:?}"
+            );
+            assert_eq!(
+                stopped
+                    .openbot
+                    .iter()
+                    .filter(|line| line.contains(ENGINE_UNREACHABLE_AT_STOP))
+                    .count(),
+                1,
+                "{stopped:?}"
+            );
+            assert!(
+                stopped
+                    .openbot
+                    .iter()
+                    .all(|line| !line.contains("folder operation")),
+                "{stopped:?}"
+            );
+            assert!(stopped.intelligence.is_some(), "quit: {quit}");
+            // Kept for the Stop that retries.
+            assert!(shell.containers.lock().unwrap().is_some(), "quit: {quit}");
+            assert!(recovery_required(&shell, &root), "quit: {quit}");
+            if quit {
+                record_quit(&root, stopped);
+                // The headline the next launch shows, in full.
+                let notice = read_quit_cleanup_notice(&root).unwrap().unwrap();
+                assert_eq!(notice.said, ENGINE_UNREACHABLE_AT_STOP);
+                assert!(
+                    !notice.detail.as_deref().unwrap().contains("couldn't reach"),
+                    "{notice:?}"
+                );
+            }
+            if let Some(broker) = shell.host_access.lock().unwrap().take() {
+                broker.stop_with_machine_stopped();
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// What `podman machine inspect` says decides it; only "stopped" means nothing runs.
+    #[test]
+    fn only_a_machine_that_says_stopped_has_nothing_running() {
+        let inspect = |state: &str| {
+            serde_json::json!([{ "Name": "openbot", "State": state, "Rootful": true }]).to_string()
+        };
+        for (answers, state, expected) in [
+            (true, Some("running"), EngineAtStop::Answers),
+            (false, Some("stopped"), EngineAtStop::MachineStopped),
+            (false, Some("running"), EngineAtStop::Unreachable),
+            (false, Some("starting"), EngineAtStop::Unreachable),
+            (false, None, EngineAtStop::Unreachable),
+        ] {
+            let found = state
+                .map(|state| acquire::machine_state(&inspect(state), "openbot").unwrap())
+                .unwrap_or(None);
+            assert_eq!(
+                EngineAtStop::from(answers, found.as_deref()),
+                expected,
+                "{answers} {state:?}"
+            );
+        }
+        assert_eq!(
+            acquire::machine_state(&inspect("stopped"), "someone-else").unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -21711,5 +23008,172 @@ fn main() {
                 .as_str(),
             format!("http://127.0.0.1:{}/", f.ports.app)
         );
+    }
+}
+
+/**
+A Quit's notice as OpenBot 1.0.3 reads it, for an app rolled back to it after this build quit.
+
+Copied as it is at the `v1.0.3` tag (`desktop/src-tauri/src/main.rs`), and never changed here: what
+this build writes must read in it.
+*/
+#[cfg(test)]
+mod release_1_0_3_quit_notice {
+    use super::*;
+
+    const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+
+    const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
+
+    fn quit_cleanup_notice_path(root: &Path) -> PathBuf {
+        root.join(QUIT_CLEANUP_NOTICE_FILE)
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct QuitCleanupNotice {
+        version: u8,
+        failures: Vec<QuitCleanupFailure>,
+    }
+
+    #[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum QuitCleanupFailure {
+        HostProcesses,
+        Containers,
+    }
+
+    fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
+        match failure {
+            QuitCleanupFailure::HostProcesses => {
+                "OpenBot could not confirm all app processes stopped."
+            }
+            QuitCleanupFailure::Containers => "OpenBot could not confirm all containers stopped.",
+        }
+    }
+
+    fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
+        let path = quit_cleanup_notice_path(root);
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(Problem::with(
+                    "OpenBot could not read its previous shutdown notice.",
+                    format!("{}: {error}", path.display()),
+                ))
+            }
+        };
+        let size = file
+            .metadata()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not read its previous shutdown notice.",
+                    format!("{}: {error}", path.display()),
+                )
+            })?
+            .len();
+        if size > QUIT_CLEANUP_NOTICE_LIMIT as u64 {
+            return Err(Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!(
+                    "{}: shutdown notice exceeded its size limit",
+                    path.display()
+                ),
+            ));
+        }
+        let notice: QuitCleanupNotice = serde_json::from_reader(file).map_err(|error| {
+            Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+        std::fs::remove_file(&path).map_err(|error| {
+            Problem::with(
+                "OpenBot could not clear its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+        let detail = notice
+            .failures
+            .iter()
+            .map(|failure| quit_cleanup_failure_summary(*failure))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if detail.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Problem::with(
+            "OpenBot had trouble shutting down last time.",
+            detail,
+        )))
+    }
+
+    fn root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "openbot-{label}-{}-{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// A Quit that could not reach the software OpenBot runs on, as this build records it: 1.0.3
+    /// reads it and says what it always said, and this build says why.
+    #[test]
+    fn a_quit_that_could_not_reach_the_engine_reads_in_1_0_3() {
+        let root = root("notice-1-0-3");
+        let lines = vec![
+            format!("[exit] cleanup failed: {ENGINE_UNREACHABLE_AT_STOP}\nCould not verify host containers stopped: Cannot connect to Podman"),
+            "[exit] cleanup failed: Compose down failed: could not resolve computer namespace: Compose configuration failed (exit status: 125)".to_string(),
+        ];
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let rolled_back = read_quit_cleanup_notice(&root)
+            .expect("1.0.3 reads the notice")
+            .expect("and says it");
+        assert_eq!(
+            rolled_back.said,
+            "OpenBot had trouble shutting down last time."
+        );
+        assert_eq!(
+            rolled_back.detail.as_deref(),
+            Some("OpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
+        );
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(now.said, ENGINE_UNREACHABLE_AT_STOP);
+        assert_eq!(
+            now.detail.as_deref(),
+            Some("OpenBot could not confirm all app processes stopped.\nOpenBot could not confirm all containers stopped.")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The sentence alone, put first by `EngineAtStop::say_first`, adds nothing for 1.0.3 to list.
+    #[test]
+    fn the_engine_sentence_alone_adds_nothing_1_0_3_lists() {
+        let root = root("notice-1-0-3-sentence");
+        let lines = vec![
+            format!("[exit] cleanup failed: {ENGINE_UNREACHABLE_AT_STOP}"),
+            "[exit] cleanup failed: Compose down failed: could not resolve computer namespace: Compose configuration failed (exit status: 125)".to_string(),
+        ];
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let rolled_back = read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(
+            rolled_back.detail.as_deref(),
+            Some("OpenBot could not confirm all containers stopped.")
+        );
+
+        super::write_quit_cleanup_notice(&root, &lines).unwrap();
+        let now = super::read_quit_cleanup_notice(&root).unwrap().unwrap();
+        assert_eq!(now.said, ENGINE_UNREACHABLE_AT_STOP);
+        assert_eq!(
+            now.detail.as_deref(),
+            Some("OpenBot could not confirm all containers stopped.")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

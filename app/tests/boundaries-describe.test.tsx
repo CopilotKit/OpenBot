@@ -23,6 +23,7 @@ import type { ActionPolicy } from "@/lib/computers/queries";
 import { Route as BoundariesRoute } from "@/routes/_authed/admin/boundaries";
 import { Route as RuleRoute } from "@/routes/_authed/admin/boundaries_.$index";
 import { Route as NewRuleRoute } from "@/routes/_authed/admin/boundaries_.new";
+import { answerBotsList } from "./bots-api";
 
 /**
  * A boundary described in English: the model's rule lands in the CEL field beside its independent
@@ -63,7 +64,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** What the real endpoint answered for this description (server/tests/fixtures). */
+/** What the real endpoint answered for this description, as recorded from the server. */
 const SOCIAL: PolicyTranslation = {
   rule: 'intent == "navigate" && (page.host == "facebook.com" || matches(page.host, "[.]facebook[.]com$"))',
   effect: "deny",
@@ -133,10 +134,10 @@ function serving(policy: ActionPolicy) {
         },
       });
     }
-    if (path.includes("/api/agents"))
-      return Response.json({
-        agents: [{ id: "research-assistant", name: "Research Assistant" }],
-      });
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: "research-assistant", name: "Research Assistant" }],
+    });
+    if (bots) return bots;
     return Response.json({ error: "unexpected" }, { status: 404 });
   }) as typeof fetch;
 }

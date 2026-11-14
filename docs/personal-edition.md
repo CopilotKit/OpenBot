@@ -22,17 +22,9 @@ bash scripts/start.sh
 because the Personal Assistant runs inside the server on the model in
 [`examples/personal/model.yaml`](../examples/personal/model.yaml).
 
-It also starts your own browser: your installed Google Chrome, or Microsoft Edge, as a window on
-your desktop with the OpenBot Recorder in it. It builds the Recorder (`extension/dist`) if it isn't
-built, runs `scripts/start-local-chrome-computer.ts` on port `BROWSER_PORT` (4101) with
-`COMPUTER_PEOPLE_ONLY=on`, and points the server at it with `OPENBOT_BROWSER_URL`. **Teach a Bot**
-in the sidebar takes you to a page whose Open opens or brings forward that window, and Record there
-goes to your own Learning space. OpenBot Desktop does not do this: it shows your browser inside its
-window (see [OpenBot Desktop](#openbot-desktop)). Its profile is kept under
-`~/Library/Application Support/OpenBot/local-computer` on macOS (see
-[configuration](configuration.md#installed-chrome-for-a-local-api-deployment) for the other systems).
-Without Chrome or Edge, OpenBot starts without it and `start.sh` says why. `scripts/stop.sh` stops it
-with the rest.
+Your own browser, the one **Teach a Bot** records in, runs on that one computer and shows in the
+page, as in OpenBot Desktop (see [OpenBot Desktop](#openbot-desktop)). The server, the routine worker
+and the computer run from the published OpenBot images; the app runs from the checkout.
 
 ## OpenBot Desktop
 

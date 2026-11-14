@@ -1,8 +1,7 @@
 /**
  * What a Bot in this box knows about its own hands.
  *
- * Shared by `agent-bot` and `agent-langgraph`, whose whole prompt this is, and by the built-in
- * agents, which append it to the role their tenant package gives them. A Bot's instructions about
+ * Read by the built-in agents, which append it to the role their tenant package gives them. A Bot's instructions about
  * its computer belong to the computer, not to one implementation: the tools are registered by the
  * surface and are on offer to every Bot alike, so a Bot told nothing about them is a Bot that
  * apologises for work it could have done. That is what happened to the built-in agents, which knew
@@ -11,6 +10,7 @@
  */
 import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import { DELEGATE_TOOL, DELEGATING_GUIDANCE } from "./orchestration";
 import { RESEARCH_APP_NAMES } from "./research";
 import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
 
@@ -116,8 +116,11 @@ const ACTING_LINES = [
   "The person is not looking at this page and cannot type into it until you hand it over. Do not ask",
   "them to enter a username, a password or a code, neither into this conversation nor 'on the sign-in",
   "page': you do not need it, should not hold it, and they cannot reach the page anyway.",
-  "When you need a single value, a password, a code, a card number, do not hand over the whole",
-  "browser. Call computer_request_secret with that field's ref and a short label, without clicking",
+  "When the person says they will type it themselves, or asks you to hand them the browser or let",
+  "them take over, call computer_request_help: they are asking for the wheel, and the masked box is",
+  "not what they asked for, even for a single password.",
+  "Otherwise, when you need a single value, a password, a code, a card number, do not hand over the",
+  "whole browser. Call computer_request_secret with that field's ref and a short label, without clicking",
   "the field first: clicking a password field hands that step to the person instead. They type the",
   "value into a masked box that goes straight into the field, and you never see it.",
   "Use a full takeover for anything more involved than one field.",
@@ -170,8 +173,7 @@ export type ComputerHolding = {
  *
  * A function rather than one constant because the right advice about the browser depends on whether
  * a search tool sits beside it; see `WITH_SEARCH_LINES`. Built-in Bots get it from `copilot.ts`, which
- * knows the tools it is building with; `agent-bot` and `agent-langgraph` work it out from the tools
- * each run offers them.
+ * knows the tools it is building with.
  */
 export function computerGuidance(holding: ComputerHolding): string {
   return asParagraphs([
@@ -555,6 +557,28 @@ export function workingGuidance(options: {
 }
 
 /**
+ * How a Bot hands real work into task threads of its own, for a run that is offered `delegate`, in
+ * its own section ("delegating") after the working rules.
+ *
+ * EVERY BOT THAT HOLDS THE TOOL, WHATEVER RUNS IT. A Bot OpenBot runs and one on a harness are
+ * offered the same `delegate`, and a harness Bot (the LangGraph Personal Assistant, the Desktop's
+ * default) that was told about it only by the tool's description did the work itself every time,
+ * until the person said to hand it off. Keyed on the run's tools rather than said always, because a
+ * harness Bot's standing message is one text for all of its runs and a routine, a check-in and a
+ * task's own thread are offered no such tool.
+ */
+export function delegatingGuidance(
+  tools: readonly { name: string }[],
+): string[] {
+  return promptSection(
+    "delegating",
+    tools.some((tool) => tool.name === DELEGATE_TOOL)
+      ? DELEGATING_GUIDANCE
+      : null,
+  );
+}
+
+/**
  * Added to the description of an app tool its app marks destructive (MCP's `destructiveHint`, a
  * broker's destructive flag), where the Bot is offered it. OpenBot asks before one runs, so the Bot
  * is told so on the tool itself, in the words {@link ASKING_GUIDANCE} names.
@@ -676,9 +700,8 @@ function dayIn(
  * it. "Nothing happened" would leave it repeating the request, and a fake success would have it
  * report work it never did.
  *
- * Shared because both Bots in this repo have to say the same thing. The first fix for this landed in
- * `agent-langgraph` alone, and `agent-bot` — the Bot that ships in the box, and the one behind the
- * Browser Bot — went on failing in exactly the same way until somebody drove it.
+ * Shared because every Bot that answers for a step has to say the same thing: a fix that lands in
+ * one Bot alone leaves the others failing in exactly the same way until somebody drives them.
  */
 export const NO_ANSWER_CAME = notRun(
   "no result came back, because the person did not answer this and the run it belonged to has ended.",

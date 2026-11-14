@@ -18,6 +18,7 @@ import {
 import { computerToolsOffered } from "@/lib/copilot/computer-available";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
+import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -67,7 +68,7 @@ const PROFILE = { id: BOT, visibility: "public", canManage: true };
 function ordinaryAnswer(path: string): Response {
   if (path === `/api/components/for-agent/${BOT}`)
     return Response.json({ components: [RECORD] });
-  if (path === `/api/agents/${BOT}`) return Response.json({ agent: PROFILE });
+  if (path === botPath(BOT)) return Response.json({ bot: PROFILE });
   if (path === "/api/admin/enterprise/me")
     return Response.json({ capabilities: {}, enforced: false });
   if (path === `/api/plugins/for/${BOT}`)

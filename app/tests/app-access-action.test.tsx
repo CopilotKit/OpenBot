@@ -23,6 +23,7 @@ import {
 } from "@/components/plugins/app-access-action";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { appAccess } from "./app-access-fixture";
+import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -89,8 +90,8 @@ function mounted(
       return Response.json({ user: { id: "usr_admin", role: "admin" } });
     if (options.personal && url === "/api/capabilities")
       return Response.json({ edition: "personal" });
-    if (options.admin && url === "/api/agents/expenses")
-      return Response.json({ agent: { id: "expenses", name: "Expenses" } });
+    if (options.admin && url === botPath("expenses"))
+      return Response.json({ bot: { id: "expenses", name: "Expenses" } });
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
     if (url.endsWith("/connect?returnTo=settings")) {

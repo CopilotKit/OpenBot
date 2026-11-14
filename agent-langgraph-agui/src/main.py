@@ -1,8 +1,8 @@
 """LangGraph as a Bot, through the AG-UI integration rather than by hand.
 
-OpenBot already ships `agent-langgraph`, which speaks AG-UI itself because it predates the rule
-against writing adapters. This is the same framework served through `ag-ui-langgraph`, which is the
-package the AG-UI project maintains, so the protocol stops being ours to keep working.
+The framework is served through `ag-ui-langgraph`, which is the package the AG-UI project
+maintains, so the protocol is not ours to keep working. It is also the managed Bot: the team
+edition's Risk Analyst runs on it.
 """
 
 import hmac
@@ -129,16 +129,26 @@ def _provider_kwargs(provider: str, model: str, effort: str):
     An effort is sent only when the run carries one, under the field that provider reads, so a run
     without one gets the model's own default.
 
-    - OpenAI itself (no `OPENAI_BASE_URL`): the Responses API for a model that takes tools only
-      there, with `reasoning.effort`; Chat Completions otherwise, with `reasoning_effort`.
-    - Any other OpenAI-compatible endpoint: `reasoning_effort`, on whichever API the integration
-      picks. Most serve only Chat Completions (Gemini's and xAI's compatible endpoints), and the
-      integration moves `reasoning_effort` to `reasoning.effort` itself when it picks Responses.
+    - OpenAI, wherever it is reached: the Responses API for a model that takes tools only there,
+      with `reasoning.effort`; Chat Completions otherwise, with `reasoning_effort`.
+    - Any other model at an OpenAI-compatible endpoint: `reasoning_effort`, on whichever API the
+      integration picks. Most serve only Chat Completions (Gemini's and xAI's compatible
+      endpoints), and the integration moves `reasoning_effort` to `reasoning.effort` itself when
+      it picks Responses.
+
+    THE MODEL DECIDES, NOT THE ADDRESS. A gateway or a proxy in front of OpenAI (LiteLLM, Portkey,
+    a company's own, a test's recorder) is an `OPENAI_BASE_URL`, and the address cannot say which
+    API a model takes. Decided by the address, `gpt-5.6-terra` behind one was sent to Chat
+    Completions and refused every run that offered a tool: "Function tools with reasoning_effort
+    are not supported for gpt-5.6-terra in /v1/chat/completions." The built-in Bots decide the
+    same way (`chooseOpenAIApi` on the server). An operator who set `COPILOTKIT_OPENAI_API=chat`
+    has decided, as there.
     - Anthropic: `output_config.effort`, through langchain-anthropic's `effort`.
     - Google: `thinkingConfig.thinkingLevel`, through langchain-google-genai's `thinking_level`.
     """
     if provider == "openai":
-        if not os.environ.get("OPENAI_BASE_URL") and requires_responses_api(model):
+        chat_only = (os.environ.get("COPILOTKIT_OPENAI_API") or "").strip() == "chat"
+        if requires_responses_api(model) and not chat_only:
             return {
                 "use_responses_api": True,
                 **({"reasoning": {"effort": effort}} if effort else {}),

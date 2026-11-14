@@ -1,2 +1,0 @@
-ALTER TABLE "attachments" ADD COLUMN "upload_group" text;--> statement-breakpoint
-CREATE INDEX "attachments_upload_group_idx" ON "attachments" USING btree ("channel_id","uploaded_by","upload_group") WHERE "attachments"."attached_at" is null;

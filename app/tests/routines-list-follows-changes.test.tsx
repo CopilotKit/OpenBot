@@ -22,6 +22,7 @@ import {
   ROUTINES_REFETCH_MS,
   type RoutineRecord,
 } from "@/lib/routines/queries";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -147,10 +148,10 @@ function serving() {
             });
       if (url === "/api/proactive/settings")
         return Response.json({ settings: [], allowed: true });
-      if (url.startsWith("/api/agents"))
-        return Response.json({
-          agents: [{ id: "expenses", name: "Expenses" }],
-        });
+      const bots = answerBotsList(url, init, {
+        visible: [{ id: "expenses", name: "Expenses" }],
+      });
+      if (bots) return bots;
       return Response.json({ runs: [], triggers: [], channels: [] });
     },
     { preconnect: originalFetch.preconnect },

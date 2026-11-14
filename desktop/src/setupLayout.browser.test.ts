@@ -722,6 +722,29 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
  * and the text under it moved up. The line holds its tallest height in every state, and before it
  * says anything, so the card's bottom edge stays where it is.
  */
+describe.skipIf(!asked)("the first screen at the window's default size", () => {
+  // The window opens at 1000x800 (tauri.conf.json); a title bar takes some of that. Seen on
+  // Windows: once the first screen listed where OpenBot runs and what Self-hosted needs, the card
+  // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
+  test("at 1000x760, everything on it shows without the card scrolling", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 760 },
+    });
+    try {
+      await open(page);
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      await page.waitForTimeout(400);
+      const overflow = await page.evaluate(() => {
+        const card = document.querySelector("main > .sheet") as HTMLElement;
+        return card.scrollHeight - card.clientHeight;
+      });
+      expect(overflow).toBeLessThanOrEqual(0);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
     [1000, 800],
@@ -731,9 +754,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
-        await page
-          .getByRole("heading", { name: "Set up OpenBot (self-contained)" })
-          .waitFor();
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page.waitForTimeout(400);
         // The card's bottom edge: nothing under the line moves, and the card does not shrink.
         const usage = async () => {

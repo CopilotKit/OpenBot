@@ -577,9 +577,9 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
 async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary, status, reply, expected
 ):
-    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
-    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
-    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`, and
+    # the harness passes that reason on: without it the model knows only a status code, and cannot
+    # tell the person why or repair its call.
     boundary["callback_status"] = status
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
@@ -661,15 +661,19 @@ async def test_concurrent_requests_keep_tool_ownership_and_assertions_separate(
 
 
 @pytest.mark.asyncio
-async def test_undeclared_model_tool_is_refused_without_callback(boundary):
+async def test_undeclared_model_tool_is_handed_back_without_callback(boundary):
+    """A call to a tool this run was not offered is never run here, and never ends the run in an
+    error: it is handed back for the caller to answer, as a call the surface owns is."""
     boundary["force_call"] = "undeclared_tool"
     events = await run_protocol(
         run_input(["granted_lookup"], deployment=["granted_lookup", "undeclared_tool"]),
         allow_error=True,
     )
-    assert any(
-        e["type"] == "RUN_ERROR" and "not offered" in e["message"] for e in events
-    )
+    assert not any(e["type"] == "RUN_ERROR" for e in events)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert [
+        e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"
+    ] == ["undeclared_tool"]
     assert boundary["callback"] == []
 
 

@@ -17,15 +17,16 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NetworkSection } from "@/components/admin/controls/computer-sections";
+import { deploymentKeys } from "@/lib/deployment/queries";
 import type { NetworkAllowlistTranslation } from "@/lib/enterprise/network-allowlist";
 import type {
   NetworkCandidate,
   NetworkPolicy,
   NetworkReplayReport,
 } from "@/lib/enterprise/queries";
-import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
-import recorded from "../../server/tests/fixtures/network-allowlist-recorded.json";
+import { answerBotsList } from "./bots-api";
+import recorded from "./fixtures/network-allowlist-recorded.json";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -134,8 +135,10 @@ function serving() {
       replayed.push(JSON.parse(String(init?.body)));
       return Response.json({ report: REPORT });
     }
-    if (path.startsWith("/api/agents"))
-      return Response.json({ agents: [{ id: "ops-bot", name: "Ops Bot" }] });
+    const bots = answerBotsList(input, init, {
+      visible: [{ id: "ops-bot", name: "Ops Bot" }],
+    });
+    if (bots) return bots;
     if (path === "/api/admin/enterprise")
       return Response.json({
         capabilities: [],

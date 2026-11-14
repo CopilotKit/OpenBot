@@ -14,6 +14,7 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { GroupChat } from "@/components/channels/group-chat";
 import type { GroupMessage } from "@/lib/groups";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -84,13 +85,13 @@ beforeAll(() => {
       return Response.json({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
-    if (url.pathname === "/api/agents")
-      return Response.json({
-        agents: [
-          { id: ERRANDS, name: "Errand Helper", avatarSeed: "personal" },
-          { id: BUDGET, name: "Budget Buddy", avatarSeed: BUDGET },
-        ],
-      });
+    const bots = answerBotsList(url, init, {
+      visible: [
+        { id: ERRANDS, name: "Errand Helper", avatarSeed: "personal" },
+        { id: BUDGET, name: "Budget Buddy", avatarSeed: BUDGET },
+      ],
+    });
+    if (bots) return bots;
     if (url.pathname === `/api/groups/${CHANNEL}`) {
       if (method === "POST") {
         groupSends.push(JSON.parse(String(init?.body)));

@@ -211,7 +211,7 @@ pub fn app_config_dir(
             .map(Path::to_path_buf)
             .unwrap_or_else(|| home.join("AppData").join("Roaming")),
     };
-    config.join(APP_IDENTIFIER)
+    config.join(crate::stack::identifier_for(APP_IDENTIFIER))
 }
 
 fn refused(refusal: Refusal) -> Value {

@@ -24,6 +24,7 @@ import {
 import { ActiveBotProvider } from "@/lib/copilot/active-bot";
 import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { queryClient } from "@/query-client";
+import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -267,13 +268,13 @@ beforeAll(() => {
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
       // What the Bot's runs are offered is read from these, as the server answers them: the Bot is
       // the person's own, holds no components, and the deployment switches nothing off.
-      if (url.pathname === `/api/agents/${BOT}`)
+      if (url.pathname === botPath(BOT))
         return NativeResponse.json({
-          agent: { id: BOT, visibility: "public", canManage: true },
+          bot: { id: BOT, visibility: "public", canManage: true },
         });
       if (url.pathname === `/api/components/for-agent/${BOT}`)
         return NativeResponse.json({ components: [] });

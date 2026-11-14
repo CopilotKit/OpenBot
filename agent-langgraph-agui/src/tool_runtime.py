@@ -1,4 +1,4 @@
-"""The current run's tools, with the same ownership contract as agent-langgraph.
+"""The current run's tools, with the ownership contract every OpenBot harness keeps.
 
 Computer/UI tools finish the run for the surface to execute and resume. Only tools
 marked by OpenBot's server execute here, through its signed callback. The request
@@ -243,10 +243,6 @@ def current_tools() -> RunTools:
     return _current.get() or RunTools()
 
 
-class UnofferedToolError(ValueError):
-    pass
-
-
 class ToolAwareAgent(WholeThreadAgent):
     async def run(self, input: RunAgentInput):
         props = input.forwarded_props if isinstance(input.forwarded_props, dict) else {}
@@ -286,11 +282,6 @@ class ToolAwareAgent(WholeThreadAgent):
                     if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
                         ended = True
                     yield event
-        except UnofferedToolError:
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                message="The model requested a tool that was not offered for this run.",
-            )
         except Exception as error:
             billing = billing_refusal(error)
             if billing:
@@ -406,9 +397,13 @@ def next_step(state):
     context = current_tools()
     offered = {tool.name for tool in context.tools}
     if any(call["name"] not in offered for call in calls):
-        raise UnofferedToolError(
-            "The model requested a tool that was not offered for this run."
-        )
+        # A tool this run was not offered is never run here, but it does not end the run in an
+        # error either: it is handed back like a call the surface owns, and the caller answers it,
+        # running a tool the Bot holds through its own governance or refusing a name it holds
+        # nothing for, and the model goes on. FOUND ON WINDOWS: a model that called Google Sheets'
+        # "Format cell", which its Bot holds and this step was not sent, ended the run in red with
+        # "The model requested a tool that was not offered for this run."
+        return END
     # Mixed turns yield too: never invent results for a UI component or execute
     # a governed action while the surface still owns an unanswered call.
     if any(call["name"] not in context.deployment for call in calls):

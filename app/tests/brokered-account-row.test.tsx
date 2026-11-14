@@ -33,7 +33,18 @@ import type { BrokerField } from "@/lib/plugins/mutations";
 import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
-import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
+import { answerBotsList } from "./bots-api";
+
+/**
+ * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
+ * from the published OpenBot images, so its list is written out here as it answers today.
+ */
+const BROKERED_PROBE_OUTCOMES = [
+  "nothing",
+  "answered",
+  "complained",
+  "unreachable",
+] as const;
 
 /**
  * The brokered account row, on both screens that draw it.
@@ -650,7 +661,8 @@ function installDeployment(deployment: Deployment): Server {
       state.probe = undefined;
       return json({ ok: true });
     }
-    if (path.startsWith("/api/agents")) return json({ agents: [] });
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
     if (path.startsWith("/api/plugins")) {
       return json(
         pluginsPage(state.composioConfigured, state.authScheme, state.title),
@@ -1662,8 +1674,7 @@ test("a check that did not come back clean says so, without ruling on the key", 
  * rounds it did: `["nothing", "answered", "complained", "unreachable"]` written out at the assertion,
  * in this file, compared to the `outcome` fields above it — a fifth member on the server's real
  * `BrokeredProbe` passed that, which is exactly the drift the test was added to catch. It now
- * counts against `BROKERED_PROBE_OUTCOMES`, imported from `server/src/plugins/store.ts`, which that
- * module pins to the union in both directions with `satisfies` and a `Decides<…>` witness.
+ * counts against `BROKERED_PROBE_OUTCOMES` at the top of this file, the server's own list.
  *
  * `SERVER_FIELD_SCHEMES` ABOVE IS STILL A COPY AND STILL SHOULD BE, which is not the same case: it
  * earns its copy by carrying a scheme the screen has never heard of, and a disagreement is the one

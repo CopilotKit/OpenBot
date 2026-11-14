@@ -46,10 +46,15 @@ function summary(
 }
 
 const requests: string[] = [];
-function serving(channels: ChannelSummary[]) {
+function serving(
+  channels: ChannelSummary[],
+  edition: "team" | "personal" = "team",
+) {
   requests.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
+    if (String(input) === "/api/capabilities")
+      return Response.json({ edition });
     requests.push(`${method} ${String(input)}`);
     if (method === "GET") return Response.json({ channels, nextCursor: null });
     return new Response(null, { status: 204 });
@@ -133,4 +138,42 @@ test("a conversation with no name yet is asked about as this conversation", asyn
   expect(
     await view.findByRole("dialog", { name: "Delete this conversation?" }),
   ).toBeTruthy();
+});
+
+test("in the personal edition, Delete does not speak of everyone in the conversation", async () => {
+  // One person uses the personal edition, so nobody else is in a conversation to lose it.
+  serving([summary("c1", false, "Kingfisher Back Colour")], "personal");
+  const view = draw();
+
+  fireEvent.click(
+    await view.findByRole("button", { name: "Delete conversation…" }),
+  );
+
+  const dialog = await view.findByRole("dialog", {
+    name: "Delete “Kingfisher Back Colour”?",
+  });
+  await waitFor(() =>
+    expect(dialog.textContent).toContain(
+      "It's deleted, with all its messages.",
+    ),
+  );
+  expect(dialog.textContent).not.toContain("everyone");
+});
+
+test("in the team edition, Delete says it goes for everyone in the conversation", async () => {
+  serving([summary("c1", false, "Kingfisher Back Colour")], "team");
+  const view = draw();
+
+  fireEvent.click(
+    await view.findByRole("button", { name: "Delete conversation…" }),
+  );
+
+  const dialog = await view.findByRole("dialog", {
+    name: "Delete “Kingfisher Back Colour”?",
+  });
+  await waitFor(() =>
+    expect(dialog.textContent).toContain(
+      "It disappears for everyone in the conversation.",
+    ),
+  );
 });

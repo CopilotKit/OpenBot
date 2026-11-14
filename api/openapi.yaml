@@ -32,7 +32,70 @@ tags:
     description: >-
       The Bots a person can see: their own, those shared with them, the ones an
       administrator assigned them, and the ones that come with OpenBot.
+  - name: Reactions
+    description: >-
+      The reactions a Bot leaves on a person's message in place of a line of
+      its own, when the message only needs an acknowledgement.
+  - name: Audit events
+    description: >-
+      The audit trail: what people and Bots did in the organization, and what
+      its policy refused, newest first. Only an administrator can read it. It
+      is read-only: events are written by what they record, never through the
+      API.
 paths:
+  /api/v2/organizations/{organizationId}/reactions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Reactions]
+      operationId: listReactions
+      summary: List reactions in a conversation
+      description: >-
+        Return one page of the reactions Bots left on the caller's messages in
+        one of their conversations, named by its thread. Another person's
+        thread answers with an empty list. A missing cursor starts at the
+        first page and nextCursor null ends the list. Today's server returns
+        every reaction on the first page.
+      security:
+        - webSession: []
+        - appOAuth: [reactions:read]
+        - apiKey: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          description: The conversation's thread, as its messages name it.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of reactions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ReactionPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -83,6 +146,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     post:
       tags: [Bots]
       operationId: createBot
@@ -126,7 +191,7 @@ paths:
                   auth:
                     header: Authorization
                     value: Bearer example-key
-                  harness: langgraph-python
+                  harness: langgraph
       responses:
         '201':
           description: The Bot was created.
@@ -157,6 +222,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots/{botId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -195,6 +262,8 @@ paths:
           $ref: '#/components/responses/BotNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     patch:
       tags: [Bots]
       operationId: updateBot
@@ -253,6 +322,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags: [Bots]
       operationId: deleteBot
@@ -283,6 +354,260 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/audit-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Audit events]
+      operationId: listAuditEvents
+      summary: List audit events
+      description: >-
+        Return one page of the audit trail, newest first, narrowed by the
+        filters given. Each filter narrows the events, and a filter that takes
+        several values separated by commas matches any of them. A value that
+        names nothing in the trail matches no event rather than being refused.
+        A missing cursor starts at the newest event and nextCursor null ends
+        the list. A cursor belongs to the filters that made it, so changing a
+        filter starts again without one; limit may change from page to page.
+        Only an administrator may read the trail.
+      security:
+        - webSession: []
+        - appOAuth: [audit-events:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/AuditEventTypes'
+        - $ref: '#/components/parameters/AuditExcludedEventTypes'
+        - $ref: '#/components/parameters/AuditExcludedCalls'
+        - $ref: '#/components/parameters/AuditActor'
+        - $ref: '#/components/parameters/AuditInitiatorKinds'
+        - $ref: '#/components/parameters/AuditTargetTypes'
+        - $ref: '#/components/parameters/AuditTargetId'
+        - $ref: '#/components/parameters/AuditBots'
+        - $ref: '#/components/parameters/AuditApps'
+        - $ref: '#/components/parameters/AuditTools'
+        - $ref: '#/components/parameters/AuditEffect'
+        - $ref: '#/components/parameters/AuditIntents'
+        - $ref: '#/components/parameters/AuditRule'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: One page of audit events.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+              examples:
+                firstPage:
+                  $ref: '#/components/examples/AuditEventPageFirst'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/audit-events/export:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Audit events]
+      operationId: exportAuditEvents
+      summary: Export audit events as CSV
+      description: >-
+        Return every event the filters match, newest first, as one CSV file
+        (RFC 4180): the same filters as listing audit events, without its
+        paging, so the file and the list agree. The file holds at most 5,000
+        events; when more match, OpenBot-Export-Truncated says how many it
+        holds, and narrowing the dates exports the rest. A cell a spreadsheet
+        would run as a formula starts with an apostrophe. Each export is
+        recorded on the trail. Only an administrator may export the trail.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [audit-events:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/AuditEventTypes'
+        - $ref: '#/components/parameters/AuditExcludedEventTypes'
+        - $ref: '#/components/parameters/AuditExcludedCalls'
+        - $ref: '#/components/parameters/AuditActor'
+        - $ref: '#/components/parameters/AuditInitiatorKinds'
+        - $ref: '#/components/parameters/AuditTargetTypes'
+        - $ref: '#/components/parameters/AuditTargetId'
+        - $ref: '#/components/parameters/AuditBots'
+        - $ref: '#/components/parameters/AuditApps'
+        - $ref: '#/components/parameters/AuditTools'
+        - $ref: '#/components/parameters/AuditEffect'
+        - $ref: '#/components/parameters/AuditIntents'
+        - $ref: '#/components/parameters/AuditRule'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: >-
+            The matching events as CSV, one header row and one row per event.
+            The columns are id, createdAt, eventType, actorUserId,
+            initiatorKind, initiatorId, targetType, targetId, decisionAllowed,
+            decisionRule, bot and payload, the event's payload as JSON.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            Content-Disposition:
+              description: An attachment named after the day it was exported.
+              schema:
+                type: string
+              example: attachment; filename="audit-events-2026-11-14.csv"
+            OpenBot-Export-Truncated:
+              description: >-
+                Present only when more events matched than the file holds: the
+                number of events it holds.
+              schema:
+                type: integer
+                minimum: 1
+              example: 5000
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                id,createdAt,eventType,actorUserId,initiatorKind,initiatorId,targetType,targetId,decisionAllowed,decisionRule,bot,payload
+                0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10,2026-11-14T09:12:44.501Z,computer.action_refused,,routine,routine_7f2c,computer,research-assistant,false,network.deny,research-assistant,"{""bot"":""research-assistant"",""decision"":{""allowed"":false,""rule"":""network.deny""}}"
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/audit-events/vocabulary:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Audit events]
+      operationId: getAuditEventVocabulary
+      summary: Read what the audit filters can name
+      description: >-
+        Return what a filter on the audit trail can name in this
+        organization: its Bots, its people, the apps and tools the trail has
+        seen, and the boundary rules, both the policy's current ones and any
+        that refused something in the trail. These are the only values a
+        question asked of the trail can turn into. Only an administrator may
+        read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [audit-events:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What the audit filters can name.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditVocabulary'
+              examples:
+                vocabulary:
+                  $ref: '#/components/examples/AuditVocabularyExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/audit-events/ask:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags: [Audit events]
+      operationId: askAuditEvents
+      summary: Ask the audit trail a question
+      description: >-
+        Turn a question in English into filters on the audit trail. The
+        deployment's model chooses the filters and never answers the question
+        itself: the events the filters list are the answer. Every filter is
+        checked against what the trail can name (getAuditEventVocabulary), and
+        filters that still fail on the model's second try are refused, never
+        guessed at. A second call that never sees the question reads the
+        filters back in one line. Nothing changes but the trail, which records
+        each question with the filters it became. Only an administrator may
+        ask. A repeated request with the same Idempotency-Key and body returns
+        the first answer without asking the model again.
+      security:
+        - webSession: []
+        - appOAuth: [audit-events:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditQuestion'
+            examples:
+              blocked:
+                value:
+                  question: What did the Research Assistant try to do yesterday that was blocked?
+                  timeZone: Europe/London
+      responses:
+        '200':
+          description: >-
+            The filters the question became, or why the trail can't answer it.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditAnswer'
+              examples:
+                answered:
+                  $ref: '#/components/examples/AuditAnswerExample'
+        '400':
+          $ref: '#/components/responses/InvalidAuditQuestion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/AuditQuestionNotUnderstood'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ModelFailed'
+        '503':
+          $ref: '#/components/responses/ModelNotConfigured'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -308,6 +633,8 @@ components:
           scopes:
             bots:read: Read the Bots the signed-in person can see.
             bots:write: Create, change and delete the signed-in person's Bots.
+            reactions:read: Read the reactions Bots left on the signed-in person's messages.
+            audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
     apiKey:
       type: http
       scheme: bearer
@@ -351,11 +678,16 @@ components:
       in: query
       description: >-
         Opaque continuation from the previous page's nextCursor, bound to the
-        organization and the filters that made it.
+        organization and the filters that made it. The server only ever issues
+        cursors written in URL-safe base64 (letters, digits, - and _, no
+        padding) and refuses anything else, so the pattern says so. A cursor
+        that fits the pattern can still be refused: one this list never gave
+        out, or one made for another organization or other filters.
       schema:
         type: string
         minLength: 1
         maxLength: 4096
+        pattern: ^[A-Za-z0-9_-]+$
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -368,6 +700,117 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    AuditEventTypes:
+      name: eventType
+      in: query
+      description: >-
+        Events of any of these types, separated by commas, such as
+        computer.action_refused,mcp.call_rejected.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditExcludedEventTypes:
+      name: excludeEventType
+      in: query
+      description: Leave out events of these types, separated by commas.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditExcludedCalls:
+      name: excludeCalls
+      in: query
+      description: >-
+        Leave out the app calls of these tools that succeeded, separated by
+        commas: calls whose change has an event of its own. A call that failed
+        is kept.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditActor:
+      name: actorUserId
+      in: query
+      description: Events that ran on this person's authority, by their user id.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditInitiatorKinds:
+      name: initiatorKind
+      in: query
+      description: >-
+        Events started in any of these ways, separated by commas: person,
+        deployment, routine, responsibility, memory or handoff.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditTargetTypes:
+      name: targetType
+      in: query
+      description: >-
+        Events about any of these kinds of thing, separated by commas, such as
+        agent or computer.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditTargetId:
+      name: targetId
+      in: query
+      description: Events about this one thing, by its id.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditBots:
+      name: bot
+      in: query
+      description: >-
+        The events of any of these Bots, by id, separated by commas: what each
+        Bot did and what was done to it.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditApps:
+      name: app
+      in: query
+      description: >-
+        App calls to any of these apps, separated by commas, by the app's key
+        (gmail), whichever way the app was connected.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditTools:
+      name: tool
+      in: query
+      description: >-
+        App calls of any of these tools, separated by commas, by the name the
+        trail records, in any case.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditEffect:
+      name: effect
+      in: query
+      description: App calls that only read (read), or that change something (write).
+      schema:
+        $ref: '#/components/schemas/AuditEffect'
+    AuditIntents:
+      name: intent
+      in: query
+      description: >-
+        Actions that did any of these, separated by commas, in the boundary's
+        own words (AuditIntent). A word outside those matches nothing.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditRule:
+      name: rule
+      in: query
+      description: >-
+        Refusals by this one boundary rule, its text exactly as recorded. One
+        rule, not a list, because a rule can hold commas.
+      schema:
+        $ref: '#/components/schemas/AuditFilterText'
+    AuditFrom:
+      name: from
+      in: query
+      description: Events after this moment.
+      schema:
+        type: string
+        format: date-time
+    AuditTo:
+      name: to
+      in: query
+      description: Events before this moment.
+      schema:
+        type: string
+        format: date-time
   headers:
     PrivateNoStore:
       description: A Bot is private to the caller.
@@ -438,8 +881,11 @@ components:
         endpoint:
           type: [string, 'null']
           description: >-
-            The AG-UI address it runs at. Null for a Bot that runs inside
-            OpenBot.
+            The AG-UI address it runs at, as it was stored. Null for a Bot that
+            runs inside OpenBot. Every address saved through this API is an
+            absolute http or https address (see the request's endpoint), but
+            one saved by an older release is returned as it is, so this field
+            states no format.
         hasAuth:
           type: boolean
           description: Whether a key is set for its address. Never the key.
@@ -510,7 +956,42 @@ components:
         nextCursor:
           type: [string, 'null']
           maxLength: 4096
-          description: Pass as cursor for the next page. Null ends the list.
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    Reaction:
+      type: object
+      required: [messageId, agentId, emoji, createdAt]
+      properties:
+        messageId:
+          type: string
+          description: The person's message the reaction is on, by the id its conversation gives it.
+        agentId:
+          type: string
+          description: The Bot that reacted.
+        emoji:
+          type: string
+          description: The reaction itself.
+          example: 👍
+        createdAt:
+          type: string
+          format: date-time
+    ReactionPage:
+      type: object
+      required: [reactions, nextCursor]
+      properties:
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reaction'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
     BotResponse:
       type: object
       required: [bot]
@@ -591,9 +1072,19 @@ components:
         endpoint:
           type: string
           description: >-
-            The AG-UI address it runs at. Empty or absent on create means it
-            runs inside OpenBot; empty or absent on a change leaves it as it
-            is. The server refuses an address this deployment may not reach.
+            The AG-UI address it runs at: empty, or an absolute http or https
+            address, the only kinds the server has ever taken. Empty or absent
+            on create means it runs inside OpenBot; empty or absent on a
+            change leaves it as it is. An address that fits can still be
+            refused: the server refuses one this deployment may not reach,
+            such as a private network address on a deployment that keeps Bots
+            off it.
+          anyOf:
+            - type: string
+              maxLength: 0
+            - type: string
+              format: uri
+              pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
         auth:
           $ref: '#/components/schemas/BotKey'
         isolated:
@@ -619,12 +1110,303 @@ components:
               type: string
               description: >-
                 The framework an agent somebody runs themselves is built on,
-                by its id in OpenBot's harness list. Kept only with an
-                endpoint.
+                by its id in OpenBot's harness list (shared/harnesses.json),
+                which the server checks every create against. Empty means none
+                was named, as for an agent somebody already runs. "byo-url" is
+                not one: it names no framework. Kept only with an endpoint.
+              enum:
+                - ''
+                - crewai
+                - llamaindex
+                - agno
+                - langgraph
+                - google-adk
+                - antigravity
+                - pydantic-ai
+                - microsoft-agent-framework
+                - claude-agent-sdk
+                - strands
+                - ag2
+                - langroid
+                - mastra
     UpdateBotRequest:
       description: A Bot's fields after the change.
       allOf:
         - $ref: '#/components/schemas/BotFields'
+    AuditFilterText:
+      type: string
+      maxLength: 4096
+      pattern: ^[^\x00]*$
+      description: >-
+        Text a filter on the audit trail matches. Blank is no filter. It never
+        holds a NUL character, which no event can.
+    AuditEffect:
+      type: string
+      enum: [read, write]
+      description: Whether an app call only reads, or changes something.
+    AuditIntent:
+      type: string
+      description: What an action did, in the words of the boundary that judged it.
+      enum:
+        - activate
+        - type
+        - navigate
+        - read
+        - read_file
+        - download_file
+        - write_file
+        - list_files
+        - run_command
+        - read_tool
+        - write_tool
+    AuditEvent:
+      type: object
+      description: >-
+        One thing that happened, as the trail recorded it. Secrets are
+        redacted from the payload before it is written.
+      required:
+        - id
+        - actorUserId
+        - initiatorKind
+        - initiatorId
+        - eventType
+        - targetType
+        - targetId
+        - payload
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The event's id.
+        actorUserId:
+          type: [string, 'null']
+          description: >-
+            The person whose authority it ran on, by user id. Null when it ran
+            on nobody's, such as the deployment acting at start-up.
+        initiatorKind:
+          type: string
+          description: >-
+            What started it: person, deployment, routine, responsibility,
+            memory or handoff. Read back as it was written, so an event from a
+            later release may name another.
+        initiatorId:
+          type: [string, 'null']
+          description: >-
+            Which routine, responsibility, memory or Bot started it. Null when
+            a person or the deployment did.
+        eventType:
+          type: string
+          description: What happened, such as computer.action_refused.
+        targetType:
+          type: string
+          description: The kind of thing it happened to, such as agent or computer.
+        targetId:
+          type: [string, 'null']
+          description: The thing it happened to, by id. Null when it names none.
+        payload:
+          type: object
+          additionalProperties: true
+          description: What the event recorded. Its fields depend on eventType.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it happened.
+    AuditEventPage:
+      type: object
+      required: [auditEvents, nextCursor]
+      properties:
+        auditEvents:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next, older page. Null ends the list.
+            Written in URL-safe base64, the only form the cursor parameter
+            accepts.
+    AuditVocabulary:
+      type: object
+      description: What a filter on the audit trail can name in this organization.
+      required: [bots, people, apps, tools, rules]
+      properties:
+        bots:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+        people:
+          type: array
+          items:
+            type: object
+            required: [id, name, email]
+            properties:
+              id:
+                type: string
+                description: Their user id, as actorUserId names them.
+              name:
+                type: [string, 'null']
+              email:
+                type: string
+        apps:
+          type: array
+          description: Apps by their key (gmail), whichever way they were connected.
+          items:
+            type: object
+            required: [key, name]
+            properties:
+              key:
+                type: string
+              name:
+                type: string
+                description: The app's name, as the Apps page shows it.
+        tools:
+          type: array
+          description: The tools of each app, most called first.
+          items:
+            type: object
+            required: [app, tool, calls]
+            properties:
+              app:
+                type: string
+                description: The app's key.
+              tool:
+                type: string
+              calls:
+                type: integer
+                minimum: 0
+                description: How many events the trail holds for it; 0 for a tool never called.
+        rules:
+          type: array
+          description: >-
+            Boundary rules: the policy's current ones, and any that refused
+            something in the trail.
+          items:
+            type: object
+            required: [rule, name, refusals]
+            properties:
+              rule:
+                type: string
+                description: The rule's text, as the rule filter takes it.
+              name:
+                type: [string, 'null']
+                description: The name an administrator gave it, if any.
+              refusals:
+                type: integer
+                minimum: 0
+                description: How many refusals by it the trail holds.
+    AuditQuestion:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: ^[^\x00]*$
+          description: The question, 1 to 500 characters once trimmed.
+        timeZone:
+          type: string
+          maxLength: 100
+          description: >-
+            Where the person asking is, as an IANA time zone (Europe/London),
+            so yesterday is their yesterday. Absent or unknown means UTC.
+    AuditFilters:
+      type: object
+      description: >-
+        Filters on the audit trail, as listing audit events takes them, each
+        list joined with commas: every filter narrows the events, and the
+        values in a list are alternatives. Empty means every event.
+      properties:
+        eventType:
+          type: array
+          items:
+            type: string
+        bot:
+          type: string
+          description: One Bot, by id.
+        actorUserId:
+          type: string
+        initiatorKind:
+          type: array
+          items:
+            type: string
+        app:
+          type: array
+          items:
+            type: string
+        tool:
+          type: array
+          items:
+            type: string
+        effect:
+          $ref: '#/components/schemas/AuditEffect'
+        intent:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditIntent'
+        rule:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+    AuditFilterLabels:
+      type: object
+      description: >-
+        The names for the values in a set of filters, so each reads as a name:
+        Bots and people by id, apps by key, rules by their text.
+      required: [bots, people, apps, rules]
+      properties:
+        bots:
+          type: object
+          additionalProperties:
+            type: string
+        people:
+          type: object
+          additionalProperties:
+            type: string
+        apps:
+          type: object
+          additionalProperties:
+            type: string
+        rules:
+          type: object
+          additionalProperties:
+            type: string
+    AuditAnswer:
+      type: object
+      description: >-
+        A question about the trail, as filters. The events the filters list
+        are the answer.
+      required: [answerable, unanswered, filters, reading, labels]
+      properties:
+        answerable:
+          type: string
+          enum: ['yes', 'partly', 'no']
+          description: Whether the trail answers all of the question, part of it, or none of it.
+        unanswered:
+          type: [string, 'null']
+          description: What the trail can't answer, and why. Null when it answers all of it.
+        filters:
+          $ref: '#/components/schemas/AuditFilters'
+        reading:
+          type: [string, 'null']
+          description: >-
+            The filters read back in one line by a call that never saw the
+            question. Null when the trail can't answer any of it.
+        labels:
+          $ref: '#/components/schemas/AuditFilterLabels'
     Problem:
       type: object
       description: >-
@@ -804,6 +1586,113 @@ components:
                 requestId: req_example
                 traceId: trace_example
                 capability: isolatedComputers
+    AdminOnly:
+      description: >-
+        The caller is not an administrator of the organization, or holds no
+        role in it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidAuditQuestion:
+      description: >-
+        The question is blank or longer than 500 characters once trimmed, holds
+        a character OpenBot can't keep, or a parameter is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            blank:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Ask a question first.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            long:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Keep the question under 500 characters. Ask one thing at a time.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AuditQuestionNotUnderstood:
+      description: >-
+        The model's filters still failed their check on its second try, so
+        none are given.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notUnderstood:
+              value:
+                type: https://open.bot/errors/question-not-understood
+                title: Couldn't turn that question into filters.
+                status: 422
+                detail: Couldn't turn that question into filters. Ask it another way, or set the filters yourself.
+                code: QUESTION_NOT_UNDERSTOOD
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ModelFailed:
+      description: The model didn't answer, or didn't answer usefully. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/model-failed
+                title: The model didn't answer.
+                status: 502
+                detail: Couldn't reach the model. Try again.
+                code: MODEL_FAILED
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    ModelNotConfigured:
+      description: The deployment has no model to read a question with.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noModel:
+              value:
+                type: https://open.bot/errors/model-not-configured
+                title: OpenBot has no model to answer with.
+                status: 503
+                detail: OpenBot needs a model key to answer a question. Add one in the Vault, or set the filters yourself.
+                code: MODEL_NOT_CONFIGURED
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     OrganizationNotFound:
       description: The organization does not exist or is not visible to the caller.
       content:
@@ -878,7 +1767,98 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+    UnexpectedError:
+      description: >-
+        Any other status, in the same problem details shape. The statuses
+        listed for an operation are the ones its own rules produce; this
+        covers the rest, such as a proxy in front of the server refusing a
+        request too large to read (413, 414, 431) or a gateway that cannot
+        reach it (502, 503, 504). A client reads detail and retryable from
+        it like any other problem.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: OpenBot isn't available right now.
+                status: 503
+                detail: OpenBot isn't available right now. Try again in a moment.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
   examples:
+    ReactionPageLast:
+      summary: Every reaction in a conversation, on one page.
+      value:
+        reactions:
+          - messageId: msg_2f0c1e7a
+            agentId: general-assistant
+            emoji: 👍
+            createdAt: '2026-11-12T22:41:07.000Z'
+        nextCursor: null
+    AuditEventPageFirst:
+      summary: The newest event, with older ones to follow.
+      value:
+        auditEvents:
+          - id: 0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10
+            actorUserId: null
+            initiatorKind: routine
+            initiatorId: routine_7f2c
+            eventType: computer.action_refused
+            targetType: computer
+            targetId: research-assistant
+            payload:
+              bot: research-assistant
+              decision:
+                allowed: false
+                rule: network.deny
+            createdAt: '2026-11-14T09:12:44.501Z'
+        nextCursor: eyJ2IjoxLCJvIjoiZGVmYXVsdCJ9
+    AuditVocabularyExample:
+      summary: One Bot, one person, one app and one rule.
+      value:
+        bots:
+          - id: research-assistant
+            name: Research Assistant
+        people:
+          - id: user_2b7c
+            name: Dana Reyes
+            email: dana@example.com
+        apps:
+          - key: gmail
+            name: Gmail
+        tools:
+          - app: gmail
+            tool: GMAIL_SEND_EMAIL
+            calls: 12
+        rules:
+          - rule: network.deny
+            name: Keep Bots off the internal network
+            refusals: 3
+    AuditAnswerExample:
+      summary: A question the trail answers.
+      value:
+        answerable: 'yes'
+        unanswered: null
+        filters:
+          bot: research-assistant
+          eventType:
+            - computer.action_refused
+            - mcp.call_rejected
+          from: '2026-11-13T00:00:00.000Z'
+          to: '2026-11-14T00:00:00.000Z'
+        reading: Actions the Research Assistant was refused on 13 November.
+        labels:
+          bots:
+            research-assistant: Research Assistant
+          people: {}
+          apps: {}
+          rules: {}
     BotPageLast:
       summary: Every Bot, on one page.
       value:

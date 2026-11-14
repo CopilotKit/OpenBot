@@ -16,6 +16,7 @@ import {
 import {
   readPageFrame,
   readScreenshot,
+  startComputer,
   type Screenshot,
 } from "@/lib/computers/screen";
 import { useComputerControl } from "@/lib/computers/use-control";
@@ -426,6 +427,11 @@ export function ComputerView({
   const secretPending = Boolean(control?.secretWanted);
   const secretPendingRef = useRef(false);
   secretPendingRef.current = secretPending;
+  // A new request is a fresh start: what went wrong with the last one is not news about it.
+  const secretAsked = control?.secretId ?? control?.secretWanted;
+  useEffect(() => {
+    if (secretAsked) setSecretProblem(null);
+  }, [secretAsked]);
   // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
   const generation = useRef(0);
   /** Force a short watch window after non-Bot actions such as secret entry. */
@@ -571,8 +577,46 @@ export function ComputerView({
   /** The fresher of the two answers: the poll that just ran, else the status read. */
   const computerState: ComputerState | undefined =
     polledState ?? status.data?.state;
-  /** In a turn, an absent computer is one the Bot's action is about to start, not one left off. */
-  const asleep = computerState === "absent" && !toolCallId;
+  /*
+   * OPENING THE SCREEN STARTS A COMPUTER THAT IS OFF. Once, for the state the screen was opened on.
+   *
+   * Nothing this view reads starts a computer, so one that was off stayed off however long a person
+   * looked at it, and the only way to see the Bot's browser was to ask the Bot to do something. A
+   * person opening the screen is asking to see the computer, so the server is told, and starts it.
+   *
+   * Only the screen beside a conversation, which a person opens: a card in a turn is drawn by
+   * scrolling past it, and its computer is started by the Bot's action. And only for what the screen
+   * found when it opened. A computer that goes off later, in front of a person who left the screen
+   * open, stays off: nobody opened anything, and starting it again would keep every computer with a
+   * screen left open running for ever.
+   */
+  const openedOn = useRef<string | null>(null);
+  const [startAsked, setStartAsked] = useState(false);
+  // A picture is a computer that is up, whatever the state reads have or have not said yet.
+  const hasFrame = shot !== null;
+  useEffect(() => {
+    if (toolCallId || settled || !visualVisible) return;
+    if (!computerState && !hasFrame) return;
+    if (openedOn.current === computerId) return;
+    openedOn.current = computerId;
+    if (computerState !== "absent") return;
+    /*
+     * "Starting" only once the server says it is. Until then, and for a server that has no such
+     * call or refuses it, the screen says what it always said: the computer is off.
+     */
+    void startComputer(computerId).then((state) => {
+      if (state === "starting" || state === "ready") setStartAsked(true);
+    });
+  }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
+  useEffect(() => {
+    // Up, or on its way: what the server says is the news again, and a later "off" is one.
+    if (computerState && computerState !== "absent") setStartAsked(false);
+  }, [computerState]);
+  /**
+   * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
+   * is about to start, and one this screen has just asked for is on its way.
+   */
+  const asleep = computerState === "absent" && !toolCallId && !startAsked;
   /** Waiting for a first frame, for a reason that can end. A computer that is off waits for the Bot. */
   const waitingForFrame = !settled && visualVisible && shot === null && !asleep;
 
@@ -953,9 +997,23 @@ export function ComputerView({
               conversation, and the Bot never sees it.
             </p>
             {secretProblem ? (
-              <p className="mt-1 text-xs text-destructive">{secretProblem}</p>
+              <p className="mt-1 text-xs text-destructive" role="alert">
+                {secretProblem}
+              </p>
             ) : null}
           </form>
+        ) : secretProblem ? (
+          /*
+            A send that failed because the request had already ended closes the box with it, and the
+            reason went with the box: the person saw it vanish and nothing else. It stays here until
+            the Bot asks again.
+          */
+          <p
+            className="border-t bg-muted/40 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {secretProblem}
+          </p>
         ) : null}
 
         {/*

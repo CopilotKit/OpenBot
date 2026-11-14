@@ -24,9 +24,9 @@ export function BusinessOrb({ orb = true }: { orb?: boolean }) {
       />
       {orb ? (
         <div className="absolute inset-0 flex items-center justify-center">
-          {/* `.bot-orb-live` gives it the same finish as a Bot's orb in a conversation. */}
+          {/* `.bot-orb-live` and `trueColors` give it the same finish as a Bot's orb in a conversation. */}
           <span className="bot-orb-live inline-flex rounded-full ring-1 ring-foreground/10">
-            <AgentOrb colors={ORB_COLORS} size="176px" />
+            <AgentOrb colors={ORB_COLORS} size="176px" trueColors />
           </span>
         </div>
       ) : null}

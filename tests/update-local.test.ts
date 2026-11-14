@@ -226,11 +226,16 @@ test("an interrupted operation blocks another apply without starting containers"
   expect(f.calls.some((c) => c.includes(" stop "))).toBe(false);
 });
 
-test("host apply installs source, runs existing guarded migration and restarts the host topology", async () => {
+test("host apply installs source, runs the image's guarded migration and restarts the host topology", async () => {
   const f = fixture("host");
   await applyLocalUpdate(f.options);
   expect(f.calls.some((c) => c.includes("scripts/start.sh"))).toBe(true);
-  expect(f.calls.some((c) => c.includes("scripts/migrate.ts"))).toBe(true);
+  // The server's own migrations, from its image, as the image topology runs them.
+  expect(
+    f.calls.some(
+      (c) => c.includes("--exit-code-from") && c.includes("migrate"),
+    ),
+  ).toBe(true);
   expect(
     f.calls.some((c) => c.includes("up") && c.includes("server worker")),
   ).toBe(false);
@@ -383,8 +388,6 @@ test.each([
   "%s apply runs its long steps to completion with no kill deadline",
   async (topology, expected) => {
     const f = fixture(topology);
-    // Host migration runs from server/, which a real checkout has.
-    mkdirSync(join(f.root, "server"));
     const long: [string, (command: readonly string[]) => boolean][] = [
       ["pull", (c) => c.includes("pull")],
       ["backup", (c) => c.some((part) => part.includes("pg_dump"))],

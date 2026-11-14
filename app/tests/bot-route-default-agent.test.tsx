@@ -19,6 +19,7 @@ import {
   within,
 } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { botPath } from "./bots-api";
 import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
 let originalRect: typeof HTMLElement.prototype.getBoundingClientRect;
@@ -86,7 +87,8 @@ function queryClientWithAgentsAndFetchedAgent(
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === `/api/agents/${agentId}`) return response.clone();
+      // One Bot, read at the API's address (getBot), as the server answers it.
+      if (url === botPath(agentId)) return response.clone();
       throw new Error(`Unexpected fetch: ${url}`);
     },
     { preconnect: originalFetch.preconnect },
@@ -242,7 +244,7 @@ test("/bot loads a hidden explicit agent from the detail endpoint", async () => 
     queryClientWithAgentsAndFetchedAgent(
       [GENERAL_ASSISTANT],
       "hidden-bot",
-      Response.json({ agent: hiddenBot }),
+      Response.json({ bot: hiddenBot }),
     ),
     "/bot?agent=hidden-bot",
   );
@@ -262,7 +264,7 @@ test("/bot hidden lookup does not collide with the shared agent detail cache", a
   const queryClient = queryClientWithAgentsAndFetchedAgent(
     [GENERAL_ASSISTANT],
     "hidden-bot",
-    Response.json({ agent: hiddenBot }),
+    Response.json({ bot: hiddenBot }),
   );
   queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
   const view = renderBot(queryClient, "/bot?agent=hidden-bot");

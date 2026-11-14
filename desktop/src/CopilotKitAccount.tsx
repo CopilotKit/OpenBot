@@ -60,8 +60,8 @@ const COULD_NOT_CHECK = "Couldn’t check your OpenBot account. Try again.";
 const WHAT_SIGNING_IN_SENDS =
   "Signing in gets your free license key and sets up your apps. OpenBot keeps your conversations and files on this computer.";
 /**
- * The signed-out step's lede. The first screen says this OpenBot is self-contained, so this one says
- * only what the step is for: the license key, and that signing in gets it.
+ * The signed-out step's lede. The first screen says every part of OpenBot runs on this computer, so
+ * this one says only what the step is for: the license key, and that signing in gets it.
  */
 const LICENSE_KEY = "OpenBot needs a free license key. Sign in to get one.";
 const SIGN_IN_DID_NOT_FINISH = "Sign-in didn’t finish. Try again.";

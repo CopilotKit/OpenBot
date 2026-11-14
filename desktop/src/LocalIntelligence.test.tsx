@@ -20,6 +20,8 @@ let updateStepAsked: unknown[] = [];
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
+/** What the window told the log as each `run_local_eval` answer reached it. */
+const answerNotes: unknown[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
@@ -28,6 +30,11 @@ mock.module("@tauri-apps/api/core", () => ({
     if (command === "wake_engine") return Promise.resolve(null);
     // Asked every second while a CLI call runs: not a step of the sequence.
     if (command === "local_eval_steps") return Promise.resolve(localSteps);
+    // What the window tells the log when an answer reaches it: not a step either.
+    if (command === "local_eval_answer_landed") {
+      answerNotes.push(args);
+      return Promise.resolve(null);
+    }
     // Asking which step an update is in is not a step of the sequence either.
     if (command === "local_eval_update_step") {
       updateStepAsked.push(args);
@@ -50,6 +57,7 @@ afterEach(() => {
   updateStep = null;
   updateStepAsked = [];
   localSteps = null;
+  answerNotes.length = 0;
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -228,6 +236,19 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
     "run_local_eval:status",
     "run_local_eval:status",
   ]);
+  // Each answer that reaches the window is noted for the log, under its own call (`answerLanded`).
+  const asked = invokeCalls
+    .filter((call) => call.command === "run_local_eval")
+    .map((call) => (call.args as { attempt: string }).attempt);
+  await waitFor(() =>
+    expect(
+      answerNotes.map((note) => (note as { attempt: string }).attempt),
+    ).toEqual(asked),
+  );
+  expect(answerNotes[0]).toMatchObject({ action: "status" });
+  expect(typeof (answerNotes[0] as { landedAtMs: unknown }).landedAtMs).toBe(
+    "number",
+  );
   expect(
     invokeCalls.find((call) => call.command === "set_up_local_eval")?.args,
   ).toMatchObject({ root: "/tmp/openbot" });
@@ -1388,12 +1409,15 @@ test("a resize Podman refused says so and gives the steps instead", async () => 
     set_up_local_eval: [cpuShortOnPodman],
     podman_machine_plan: [resizeToSix],
     resize_podman_machine: [
-      "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+      {
+        said: "OpenBot couldn't resize your Podman machine. Use the steps below instead.",
+        resized: false,
+      },
     ],
     local_eval_download: [null],
     cancel_local_eval: [null],
   });
-  // The native side rejects with its sentence.
+  // The native side rejects with its sentence (`ResizeStopped`).
   const answer = invokeHandler;
   invokeHandler = async (command, args) => {
     const answered = await answer(command, args);
@@ -1417,6 +1441,52 @@ test("a resize Podman refused says so and gives the steps instead", async () => 
     "podman machine set --cpus 6 podman-machine-default",
   );
   expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
+});
+
+test("a machine resized but not ready to download in time says so, with Retry alone", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [cpuShortOnPodman, report()],
+    podman_machine_plan: [resizeToSix],
+    resize_podman_machine: [
+      {
+        said: "Your Podman machine has more room now, but it can't download yet. Check your internet connection, then click Retry.",
+        resized: true,
+      },
+    ],
+    connect_local_eval: [connection()],
+    run_local_eval: [ready],
+    local_eval_download: [null],
+    cancel_local_eval: [null],
+  });
+  const answer = invokeHandler;
+  invokeHandler = async (command, args) => {
+    const answered = await answer(command, args);
+    if (command === "resize_podman_machine") throw answered;
+    return answered;
+  };
+  const started: Startable[] = [];
+  const screen = view({
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  const offer = await screen.findByRole("region", {
+    name: "OpenBot can fix this for you",
+  });
+  await userEvent.click(
+    within(offer).getByRole("button", { name: "Resize my Podman" }),
+  );
+  const waiting = await screen.findByRole("region", {
+    name: "Your Podman machine is bigger now",
+  });
+  expect(waiting.textContent).toContain("it can't download yet");
+  // The machine is already bigger: no steps to do it by hand.
+  expect(within(waiting).queryAllByRole("listitem")).toHaveLength(0);
+  // Setup is not run again until the person says so.
+  expect(commands().filter((c) => c === "set_up_local_eval")).toHaveLength(1);
+  await userEvent.click(within(waiting).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
 });
 
 /**
