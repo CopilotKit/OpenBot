@@ -454,8 +454,15 @@ test("runs no SPIRE", () => {
  */
 test("runs the LangGraph harness as the managed Bot, and neither retired Bot", () => {
   const services = composeServices();
-  expect(Object.keys(services)).not.toContain("agent-bot");
-  expect(Object.keys(services)).not.toContain("agent-langgraph");
+  // Both names are still in the file for one release, behind a profile nothing turns on, so an app
+  // from the release before can read it (tests/older-apps.test.ts). Neither is run: with every
+  // profile anything asks for, Compose brings up neither, and neither is built from this tree.
+  const run = Object.keys(runComposeConfig({}).services);
+  for (const retired of ["agent-bot", "agent-langgraph"]) {
+    expect(run).not.toContain(retired);
+    expect(services[retired]?.profiles).toEqual(["for-older-apps"]);
+    expect(services[retired]?.build).toBeUndefined();
+  }
   const address = new URL(
     runComposeConfig({
       MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",

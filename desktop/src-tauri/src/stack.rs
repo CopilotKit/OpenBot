@@ -983,6 +983,44 @@ fn compose_service_names(text: &str) -> Vec<String> {
     names
 }
 
+/// The Compose profile of the services `docker-compose.yml` keeps for one release and starts
+/// never: `agent-bot` and `agent-langgraph`, defined only so the app from the release before can
+/// merge its own port overlay onto the file. This app publishes no port for them.
+const OLDER_APPS_PROFILE: &str = "for-older-apps";
+
+/// The services a Compose file puts behind `profile`, read as text like [`compose_service_names`]:
+/// a `profiles:` line directly under the service, naming the profile.
+fn compose_services_behind(text: &str, profile: &str) -> Vec<String> {
+    let names = compose_service_names(text);
+    let mut behind = Vec::new();
+    let mut service: Option<&str> = None;
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("  ") else {
+            if !line.trim().is_empty() {
+                service = None;
+            }
+            continue;
+        };
+        if !rest.starts_with(' ') {
+            let key = rest.split('#').next().unwrap_or(rest).trim_end();
+            service = key
+                .strip_suffix(':')
+                .map(|name| name.trim_matches(['"', '\'']))
+                .filter(|name| names.iter().any(|known| known == name));
+            continue;
+        }
+        let named = rest.strip_prefix("  profiles:").is_some_and(|value| {
+            value
+                .split(['[', ']', ',', '"', '\'', ' '])
+                .any(|p| p == profile)
+        });
+        if let (true, Some(name)) = (named, service) {
+            behind.push(name.to_owned());
+        }
+    }
+    behind
+}
+
 /// The Mac Podman port overlay for this installation: [`MACOS_PODMAN_PORTS`] with only the services
 /// its own Compose files define, or nothing when they define none of them.
 ///
@@ -991,12 +1029,23 @@ fn compose_service_names(text: &str) -> Vec<String> {
 /// specified"), and that refusal fails every command given the overlay. An installation being
 /// updated still has the previous release's `docker-compose.yml` while this app backs its database
 /// up, and again if the update is rolled back, so the overlay follows the file that is there.
+///
+/// A service the file keeps only for an older app ([`OLDER_APPS_PROFILE`]) gets no ports: it is
+/// never started, and the two names are real services in an earlier release's file.
 fn macos_podman_ports(root: &Path, files: &[String]) -> Option<String> {
-    let defined: std::collections::HashSet<String> = files
+    let texts: Vec<String> = files
         .iter()
         .filter_map(|file| std::fs::read_to_string(root.join(file)).ok())
-        .flat_map(|text| compose_service_names(&text))
         .collect();
+    let mut defined: std::collections::HashSet<String> = texts
+        .iter()
+        .flat_map(|text| compose_service_names(text))
+        .collect();
+    for text in &texts {
+        for kept in compose_services_behind(text, OLDER_APPS_PROFILE) {
+            defined.remove(&kept);
+        }
+    }
     let (header, services) = MACOS_PODMAN_PORTS.split_once("services:\n")?;
     // A block is a service's own line and what is indented under it; a comment line above a
     // service belongs to the block it introduces.
@@ -9164,6 +9213,49 @@ fn main() {
         // Nothing to override is no overlay at all, not an empty `services:`.
         std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
         assert_eq!(macos_podman_ports(&root, &files), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// This release's Compose file defines `agent-bot` and `agent-langgraph` for one release, so
+    /// the 1.0.2 and 1.0.3 apps can merge their own port overlay onto it (each names both; the
+    /// fixtures are `macos-podman-ports.yml` at those tags). This app starts neither and publishes
+    /// no port for either: not in the services it brings up, nor in either overlay it writes.
+    #[test]
+    fn this_app_names_neither_service_kept_for_an_older_app() {
+        let kept = ["agent-bot", "agent-langgraph"];
+        for older in [
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.2.yml"),
+            include_str!("../test-fixtures/older-apps/macos-podman-ports-v1.0.3.yml"),
+        ] {
+            for service in kept {
+                assert!(overlay_services(older).contains(&service.to_owned()));
+            }
+        }
+        let current = include_str!("../../../docker-compose.yml");
+        assert_eq!(compose_services_behind(current, OLDER_APPS_PROFILE), kept);
+        // In 1.0.2's file both are services it runs, and they keep their ports there.
+        assert!(compose_services_behind(RELEASED_COMPOSE_1_0_2, OLDER_APPS_PROFILE).is_empty());
+        assert!(compose_services_behind(current, "openbot").contains(&"server".to_owned()));
+
+        let root = temp_root("compose-kept-for-older-apps");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+        std::fs::write(root.join(".env"), "PICKED_HARNESS_HOST_PORT=4302\n").unwrap();
+        let ports = macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap();
+        let harness = harness_port_overlay(&root, true).unwrap().unwrap();
+        for service in kept {
+            assert!(!SERVICES.contains(&service), "{service} is started");
+            assert!(
+                !selected_services(true).contains(&service),
+                "{service} is started"
+            );
+            for overlay in [&ports, &harness] {
+                assert!(
+                    !overlay_services(overlay).contains(&service.to_owned()),
+                    "{service} is given ports: {overlay}"
+                );
+            }
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

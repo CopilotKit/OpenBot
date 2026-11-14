@@ -444,6 +444,12 @@ jobs:
           # manifest step died on `bun: command not found` after the image had already been pushed,
           # which is the one point in a release where a failure leaves a published image with
           # nothing pointing at it.
+          #
+          # `agent-bot` and `agent-langgraph` are the server image under two more names, kept for
+          # one release: the 1.0.2 and 1.0.3 apps refuse a manifest that names neither, so they
+          # could not start an installation a newer app had updated. They are names only. Nothing
+          # is built, pushed or copied for them, and no app pulls or runs an image under them.
+          # Drop both in the release after (docs/releasing.md).
           jq -n \
             --arg version "$VERSION" \
             --arg commit "$COMMIT" \
@@ -451,8 +457,16 @@ jobs:
             '{
               version: $version,
               commit: $commit,
-              images: $components,
+              images: ($components + {
+                "agent-bot": $components.server,
+                "agent-langgraph": $components.server,
+              }),
             }' > container-images.json
+          # Two names for an image that is not there would be a manifest no app can read.
+          if ! jq -e '.images.server.reference' container-images.json > /dev/null; then
+            echo "::error::The manifest names no server image."
+            exit 1
+          fi
           cat container-images.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

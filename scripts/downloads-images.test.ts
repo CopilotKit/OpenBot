@@ -294,6 +294,14 @@ test("a release's images are copied under the registry's paths, byte for byte an
       supervisor: {
         reference: `ghcr.io/copilotkit/openbot-supervisor@${supervisor.digest}`,
       },
+      // The server image under two more names, as a release pins it for one release
+      // (tests/older-apps.test.ts). One image, copied once: the count below is still seven.
+      "agent-bot": {
+        reference: `ghcr.io/copilotkit/openbot-server@${server.digest}`,
+      },
+      "agent-langgraph": {
+        reference: `ghcr.io/copilotkit/openbot-server@${server.digest}`,
+      },
     },
   };
   fake.release("v0.3.4", {

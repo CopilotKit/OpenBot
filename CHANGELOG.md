@@ -34,6 +34,11 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **OpenBot Desktop 1.0.2 and 1.0.3 can start an installation a newer version updated.** Put back
+  over one, they stopped with "container-images.json for … names no agent-bot image". For one
+  release, `container-images.json` names `agent-bot` and `agent-langgraph` again, both as the
+  server image, and `docker-compose.yml` defines two services of those names that nothing starts.
+  Nothing more is downloaded or run. Both are dropped in the release after.
 - **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
   menu, it could seem to do nothing for a few seconds and then close the app, after saving the
   file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
