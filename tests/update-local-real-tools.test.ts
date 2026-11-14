@@ -445,7 +445,7 @@ describe.skipIf(!docker)("image migration with real Docker Compose", () => {
     "executes the image without building and propagates migration exit %s",
     async (exitCode) => {
       const project = `fix979-migrate-${id}-${exitCode}`;
-      // A release whose Compose file uses a `migrate` service: 1.0.2's own file. The real file
+      // A release whose Compose file uses a `migrate` service: 1.0.2's own file, which is 1.0.3's too. The real file
       // says its server applies its own migrations, and is never asked to run one.
       const f = installation(
         `COMPOSE_PROJECT_NAME=${project}\nCOMPOSE_PROFILES=openbot\n`,

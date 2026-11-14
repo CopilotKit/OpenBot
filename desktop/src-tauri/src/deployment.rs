@@ -1030,9 +1030,10 @@ mod tests {
 
     /// How the OpenBot Desktop 1.0.2 app decides that an installed release is one it cannot run:
     /// `predates_containers` and its `compose_services` reader, word for word from
-    /// `desktop/src-tauri/src/deployment.rs` at the tag `v1.0.2`. Such a release it downloads again
+    /// `desktop/src-tauri/src/deployment.rs` at the tag `v1.0.2`. The rule is the same at `v1.0.3`:
+    /// that file does not differ between the two tags. Such a release it downloads again
     /// and then refuses with "This OpenBot app needs a newer OpenBot release than the latest one."
-    mod as_the_1_0_2_app_reads_it {
+    mod as_the_1_0_2_and_1_0_3_apps_read_it {
         pub fn predates_containers(text: &str) -> bool {
             let services = compose_services(text);
             !(services.contains(&"server") && services.contains(&"worker"))
@@ -1064,13 +1065,24 @@ mod tests {
         }
     }
 
-    /// A 1.0.2 app put back over an updated installation, or a 1.0.2 installer on a new computer,
-    /// is handed this release's Compose file. It reads it as a release it can run, because the file
+    /// A 1.0.2 or 1.0.3 app put back over an updated installation, or one of their installers on a
+    /// new computer, is handed this release's Compose file. It reads it as a release it can run, because the file
     /// still defines `worker`; without that service it would not.
     #[test]
-    fn the_1_0_2_app_reads_this_releases_compose_file_as_current() {
+    fn the_1_0_2_and_1_0_3_apps_read_this_releases_compose_file_as_current() {
         let current = include_str!("../../../docker-compose.yml");
-        assert!(!as_the_1_0_2_app_reads_it::predates_containers(current));
+        assert!(!as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
+            current
+        ));
+        // As it reads its own release's file, and 1.0.3's.
+        for released in [
+            include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml"),
+            include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml"),
+        ] {
+            assert!(!as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
+                released
+            ));
+        }
 
         // The same file with its `worker` service taken out, as a release that stops defining it
         // would have it.
@@ -1090,7 +1102,7 @@ mod tests {
         assert!(
             without_worker.contains("\n  server:\n") && !without_worker.contains("\n  worker:\n")
         );
-        assert!(as_the_1_0_2_app_reads_it::predates_containers(
+        assert!(as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
             &without_worker
         ));
     }
@@ -1108,6 +1120,10 @@ mod tests {
             (
                 "1.0.2",
                 include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml"),
+            ),
+            (
+                "1.0.3",
+                include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml"),
             ),
         ] {
             std::fs::write(root.join("docker-compose.yml"), text).unwrap();

@@ -8933,7 +8933,11 @@ fn main() {
     fn the_personal_edition_raises_one_computer_and_no_bundled_bot() {
         let root = temp_root("personal-edition-services");
         std::fs::create_dir_all(&root).unwrap();
-        for compose in [THIS_RELEASES_COMPOSE, RELEASED_COMPOSE_1_0_2] {
+        for compose in [
+            THIS_RELEASES_COMPOSE,
+            RELEASED_COMPOSE_1_0_2,
+            RELEASED_COMPOSE_1_0_3,
+        ] {
             std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
             for service in ["supervisor", "agent-bot", "agent-langgraph"] {
                 assert!(!SERVICES.contains(&service), "{service} is started");
@@ -9421,80 +9425,94 @@ fn main() {
     const RELEASED_COMPOSE_1_0_2: &str =
         include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml");
 
+    /// And the one 1.0.3 installed, the latest release that runs `worker` and `migrate`. The two
+    /// files are the same today; each is the release's own, so the tests below hold for both.
+    const RELEASED_COMPOSE_1_0_3: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml");
+
+    /// Every release an installation may be on when this app updates it or puts it back, by name.
+    const RELEASED_COMPOSES: [(&str, &str); 2] = [
+        ("1.0.2", RELEASED_COMPOSE_1_0_2),
+        ("1.0.3", RELEASED_COMPOSE_1_0_3),
+    ];
+
     fn overlay_services(overlay: &str) -> Vec<String> {
         compose_service_names(overlay)
     }
 
-    /// Updating 1.0.2 on a Mac with Podman failed, and the fall-back start failed too: the overlay
+    /// Updating 1.0.2 on a Mac with Podman failed, and the fall-back start failed too (1.0.3's file
+    /// is read the same way): the overlay
     /// named a service the installed Compose file did not define, and Compose refused every command
     /// with "service ... has neither an image nor a build context specified". The overlay names
     /// only what the installation's own file defines, whichever release wrote that file.
     #[test]
     fn the_mac_podman_overlay_names_only_services_the_installation_uses() {
-        let root = temp_root("compose-ports-installed");
-        std::fs::create_dir_all(&root).unwrap();
-        let files = ["docker-compose.yml".to_owned()];
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("compose-ports-installed");
+            std::fs::create_dir_all(&root).unwrap();
+            let files = ["docker-compose.yml".to_owned()];
 
-        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
-        let released = macos_podman_ports(&root, &files).unwrap();
-        let defined = compose_service_names(RELEASED_COMPOSE_1_0_2);
-        for service in overlay_services(&released) {
-            assert!(defined.contains(&service), "{service} is not in 1.0.2");
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            let released = macos_podman_ports(&root, &files).unwrap();
+            let defined = compose_service_names(compose);
+            for service in overlay_services(&released) {
+                assert!(defined.contains(&service), "{service} is not in {release}");
+            }
+            assert_eq!(
+                overlay_services(&released),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-bot",
+                    "agent-langgraph",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+            assert!(released.contains("${BOT_PORT:-4200}:4200"), "{released}");
+
+            // And this release's own file, once the update has put it in place.
+            let current = include_str!("../../../docker-compose.yml");
+            std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+            let updated = macos_podman_ports(&root, &files).unwrap();
+            assert_eq!(
+                overlay_services(&updated),
+                [
+                    "postgres",
+                    "supervisor",
+                    "agent-computer",
+                    "agent-langgraph-agui",
+                    "agent-harness",
+                    "server"
+                ]
+            );
+
+            // A service a person's own override file defines counts as defined.
+            std::fs::write(
+                root.join("docker-compose.yml"),
+                "services:\n  postgres:\n    image: x\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("docker-compose.override.yml"),
+                "services:\n  server: # theirs\n    image: y\n",
+            )
+            .unwrap();
+            let both = [
+                "docker-compose.yml".to_owned(),
+                "docker-compose.override.yml".to_owned(),
+            ];
+            assert_eq!(
+                overlay_services(&macos_podman_ports(&root, &both).unwrap()),
+                ["postgres", "server"]
+            );
+
+            // Nothing to override is no overlay at all, not an empty `services:`.
+            std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+            assert_eq!(macos_podman_ports(&root, &files), None);
+            std::fs::remove_dir_all(root).unwrap();
         }
-        assert_eq!(
-            overlay_services(&released),
-            [
-                "postgres",
-                "supervisor",
-                "agent-computer",
-                "agent-bot",
-                "agent-langgraph",
-                "agent-harness",
-                "server"
-            ]
-        );
-        assert!(released.contains("${BOT_PORT:-4200}:4200"), "{released}");
-
-        // And this release's own file, once the update has put it in place.
-        let current = include_str!("../../../docker-compose.yml");
-        std::fs::write(root.join("docker-compose.yml"), current).unwrap();
-        let updated = macos_podman_ports(&root, &files).unwrap();
-        assert_eq!(
-            overlay_services(&updated),
-            [
-                "postgres",
-                "supervisor",
-                "agent-computer",
-                "agent-langgraph-agui",
-                "agent-harness",
-                "server"
-            ]
-        );
-
-        // A service a person's own override file defines counts as defined.
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  postgres:\n    image: x\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("docker-compose.override.yml"),
-            "services:\n  server: # theirs\n    image: y\n",
-        )
-        .unwrap();
-        let both = [
-            "docker-compose.yml".to_owned(),
-            "docker-compose.override.yml".to_owned(),
-        ];
-        assert_eq!(
-            overlay_services(&macos_podman_ports(&root, &both).unwrap()),
-            ["postgres", "server"]
-        );
-
-        // Nothing to override is no overlay at all, not an empty `services:`.
-        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
-        assert_eq!(macos_podman_ports(&root, &files), None);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// This release's Compose file defines `agent-bot` and `agent-langgraph` for one release, so
@@ -9917,11 +9935,16 @@ fn main() {
         // not stay up. Where a release's file defines it, `server` depends on it, so `up` runs it
         // to completion first.
         assert!(!SERVICES.contains(&MIGRATE));
-        let root = temp_root("migrate-not-raised");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
-        assert!(!selected_services(&root, true).contains(&MIGRATE));
-        std::fs::remove_dir_all(root).unwrap();
+        for (release, compose) in RELEASED_COMPOSES {
+            let root = temp_root("migrate-not-raised");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                !selected_services(&root, true).contains(&MIGRATE),
+                "{release}"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     /// This release's own Compose file, which an installation has once it is on this release.
@@ -9944,8 +9967,10 @@ fn main() {
             assert!(defined.iter().any(|name| name == service), "{service}");
         }
 
-        // 1.0.2's file has no such line, and is read as using both.
-        assert!(!server_does_the_scheduled_work(RELEASED_COMPOSE_1_0_2));
+        // 1.0.2's file and 1.0.3's have no such line, and are read as using both.
+        for (release, compose) in RELEASED_COMPOSES {
+            assert!(!server_does_the_scheduled_work(compose), "{release}");
+        }
         // Only the line itself counts: not a comment about it, a nested key, or another value.
         for other in [
             "# x-openbot-scheduled-work: server\nservices: {}\n",
@@ -9962,8 +9987,13 @@ fn main() {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
         assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
-        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
-        assert!(installation_uses(&root, WORKER) && installation_uses(&root, MIGRATE));
+        for (release, compose) in RELEASED_COMPOSES {
+            std::fs::write(root.join("docker-compose.yml"), compose).unwrap();
+            assert!(
+                installation_uses(&root, WORKER) && installation_uses(&root, MIGRATE),
+                "{release}"
+            );
+        }
         // A later release's file, with neither service and no line, uses neither.
         std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         assert!(!installation_uses(&root, WORKER) && !installation_uses(&root, MIGRATE));
@@ -10057,7 +10087,7 @@ fn main() {
         assert!(!log.contains("\trm "), "{log}");
     }
 
-    /// An installation still has release 1.0.2's Compose file while a newer app updates it, and
+    /// An installation still has release 1.0.2's or 1.0.3's Compose file while a newer app updates it, and
     /// again after an update that rolled back. That file defines `migrate` and `worker`, and the
     /// installation is run as it requires: the worker is raised, restarted and stopped with the
     /// server, `migrate` runs as the dependency `up` completes before `server`, both images are
@@ -10071,24 +10101,26 @@ fn main() {
         }
         let path = PathFixture::with_fake_engine("installed-services");
         let [docker, _] = computer_stop_addresses(&path);
-        let containers = "migrate-1\topenbot-desktop\tmigrate\nworker-1\topenbot-desktop\tworker\n";
-        let (root, record) = installed_services_root(
-            &path,
-            "previous-release",
-            RELEASED_COMPOSE_1_0_2,
-            containers,
-        );
-        // `server` waits on `migrate` in that file, which is how `up` runs it.
-        assert!(RELEASED_COMPOSE_1_0_2.contains(
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers =
+                "migrate-1\topenbot-desktop\tmigrate\nworker-1\topenbot-desktop\tworker\n";
+            let (root, record) = installed_services_root(
+                &path,
+                &format!("previous-release-{release}"),
+                compose,
+                containers,
+            );
+            // `server` waits on `migrate` in that file, which is how `up` runs it.
+            assert!(compose.contains(
             "    depends_on:\n      migrate:\n        condition: service_completed_successfully"
         ));
-        assert_eq!(
-            selected_services(&root, false),
-            ["postgres", "agent-computer", "server", "worker"]
-        );
+            assert_eq!(
+                selected_services(&root, false),
+                ["postgres", "agent-computer", "server", "worker"]
+            );
 
-        let log = every_command_for(&docker, &root, &record);
-        assert_eq!(
+            let log = every_command_for(&docker, &root, &record);
+            assert_eq!(
             commands_ending(&log, "postgres agent-computer server worker agent-harness migrate"),
             [
                 "compose --profile harness config --images postgres agent-computer server worker agent-harness migrate",
@@ -10096,30 +10128,31 @@ fn main() {
             ],
             "{log}"
         );
-        assert_eq!(
+            assert_eq!(
             commands_ending(&log, "postgres agent-computer server worker agent-harness"),
             ["compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness"],
             "{log}"
         );
-        assert_eq!(
-            commands_ending(&log, "restart server worker"),
-            ["compose --profile openbot restart server worker"],
-            "{log}"
-        );
-        assert!(
-            log.contains(
-                "\tcompose -f docker-compose.yml --profile harness --profile openbot down\n"
-            ),
-            "{log}"
-        );
-        // Its `migrate` and `worker` containers are Compose's own under this file: never looked
-        // for, never removed.
-        assert!(!log.contains("\tps --all --quiet "), "{log}");
-        assert!(!log.contains("\trm "), "{log}");
-        assert_eq!(
-            std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
-            containers
-        );
+            assert_eq!(
+                commands_ending(&log, "restart server worker"),
+                ["compose --profile openbot restart server worker"],
+                "{log}"
+            );
+            assert!(
+                log.contains(
+                    "\tcompose -f docker-compose.yml --profile harness --profile openbot down\n"
+                ),
+                "{log}"
+            );
+            // Its `migrate` and `worker` containers are Compose's own under this file: never looked
+            // for, never removed.
+            assert!(!log.contains("\tps --all --quiet "), "{log}");
+            assert!(!log.contains("\trm "), "{log}");
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                containers
+            );
+        }
     }
 
     /// The update's own steps (`upgrade::Steps`) through the functions Start and Stop use, on the
@@ -10161,10 +10194,16 @@ fn main() {
         }
     }
 
-    /// An installation laid out as 1.0.2 and running, on an engine that keeps containers the way
-    /// Compose does: `up` under 1.0.2's file has made its `migrate` and `worker` beside the rest.
-    fn running_1_0_2(path: &PathFixture, docker: &Address, label: &str) -> (PathBuf, PathBuf) {
-        let (root, record) = installed_services_root(path, label, RELEASED_COMPOSE_1_0_2, "");
+    /// An installation laid out as an earlier release (`compose`, 1.0.2's file or 1.0.3's) and
+    /// running, on an engine that keeps containers the way Compose does: `up` under that file has
+    /// made its `migrate` and `worker` beside the rest.
+    fn running_earlier_release(
+        path: &PathFixture,
+        docker: &Address,
+        label: &str,
+        compose: &str,
+    ) -> (PathBuf, PathBuf) {
+        let (root, record) = installed_services_root(path, label, compose, "");
         std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
         up(docker, &root, false, &Secrets::new()).unwrap();
         assert_eq!(
@@ -10194,15 +10233,15 @@ fn main() {
             .collect()
     }
 
-    /// What must hold once an update from 1.0.2 has been undone: the installed Compose file is
-    /// 1.0.2's again, byte for byte; the previous version was started as that file requires, with
+    /// What must hold once an update from an earlier release (`compose`, 1.0.2's file or 1.0.3's)
+    /// has been undone: the installed Compose file is that release's again, byte for byte; the previous version was started as that file requires, with
     /// its `worker` named and its `migrate` raised by that `up`; its image list still asks for
     /// both; and nothing looked for, or removed, a `worker` or `migrate` container once that file
     /// was back, or at any point removed one.
-    fn assert_back_on_1_0_2(docker: &Address, root: &Path, record: &Path) {
+    fn assert_back_on_earlier_release(docker: &Address, root: &Path, record: &Path, compose: &str) {
         assert_eq!(
             std::fs::read(root.join("docker-compose.yml")).unwrap(),
-            RELEASED_COMPOSE_1_0_2.as_bytes()
+            compose.as_bytes()
         );
         assert!(!crate::upgrade::interrupted(root));
         let commands = engine_commands(record);
@@ -10215,7 +10254,7 @@ fn main() {
             "{listing}"
         );
         // The update's own Stop, under this release's file, is the last to look for left-overs;
-        // the previous version's Start, under 1.0.2's file, does not.
+        // the previous version's Start, under its own file, does not.
         let last_down = commands
             .iter()
             .rposition(|command| command.ends_with(" down"))
@@ -10235,7 +10274,7 @@ fn main() {
             fixture_services(root),
             ["postgres", "agent-computer", "server", "worker", "migrate"]
         );
-        // And what Install would ask for now is 1.0.2's list, `migrate` and `worker` included.
+        // And what Install would ask for now is that release's list, `migrate` and `worker` included.
         std::fs::remove_file(record).unwrap();
         installation_images(docker, root, false, &Secrets::new()).unwrap();
         assert_eq!(
@@ -10244,89 +10283,106 @@ fn main() {
         );
     }
 
-    /// An update from 1.0.2 whose new version does not start is undone: 1.0.2's Compose file goes
-    /// back and 1.0.2 is started again. The failure comes after this release's file, which uses
+    /// An update from 1.0.2 or 1.0.3 whose new version does not start is undone: that release's
+    /// Compose file goes back and it is started again. The failure comes after this release's file, which uses
     /// neither `migrate` nor `worker`, is in place.
     #[test]
-    fn an_update_from_1_0_2_that_does_not_start_goes_back_to_its_migrate_and_worker() {
+    fn an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker() {
         if crate::test_support::isolated_process(
-            "stack::tests::an_update_from_1_0_2_that_does_not_start_goes_back_to_its_migrate_and_worker",
+            "stack::tests::an_update_from_an_earlier_release_that_does_not_start_goes_back_to_its_migrate_and_worker",
         ) {
             return;
         }
         let path = PathFixture::with_fake_engine("installed-services");
         let [docker, _] = computer_stop_addresses(&path);
-        let (root, record) = running_1_0_2(&path, &docker, "update-fails");
-        std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-fails-{release}"),
+                compose,
+            );
+            std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
 
-        let mut steps = UpdateTo {
-            engine: &docker,
-            root: &root,
-            dies_starting: false,
-        };
-        let ran = crate::upgrade::run(&root, &mut steps);
-        assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
-
-        // The new version was tried under its own file: asked for no `migrate` or `worker`.
-        let commands = engine_commands(&record);
-        assert!(
-            commands
-                .contains(&"compose config --images postgres agent-computer server".to_string())
-                && commands.contains(
-                    &"compose up -d --no-build --pull never postgres agent-computer server"
-                        .to_string()
-                ),
-            "{commands:#?}"
-        );
-        assert_back_on_1_0_2(&docker, &root, &record);
-    }
-
-    /// The same, for an update the app stopped part way: the new version had started when the app
-    /// died, and the next Start puts 1.0.2 back first (`upgrade::recover`) and starts it.
-    #[test]
-    fn an_update_from_1_0_2_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker() {
-        if crate::test_support::isolated_process(
-            "stack::tests::an_update_from_1_0_2_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker",
-        ) {
-            return;
-        }
-        let path = PathFixture::with_fake_engine("installed-services");
-        let [docker, _] = computer_stop_addresses(&path);
-        let (root, record) = running_1_0_2(&path, &docker, "update-interrupted");
-
-        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut steps = UpdateTo {
                 engine: &docker,
                 root: &root,
-                dies_starting: true,
+                dies_starting: false,
             };
-            crate::upgrade::run(&root, &mut steps)
-        }));
-        assert!(died.is_err(), "the app was to stop part way");
-        // Left as the app left it: this release's file in place and running, 1.0.2's set aside.
-        assert!(crate::upgrade::interrupted(&root));
-        assert_eq!(
-            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
-            THIS_RELEASES_COMPOSE
-        );
-        assert_eq!(
-            fixture_services(&root),
-            ["postgres", "agent-computer", "server"]
-        );
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
 
-        // The next Start.
-        let mut steps = UpdateTo {
-            engine: &docker,
-            root: &root,
-            dies_starting: false,
-        };
-        assert!(crate::upgrade::recover(&root, &mut steps).unwrap());
-        crate::upgrade::Steps::start(&mut steps).unwrap();
-        assert_back_on_1_0_2(&docker, &root, &record);
+            // The new version was tried under its own file: asked for no `migrate` or `worker`.
+            let commands = engine_commands(&record);
+            assert!(
+                commands.contains(
+                    &"compose config --images postgres agent-computer server".to_string()
+                ) && commands.contains(
+                    &"compose up -d --no-build --pull never postgres agent-computer server"
+                        .to_string()
+                ),
+                "{commands:#?}"
+            );
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
     }
 
-    /// The update from 1.0.2: once this release's Compose file is in place, the `worker` and
-    /// `migrate` containers 1.0.2 made belong to no service, and Compose leaves such a container
+    /// The same, for an update the app stopped part way: the new version had started when the app
+    /// died, and the next Start puts the earlier release back first (`upgrade::recover`) and
+    /// starts it.
+    #[test]
+    fn an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker(
+    ) {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_from_an_earlier_release_the_app_stopped_part_way_goes_back_to_its_migrate_and_worker",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        for (release, compose) in RELEASED_COMPOSES {
+            let (root, record) = running_earlier_release(
+                &path,
+                &docker,
+                &format!("update-interrupted-{release}"),
+                compose,
+            );
+
+            let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut steps = UpdateTo {
+                    engine: &docker,
+                    root: &root,
+                    dies_starting: true,
+                };
+                crate::upgrade::run(&root, &mut steps)
+            }));
+            assert!(died.is_err(), "the app was to stop part way");
+            // Left as the app left it: this release's file in place and running, the earlier one's
+            // set aside.
+            assert!(crate::upgrade::interrupted(&root));
+            assert_eq!(
+                std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+                THIS_RELEASES_COMPOSE
+            );
+            assert_eq!(
+                fixture_services(&root),
+                ["postgres", "agent-computer", "server"]
+            );
+
+            // The next Start.
+            let mut steps = UpdateTo {
+                engine: &docker,
+                root: &root,
+                dies_starting: false,
+            };
+            assert!(crate::upgrade::recover(&root, &mut steps).unwrap());
+            crate::upgrade::Steps::start(&mut steps).unwrap();
+            assert_back_on_earlier_release(&docker, &root, &record, compose);
+        }
+    }
+
+    /// The update from 1.0.2 or 1.0.3: once this release's Compose file is in place, the `worker`
+    /// and `migrate` containers that release made belong to no service, and Compose leaves such a container
     /// running. Start removes them before it raises anything, and only them: found by this
     /// installation's project and those two services, removed without touching a volume. A
     /// `worker` of another Compose project and this installation's other containers stay.
@@ -10339,31 +10395,33 @@ fn main() {
         }
         let path = PathFixture::with_fake_engine("installed-services");
         let [docker, _] = computer_stop_addresses(&path);
-        let containers = "migrate-1\topenbot-desktop\tmigrate\n\
+        for (release, compose) in RELEASED_COMPOSES {
+            let containers = "migrate-1\topenbot-desktop\tmigrate\n\
                           worker-1\topenbot-desktop\tworker\n\
                           server-1\topenbot-desktop\tserver\n\
                           postgres-1\topenbot-desktop\tpostgres\n\
                           elsewhere-worker-1\tanother-project\tworker\n";
-        // 1.0.2 is installed and running, and the update lays this release's file over it.
-        let (root, record) =
-            installed_services_root(&path, "updated", RELEASED_COMPOSE_1_0_2, containers);
-        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+            // The earlier release is installed and running, and the update lays this release's file
+            // over it.
+            let (root, record) =
+                installed_services_root(&path, &format!("updated-{release}"), compose, containers);
+            std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
 
-        let services = up(&docker, &root, false, &Secrets::new()).unwrap();
-        assert_eq!(services, ["postgres", "agent-computer", "server"]);
-        assert_eq!(
-            std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
-            "server-1\topenbot-desktop\tserver\n\
+            let services = up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(services, ["postgres", "agent-computer", "server"]);
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-containers")).unwrap(),
+                "server-1\topenbot-desktop\tserver\n\
              postgres-1\topenbot-desktop\tpostgres\n\
              elsewhere-worker-1\tanother-project\tworker\n"
-        );
-        let log = std::fs::read_to_string(&record).unwrap();
-        let commands: Vec<&str> = log
-            .lines()
-            .filter_map(|line| line.split_once('\t'))
-            .map(|(_, command)| command)
-            .collect();
-        assert_eq!(
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            let commands: Vec<&str> = log
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(_, command)| command)
+                .collect();
+            assert_eq!(
             commands,
             [
                 "ps --all --quiet --filter label=com.docker.compose.project=openbot-desktop --filter label=com.docker.compose.service=migrate",
@@ -10374,16 +10432,17 @@ fn main() {
             ],
             "{log}"
         );
-        assert!(
-            !log.contains("--volumes") && !log.contains("--remove-orphans"),
-            "{log}"
-        );
+            assert!(
+                !log.contains("--volumes") && !log.contains("--remove-orphans"),
+                "{log}"
+            );
 
-        // Stop finds none left, and the next Start removes nothing.
-        std::fs::remove_file(&record).unwrap();
-        down(&docker, &root).unwrap();
-        up(&docker, &root, false, &Secrets::new()).unwrap();
-        assert!(!std::fs::read_to_string(&record).unwrap().contains("\trm "));
+            // Stop finds none left, and the next Start removes nothing.
+            std::fs::remove_file(&record).unwrap();
+            down(&docker, &root).unwrap();
+            up(&docker, &root, false, &Secrets::new()).unwrap();
+            assert!(!std::fs::read_to_string(&record).unwrap().contains("\trm "));
+        }
     }
 
     #[test]
