@@ -27,6 +27,7 @@ export * from "./reactions/reactions.zod";
 export * from "./reviewer-guidance/reviewer-guidance.zod";
 export * from "./routines/routines.zod";
 export * from "./recorder/recorder.zod";
+export * from "./routines/routines.zod";
 export * from "./saved-logins/saved-logins.zod";
 export * from "./sessions/sessions.zod";
 export * from "./shared-use/shared-use.zod";
