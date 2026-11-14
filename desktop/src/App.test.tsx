@@ -2431,7 +2431,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   const alert = await view.findByRole("alert", { name: "Setup" });
   expect(alert.textContent).toContain("Setup stopped");
   expect(alert.textContent).toContain(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
   );
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Finishing setup" });
@@ -2439,7 +2439,7 @@ test("a blocked setup stops at its row in plain words and Retry resumes there", 
   expect(setups).toBe(1);
   const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
   expect(row.textContent).toContain(
-    "The software OpenBot runs on isn't running. Retry to start it.",
+    "OpenBot can't reach the software it runs on. Retry to start it again.",
   );
   expectPlain(view);
   expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
@@ -2880,7 +2880,7 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   ]);
   expect(
     view.queryByText(
-      "The software OpenBot runs on isn't running. Retry to start it.",
+      "OpenBot can't reach the software it runs on. Retry to start it again.",
     ),
   ).toBeNull();
 });
@@ -4390,7 +4390,7 @@ test("the last quit's notices go once Start runs, and a Start that stops says on
   });
   await waitFor(() =>
     expect(row.textContent).toContain(
-      "The software OpenBot runs on isn't running. Retry to start it.",
+      "OpenBot can't reach the software it runs on. Retry to start it again.",
     ),
   );
   expect(view.queryByText(notice)).toBeNull();
