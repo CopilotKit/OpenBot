@@ -28,7 +28,13 @@ Chrome or Edge first: the helper opens an isolated browser window for the deploy
 sign-in, lets you choose an accessible project, and creates or reuses `openbot` before minting
 its runtime key. Local development may use a loopback HTTP origin. Existing key-only setups
 use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
-There is no managed license step. Then add `OPENAI_API_KEY`.
+There is no managed license step. Then add `OPENAI_API_KEY`, or for Anthropic both
+`ANTHROPIC_API_KEY` and `BOT_PROVIDER=anthropic`.
+
+`login` opens a browser on this machine. With no browser, such as over SSH, use
+`npx --yes copilotkit@latest login --device`, which signs in with a code from a browser on any
+device. `project select` asks in the terminal; with no terminal to ask in, name the project:
+`npx --yes copilotkit@latest project select --project <slug or id> --json`.
 
 The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
 `bun run setup:composio` runs that step alone, independently of Learning. A failure
@@ -117,6 +123,22 @@ migration step in `start.sh`, which only checks, once the server is up, that the
 `docker-compose.yml` still defines a `migrate` and a `worker` service for one release, for an
 OpenBot Desktop app from the release before to read, and nothing starts them; a container of
 either that an earlier start left is removed.
+
+## The API spec
+
+The app talks to the server through one API, described in [`api/`](../api/README.md): the REST
+operations in `api/openapi.yaml`, bundled from one file per area in `api/openapi/`, and the
+WebSocket channels in `api/asyncapi.yaml`. The app's client is generated from the REST spec into
+`app/src/lib/api/generated` and checked in. After changing a file under `api/openapi/`:
+
+```sh
+bun run api:lint
+bun run api:generate
+```
+
+and commit the area file, `api/openapi.yaml` and the generated client together. CI fails a pull
+request whose bundle or client is stale, whose spec fails the lint, or whose change breaks a client
+of the base branch.
 
 ## Quality checks
 

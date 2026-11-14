@@ -51,8 +51,7 @@ Desktop, after a change of AI provider, Start moves it to the new framework, ren
 rewrites the "Powered by" part of its subtitle, keeping any words around it. A connection the person
 set on the Setup page is left alone.
 
-The starter is seeded once, into a new installation only (`personalStarterSeed` in
-`server/src/tenant-package.ts`). An existing installation keeps the Bots it has: where the Personal
+The starter is seeded once, into a new installation only. An existing installation keeps the Bots it has: where the Personal
 Assistant and the picked Bot are two Bots, they stay two, and neither is rewritten from the package
 on Start. Only the picked Bot's connection still follows the installer.
 
@@ -72,7 +71,7 @@ in the computer's container is handed `http://127.0.0.1:<port>`, which in there 
 The desktop writes `COMPUTER_LOOPBACK_RELAYS` (`<port>=<host>:<port>`, comma-separated): the app's
 and the server's ports to the server's container, and a local Intelligence gateway's port to
 `host.docker.internal`. The computer listens on those ports at its own loopback and passes each
-connection on (`agent-computer/src/loopback-relay.ts`). Unset, it relays nothing.
+connection on. Unset, it relays nothing.
 
 An installation from an earlier OpenBot Desktop, which ran the team edition, becomes the personal
 edition on its next Start. Its Bots and conversations stay in the database. The team edition's
@@ -140,8 +139,7 @@ Only the desktop can open a folder. It hands the server a token minted on every 
 (`OPENBOT_DESKTOP_HOST_TOKEN`), and its folder worker answers the server with it. A personal edition
 started with `scripts/start.sh` has no such token, so the section says it needs OpenBot Desktop and
 offers no picker, and the server refuses a folder request at once (`409`) rather than waiting for a
-desktop that will never answer. See `server/src/host-access/` and
-`desktop/src-tauri/src/desktop_host_access.rs`.
+desktop that will never answer. See `desktop/src-tauri/src/desktop_host_access.rs`.
 
 ### Teach a Bot
 
@@ -155,7 +153,8 @@ For the same reason your own browser (**Teach a Bot**) may run on that computer 
 edition refuses it: the one computer is told the edition (`OPENBOT_EDITION`, beside
 `COMPUTER_PERSON_ID`), and the server and the computer both allow it only in the personal edition. Its
 profile sits beside your Bots' profiles, which already hold the sites you signed in to for them.
-Where `OPENBOT_BROWSER_URL` is set, as `scripts/start.sh` sets it, your browser runs there instead.
+Where `OPENBOT_BROWSER_URL` is set, which neither `scripts/start.sh` nor the desktop does, your
+browser runs there instead.
 
 ## What the app shows
 
@@ -178,7 +177,7 @@ account are the same decision when one person makes both:
   conversation, where you can allow each once, for the conversation, or always. Turn on **Ask before
   making changes** in Settings → Approvals to be asked about every change. See
   [Approvals](approvals.md). An app can't be taken from one Bot; turning it off takes it from all of
-  them. See `server/src/plugins/personal-defaults.ts`.
+  them.
 - A connected tile opens `/connections/<app>`: its tools, your account, and turning it off.
 - **Vault**, below the grid, opens Settings → Vault, where your saved website logins and API keys
   are.
@@ -191,8 +190,7 @@ account are the same decision when one person makes both:
 you sign in to, **Connect** turns the app on and opens its sign-in in a new tab, and the
 conversation carries on once it is connected. An app with nothing to sign in to, or whose sign-in
 isn't known until it is on, shows **Turn on**, and one that takes a key shows **Set up**, which
-opens its page under Connections. The Bot is told which button the card shows, so it names that one
-(`server/src/plugins/app-access-tool.ts`).
+opens its page under Connections. The Bot is told which button the card shows, so it names that one.
 
 **Bots** lists your Bots and, under **What your Bots learn**, a link to Skills. A Bot's own page
 shows what it is working on and what waits for you, with its Activity beside them, then its settings
@@ -250,7 +248,7 @@ The server answers `404` for the API behind the team-only screens: people, ident
 enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
 and check-in settings, and SCIM and SSO registration. Admin reads two of them to show your own
 Bots: which models they ran on (`GET /api/admin/enterprise/models/usage`) and how their check-ins
-went (`GET /api/admin/proactive`). See `server/src/edition-routes.ts`.
+went (`GET /api/admin/proactive`).
 
 ## Web search is on from the start
 
@@ -266,4 +264,4 @@ It is turned on once. Turn it off on its Connections page and it stays off: the 
 that it turned it on (`personal_default_apps` in `enterprise_settings`) and never does it again.
 Starting offline doesn't stop the server. Parallel is turned on without its tools, and the server
 asks for them again in the background, and on every start, until Parallel answers, so nobody has to
-press Refresh. See `ensurePersonalDefaultApps` in `server/src/plugins/personal-defaults.ts`.
+press Refresh.

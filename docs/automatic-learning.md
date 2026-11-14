@@ -4,7 +4,7 @@ Open **Admin → Automatic learning** to choose which Bots contribute completed 
 
 Out of the box, OpenBot assigns that container itself: when nothing is saved in Admin and no container is named in the environment, the server makes its Intelligence project's `openbot` container the default as soon as that container exists. See [Automatic assignment](#automatic-assignment).
 
-OpenBot Desktop runs a local Intelligence of its own and names no container in `.env`, so the server creates and assigns that Intelligence's `openbot` container itself (see [Automatic assignment](#automatic-assignment)). An installation an earlier Desktop set up against managed or self-hosted Intelligence is not reopened against it. The local Learning agent thinks with the person's own model: their OpenAI or Anthropic key, or, for a Claude or ChatGPT plan, the OpenBot server's Learning endpoint (`server/src/learning/model-endpoint.ts`), which answers each call on that plan and accepts only a secret Desktop mints once per installation. With any other model sign-in Learning has no model, and Settings → Learning says so. Learning never gets a model through CopilotKit.
+OpenBot Desktop runs a local Intelligence of its own and names no container in `.env`, so the server creates and assigns that Intelligence's `openbot` container itself (see [Automatic assignment](#automatic-assignment)). An installation an earlier Desktop set up against managed or self-hosted Intelligence is not reopened against it. The local Learning agent thinks with the person's own model: their OpenAI or Anthropic key, or, for a Claude or ChatGPT plan, the OpenBot server's Learning endpoint, which answers each call on that plan and accepts only a secret Desktop mints once per installation. With any other model sign-in Learning has no model, and Settings → Learning says so. Learning never gets a model through CopilotKit.
 
 For a fresh managed clone, copy `.env.example` to `.env`, then run from the OpenBot root:
 
@@ -49,10 +49,10 @@ A current Intelligence lets a project's runtime key create a container in its ow
 
 | Where | Credential | What happens |
 | --- | --- | --- |
-| `bun run start` / `scripts/start.sh` | Your CLI login (`npx --yes copilotkit@latest login`) | Every start runs `scripts/setup-learning.ts --non-interactive`. With no project selected in the checkout, it lists the projects your login can see and uses the runtime key's, from a scratch directory, so nothing in the checkout is selected or rewritten. With no login on the machine it does not download the CLI. |
+| `bash scripts/start.sh` | Your CLI login (`npx --yes copilotkit@latest login`) | Every start runs `scripts/setup-learning.ts --non-interactive`. With no project selected in the checkout, it lists the projects your login can see and uses the runtime key's, from a scratch directory, so nothing in the checkout is selected or rewritten. With no login on the machine it does not download the CLI. |
 | `bun scripts/setup-learning.ts` | CLI login (managed) or browser sign-in (self-hosted) | As above, interactively; self-hosted opens a browser. |
 | Server, at start and from Admin | The runtime key on a current Intelligence; otherwise `INTELLIGENCE_SERVICE_TOKEN` + `INTELLIGENCE_PROJECT_ID` (local evaluation installs), or a CLI login on the same machine | Creates it once at start if it is missing. **Admin → Automatic learning** shows **Create the openbot container** when one of these is present, to try again. |
-| Helm | `config.learning.setup.cliLoginSecret` or `serviceTokenSecret` + `projectId` | A Job per release revision runs `server/src/learning/ensure-container.ts` and exits; the server assigns the container on its next check. The CLI login is used by that Job only. |
+| Helm | `config.learning.setup.cliLoginSecret` or `serviceTokenSecret` + `projectId` | A Job per release revision runs the server image's `openbot learning-setup` command and exits; the server assigns the container on its next check. The CLI login is used by that Job only. |
 | Desktop app | The local Intelligence's runtime key | The server creates `openbot` at start, as on any current Intelligence (above). |
 
 With none of them, and a runtime key that cannot create it (Intelligence 0.15.1 and earlier), the `learning-auto-assign` log line and the Admin page name the exact steps for your Intelligence: for managed, sign in with the CLI and run the helper (or give the chart a CLI login); for self-hosted, run the helper and sign in, or set a service token on a local evaluation install. Creating a container with ID `openbot` in Intelligence by hand works everywhere.
@@ -92,7 +92,7 @@ The admin page reports evidence and published-skill counts, analysis status, and
 
 For managed Intelligence, keep the existing managed API and gateway configuration. Configure the container in its associated project. For an Enterprise self-hosted Intelligence deployment, use its API and gateway endpoints and the same project's key. Install the Intelligence release and migrations that support Automatic Learning, the Inspector Learning endpoint (`GET /api/inspector/learning`), and published skill delivery before assigning a container in OpenBot. Links come from that server's configured web-app origin, so self-hosted administration opens the correct UI; with no web-app origin there are no links, and review happens in OpenBot.
 
-OpenBot's database migrations add `learning_settings` and `learning_thread_bindings`, and for each person's own space `learning_person_spaces`, `learning_skill_sharing` and `learning_open_skills`; run the normal deployment migrations. The settings are read from the database across replicas, and thread assignment is atomic.
+OpenBot's database migrations add `learning_settings` and `learning_thread_bindings`, and for each person's own space `learning_person_spaces`, `learning_skill_sharing` and `learning_open_skills`; the server applies them as it starts. The settings are read from the database across replicas, and thread assignment is atomic.
 
 Operators may seed an initial default in the API server environment:
 

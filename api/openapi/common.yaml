@@ -320,8 +320,7 @@ components:
       type: oauth2
       description: >-
         Desktop, mobile and the CLI. OAuth 2.1 authorization code with PKCE
-        (RFC 7636, S256 only); the access token is sent as a bearer token. The
-        server does not accept it yet.
+        (RFC 7636, S256 only); the access token is sent as a bearer token.
       flows:
         authorizationCode:
           authorizationUrl: /api/auth/oauth2/authorize
@@ -395,7 +394,7 @@ components:
       bearerFormat: OpenBot API key
       description: >-
         Automation. An API key acts as the person who created it, inside one
-        organization. The server does not accept it yet.
+        organization.
     recorderConnection:
       type: http
       scheme: bearer
