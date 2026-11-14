@@ -3613,7 +3613,7 @@ paths:
                 $ref: '#/components/schemas/RoutineResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/RoutineExample'
+                  $ref: '#/components/examples/RoutineResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRoutine'
         '401':
@@ -3689,6 +3689,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutineSwitch'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineSwitchExample'
         '400':
           $ref: '#/components/responses/InvalidRoutine'
         '401':
@@ -3730,6 +3733,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutineSwitch'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineSwitchExample'
         '400':
           $ref: '#/components/responses/InvalidRoutine'
         '401':
@@ -3771,6 +3777,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutineRunAccepted'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineRunAcceptedExample'
         '400':
           $ref: '#/components/responses/InvalidRoutine'
         '401':
@@ -3813,6 +3822,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutineRunPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineRunPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -3912,7 +3924,7 @@ paths:
                 $ref: '#/components/schemas/CheckInResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/CheckInExample'
+                  $ref: '#/components/examples/CheckInResponseExample'
         '400':
           $ref: '#/components/responses/InvalidCheckIn'
         '401':
@@ -3966,7 +3978,7 @@ paths:
                 $ref: '#/components/schemas/CheckInResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/CheckInExample'
+                  $ref: '#/components/examples/CheckInResponseExample'
         '400':
           $ref: '#/components/responses/InvalidCheckIn'
         '401':
@@ -4038,6 +4050,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CheckInRunAnswer'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInRunAnswerExample'
         '400':
           $ref: '#/components/responses/InvalidCheckIn'
         '401':
@@ -4121,6 +4136,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StartedCheckInItem'
+              examples:
+                answer:
+                  $ref: '#/components/examples/StartedCheckInItemExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4162,6 +4180,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CheckInItemResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInItemResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4211,6 +4232,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CheckInUsage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/CheckInUsageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4306,7 +4330,7 @@ paths:
                 $ref: '#/components/schemas/GoalResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/GoalExample'
+                  $ref: '#/components/examples/GoalResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4360,7 +4384,7 @@ paths:
                 $ref: '#/components/schemas/GoalResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/GoalExample'
+                  $ref: '#/components/examples/GoalResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4434,7 +4458,7 @@ paths:
                 $ref: '#/components/schemas/GoalResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/GoalExample'
+                  $ref: '#/components/examples/GoalResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4478,7 +4502,7 @@ paths:
                 $ref: '#/components/schemas/GoalResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/GoalExample'
+                  $ref: '#/components/examples/GoalResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4522,7 +4546,7 @@ paths:
                 $ref: '#/components/schemas/GoalResponse'
               examples:
                 answer:
-                  $ref: '#/components/examples/GoalExample'
+                  $ref: '#/components/examples/GoalResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4564,6 +4588,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalRunAccepted'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalRunAcceptedExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4606,6 +4633,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalRunPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalRunPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4646,6 +4676,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerPage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4694,6 +4727,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerWithSecret'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerWithSecretExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4750,6 +4786,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4822,6 +4861,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4864,6 +4906,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerResponseExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4905,6 +4950,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerSecret'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerSecretExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4954,6 +5002,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GoalTriggerWithSecret'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GoalTriggerWithSecretExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -4995,6 +5046,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GithubEventSourcePage'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GithubEventSourcePageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -5041,6 +5095,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GithubEventSourceResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/GithubEventSourceResponseExample'
         '400':
           $ref: '#/components/responses/InvalidGoal'
         '401':
@@ -5117,6 +5174,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FollowUpCancelled'
+              examples:
+                answer:
+                  $ref: '#/components/examples/FollowUpCancelledExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -12229,7 +12289,7 @@ components:
             goalId: null
             createdAt: '2026-11-02T16:21:09.000Z'
         nextCursor: null
-    RoutineExample:
+    RoutineResponseExample:
       summary: A routine.
       value:
         routine:
@@ -12251,6 +12311,26 @@ components:
             at: '2026-11-13T14:00:41.000Z'
           goalId: null
           createdAt: '2026-11-02T16:21:09.000Z'
+    RoutineSwitchExample:
+      summary: A routine, paused.
+      value:
+        enabled: false
+    RoutineRunAcceptedExample:
+      summary: A run, accepted.
+      value:
+        accepted: true
+        runId: 0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f
+    RoutineRunPageExample:
+      summary: A routine's runs, on one page.
+      value:
+        runs:
+          - id: 0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f
+            status: succeeded
+            startedAt: '2026-11-13T14:00:00.000Z'
+            finishedAt: '2026-11-13T14:00:41.000Z'
+            error: null
+            source: schedule
+        nextCursor: null
     CheckInPageExample:
       summary: A person's check-ins, on one page.
       value:
@@ -12279,7 +12359,7 @@ components:
             updatedAt: '2026-11-14T09:00:38.000Z'
         allowed: true
         nextCursor: null
-    CheckInExample:
+    CheckInResponseExample:
       summary: A check-in.
       value:
         checkIn:
@@ -12305,6 +12385,10 @@ components:
             finishedAt: '2026-11-14T09:00:38.000Z'
           createdAt: '2026-11-10T12:00:00.000Z'
           updatedAt: '2026-11-14T09:00:38.000Z'
+    CheckInRunAnswerExample:
+      summary: A check-in, queued.
+      value:
+        queued: true
     CheckInItemPageExample:
       summary: What a person's Bots found, on one page.
       value:
@@ -12323,6 +12407,76 @@ components:
             resolvedAt: null
             createdAt: '2026-11-14T09:00:36.000Z'
         nextCursor: null
+    StartedCheckInItemExample:
+      summary: An item, started as a task.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: started
+          pingId: null
+          deliveredAt: null
+          resolvedAt: '2026-11-14T10:12:00.000Z'
+          createdAt: '2026-11-14T09:00:36.000Z'
+        task:
+          id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+          conversationId: 8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a
+    CheckInItemResponseExample:
+      summary: An item, hidden.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: dismissed
+          pingId: null
+          deliveredAt: null
+          resolvedAt: '2026-11-14T10:12:00.000Z'
+          createdAt: '2026-11-14T09:00:36.000Z'
+    CheckInUsageExample:
+      summary: A week of check-ins.
+      value:
+        days: 7
+        dailyRuns: 24
+        bots:
+          - botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            name: General Assistant
+            avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            peopleOn: 3
+            runs:
+              quiet: 14
+              raised: 4
+              failed: 1
+              skipped:
+                off_admin: 0
+                off_person: 0
+                paused: 0
+                capped: 2
+                unreachable: 0
+                no_sources: 0
+                busy: 0
+            items:
+              raised: 6
+              started: 3
+              hidden: 1
+              cleared: 1
+              open: 1
+            acceptance: 0.75
+            pinged: 5
+        pings:
+          sent: 4
+          itemsPerPing: 1.25
     GoalPageExample:
       summary: A person's goals, on one page.
       value:
@@ -12344,7 +12498,7 @@ components:
             updatedAt: '2026-11-12T10:15:00.000Z'
             completedAt: null
         nextCursor: null
-    GoalExample:
+    GoalResponseExample:
       summary: A goal.
       value:
         goal:
@@ -12364,3 +12518,102 @@ components:
           createdAt: '2026-11-12T10:15:00.000Z'
           updatedAt: '2026-11-12T10:15:00.000Z'
           completedAt: null
+    GoalRunAcceptedExample:
+      summary: A run, accepted.
+      value:
+        eventId: 3c2d1e0f-9a8b-4c7d-8e6f-5a4b3c2d1e0f
+        duplicate: false
+        runIds:
+          - 5e4d3c2b-1a0f-4e9d-8c7b-6a5f4e3d2c1b
+    GoalRunPageExample:
+      summary: A goal's runs, on one page.
+      value:
+        runs:
+          - id: 5e4d3c2b-1a0f-4e9d-8c7b-6a5f4e3d2c1b
+            status: succeeded
+            replyText: Added two lines to the draft release notes.
+            error: null
+            waiting: null
+            startedAt: '2026-11-13T16:02:00.000Z'
+            finishedAt: '2026-11-13T16:02:48.000Z'
+            createdAt: '2026-11-13T16:01:59.000Z'
+        nextCursor: null
+    GoalTriggerPageExample:
+      summary: A goal's triggers, on one page.
+      value:
+        triggers:
+          - id: 2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+            goalId: 7d2c9b1a-0e4f-4b6a-8c3d-5e6f7a8b9c0d
+            kind: webhook
+            config:
+              kind: webhook
+              filter:
+                eventTypes: []
+            hasSecret: true
+            enabled: true
+            path: /api/events/triggers/2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+            address: null
+            createdAt: '2026-11-12T10:20:00.000Z'
+            updatedAt: '2026-11-12T10:20:00.000Z'
+        nextCursor: null
+    GoalTriggerWithSecretExample:
+      summary: A trigger, with the secret OpenBot made for it.
+      value:
+        trigger:
+          id: 2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+          goalId: 7d2c9b1a-0e4f-4b6a-8c3d-5e6f7a8b9c0d
+          kind: webhook
+          config:
+            kind: webhook
+            filter:
+              eventTypes: []
+          hasSecret: true
+          enabled: true
+          path: /api/events/triggers/2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+          address: null
+          createdAt: '2026-11-12T10:20:00.000Z'
+          updatedAt: '2026-11-12T10:20:00.000Z'
+        secret: whsec_ZXhhbXBsZS1zZWNyZXQtZm9yLXRoZS1kb2Nz
+    GoalTriggerResponseExample:
+      summary: A trigger.
+      value:
+        trigger:
+          id: 2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+          goalId: 7d2c9b1a-0e4f-4b6a-8c3d-5e6f7a8b9c0d
+          kind: webhook
+          config:
+            kind: webhook
+            filter:
+              eventTypes: []
+          hasSecret: true
+          enabled: true
+          path: /api/events/triggers/2b7e1c90-4d5f-4a6b-9c8d-7e6f5a4b3c2d
+          address: null
+          createdAt: '2026-11-12T10:20:00.000Z'
+          updatedAt: '2026-11-12T10:20:00.000Z'
+    GoalTriggerSecretExample:
+      summary: A trigger's secret.
+      value:
+        secret: whsec_ZXhhbXBsZS1zZWNyZXQtZm9yLXRoZS1kb2Nz
+    GithubEventSourcePageExample:
+      summary: A person's GitHub event sources, on one page.
+      value:
+        githubEventSources:
+          - id: 6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f
+            source: github
+            repository: acme/storefront
+            createdAt: '2026-11-12T10:30:00.000Z'
+        nextCursor: null
+    GithubEventSourceResponseExample:
+      summary: A GitHub event source, as it was connected.
+      value:
+        githubEventSource:
+          id: 6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f
+          source: github
+          repository: acme/storefront
+          createdAt: '2026-11-12T10:30:00.000Z'
+          webhookPath: /api/events/github/6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f
+    FollowUpCancelledExample:
+      summary: A follow-up, cancelled.
+      value:
+        cancelled: true

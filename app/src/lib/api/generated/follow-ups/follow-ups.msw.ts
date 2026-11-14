@@ -6,9 +6,9 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type { FollowUpCancelled } from "../model";
 
-export const getCancelFollowUpResponseMock = (
-  overrideResponse: Partial<Extract<FollowUpCancelled, object>> = {},
-): FollowUpCancelled => ({ cancelled: true, ...overrideResponse });
+export const getCancelFollowUpResponseMock = (): FollowUpCancelled => ({
+  cancelled: true,
+});
 
 export const getCancelFollowUpMockHandler = (
   overrideResponse?:
