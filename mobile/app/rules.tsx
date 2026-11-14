@@ -10,10 +10,13 @@ import {
   View,
 } from "react-native";
 import {
+  APPROVAL_PREFERENCES_PATH,
+  APPROVAL_RULES_PATH,
   type ApprovalRule,
-  type ApprovalSettings,
   api,
+  approvalRulePath,
   BEHAVIOUR_LABELS,
+  loadApprovalSettings,
   type RuleBehaviour,
 } from "../src/api";
 import { authClient } from "../src/auth";
@@ -80,7 +83,7 @@ export default function RulesScreen() {
   const action = useAction();
   const [toolRef, setToolRef] = useState("");
   const [behaviour, setBehaviour] = useState<RuleBehaviour>("ask");
-  const load = useCallback(() => api<ApprovalSettings>("/api/approvals"), []);
+  const load = useCallback(() => loadApprovalSettings(), []);
   const settings = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const data = settings.data;
@@ -94,13 +97,16 @@ export default function RulesScreen() {
 
   const setPreference = (body: Record<string, boolean>) =>
     action.run("preferences", async () => {
-      await api("/api/approvals/preferences", { method: "PATCH", body });
+      await api(APPROVAL_PREFERENCES_PATH, {
+        method: "PATCH",
+        body,
+      });
       await settings.refresh();
     });
   /** A rule's behaviour is edited in place, so it keeps its id and its audit history. */
   const changeRule = (rule: ApprovalRule, next: RuleBehaviour) =>
     action.run(rule.id, async () => {
-      await api(`/api/approvals/rules/${encodeURIComponent(rule.id)}`, {
+      await api(approvalRulePath(rule.id), {
         method: "PATCH",
         body: { behaviour: next },
       });
@@ -199,10 +205,9 @@ export default function RulesScreen() {
                     style: "destructive",
                     onPress: () => {
                       void action.run(rule.id, async () => {
-                        await api(
-                          `/api/approvals/rules/${encodeURIComponent(rule.id)}`,
-                          { method: "DELETE" },
-                        );
+                        await api(approvalRulePath(rule.id), {
+                          method: "DELETE",
+                        });
                         await settings.refresh();
                       });
                     },
@@ -232,7 +237,7 @@ export default function RulesScreen() {
               disabled={Boolean(action.busy) || !toolRef.trim()}
               onPress={() => {
                 void action.run("add", async () => {
-                  await api("/api/approvals/rules", {
+                  await api(APPROVAL_RULES_PATH, {
                     method: "POST",
                     body: { botId, toolRef: toolRef.trim(), behaviour },
                   });

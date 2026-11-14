@@ -1,5 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { replaceBoundaries } from "@/lib/api/generated/boundaries/boundaries";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { client } from "@/lib/client";
 import { clearActivity } from "./activity";
@@ -115,11 +117,12 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
     mutationFn: (
       next: ActionPolicy & { authoring?: PolicyAuthoring },
     ): Promise<ActionPolicy> =>
-      client("/api/computers/policy", "policy", {
-        method: "PUT",
-        body: next,
-        fallback: "The boundary could not be saved.",
-      }),
+      replaceBoundaries(
+        ORGANIZATION_ID,
+        next,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "The boundary could not be saved." },
+      ),
     onSuccess: () => invalidateComputers(queryClient),
   });
 }

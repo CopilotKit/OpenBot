@@ -98,6 +98,56 @@ export async function api<T>(
   }
   return body as T;
 }
+/** The person asking, as the API addresses them. */
+const ME = `${ORGANIZATION}/people/me`;
+/** Where one of the person's approvals is decided. */
+export const approvalDecisionPath = (id: string) =>
+  `${ME}/approvals/${encodeURIComponent(id)}/decide`;
+/** Where one of the questions a Bot asked the person is answered. */
+export const questionResponsePath = (id: string) =>
+  `${ME}/questions/${encodeURIComponent(id)}/respond`;
+export const APPROVAL_PREFERENCES_PATH = `${ME}/approval-preferences`;
+export const APPROVAL_RULES_PATH = `${ME}/approval-rules`;
+export const approvalRulePath = (id: string) =>
+  `${APPROVAL_RULES_PATH}/${encodeURIComponent(id)}`;
+/** What waits on the person: the actions their Bots asked about, and the questions they asked. */
+export async function loadApprovalInbox(): Promise<ApprovalInbox> {
+  const [requests, questions] = await Promise.all([
+    everyPage<ApprovalInbox["requests"][number]>(
+      `${ME}/approvals`,
+      "approvals",
+    ),
+    everyPage<NonNullable<ApprovalInbox["questions"]>[number]>(
+      `${ME}/questions`,
+      "questions",
+    ),
+  ]);
+  return { requests, questions };
+}
+/** The person's own approval preferences and rules, with what the organization set for everybody. */
+export async function loadApprovalSettings(): Promise<ApprovalSettings> {
+  const [preferences, rules, team, teamRules] = await Promise.all([
+    api<{ enabled: boolean; autoReview: boolean }>(APPROVAL_PREFERENCES_PATH),
+    everyPage<ApprovalRule>(APPROVAL_RULES_PATH, "approvalRules"),
+    api<{ enforceAutoReview: boolean; customRulesEnabled: boolean }>(
+      `${ORGANIZATION}/approval-settings`,
+    ),
+    everyPage<ApprovalRule>(`${ORGANIZATION}/approval-rules`, "approvalRules"),
+  ]);
+  return {
+    enabled: preferences.enabled,
+    rules,
+    teamRules,
+    preferences: {
+      enabled: preferences.enabled,
+      autoReview: preferences.autoReview,
+    },
+    team: {
+      enforceAutoReview: team.enforceAutoReview,
+      customRulesEnabled: team.customRulesEnabled,
+    },
+  };
+}
 export type Conversation = {
   id: string;
   name: string;

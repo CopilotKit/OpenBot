@@ -14,6 +14,7 @@ import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerTeamBots, teamBotOf } from "./bots-api";
 import { notificationsResponse } from "./notifications-api";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -94,18 +95,31 @@ function serving(
         sources: [{ id: "s1", agentId: "expenses", enabled: true }],
       });
     }
-    if (url === "/api/approvals") {
-      return Response.json({
-        enabled: true,
-        requests: [],
-        questions: [],
-        rules: [
-          { id: "r1", botId: "expenses" },
-          { id: "r2", botId: "*" },
-        ],
-        teamRules: [],
-      });
-    }
+    const approvals = approvalInboxResponse(url, {
+      enabled: true,
+      requests: [],
+      questions: [],
+      rules: [
+        {
+          id: "r1",
+          botId: "expenses",
+          toolRef: "mcp/drive/share",
+          effect: "write",
+          scope: "*",
+          behaviour: "allow",
+        },
+        {
+          id: "r2",
+          botId: "*",
+          toolRef: "mcp/drive/share",
+          effect: "write",
+          scope: "*",
+          behaviour: "ask",
+        },
+      ],
+      teamRules: [],
+    });
+    if (approvals) return approvals;
     return meResponse({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });

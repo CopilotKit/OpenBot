@@ -442,7 +442,7 @@ describe("the Computer page", () => {
     expect(folders.textContent).not.toContain("The desktop app is offline");
   });
 
-  /** A folder request still open, as `GET /api/host-access` lists it. */
+  /** A folder request still open, as the API's `people/me/host-access` lists it. */
   function waiting(
     kind: NonNullable<HostAccessStatus["pending"][number]["kind"]>,
     botId = "personal-assistant",

@@ -30,6 +30,11 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import {
+  approvalInboxResponse,
+  COMPUTER_STEPS_PATH,
+  computerStepResponse,
+} from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -245,11 +250,10 @@ beforeAll(() => {
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
-      // The gate: `POST /api/approvals/computer/:botId` in server/src/approvals/routes.ts.
-      if (url.pathname === `/api/approvals/computer/${bot}`) {
-        const body = (await request.json()) as {
-          toolCallId: string;
-          args: Record<string, unknown>;
+      // The gate: the API's computer step, which carries the conversation with the call in it.
+      if (url.pathname === COMPUTER_STEPS_PATH) {
+        const { conversation: body } = (await request.json()) as {
+          conversation: { toolCallId: string; args: Record<string, unknown> };
         };
         gated.push({ toolCallId: body.toolCallId, args: body.args });
         inFlight += 1;
@@ -257,17 +261,23 @@ beforeAll(() => {
         // Long enough that steps sent together would overlap here.
         await new Promise((resolve) => setTimeout(resolve, 30));
         inFlight -= 1;
-        return gate(String(body.args.ref));
+        return computerStepResponse(gate(String(body.args.ref)));
       }
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
           teamRules: [],
           questions: [],
         });
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+        if (approvals) return approvals;
+      }
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
       if (url.pathname.startsWith(`/api/computers/${bot}/`))
         return NativeResponse.json({ botId: bot, state: "ready" });

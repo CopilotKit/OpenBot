@@ -23,6 +23,7 @@ import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { queryClient } from "@/query-client";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
 import {
   ASKED_SO_FAR,
   ASKED_TEXT,
@@ -174,14 +175,16 @@ beforeAll(() => {
         return NativeResponse.json({ components: [] });
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",

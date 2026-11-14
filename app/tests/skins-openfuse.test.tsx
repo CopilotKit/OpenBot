@@ -58,6 +58,7 @@ import {
   PREFERENCES_PATH,
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import {
   activityOf,
   answerBotAttention,
@@ -426,7 +427,6 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       },
     }),
     "/api/channels": { channels, nextCursor: null },
-    "/api/approvals": inbox,
     [botOperationPath(fuse.id, "activity")]: activity,
     [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
@@ -466,7 +466,10 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-      if (method !== "GET") return Response.json({ ok: true });
+      if (method !== "GET")
+        return (
+          approvalWriteResponse(input, init) ?? Response.json({ ok: true })
+        );
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
       const waiting = answerBotAttention(input, init, { bots: attention });
@@ -478,6 +481,8 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
           ? Response.json({ channel: found })
           : Response.json({ error: "Not found" }, { status: 404 });
       }
+      const approvals = approvalInboxResponse(input, inbox);
+      if (approvals) return approvals;
       if (path in routes) return Response.json(routes[path]);
       return Response.json({ error: "Not here" }, { status: 404 });
     },
@@ -1002,7 +1007,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: "POST",
-        path: "/api/approvals/r-pending/decision",
+        path: "/api/v2/organizations/default/people/me/approvals/r-pending/decide",
         body: { decision: "allow_once" },
       }),
     );

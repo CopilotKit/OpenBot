@@ -219,7 +219,11 @@ beforeAll(() => {
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },

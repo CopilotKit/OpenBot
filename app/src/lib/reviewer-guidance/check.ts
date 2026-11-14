@@ -1,4 +1,8 @@
-import { client } from "@/lib/client";
+import {
+  checkReviewerGuidance as checkReviewerGuidanceRequest,
+  replayReviewerGuidance,
+} from "@/lib/api/generated/reviewer-guidance/reviewer-guidance";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import type { GuidanceBacktest } from "./queries";
 
 /**
@@ -21,25 +25,27 @@ export const GUIDANCE_LIMIT = 2000;
 export async function checkReviewerGuidance(
   text: string,
 ): Promise<GuidanceReading> {
-  const response = await client("/api/approvals/team/guidance/check", {
-    method: "POST",
-    body: { text },
-    fallback: "Couldn't check the guidance. Try again.",
-  });
-  return (await response.json()) as GuidanceReading;
+  const reading = await checkReviewerGuidanceRequest(
+    ORGANIZATION_ID,
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't check the guidance. Try again." },
+  );
+  // `check` carries its error exactly when it is not ok.
+  return reading as GuidanceReading;
 }
 
 /**
  * The reviewer, with these words, over the requests people decided. One model call a request, so it
  * runs only when the admin asks, after being told how many. Writes nothing.
  */
-export async function backtestReviewerGuidance(
+export function backtestReviewerGuidance(
   text: string,
 ): Promise<GuidanceBacktest> {
-  const response = await client("/api/approvals/team/guidance/backtest", {
-    method: "POST",
-    body: { text },
-    fallback: "Couldn't test the guidance on recent requests.",
-  });
-  return (await response.json()) as GuidanceBacktest;
+  return replayReviewerGuidance(
+    ORGANIZATION_ID,
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't test the guidance on recent requests." },
+  );
 }

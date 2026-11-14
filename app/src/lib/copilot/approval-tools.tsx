@@ -7,8 +7,11 @@ import { withFinishedAt } from "@openbot/shared/computer-control";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { runComputerStep } from "@/lib/api/generated/approvals/approvals";
+import type { ComputerStepOutcome } from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
-import { tryClient } from "@/lib/client";
+import { ClientError } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
 import { useBotOfCall } from "./active-bot";
 import {
@@ -159,24 +162,30 @@ export function useFrontendTool<T extends Record<string, unknown>>(
       if (everyStep) return { ok: false, reason: NOT_ASKED };
       return direct ?? tool.handler?.(args, context);
     }
-    let response: Response;
+    let step: ComputerStepOutcome;
     try {
       // The gate of the Bot whose run this is, which the person may have navigated away from.
-      response = await tryClient(
-        `/api/approvals/computer/${encodeURIComponent(botOf(context.agent))}`,
-        { method: "POST", body: snapshot, signal: context.signal },
+      step = await runComputerStep(
+        ORGANIZATION_ID,
+        "me",
+        { botId: botOf(context.agent), conversation: snapshot },
+        { "Idempotency-Key": idempotencyKey() },
+        { signal: context.signal, fallback: "That did not work." },
       );
     } catch (error) {
       // The same two answers callComputer gives when the request itself does not complete.
       if (error instanceof DOMException && error.name === "AbortError")
         return { ok: false, reason: "Stopped.", stopped: true };
+      // Answered, not thrown: a thrown handler ends the Bot's turn with nothing said (see
+      // failedComputerCall), where a failed result lets it snapshot again or try another way.
+      if (error instanceof ClientError)
+        return failedComputerCall(error.status, { error: error.message });
       return {
         ok: false,
         reason: "The assistant's computer could not be reached.",
       };
     }
-    const payload: unknown = await response.json().catch(() => null);
-    if (response.status === 202) {
+    if (step.outcome === "waiting") {
       if (!context.agent)
         throw new Error("The interrupted conversation is unavailable.");
       // Stop signals the SDK to discard this handler's unfinished result. The server owns
@@ -186,19 +195,15 @@ export function useFrontendTool<T extends Record<string, unknown>>(
       void queryClient.invalidateQueries({ queryKey: ["approvals"] });
       return WAITING_FOR_PERSON;
     }
-    // Answered, not thrown: a thrown handler ends the Bot's turn with nothing said (see
-    // failedComputerCall), where a failed result lets it snapshot again or try another way.
-    if (!response.ok)
-      return failedComputerCall(
-        response.status,
-        payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>)
-          : null,
-      );
-    if (!payload || typeof payload !== "object" || !("result" in payload))
-      return failedComputerCall(response.status, {
+    // The computer is held for a person: told to the Bot as the refusal it has always been.
+    if (step.outcome === "held") {
+      const { outcome: _held, ...held } = step;
+      return failedComputerCall(409, held);
+    }
+    if (!("result" in step))
+      return failedComputerCall(200, {
         error: "The computer action returned no result.",
       });
-    return payload.result;
+    return step.result;
   }
 }

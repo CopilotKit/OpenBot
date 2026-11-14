@@ -15,6 +15,7 @@ import { GroupChat } from "@/components/channels/group-chat";
 import type { GroupMessage } from "@/lib/groups";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -109,8 +110,8 @@ beforeAll(() => {
         messages,
       });
     }
-    if (url.pathname === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(url.pathname, {
         enabled: true,
         requests: [],
         rules: [],
@@ -131,6 +132,8 @@ beforeAll(() => {
             ]
           : [],
       });
+      if (approvals) return approvals;
+    }
     const waiting = answerBotAttention(url, init, {
       bots: [
         attentionOf(ERRANDS, "Errand Helper", {
@@ -142,7 +145,10 @@ beforeAll(() => {
     if (waiting) return waiting;
     // As the server answers a group question: closed, the answer posted to the group, and the Bot
     // that asked queued to answer it there.
-    if (url.pathname === "/api/approvals/questions/q-1/respond") {
+    if (
+      url.pathname ===
+      "/api/v2/organizations/default/people/me/questions/q-1/respond"
+    ) {
       answers.push(JSON.parse(String(init?.body)));
       open = false;
       messages = [
@@ -150,7 +156,7 @@ beforeAll(() => {
         line("person-response:q-1", null, ANSWER),
         line(`person-response:q-1:${ERRANDS}`, ERRANDS, REPLY),
       ];
-      return Response.json({ id: "q-1", queued: true });
+      return Response.json({ id: "q-1", continueHere: false });
     }
     throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);
   }) as typeof fetch;
