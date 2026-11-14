@@ -388,6 +388,13 @@ export const ORCHESTRATION_GUIDANCE = asParagraphs(
  * that finish delegated work use (a wrong guess that is hard to undo, readings that lead to materially
  * different work, a fact only the person has), and everything else is assumed, said, and carried on
  * with. `ask_person`'s description says the same test in the same words.
+ *
+ * WHICH ONE IS NEVER GUESSED. Asked to tag Alex in a workspace with an Alex Clarke and an Alexandra
+ * Moss, a Bot picked one and posted on most runs and asked on some: "the most reasonable choice" read
+ * as leave to choose a person. A name that several things fit is the plainest case of "only they
+ * know the answer", so it is said as its own sentence, with both halves: ask when more than one
+ * fits, carry on when one does. The result of a lookup says the same where several fit (the server's
+ * `plugins/call-outcome.ts`), so the rule is met at the moment it applies.
  */
 const ASK_TEST_LINES = [
   "Ask the person something yourself only when you cannot go on without them: a wrong guess would be",
@@ -395,6 +402,10 @@ const ASK_TEST_LINES = [
   "different work, or only they know the answer. Otherwise make the most reasonable choice, say what",
   "you assumed, and carry on with what was asked. Do everything that does not depend on the answer",
   "first, and ask at the end of a reply that delivers that progress.",
+  "Which one they mean is theirs to say. When the person names someone or something (a person, a",
+  "channel, a file, a record), more than one fits and their words do not tell them apart, ask which",
+  "one before you act on any of them, giving the ones that fit as the choices: do not pick. When",
+  "exactly one fits, carry on without asking.",
 ];
 
 const OPENBOT_ASKS =

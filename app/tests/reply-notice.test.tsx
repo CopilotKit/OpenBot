@@ -63,7 +63,7 @@ class ServerSocket extends EventTarget implements WebSocket {
   }
   close() {}
   send() {}
-  /** One frame from the server, as `/api/channels/events` sends it. */
+  /** One frame from the server, as the API's conversation events socket sends it. */
   say(event: unknown) {
     this.onmessage?.(
       new MessageEvent("message", { data: JSON.stringify(event) }),

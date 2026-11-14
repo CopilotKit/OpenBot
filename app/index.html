@@ -7,10 +7,18 @@
     <!-- Sets the theme before the first paint. Must stay inline and classic: `defer` or `type="module"` runs too late. -->
     <script>
       // localStorage throws in some privacy modes; a theme is not worth taking the app down for.
+      // The theme and the skin each in a try of their own, so neither costs the other.
       try {
-        const dark = window.localStorage.getItem("openbot-theme") === "dark";
+        // A saved "light" or "dark" is the person's own choice. Nothing saved follows the system
+        // (lib/theme.ts), and the app's theme provider keeps following it once the app is up.
+        const theme = window.localStorage.getItem("openbot-theme");
+        const dark =
+          theme === "dark" ||
+          (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      } catch {}
+      try {
         const saved = window.localStorage.getItem("openbot-skin");
         // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
         const skin = saved === "openmuse" ? "openfuse" : saved;
