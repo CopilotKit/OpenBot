@@ -72,9 +72,16 @@ function nextLine({ task, status }: ListedTask): string | null {
 export function TaskRow({
   listed,
   botName,
+  askedIn,
 }: {
   listed: ListedTask;
-  botName: string;
+  /** Left out on a Bot's own page, where every row is that Bot's. */
+  botName?: string;
+  /**
+   * The conversation that asked for the task, for a link back to it, with what that conversation is
+   * called when it is known. A check-in's task was not asked for in one.
+   */
+  askedIn?: { channelId: string; title: string | null };
 }) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
@@ -108,6 +115,19 @@ export function TaskRow({
         </ItemDescription>
         {next ? (
           <ItemDescription className="text-foreground">{next}</ItemDescription>
+        ) : null}
+        {askedIn ? (
+          <ItemDescription className="line-clamp-1" data-slot="task-asked-in">
+            <Link
+              className="rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              params={{ channelId: askedIn.channelId }}
+              to="/channel/$channelId"
+            >
+              {askedIn.title
+                ? `Asked in ${askedIn.title}`
+                : "Asked in another conversation"}
+            </Link>
+          </ItemDescription>
         ) : null}
         <ItemFooter className="mt-2 flex-wrap justify-start">
           {status === "failed" ? (
