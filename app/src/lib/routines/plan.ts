@@ -20,8 +20,8 @@ export type RoutinePlan =
   | {
       kind: "goal";
       goal: {
-        agentId: string;
-        channelId: string;
+        botId: string;
+        conversationId: string;
         title: string;
         instruction: string;
         successCriteria: string;
@@ -36,8 +36,8 @@ export type RoutinePlan =
   | {
       kind: "check-in";
       checkIn: {
-        agentId: string;
-        channelId: string;
+        botId: string;
+        conversationId: string;
         focus: string;
         subject: string;
         intervalMinutes: number;
@@ -83,8 +83,8 @@ export function planRoutine(
     return {
       kind: "check-in",
       checkIn: {
-        agentId,
-        channelId,
+        botId: agentId,
+        conversationId: channelId,
         focus: instruction,
         subject: checkInSubject(values),
         intervalMinutes: Number(values.interval),
@@ -96,8 +96,8 @@ export function planRoutine(
     return {
       kind: "routine",
       routine: {
-        agentId,
-        channelId,
+        botId: agentId,
+        conversationId: channelId,
         instruction,
         ...(title ? { title } : {}),
         cron: cronFrom(values),
@@ -111,8 +111,8 @@ export function planRoutine(
   const goalTitle =
     title || cutToUnits(instruction.replace(/\s+/g, " "), 160).trim();
   const goal = {
-    agentId,
-    channelId,
+    botId: agentId,
+    conversationId: channelId,
     title: goalTitle,
     instruction,
     successCriteria: doneWhen,

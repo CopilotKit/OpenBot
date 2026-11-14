@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import { describeEvent, eventDetail } from "@/lib/routines/events";
 import { goalStarts } from "@/lib/routines/merged";
-import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
 
 describe("an event a goal listens for, in words", () => {
@@ -60,8 +60,8 @@ const goal = (
   subscriptions: ResponsibilityRecord["subscriptions"],
 ): ResponsibilityRecord => ({
   id: "g1",
-  agentId: "bot",
-  channelId: "c1",
+  botId: "bot",
+  conversationId: "c1",
   threadId: "t1",
   title: "Watch CI",
   instruction: "Tell me.",
@@ -72,21 +72,24 @@ const goal = (
   subscriptions,
   recurring: false,
   endsWhenMet: false,
+  createdAt: "2026-11-10T10:00:00Z",
   updatedAt: "2026-11-10T10:00:00Z",
+  completedAt: null,
 });
 
 const schedule = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "r1",
-  agentId: "bot",
+  botId: "bot",
   schedule: "Weekdays at 09:00",
   timezone: "Europe/Madrid",
   instruction: "Check.",
   title: null,
-  channel: { id: "c1", name: null, title: "CI", gone: false },
+  conversation: { id: "c1", name: null, title: "CI", gone: false },
   enabled: true,
   nextRunAt: "2999-01-01T09:00:00.000Z",
   lastRun: null,
   goalId: "g1",
+  createdAt: "2026-11-10T10:00:00Z",
   ...overrides,
 });
 

@@ -3,54 +3,52 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import {
+  createCheckIn,
+  deleteCheckIn,
+  dismissCheckInItem,
+  listCheckInItems,
+  listCheckIns,
+  runCheckIn,
+  startCheckInItem,
+  updateCheckIn,
+} from "@/lib/api/generated/check-ins/check-ins";
+import type {
+  LastCheckIn as ApiLastCheckIn,
+  CheckIn,
+  CheckInItem,
+  CheckInRunAnswer,
+  CreateCheckInRequest,
+  UpdateCheckInRequest,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { client } from "@/lib/client";
+import { everyPage } from "@/lib/routines/queries";
 import { taskKeys } from "@/lib/tasks/queries";
 
 /**
  * A Bot's newest check-in, from the run ledger: how it ended, and for one that was skipped or
  * couldn't finish, why, in one sentence the server wrote for the person. Null before the first.
+ * The API's `LastCheckIn`.
  */
-export type LastCheckIn = {
-  outcome: "running" | "quiet" | "raised" | "failed" | "skipped";
-  trigger: "schedule" | "run_now";
-  skipReason: string | null;
-  why: string | null;
-  itemsRaised: number;
-  startedAt: string;
-  finishedAt: string | null;
-};
-
-export type ProactiveSetting = {
-  id: string;
-  agentId: string;
-  channelId: string;
-  focus: string;
-  /** What it watches, in the person's words. Empty on one that watches everything the Bot reads. */
-  subject?: string;
-  sourceLink?: string | null;
-  enabled: boolean;
-  intervalMinutes: number;
-  nextRunAt: string;
-  lastRunAt: string | null;
-  lastStatus: "idle" | "running" | "succeeded" | "error";
-  lastError: string | null;
-  /** Absent from a server that predates it, which reads as no check-in yet. */
-  lastRun?: LastCheckIn | null;
-};
+export type LastCheckIn = ApiLastCheckIn;
 
 /**
- * What Run now answered: queued, or skipped at once with the reason a check-in would have been
- * skipped anyway. A Run now that can't be tried (one is running, or one ran in the last ten
- * minutes) is refused, and the client raises the server's sentence.
+ * One thing a Bot checks in on for the person: the API's `CheckIn`. `subject` is what it watches,
+ * in the person's words, and is empty on one that watches everything the Bot reads.
  */
-export type RunNowAnswer =
-  | { queued: true }
-  | { queued: false; skipped: string; why: string };
+export type ProactiveSetting = CheckIn;
 
 /**
- * `GET /api/proactive/settings`. `allowed` is false when an admin turned check-ins off for this
- * person, so their own switches can say who turned them off.
+ * What Run now answered: queued, or skipped at once (`skipped` and `why` say for what reason a
+ * check-in would have been skipped anyway). A Run now that can't be tried (one is running, or one
+ * ran in the last ten minutes) is refused, and the client raises the server's sentence.
+ */
+export type RunNowAnswer = CheckInRunAnswer;
+
+/**
+ * What `listCheckIns` answers, every page read. `allowed` is false when an admin turned check-ins
+ * off for this person, so their own switches can say who turned them off.
  */
 type ProactiveSettingsBody = {
   settings: ProactiveSetting[];
@@ -59,25 +57,13 @@ type ProactiveSettingsBody = {
 
 /**
  * Something a Bot's check-in found that needs the person: what it is, why (`detail`), and where it
- * read that. Open items only; Start and Hide take it off the list.
+ * read that. Open items only; Start and Hide take it off the list. The API's `CheckInItem`.
  *
  * A new item always names its source. Items from before check-ins may not, so `sourceApp` and
- * `sourceRef` stay nullable. `pingId` is the ping that told the person about it, null while it waits
- * for their hourly slot; the list shows it either way.
+ * `sourceRef` stay nullable. `checkInId` is the check-in that found it. `pingId` is the ping that
+ * told the person about it, null while it waits for their hourly slot; the list shows it either way.
  */
-export type ProactiveSuggestion = {
-  id: string;
-  agentId: string;
-  /** The check-in that found it. */
-  settingId?: string | null;
-  title: string;
-  detail: string;
-  sourceApp: string | null;
-  sourceRef: string | null;
-  sourceLink: string | null;
-  pingId: string | null;
-  createdAt: string;
-};
+export type ProactiveSuggestion = CheckInItem;
 
 /**
  * The site an item's link opens, as its Open button names it: the link's own host, without "www.".
@@ -99,18 +85,28 @@ export const proactiveKeys = {
 };
 
 /*
- * One read of `/api/proactive/settings` answers two questions: which Bots check in, and whether an
+ * One read of the person's check-ins answers two questions: which Bots check in, and whether an
  * admin allows it at all. Both factories share the key, so they are one request, and each component
- * sees only the half it asked for.
+ * sees only the half it asked for. `allowed` is on every page; the first one's is read.
  */
 const proactiveSettingsQuery = {
   queryKey: proactiveKeys.settings,
-  queryFn: async (): Promise<ProactiveSettingsBody> =>
-    (
-      await client("/api/proactive/settings", {
+  queryFn: async ({
+    signal,
+  }: {
+    signal?: AbortSignal;
+  }): Promise<ProactiveSettingsBody> => {
+    let allowed: boolean | undefined;
+    const settings = await everyPage(async (params) => {
+      const page = await listCheckIns(ORGANIZATION_ID, params, {
+        signal,
         fallback: "Couldn't load your check-ins",
-      })
-    ).json(),
+      });
+      allowed ??= page.allowed;
+      return { items: page.checkIns, nextCursor: page.nextCursor };
+    });
+    return { settings, allowed: allowed ?? true };
+  },
   refetchInterval: 30_000,
 };
 
@@ -130,12 +126,22 @@ export const proactiveAllowedQueryOptions = () =>
 export const proactiveSuggestionsQueryOptions = () =>
   queryOptions({
     queryKey: proactiveKeys.suggestions,
-    queryFn: (): Promise<ProactiveSuggestion[]> =>
-      client("/api/proactive/suggestions", "suggestions", {
-        fallback: "Couldn't load what your Bots found",
+    queryFn: ({ signal }): Promise<ProactiveSuggestion[]> =>
+      everyPage(async (params) => {
+        const page = await listCheckInItems(ORGANIZATION_ID, params, {
+          signal,
+          fallback: "Couldn't load what your Bots found",
+        });
+        return { items: page.checkInItems, nextCursor: page.nextCursor };
       }),
     refetchInterval: 30_000,
   });
+
+/**
+ * A fresh key for each write a person asks for. TanStack does not retry a mutation, so each attempt
+ * is a new write; a retry of the same write would reuse its key.
+ */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /**
  * A check-in for a Bot. One on a thing the Bot already watches (the same link, or the same subject)
@@ -143,43 +149,29 @@ export const proactiveSuggestionsQueryOptions = () =>
  * for a screen that asked for a new one: the server refuses that with 409 and says why.
  */
 export const createProactiveSetting = (
-  input: {
-    agentId: string;
-    channelId: string;
-    focus: string;
-    subject?: string;
-    sourceLink?: string;
-    intervalMinutes: number;
-  },
+  input: CreateCheckInRequest,
   { refuseExisting = false }: { refuseExisting?: boolean } = {},
 ) =>
-  client(
-    `/api/proactive/settings${refuseExisting ? "?refuseExisting=true" : ""}`,
-    {
-      method: "POST",
-      body: input,
-      fallback: "Couldn't turn on check-ins",
-    },
+  createCheckIn(
+    ORGANIZATION_ID,
+    input,
+    once(),
+    refuseExisting ? { refuseExisting } : undefined,
+    { fallback: "Couldn't turn on check-ins" },
   );
 export const updateProactiveSetting = (
   id: string,
-  input: { enabled?: boolean; intervalMinutes?: number; focus?: string },
+  input: UpdateCheckInRequest,
 ) =>
-  client(`/api/proactive/settings/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: input,
+  updateCheckIn(ORGANIZATION_ID, id, input, once(), {
     fallback: "Couldn't change check-ins",
   });
-export const runProactiveNow = async (id: string): Promise<RunNowAnswer> =>
-  (
-    await client(`/api/proactive/settings/${encodeURIComponent(id)}/run`, {
-      method: "POST",
-      fallback: "Couldn't start a check-in",
-    })
-  ).json();
+export const runProactiveNow = (id: string): Promise<RunNowAnswer> =>
+  runCheckIn(ORGANIZATION_ID, id, once(), {
+    fallback: "Couldn't start a check-in",
+  });
 export const removeProactiveSetting = (id: string) =>
-  client(`/api/proactive/settings/${encodeURIComponent(id)}`, {
-    method: "DELETE",
+  deleteCheckIn(ORGANIZATION_ID, id, once(), {
     fallback: "Couldn't remove check-ins",
   });
 
@@ -188,14 +180,19 @@ export const removeProactiveSetting = (id: string) =>
  * Start with the task the first one opened, so a double tap starts one task. The task arrives on the
  * lists through the tasks query, so nothing here reads the answer.
  */
-export const resolveSuggestion = (id: string, action: "start" | "dismiss") =>
-  client(`/api/proactive/suggestions/${encodeURIComponent(id)}/${action}`, {
-    method: "POST",
-    fallback:
-      action === "start"
-        ? "Couldn't start this. Try again."
-        : "Couldn't hide this. Try again.",
-  });
+export const resolveSuggestion = async (
+  id: string,
+  action: "start" | "dismiss",
+): Promise<void> => {
+  if (action === "start")
+    await startCheckInItem(ORGANIZATION_ID, id, once(), {
+      fallback: "Couldn't start this. Try again.",
+    });
+  else
+    await dismissCheckInItem(ORGANIZATION_ID, id, once(), {
+      fallback: "Couldn't hide this. Try again.",
+    });
+};
 
 /** A setting's check-ins produce items, so a change to either refreshes both. */
 const settleProactive = (queryClient: QueryClient) => () =>
