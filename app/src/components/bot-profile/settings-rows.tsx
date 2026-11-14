@@ -26,6 +26,7 @@ import {
 import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deliveryQueryOptions } from "@/lib/delivery";
 import {
   deploymentCapabilitiesQueryOptions,
@@ -83,7 +84,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const teamBots = useQuery({ ...teamBotsQueryOptions(), enabled: !personal });
   const reach = useQuery({ ...deliveryQueryOptions(), enabled: !personal });
   const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
-  const admin = me?.role === "admin";
+  const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
   const canShare =
     !personal && (agent.mine || admin || published !== undefined);

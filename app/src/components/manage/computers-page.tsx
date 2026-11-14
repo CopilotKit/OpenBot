@@ -38,6 +38,7 @@ import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
@@ -135,7 +136,9 @@ export function ComputersPage({
   const clearing = useClearBrowserData(clearOwnBrowser);
 
   // Every computer is an admin's to list. On one Bot's page a person who isn't an admin has only folders.
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
   const fleet = useQuery({
     ...computerFleetQueryOptions(),
     enabled: agentId === undefined || admin,

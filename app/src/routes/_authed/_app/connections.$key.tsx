@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -300,7 +301,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     ...currentUserQueryOptions(),
     enabled: perActionGrants && sharedHere,
   }).data;
-  const isAdmin = me?.role === "admin";
+  const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */

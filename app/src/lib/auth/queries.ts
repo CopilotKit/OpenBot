@@ -24,7 +24,10 @@ export type AuthenticatedUser = {
   name?: string | null;
   needsName?: boolean;
   image?: string | null;
-  /** Their role as a member of the organization. Nobody is an owner yet. */
+  /**
+   * Their role as a member of the organization they are working in. An owner governs it as an admin
+   * does: ask `isOrganizationAdmin` (lib/auth/roles.ts), never the role's name.
+   */
   role: "owner" | "admin" | "member";
   /** Null means this deployment does not track onboarding, which reads as nothing to finish. */
   onboarding: OnboardingStatus | null;

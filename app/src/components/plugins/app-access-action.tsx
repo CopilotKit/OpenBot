@@ -19,6 +19,7 @@ import {
   botAppQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
@@ -180,7 +181,7 @@ export function AppAccessAction({
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
     return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
-  if (me?.role === "admin")
+  if (isOrganizationAdmin(me?.role))
     return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
 }

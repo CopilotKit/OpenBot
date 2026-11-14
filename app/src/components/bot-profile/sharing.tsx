@@ -45,6 +45,7 @@ import { Separator } from "@/components/ui/separator";
 import { countLabel } from "@/lib/agents/bot-summaries";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   assignTeamBotMutationOptions,
   publishTeamBotMutationOptions,
@@ -200,7 +201,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
           ) : null}
         </PageSection>
       ) : null}
-      {me?.role === "admin" && published ? (
+      {isOrganizationAdmin(me?.role) && published ? (
         <PageSection
           description="Pins this Bot at the top of every group member's Bots list. Use * for the whole team."
           title="Assign to groups"
