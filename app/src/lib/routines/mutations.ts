@@ -295,12 +295,25 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
 /** Every routine delete, so the routine's page can tell it was deleted from there. */
 export const deleteRoutineMutationKey = [...routineKeys.all, "delete"] as const;
 
+/**
+ * Delete a routine. Its runs stop existing with it, so they are removed rather than read again: a
+ * read would ask for a routine that is gone and answer 404, which the page still showing it used to
+ * do once on its way back to Routines. Every other routine read is refreshed.
+ */
 export function deleteRoutineMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationKey: deleteRoutineMutationKey,
     mutationFn: (id: string) =>
       deleteRoutine(ORGANIZATION_ID, id, once(), { fallback: FALLBACK }),
-    onSuccess: () => invalidateRoutines(queryClient),
+    onSuccess: async (_result, id) => {
+      // A read of its runs already on its way is dropped too, not left to land in the cache.
+      await queryClient.cancelQueries({ queryKey: routineKeys.runs(id) });
+      queryClient.removeQueries({ queryKey: routineKeys.runs(id) });
+      return queryClient.invalidateQueries({
+        queryKey: routineKeys.all,
+        predicate: (query) => query.queryKey[1] !== id,
+      });
+    },
   });
 }
 
