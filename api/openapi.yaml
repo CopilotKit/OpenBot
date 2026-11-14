@@ -4258,7 +4258,6 @@ paths:
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/apps:
-  /api/v2/organizations/{organizationId}/components:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
     get:
@@ -4273,23 +4272,11 @@ paths:
             - apps:read
         - apiKey: []
       parameters:
-        - Components
-      operationId: listComponents
-      summary: List components
-      description: 'Return one page of the components Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. An admin sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:read
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/ComponentKind'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: One page of apps.
-          description: One page of components.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4300,10 +4287,6 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/AppPageExample'
-                $ref: '#/components/schemas/ComponentPage'
-              examples:
-                admin:
-                  $ref: '#/components/examples/ComponentPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4407,43 +4390,6 @@ paths:
       responses:
         '200':
           description: The app.
-  /api/v2/organizations/{organizationId}/components/announce:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-    post:
-      tags:
-        - Components
-      operationId: announceComponents
-      summary: Announce the components the app can draw
-      description: 'Tell OpenBot which components this version of the app can draw. A component OpenBot has not seen before is added and published, so every Bot can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ComponentAnnouncement'
-            examples:
-              gallery:
-                value:
-                  components:
-                    - name: showBarChart
-                      title: Bar chart
-                      kind: chart
-                      description: Compare values across categories with a bar chart.
-                    - name: showActivityReport
-                      title: Activity report
-                      kind: card
-                      description: Show how many actions each Bot took recently.
-      responses:
-        '200':
-          description: The components this announcement added. Empty when OpenBot had them all.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -4454,54 +4400,6 @@ paths:
               examples:
                 address:
                   $ref: '#/components/examples/AddressAppExample'
-                $ref: '#/components/schemas/AnnouncedComponents'
-              examples:
-                added:
-                  $ref: '#/components/examples/AnnouncedComponentsExample'
-        '400':
-          $ref: '#/components/responses/InvalidComponent'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/components/{componentId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-    get:
-      tags:
-        - Components
-      operationId: getComponent
-      summary: Read a component
-      description: Return one component. An admin sees any component with its draft, the Bots held back from it and the data it may read. Anybody else sees a published one only, without those; an unpublished one is not found.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:read
-        - apiKey: []
-      responses:
-        '200':
-          description: The component.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Component'
-              examples:
-                admin:
-                  $ref: '#/components/examples/ComponentExample'
-                member:
-                  $ref: '#/components/examples/PublishedComponentExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4622,7 +4520,6 @@ paths:
           $ref: '#/components/responses/AppNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
-          $ref: '#/components/responses/ComponentNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -4637,14 +4534,6 @@ paths:
         - webSession: []
         - appOAuth:
             - apps:write
-        - Components
-      operationId: deleteComponent
-      summary: Delete a Playground component
-      description: 'Delete a component an admin wrote in Playground: its source, its draft, and every Bot''s permission to draw it. Conversations stop drawing it. A component that comes with OpenBot can''t be deleted; unpublish it instead. Recorded on the audit trail. Only an admin may delete one.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -4699,7 +4588,6 @@ paths:
               examples:
                 address:
                   $ref: '#/components/examples/AddressAppExample'
-          description: The component was deleted.
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -4710,9 +4598,6 @@ paths:
           $ref: '#/components/responses/AppNotFound'
         '409':
           $ref: '#/components/responses/AppConflict'
-          $ref: '#/components/responses/ComponentNotFound'
-        '409':
-          $ref: '#/components/responses/ComponentConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -4731,20 +4616,6 @@ paths:
         - webSession: []
         - appOAuth:
             - apps:write
-  /api/v2/organizations/{organizationId}/components/{componentId}/draft:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-    put:
-      tags:
-        - Components
-      operationId: replaceComponentDraft
-      summary: Save a component's draft
-      description: 'Replace a component''s draft. Nothing a Bot sees changes until the component is published. For a component that comes with OpenBot the draft is its description, which the model reads when it decides to draw it; a title or source that differs from what it has is refused. For a Playground component the draft is its title, description and source. Saving one under a new name writes a new Playground component, unpublished: the name is custom_ and then lower-case letters, numbers and underscores. Recorded on the audit trail. Only an admin may save a draft.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -4772,33 +4643,6 @@ paths:
       responses:
         '200':
           description: What the switch did, or would do.
-              $ref: '#/components/schemas/ComponentDraftInput'
-            examples:
-              description:
-                summary: A new description for a component that comes with OpenBot.
-                value:
-                  description: Compare values across categories with a bar chart. Use it for up to twelve bars.
-              playground:
-                summary: A Playground component's whole draft.
-                value:
-                  title: Weather card
-                  description: Show today's weather for one city.
-                  source:
-                    html: <div class="card"><h3 id="city"></h3><p id="forecast"></p></div>
-                    css: '.card { padding: 12px; }'
-                    jsFunctions: document.getElementById("city").textContent = window.__args.city;
-                    argumentSchema:
-                      type: object
-                      properties:
-                        city:
-                          type: string
-                      required:
-                        - city
-                    sampleArguments:
-                      city: Lisbon
-      responses:
-        '200':
-          description: The component, with its draft as saved. A new Playground component is answered the same way, unpublished.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -6059,22 +5903,6 @@ paths:
           $ref: '#/components/responses/BotNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
-                $ref: '#/components/schemas/Component'
-              examples:
-                saved:
-                  $ref: '#/components/examples/ComponentExample'
-                created:
-                  $ref: '#/components/examples/NewPlaygroundComponentExample'
-        '400':
-          $ref: '#/components/responses/InvalidComponent'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/ComponentNotFound'
-        '409':
-          $ref: '#/components/responses/ComponentConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -6110,26 +5938,6 @@ paths:
       responses:
         '200':
           description: The actions chosen, and what they let the Bot do.
-  /api/v2/organizations/{organizationId}/components/{componentId}/publish:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-    post:
-      tags:
-        - Components
-      operationId: publishComponent
-      summary: Publish a component
-      description: Publish a component's draft, so every Bot not held back from it can draw it, from its next run. For a Playground component the source and the description are published together; it needs both a description and HTML first. Publishing a draft that is published already changes nothing. Recorded on the audit trail. Only an admin may publish.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The component, published.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -6140,10 +5948,6 @@ paths:
               examples:
                 answer:
                   $ref: '#/components/examples/BotGrantTranslationExample'
-                $ref: '#/components/schemas/Component'
-              examples:
-                published:
-                  $ref: '#/components/examples/ComponentExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -6195,33 +5999,6 @@ paths:
       responses:
         '200':
           description: What the set would change, and what it would have meant.
-          $ref: '#/components/responses/ComponentNotFound'
-        '409':
-          $ref: '#/components/responses/ComponentConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/components/{componentId}/unpublish:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-    post:
-      tags:
-        - Components
-      operationId: unpublishComponent
-      summary: Unpublish a component
-      description: Stop every Bot drawing a component, from its next run. Which Bots are held back from it, the data it may read and its published copy are kept, so publishing it again restores it as it was. Recorded on the audit trail. Only an admin may unpublish.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The component, unpublished.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -6232,10 +6009,6 @@ paths:
               examples:
                 answer:
                   $ref: '#/components/examples/BotGrantReplayExample'
-                $ref: '#/components/schemas/Component'
-              examples:
-                unpublished:
-                  $ref: '#/components/examples/UnpublishedComponentExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -6246,9 +6019,6 @@ paths:
           $ref: '#/components/responses/BotOrAppNotFound'
         '409':
           $ref: '#/components/responses/BotGrantConflict'
-          $ref: '#/components/responses/ComponentNotFound'
-        '409':
-          $ref: '#/components/responses/ComponentConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -6292,70 +6062,6 @@ paths:
       responses:
         '200':
           description: The grant, as the Bot has it now.
-  /api/v2/organizations/{organizationId}/components/{componentId}/functions:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-    get:
-      tags:
-        - Components
-      operationId: listComponentFunctions
-      summary: List the data a component may read
-      description: Return one page of the data functions this OpenBot ships, each with whether this component may read it. A component reads its own figures through one, so the numbers it shows come from OpenBot and not from the model. Anybody signed in may list them. Ordered by name. A missing cursor starts at the first page and nextCursor null ends the list.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:read
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: One page of data functions.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DataFunctionPage'
-              examples:
-                activityReport:
-                  $ref: '#/components/examples/DataFunctionPageExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/ComponentNotFound'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/components/{componentId}/functions/{functionId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/ComponentId'
-      - $ref: '#/components/parameters/FunctionId'
-    put:
-      tags:
-        - Components
-      operationId: grantComponentFunction
-      summary: Let a component read a data function
-      description: Let a component read one data function, for every Bot that draws it. Letting it read one it reads already changes nothing. Recorded on the audit trail. Only an admin may do this.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The data function, which the component may now read.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -6374,18 +6080,6 @@ paths:
           $ref: '#/components/responses/BotGrantForbidden'
         '404':
           $ref: '#/components/responses/BotNotFound'
-                $ref: '#/components/schemas/DataFunction'
-              examples:
-                granted:
-                  $ref: '#/components/examples/DataFunctionExample'
-        '400':
-          $ref: '#/components/responses/InvalidComponent'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/ComponentNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -6402,14 +6096,6 @@ paths:
         - webSession: []
         - appOAuth:
             - bot-grants:write
-        - Components
-      operationId: revokeComponentFunction
-      summary: Stop a component reading a data function
-      description: Stop a component reading one data function. Where it needs that data it shows why it can't. Stopping one it doesn't read changes nothing. Recorded on the audit trail. Only an admin may do this.
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:write
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -6631,7 +6317,6 @@ paths:
               examples:
                 approved:
                   $ref: '#/components/examples/AppAccessApprovalExample'
-          description: The component no longer reads it.
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -6664,27 +6349,6 @@ paths:
         - webSession: []
         - appOAuth:
             - bot-grants:read
-          $ref: '#/components/responses/ComponentNotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/bots/{botId}/components:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/BotId'
-    get:
-      tags:
-        - Components
-      operationId: listBotComponents
-      summary: List the components a Bot may draw
-      description: 'Return one page of the components this Bot may draw now: every published component it isn''t held back from, each with the description the model reads. A client offers the Bot these as tools, and checks again before drawing one (checkBotComponent). Anybody who can use the Bot may list them. Ordered by name. A missing cursor starts at the first page and nextCursor null ends the list.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - components:read
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/Limit'
@@ -6692,7 +6356,6 @@ paths:
       responses:
         '200':
           description: One page of apps the person could give.
-          description: One page of the Bot's components.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -6703,10 +6366,6 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/GiveableAppPageExample'
-                $ref: '#/components/schemas/BotComponentPage'
-              examples:
-                held:
-                  $ref: '#/components/examples/BotComponentPageExample'
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
@@ -6715,9 +6374,6 @@ paths:
           $ref: '#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/BotNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -6760,6 +6416,727 @@ paths:
               examples:
                 lastPage:
                   $ref: '#/components/examples/AppAccessRequestPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - App access requests
+      operationId: createAppAccessRequest
+      summary: Ask an administrator for an app
+      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - app-access-requests:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccessRequestInput'
+            examples:
+              notion:
+                value:
+                  botId: research-assistant
+                  appId: notion
+      responses:
+        '200':
+          description: The request, filed now or already waiting.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessRequest'
+              examples:
+                filed:
+                  $ref: '#/components/examples/AppAccessRequestExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/BotOrAppNotFound'
+        '409':
+          $ref: '#/components/responses/BotAppConflict'
+        '429':
+          $ref: '#/components/responses/TooManyPendingRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    delete:
+      tags:
+        - App access requests
+      operationId: deleteAppAccessRequest
+      summary: Withdraw a request for an app
+      description: Withdraw your own request while it is waiting. Somebody else's request is not found, like one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth:
+            - app-access-requests:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The request was withdrawn.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    post:
+      tags:
+        - App access requests
+      operationId: approveAppAccessRequest
+      summary: Approve a request for an app
+      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - app-access-requests:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccessApprovalInput'
+            examples:
+              readOnly:
+                value: {}
+      responses:
+        '200':
+          description: What changed, and the request, answered.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessApproval'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AppAccessApprovalExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: appAccessRequestId
+        in: path
+        required: true
+        description: The request's id.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
+    post:
+      tags:
+        - App access requests
+      operationId: dismissAppAccessRequest
+      summary: Dismiss a request for an app
+      description: Close a waiting request without changing anything else. Recorded on the audit trail. Only an administrator may dismiss one.
+      security:
+        - webSession: []
+        - appOAuth:
+            - app-access-requests:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The request, dismissed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccessRequest'
+              examples:
+                dismissed:
+                  $ref: '#/components/examples/DismissedAppAccessRequestExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppAccessRequestNotFound'
+        '409':
+          $ref: '#/components/responses/AppAccessRequestConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Components
+      operationId: listComponents
+      summary: List components
+      description: 'Return one page of the components Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. An admin sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ComponentKind'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of components.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentPage'
+              examples:
+                admin:
+                  $ref: '#/components/examples/ComponentPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/announce:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Components
+      operationId: announceComponents
+      summary: Announce the components the app can draw
+      description: 'Tell OpenBot which components this version of the app can draw. A component OpenBot has not seen before is added and published, so every Bot can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComponentAnnouncement'
+            examples:
+              gallery:
+                value:
+                  components:
+                    - name: showBarChart
+                      title: Bar chart
+                      kind: chart
+                      description: Compare values across categories with a bar chart.
+                    - name: showActivityReport
+                      title: Activity report
+                      kind: card
+                      description: Show how many actions each Bot took recently.
+      responses:
+        '200':
+          description: The components this announcement added. Empty when OpenBot had them all.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncedComponents'
+              examples:
+                added:
+                  $ref: '#/components/examples/AnnouncedComponentsExample'
+        '400':
+          $ref: '#/components/responses/InvalidComponent'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+    get:
+      tags:
+        - Components
+      operationId: getComponent
+      summary: Read a component
+      description: Return one component. An admin sees any component with its draft, the Bots held back from it and the data it may read. Anybody else sees a published one only, without those; an unpublished one is not found.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The component.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Component'
+              examples:
+                admin:
+                  $ref: '#/components/examples/ComponentExample'
+                member:
+                  $ref: '#/components/examples/PublishedComponentExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Components
+      operationId: deleteComponent
+      summary: Delete a Playground component
+      description: 'Delete a component an admin wrote in Playground: its source, its draft, and every Bot''s permission to draw it. Conversations stop drawing it. A component that comes with OpenBot can''t be deleted; unpublish it instead. Recorded on the audit trail. Only an admin may delete one.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The component was deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/ComponentConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}/draft:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+    put:
+      tags:
+        - Components
+      operationId: replaceComponentDraft
+      summary: Save a component's draft
+      description: 'Replace a component''s draft. Nothing a Bot sees changes until the component is published. For a component that comes with OpenBot the draft is its description, which the model reads when it decides to draw it; a title or source that differs from what it has is refused. For a Playground component the draft is its title, description and source. Saving one under a new name writes a new Playground component, unpublished: the name is custom_ and then lower-case letters, numbers and underscores. Recorded on the audit trail. Only an admin may save a draft.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComponentDraftInput'
+            examples:
+              description:
+                summary: A new description for a component that comes with OpenBot.
+                value:
+                  description: Compare values across categories with a bar chart. Use it for up to twelve bars.
+              playground:
+                summary: A Playground component's whole draft.
+                value:
+                  title: Weather card
+                  description: Show today's weather for one city.
+                  source:
+                    html: <div class="card"><h3 id="city"></h3><p id="forecast"></p></div>
+                    css: '.card { padding: 12px; }'
+                    jsFunctions: document.getElementById("city").textContent = window.__args.city;
+                    argumentSchema:
+                      type: object
+                      properties:
+                        city:
+                          type: string
+                      required:
+                        - city
+                    sampleArguments:
+                      city: Lisbon
+      responses:
+        '200':
+          description: The component, with its draft as saved. A new Playground component is answered the same way, unpublished.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Component'
+              examples:
+                saved:
+                  $ref: '#/components/examples/ComponentExample'
+                created:
+                  $ref: '#/components/examples/NewPlaygroundComponentExample'
+        '400':
+          $ref: '#/components/responses/InvalidComponent'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/ComponentConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+    post:
+      tags:
+        - Components
+      operationId: publishComponent
+      summary: Publish a component
+      description: Publish a component's draft, so every Bot not held back from it can draw it, from its next run. For a Playground component the source and the description are published together; it needs both a description and HTML first. Publishing a draft that is published already changes nothing. Recorded on the audit trail. Only an admin may publish.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The component, published.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Component'
+              examples:
+                published:
+                  $ref: '#/components/examples/ComponentExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/ComponentConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}/unpublish:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+    post:
+      tags:
+        - Components
+      operationId: unpublishComponent
+      summary: Unpublish a component
+      description: Stop every Bot drawing a component, from its next run. Which Bots are held back from it, the data it may read and its published copy are kept, so publishing it again restores it as it was. Recorded on the audit trail. Only an admin may unpublish.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The component, unpublished.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Component'
+              examples:
+                unpublished:
+                  $ref: '#/components/examples/UnpublishedComponentExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/ComponentConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}/functions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+    get:
+      tags:
+        - Components
+      operationId: listComponentFunctions
+      summary: List the data a component may read
+      description: Return one page of the data functions this OpenBot ships, each with whether this component may read it. A component reads its own figures through one, so the numbers it shows come from OpenBot and not from the model. Anybody signed in may list them. Ordered by name. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of data functions.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataFunctionPage'
+              examples:
+                activityReport:
+                  $ref: '#/components/examples/DataFunctionPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/components/{componentId}/functions/{functionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ComponentId'
+      - $ref: '#/components/parameters/FunctionId'
+    put:
+      tags:
+        - Components
+      operationId: grantComponentFunction
+      summary: Let a component read a data function
+      description: Let a component read one data function, for every Bot that draws it. Letting it read one it reads already changes nothing. Recorded on the audit trail. Only an admin may do this.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The data function, which the component may now read.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataFunction'
+              examples:
+                granted:
+                  $ref: '#/components/examples/DataFunctionExample'
+        '400':
+          $ref: '#/components/responses/InvalidComponent'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Components
+      operationId: revokeComponentFunction
+      summary: Stop a component reading a data function
+      description: Stop a component reading one data function. Where it needs that data it shows why it can't. Stopping one it doesn't read changes nothing. Recorded on the audit trail. Only an admin may do this.
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The component no longer reads it.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ComponentNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/components:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags:
+        - Components
+      operationId: listBotComponents
+      summary: List the components a Bot may draw
+      description: 'Return one page of the components this Bot may draw now: every published component it isn''t held back from, each with the description the model reads. A client offers the Bot these as tools, and checks again before drawing one (checkBotComponent). Anybody who can use the Bot may list them. Ordered by name. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - components:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the Bot's components.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotComponentPage'
+              examples:
+                held:
+                  $ref: '#/components/examples/BotComponentPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -6785,8 +7162,6 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '404':
-          $ref: '#/components/responses/OrganizationNotFound'
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
@@ -6797,16 +7172,6 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
-    post:
-      tags:
-        - App access requests
-      operationId: createAppAccessRequest
-      summary: Ask an administrator for an app
-      description: 'Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app''s state: turning it on, giving it to the Bot, or connecting its shared account. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - app-access-requests:write
     delete:
       tags:
         - Components
@@ -6860,15 +7225,6 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AppAccessRequestInput'
-            examples:
-              notion:
-                value:
-                  botId: research-assistant
-                  appId: notion
-      responses:
-        '200':
-          description: The request, filed now or already waiting.
               $ref: '#/components/schemas/ComponentCheckRequest'
             examples:
               reads:
@@ -6886,10 +7242,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AppAccessRequest'
-              examples:
-                filed:
-                  $ref: '#/components/examples/AppAccessRequestExample'
                 $ref: '#/components/schemas/ComponentCheck'
               examples:
                 allowed:
@@ -6900,12 +7252,6 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '404':
-          $ref: '#/components/responses/BotOrAppNotFound'
-        '409':
-          $ref: '#/components/responses/BotAppConflict'
-        '429':
-          $ref: '#/components/responses/TooManyPendingRequests'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -6916,29 +7262,6 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - name: appAccessRequestId
-        in: path
-        required: true
-        description: The request's id.
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 200
-          pattern: \S
-        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
-    delete:
-      tags:
-        - App access requests
-      operationId: deleteAppAccessRequest
-      summary: Withdraw a request for an app
-      description: Withdraw your own request while it is waiting. Somebody else's request is not found, like one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
-      security:
-        - webSession: []
-        - appOAuth:
-            - app-access-requests:write
   /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}/call:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -7151,135 +7474,12 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '204':
-          description: The request was withdrawn.
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '404':
-          $ref: '#/components/responses/AppAccessRequestNotFound'
-        '409':
-          $ref: '#/components/responses/AppAccessRequestConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - name: appAccessRequestId
-        in: path
-        required: true
-        description: The request's id.
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 200
-          pattern: \S
-        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
-    post:
-      tags:
-        - App access requests
-      operationId: approveAppAccessRequest
-      summary: Approve a request for an app
-      description: 'Do what a request asks: turn the app on, give the Bot its actions, or confirm the app''s shared account is connected. actions names the actions to give. Without it the Bot gets only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can''t be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.'
-      security:
-        - webSession: []
-        - appOAuth:
-            - app-access-requests:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AppAccessApprovalInput'
-            examples:
-              readOnly:
-                value: {}
-      responses:
-        '200':
-          description: What changed, and the request, answered.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppAccessApproval'
-              examples:
-                approved:
-                  $ref: '#/components/examples/AppAccessApprovalExample'
           description: The skill was deleted.
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/AppAccessRequestNotFound'
-        '409':
-          $ref: '#/components/responses/AppAccessRequestConflict'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        '502':
-          $ref: '#/components/responses/AppServiceFailed'
-        '503':
-          $ref: '#/components/responses/AppDirectoryUnavailable'
-        default:
-          $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - name: appAccessRequestId
-        in: path
-        required: true
-        description: The request's id.
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 200
-          pattern: \S
-        example: 6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d
-    post:
-      tags:
-        - App access requests
-      operationId: dismissAppAccessRequest
-      summary: Dismiss a request for an app
-      description: Close a waiting request without changing anything else. Recorded on the audit trail. Only an administrator may dismiss one.
-      security:
-        - webSession: []
-        - appOAuth:
-            - app-access-requests:write
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The request, dismissed.
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/PrivateNoStore'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppAccessRequest'
-              examples:
-                dismissed:
-                  $ref: '#/components/examples/DismissedAppAccessRequestExample'
-        '400':
-          $ref: '#/components/responses/InvalidRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/AdminOnly'
-        '404':
-          $ref: '#/components/responses/AppAccessRequestNotFound'
-        '409':
-          $ref: '#/components/responses/AppAccessRequestConflict'
           $ref: '#/components/responses/SkillForbidden'
         '404':
           $ref: '#/components/responses/SkillNotFound'
@@ -21512,165 +21712,6 @@ components:
           description: In the order the person connected them, then by id.
           items:
             $ref: '#/components/schemas/ConnectedAccount'
-    PlaygroundSource:
-      type: object
-      description: The published source of a component written in Playground. It runs in an isolated frame and reaches nothing but the arguments it is drawn with.
-      required:
-        - html
-        - css
-        - jsFunctions
-        - argumentSchema
-        - revision
-      properties:
-        html:
-          type: string
-        css:
-          type: string
-        jsFunctions:
-          type: string
-          description: Script that fills in the HTML from window.__args.
-        argumentSchema:
-          type: object
-          description: The arguments the model fills in, as JSON Schema. Empty when it takes none.
-          additionalProperties: true
-        revision:
-          type: integer
-          minimum: 1
-          description: How many times it has been published.
-    PlaygroundDraftSource:
-      type: object
-      additionalProperties: false
-      description: A Playground component's source, as an admin edits it.
-      required:
-        - html
-        - css
-        - jsFunctions
-        - argumentSchema
-        - sampleArguments
-      properties:
-        html:
-          type: string
-        css:
-          type: string
-        jsFunctions:
-          type: string
-          description: Script that fills in the HTML from window.__args.
-        argumentSchema:
-          type: object
-          description: The arguments the model fills in, as JSON Schema.
-          additionalProperties: true
-        sampleArguments:
-          type: object
-          description: The arguments Playground previews it with.
-          additionalProperties: true
-    ComponentDraft:
-      type: object
-      description: A component's working copy. For one that comes with OpenBot only the description is drafted, and source is null.
-      required:
-        - title
-        - description
-        - source
-      properties:
-        title:
-          type: string
-        description:
-          type: string
-          description: The description the model will read once it is published.
-        source:
-          oneOf:
-            - $ref: '#/components/schemas/PlaygroundDraftSource'
-            - type: 'null'
-    Component:
-      type: object
-      description: 'Something a Bot draws in a conversation instead of answering in text: a chart, a card, or one an admin wrote in Playground. draft, hasUnpublishedChanges, withheldFrom, functions and updatedBy are for an admin, and null for anybody else.'
-      required:
-        - name
-        - title
-        - kind
-        - published
-        - publishedAt
-        - description
-        - source
-        - draft
-        - hasUnpublishedChanges
-        - withheldFrom
-        - functions
-        - updatedBy
-        - updatedAt
-      properties:
-        name:
-          type: string
-          minLength: 1
-          description: The tool name a Bot draws it by, and its address. custom_ and a name for one written in Playground.
-        title:
-          type: string
-          description: What people call it.
-        kind:
-          type: string
-          minLength: 1
-          description: 'How the Components page groups it: chart, card and so on, or playground for one written in Playground.'
-        published:
-          type: boolean
-          description: Whether Bots may draw it. Changed only by publishComponent and unpublishComponent.
-        publishedAt:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When it was last published. Null if it never was.
-        description:
-          type:
-            - string
-            - 'null'
-          description: 'The published description: what the model reads when it decides whether to draw it. Null until it is first published.'
-        source:
-          description: For a published Playground component, the source a conversation draws it from. Null for one that comes with OpenBot, and for one that isn't published.
-          oneOf:
-            - $ref: '#/components/schemas/PlaygroundSource'
-            - type: 'null'
-        draft:
-          description: The working copy publishing would make live. For an admin.
-          oneOf:
-            - $ref: '#/components/schemas/ComponentDraft'
-            - type: 'null'
-        hasUnpublishedChanges:
-          type:
-            - boolean
-            - 'null'
-          description: Whether the draft differs from what is published. For an admin.
-        withheldFrom:
-          type:
-            - array
-            - 'null'
-          description: The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.
-          items:
-            type: string
-        functions:
-          type:
-            - array
-            - 'null'
-          description: The data functions it may read, by name. Empty when it shows only what the Bot passes it. For an admin.
-          items:
-            type: string
-        updatedBy:
-          type:
-            - string
-            - 'null'
-          description: 'Who last changed it: an admin''s email address, or the build for one nobody here has changed. For an admin.'
-        updatedAt:
-          type: string
-          format: date-time
-    ComponentPage:
-      type: object
-      required:
-        - components
-        - nextCursor
-      properties:
-        components:
-          type: array
-          description: By kind, then title, then name.
-          items:
-            $ref: '#/components/schemas/Component'
         nextCursor:
           type:
             - string
@@ -21768,84 +21809,6 @@ components:
         appId:
           type: string
           minLength: 1
-    AnnouncedComponent:
-      type: object
-      additionalProperties: false
-      required:
-        - name
-        - title
-        - kind
-        - description
-      properties:
-        name:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: The tool name a Bot draws it by. Trimmed.
-        title:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: Trimmed.
-        kind:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: How the Components page groups it. Trimmed.
-        description:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: What the model reads, used only when the component is new. Trimmed.
-    ComponentAnnouncement:
-      type: object
-      additionalProperties: false
-      required:
-        - components
-      properties:
-        components:
-          type: array
-          description: Every component this version of the app can draw. Empty is allowed and adds nothing.
-          items:
-            $ref: '#/components/schemas/AnnouncedComponent'
-    AnnouncedComponents:
-      type: object
-      required:
-        - added
-      properties:
-        added:
-          type: array
-          description: The names of the components this announcement added.
-          items:
-            type: string
-    ComponentDraftInput:
-      type: object
-      additionalProperties: false
-      description: A draft to save. For a component that comes with OpenBot, send its description; a title or source that differs from what it has is refused. For a Playground component, send all three.
-      required:
-        - description
-      properties:
-        description:
-          type: string
-          description: Trimmed. Required for a component that comes with OpenBot. A Playground draft may leave it empty until it is published.
-        title:
-          type: string
-          minLength: 1
-          pattern: \S
-          description: Trimmed. Required for a Playground component.
-        source:
-          oneOf:
-            - $ref: '#/components/schemas/PlaygroundDraftSource'
-            - type: 'null'
-    DataFunction:
-      type: object
-      description: Data a component may read for itself, so the figures it shows come from OpenBot and not from the model.
-      required:
-        - name
-        - description
-        - reads
-        - granted
-      properties:
         name:
           type: string
           minLength: 1
@@ -21860,121 +21823,6 @@ components:
     BotGrantSkill:
       type: object
       description: A skill, as the Bot's / menu offers it.
-          description: What it returns, for an admin deciding whether to allow it.
-        reads:
-          type: string
-          description: What it reads, in a few words.
-        granted:
-          type: boolean
-          description: Whether this component may read it.
-    DataFunctionPage:
-      type: object
-      required:
-        - functions
-        - nextCursor
-      properties:
-        functions:
-          type: array
-          description: By name.
-          items:
-            $ref: '#/components/schemas/DataFunction'
-        nextCursor:
-          type:
-            - string
-            - 'null'
-          maxLength: 4096
-          pattern: ^[A-Za-z0-9_-]+$
-          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    BotComponent:
-      type: object
-      description: A component one Bot may draw now.
-      required:
-        - name
-        - description
-      properties:
-        name:
-          type: string
-          minLength: 1
-          description: The tool name to offer the Bot.
-        description:
-          type: string
-          minLength: 1
-          description: The published description, which the model reads.
-    BotComponentPage:
-      type: object
-      required:
-        - components
-        - nextCursor
-      properties:
-        components:
-          type: array
-          description: By name.
-          items:
-            $ref: '#/components/schemas/BotComponent'
-        nextCursor:
-          type:
-            - string
-            - 'null'
-          maxLength: 4096
-          pattern: ^[A-Za-z0-9_-]+$
-          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    ComponentCheckRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        functions:
-          type: array
-          description: The data functions the component will read when it is drawn with these arguments, so the answer covers them too. None when left out.
-          items:
-            type: string
-            minLength: 1
-            pattern: \S
-    ComponentCheck:
-      type: object
-      required:
-        - allowed
-        - reason
-      properties:
-        allowed:
-          type: boolean
-        reason:
-          type:
-            - string
-            - 'null'
-          description: Why not, for the model and for the person, when allowed is false. Null when it is true.
-    ComponentCallRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - function
-      properties:
-        function:
-          type: string
-          minLength: 1
-          description: The data function to run, such as botActivity.
-        arguments:
-          type: object
-          description: The function's arguments. None when left out.
-          additionalProperties: true
-    ComponentCall:
-      type: object
-      required:
-        - allowed
-        - data
-        - reason
-      properties:
-        allowed:
-          type: boolean
-        data:
-          description: What the function read, when allowed is true; null otherwise. botActivity answers days and rows of bot and actions; recentRefusals answers rows of at, bot, what and reason.
-        reason:
-          type:
-            - string
-            - 'null'
-          description: Why it didn't run, when allowed is false. Null when it ran.
-    Skill:
-      type: object
-      description: A named instruction a person runs with / in a conversation, on a Bot that offers it.
       required:
         - slug
         - title
@@ -21983,16 +21831,6 @@ components:
         slug:
           type: string
           minLength: 1
-        - instructions
-        - tools
-        - ownerId
-        - botIds
-      properties:
-        slug:
-          type: string
-          minLength: 2
-          maxLength: 40
-          description: What a person types after /, and the skill's address.
         title:
           type: string
         summary:
@@ -22038,36 +21876,6 @@ components:
           description: In order of their id.
           items:
             $ref: '#/components/schemas/BotGrant'
-          description: One line, shown in the / menu. May be empty.
-        instructions:
-          type: string
-          description: What the Bot is told when the skill runs.
-        tools:
-          type: array
-          description: 'The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.'
-          items:
-            type: string
-        ownerId:
-          type:
-            - string
-            - 'null'
-          description: Whose it is, by person id. Null when it is the organization's.
-        botIds:
-          type: array
-          description: The Bots that offer it, by id.
-          items:
-            type: string
-    SkillPage:
-      type: object
-      required:
-        - skills
-        - nextCursor
-      properties:
-        skills:
-          type: array
-          description: By title, then slug.
-          items:
-            $ref: '#/components/schemas/Skill'
         nextCursor:
           type:
             - string
@@ -22755,6 +22563,425 @@ components:
             minLength: 1
             maxLength: 300
             pattern: \S
+    PlaygroundSource:
+      type: object
+      description: The published source of a component written in Playground. It runs in an isolated frame and reaches nothing but the arguments it is drawn with.
+      required:
+        - html
+        - css
+        - jsFunctions
+        - argumentSchema
+        - revision
+      properties:
+        html:
+          type: string
+        css:
+          type: string
+        jsFunctions:
+          type: string
+          description: Script that fills in the HTML from window.__args.
+        argumentSchema:
+          type: object
+          description: The arguments the model fills in, as JSON Schema. Empty when it takes none.
+          additionalProperties: true
+        revision:
+          type: integer
+          minimum: 1
+          description: How many times it has been published.
+    PlaygroundDraftSource:
+      type: object
+      additionalProperties: false
+      description: A Playground component's source, as an admin edits it.
+      required:
+        - html
+        - css
+        - jsFunctions
+        - argumentSchema
+        - sampleArguments
+      properties:
+        html:
+          type: string
+        css:
+          type: string
+        jsFunctions:
+          type: string
+          description: Script that fills in the HTML from window.__args.
+        argumentSchema:
+          type: object
+          description: The arguments the model fills in, as JSON Schema.
+          additionalProperties: true
+        sampleArguments:
+          type: object
+          description: The arguments Playground previews it with.
+          additionalProperties: true
+    ComponentDraft:
+      type: object
+      description: A component's working copy. For one that comes with OpenBot only the description is drafted, and source is null.
+      required:
+        - title
+        - description
+        - source
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          description: The description the model will read once it is published.
+        source:
+          oneOf:
+            - $ref: '#/components/schemas/PlaygroundDraftSource'
+            - type: 'null'
+    Component:
+      type: object
+      description: 'Something a Bot draws in a conversation instead of answering in text: a chart, a card, or one an admin wrote in Playground. draft, hasUnpublishedChanges, withheldFrom, functions and updatedBy are for an admin, and null for anybody else.'
+      required:
+        - name
+        - title
+        - kind
+        - published
+        - publishedAt
+        - description
+        - source
+        - draft
+        - hasUnpublishedChanges
+        - withheldFrom
+        - functions
+        - updatedBy
+        - updatedAt
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: The tool name a Bot draws it by, and its address. custom_ and a name for one written in Playground.
+        title:
+          type: string
+          description: What people call it.
+        kind:
+          type: string
+          minLength: 1
+          description: 'How the Components page groups it: chart, card and so on, or playground for one written in Playground.'
+        published:
+          type: boolean
+          description: Whether Bots may draw it. Changed only by publishComponent and unpublishComponent.
+        publishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was last published. Null if it never was.
+        description:
+          type:
+            - string
+            - 'null'
+          description: 'The published description: what the model reads when it decides whether to draw it. Null until it is first published.'
+        source:
+          description: For a published Playground component, the source a conversation draws it from. Null for one that comes with OpenBot, and for one that isn't published.
+          oneOf:
+            - $ref: '#/components/schemas/PlaygroundSource'
+            - type: 'null'
+        draft:
+          description: The working copy publishing would make live. For an admin.
+          oneOf:
+            - $ref: '#/components/schemas/ComponentDraft'
+            - type: 'null'
+        hasUnpublishedChanges:
+          type:
+            - boolean
+            - 'null'
+          description: Whether the draft differs from what is published. For an admin.
+        withheldFrom:
+          type:
+            - array
+            - 'null'
+          description: The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.
+          items:
+            type: string
+        functions:
+          type:
+            - array
+            - 'null'
+          description: The data functions it may read, by name. Empty when it shows only what the Bot passes it. For an admin.
+          items:
+            type: string
+        updatedBy:
+          type:
+            - string
+            - 'null'
+          description: 'Who last changed it: an admin''s email address, or the build for one nobody here has changed. For an admin.'
+        updatedAt:
+          type: string
+          format: date-time
+    ComponentPage:
+      type: object
+      required:
+        - components
+        - nextCursor
+      properties:
+        components:
+          type: array
+          description: By kind, then title, then name.
+          items:
+            $ref: '#/components/schemas/Component'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    AnnouncedComponent:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - title
+        - kind
+        - description
+      properties:
+        name:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: The tool name a Bot draws it by. Trimmed.
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed.
+        kind:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: How the Components page groups it. Trimmed.
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: What the model reads, used only when the component is new. Trimmed.
+    ComponentAnnouncement:
+      type: object
+      additionalProperties: false
+      required:
+        - components
+      properties:
+        components:
+          type: array
+          description: Every component this version of the app can draw. Empty is allowed and adds nothing.
+          items:
+            $ref: '#/components/schemas/AnnouncedComponent'
+    AnnouncedComponents:
+      type: object
+      required:
+        - added
+      properties:
+        added:
+          type: array
+          description: The names of the components this announcement added.
+          items:
+            type: string
+    ComponentDraftInput:
+      type: object
+      additionalProperties: false
+      description: A draft to save. For a component that comes with OpenBot, send its description; a title or source that differs from what it has is refused. For a Playground component, send all three.
+      required:
+        - description
+      properties:
+        description:
+          type: string
+          description: Trimmed. Required for a component that comes with OpenBot. A Playground draft may leave it empty until it is published.
+        title:
+          type: string
+          minLength: 1
+          pattern: \S
+          description: Trimmed. Required for a Playground component.
+        source:
+          oneOf:
+            - $ref: '#/components/schemas/PlaygroundDraftSource'
+            - type: 'null'
+    DataFunction:
+      type: object
+      description: Data a component may read for itself, so the figures it shows come from OpenBot and not from the model.
+      required:
+        - name
+        - description
+        - reads
+        - granted
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          description: What it returns, for an admin deciding whether to allow it.
+        reads:
+          type: string
+          description: What it reads, in a few words.
+        granted:
+          type: boolean
+          description: Whether this component may read it.
+    DataFunctionPage:
+      type: object
+      required:
+        - functions
+        - nextCursor
+      properties:
+        functions:
+          type: array
+          description: By name.
+          items:
+            $ref: '#/components/schemas/DataFunction'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    BotComponent:
+      type: object
+      description: A component one Bot may draw now.
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: The tool name to offer the Bot.
+        description:
+          type: string
+          minLength: 1
+          description: The published description, which the model reads.
+    BotComponentPage:
+      type: object
+      required:
+        - components
+        - nextCursor
+      properties:
+        components:
+          type: array
+          description: By name.
+          items:
+            $ref: '#/components/schemas/BotComponent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    ComponentCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        functions:
+          type: array
+          description: The data functions the component will read when it is drawn with these arguments, so the answer covers them too. None when left out.
+          items:
+            type: string
+            minLength: 1
+            pattern: \S
+    ComponentCheck:
+      type: object
+      required:
+        - allowed
+        - reason
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type:
+            - string
+            - 'null'
+          description: Why not, for the model and for the person, when allowed is false. Null when it is true.
+    ComponentCallRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - function
+      properties:
+        function:
+          type: string
+          minLength: 1
+          description: The data function to run, such as botActivity.
+        arguments:
+          type: object
+          description: The function's arguments. None when left out.
+          additionalProperties: true
+    ComponentCall:
+      type: object
+      required:
+        - allowed
+        - data
+        - reason
+      properties:
+        allowed:
+          type: boolean
+        data:
+          description: What the function read, when allowed is true; null otherwise. botActivity answers days and rows of bot and actions; recentRefusals answers rows of at, bot, what and reason.
+        reason:
+          type:
+            - string
+            - 'null'
+          description: Why it didn't run, when allowed is false. Null when it ran.
+    Skill:
+      type: object
+      description: A named instruction a person runs with / in a conversation, on a Bot that offers it.
+      required:
+        - slug
+        - title
+        - summary
+        - instructions
+        - tools
+        - ownerId
+        - botIds
+      properties:
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 40
+          description: What a person types after /, and the skill's address.
+        title:
+          type: string
+        summary:
+          type: string
+          description: One line, shown in the / menu. May be empty.
+        instructions:
+          type: string
+          description: What the Bot is told when the skill runs.
+        tools:
+          type: array
+          description: 'The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.'
+          items:
+            type: string
+        ownerId:
+          type:
+            - string
+            - 'null'
+          description: Whose it is, by person id. Null when it is the organization's.
+        botIds:
+          type: array
+          description: The Bots that offer it, by id.
+          items:
+            type: string
+    SkillPage:
+      type: object
+      required:
+        - skills
+        - nextCursor
+      properties:
+        skills:
+          type: array
+          description: By title, then slug.
+          items:
+            $ref: '#/components/schemas/Skill'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     SkillInput:
       type: object
       additionalProperties: false
@@ -30672,34 +30899,28 @@ components:
                 traceId: trace_example
     InvalidApp:
       description: A field is missing or out of bounds, the directory entry isn't one that can be added, the address is refused, the server needs a key nobody gave, or the server couldn't be reached or set up for signing in.
-    InvalidComponent:
-      description: 'A field is missing or blank once trimmed, holds text that can''t be kept, or doesn''t fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn''t custom_ and lower-case letters, numbers and underscores, or a data function this OpenBot doesn''t ship.'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
             title:
-            announcement:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
                 detail: Give the server a name and an address.
-                detail: Component at index 2 needs a name, a title, a kind and a description.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
             address:
-            description:
               value:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
                 detail: Use the server's https address. OpenBot doesn't send your data over plain http.
-                detail: A description is required.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -31379,8 +31600,6 @@ components:
                 traceId: trace_example
     AppAccessRequestNotFound:
       description: No request has that id, it is somebody else's, or the organization does not exist.
-    ComponentNotFound:
-      description: No component has that name, the caller isn't an admin and it isn't published, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -31393,6 +31612,77 @@ components:
                 status: 404
                 detail: There is no such request.
                 code: APP_ACCESS_REQUEST_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAccessRequestConflict:
+      description: The request was already answered, what it asks for needs something only an administrator can add first, or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            answered:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: That request has already been answered.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            needsKey:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Exa Search (API key) needs the token it is reached with. Add it on its page under Apps, then approve this request again.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidComponent:
+      description: 'A field is missing or blank once trimmed, holds text that can''t be kept, or doesn''t fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn''t custom_ and lower-case letters, numbers and underscores, or a data function this OpenBot doesn''t ship.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            announcement:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Component at index 2 needs a name, a title, a kind and a description.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            description:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A description is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ComponentNotFound:
+      description: No component has that name, the caller isn't an admin and it isn't published, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
                 type: https://open.bot/errors/component-not-found
                 title: Component not found.
                 status: 404
@@ -31402,8 +31692,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    AppAccessRequestConflict:
-      description: The request was already answered, what it asks for needs something only an administrator can add first, or the Idempotency-Key was used for a different request.
     ComponentConflict:
       description: A Playground component needs a description and HTML before it can be published, a component that comes with OpenBot can't be deleted or written in Playground, or the Idempotency-Key was used for a different request.
       content:
@@ -31411,26 +31699,22 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            answered:
             notReady:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: That request has already been answered.
                 detail: Weather card needs HTML before it can be published. Add it in Playground.
                 code: CONFLICT
                 category: conflict
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            needsKey:
             comesWithOpenBot:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: Exa Search (API key) needs the token it is reached with. Add it on its page under Apps, then approve this request again.
                 detail: Bar chart comes with OpenBot, so it can't be deleted. Unpublish it to stop Bots drawing it.
                 code: CONFLICT
                 category: conflict
