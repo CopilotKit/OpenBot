@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   applyTheme,
+  LEGACY_THEME_STORAGE_KEY,
   parseStoredTheme,
   resolveDarkTheme,
   THEME_STORAGE_KEY,
@@ -27,7 +28,6 @@ describe("theme preference", () => {
     expect(parseStoredTheme(null)).toBe("system");
     expect(parseStoredTheme("system")).toBe("system");
     expect(parseStoredTheme("something else")).toBe("system");
-    // What every release before this one saved.
     expect(parseStoredTheme("dark")).toBe("dark");
     expect(parseStoredTheme("light")).toBe("light");
   });
@@ -43,6 +43,7 @@ describe("theme preference", () => {
     const { calls, effects } = recorded();
     applyTheme("dark", false, effects);
     expect(calls).toEqual([
+      ["remove", LEGACY_THEME_STORAGE_KEY],
       ["set", THEME_STORAGE_KEY, "dark"],
       ["class", "dark", true],
       ["scheme", "dark"],
@@ -53,10 +54,24 @@ describe("theme preference", () => {
     const { calls, effects } = recorded();
     applyTheme("system", true, effects);
     expect(calls).toEqual([
+      ["remove", LEGACY_THEME_STORAGE_KEY],
       ["remove", THEME_STORAGE_KEY],
       ["class", "dark", true],
       ["scheme", "dark"],
     ]);
+  });
+});
+
+describe("what earlier releases saved", () => {
+  // They saved a light or dark on every visit, so the app must not read it as a choice.
+  test("the choice is kept under a key of its own, which the page reads before paint", () => {
+    expect(THEME_STORAGE_KEY).not.toBe(LEGACY_THEME_STORAGE_KEY);
+    const html = readFileSync(
+      new URL("../index.html", import.meta.url),
+      "utf8",
+    );
+    expect(html).toContain(`getItem("${THEME_STORAGE_KEY}")`);
+    expect(html).not.toContain(`getItem("${LEGACY_THEME_STORAGE_KEY}")`);
   });
 });
 
