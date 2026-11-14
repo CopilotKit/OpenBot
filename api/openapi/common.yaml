@@ -55,6 +55,10 @@ tags:
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
   - { name: Components, description: "The charts, cards and other components a Bot draws in a conversation instead of answering in text. Most come with OpenBot, and an admin can write more in Playground. An admin decides what each tells the model, which Bots may draw it and which data it may read." }
   - { name: Skills, description: "Named instructions a person runs by typing / in a conversation. Anybody can write their own, and an admin writes the organization's. A skill adds no access: a Bot that runs one uses only the apps it can already use." }
+  - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
+  - { name: Destinations, description: "Where a person continues a conversation with a Bot outside OpenBot: a Slack or Microsoft Teams chat, or a phone number for text messages." }
+  - { name: Deliveries, description: "What Bots sent a person outside OpenBot, and where each one got to." }
+  - { name: Notification settings, description: "How a person hears from their Bots while they're away: which ways each kind of update may use, how much each Bot may send, and which ways this deployment can reach anyone at all." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -119,6 +123,17 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}/call: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components~1{componentId}~1call' }
   /api/v2/organizations/{organizationId}/skills: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills' }
   /api/v2/organizations/{organizationId}/skills/{skillId}: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills~1{skillId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
+  /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1link-chat' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1verify-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1confirm-phone' }
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations~1{destinationId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/deliveries: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1deliveries' }
+  /api/v2/organizations/{organizationId}/people/{personId}/notification-settings: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1notification-settings' }
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1bot-notification-settings~1{botId}' }
+  /api/v2/organizations/{organizationId}/notification-transports: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1notification-transports' }
 components:
   securitySchemes:
     webSession:
@@ -173,6 +188,13 @@ components:
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
             skills:write: Write and delete the signed-in person's skills, and for an admin the organization's and anybody's.
+            devices:read: Read the phones the signed-in person registered for push notifications.
+            devices:write: Register the signed-in person's phones for push notifications, and remove them.
+            destinations:read: Read where the signed-in person continues conversations in Slack, Microsoft Teams and text messages.
+            destinations:write: Connect and disconnect the signed-in person's Slack, Microsoft Teams and text message destinations.
+            deliveries:read: Read what Bots sent the signed-in person outside OpenBot.
+            notification-settings:read: Read where the signed-in person's updates go, how much each Bot may send them, and the ways this deployment can reach people.
+            notification-settings:write: Change where the signed-in person's updates go and how much each Bot may send them.
     apiKey:
       type: http
       scheme: bearer
