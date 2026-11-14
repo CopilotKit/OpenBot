@@ -26,4 +26,5 @@ export * from "./reviewer-guidance/reviewer-guidance.zod";
 export * from "./routines/routines.zod";
 export * from "./sessions/sessions.zod";
 export * from "./shared-use/shared-use.zod";
+export * from "./team-bots/team-bots.zod";
 export * from "./what-if/what-if.zod";

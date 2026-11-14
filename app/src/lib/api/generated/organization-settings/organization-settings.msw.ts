@@ -25,6 +25,8 @@ export const getGetDeploymentResponseMock = (): Deployment => ({
   authProviders: ["google", "microsoft"],
   ssoConfigured: true,
   ssoRequired: false,
+  builtInBots: true,
+  isolatedBots: false,
 });
 
 export const getGetOrganizationSettingsResponseMock =
