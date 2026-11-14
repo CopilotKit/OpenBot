@@ -41,6 +41,16 @@ export type DeploymentCapabilities = {
   edition: "team" | "personal";
   transcription?: boolean;
   voice?: boolean;
+  /** Whether a Bot can run inside OpenBot, with no address of its own. */
+  builtInBots?: boolean;
+  /**
+   * Whether this OpenBot can give a Bot a computer of its own at all.
+   *
+   * Only where its computers are made one at a time (the supervisor, or a cluster's sandboxes).
+   * Whether the signed-in person may is a different question, answered by the "Isolated Bots"
+   * switch in `myCapabilitiesQueryOptions`.
+   */
+  isolatedBots?: boolean;
 };
 
 export const deploymentKeys = {
@@ -76,6 +86,8 @@ export function deploymentCapabilitiesQueryOptions() {
         edition: body.edition === "personal" ? "personal" : "team",
         transcription: body.transcription === true,
         voice: body.voice === true,
+        builtInBots: body.builtInBots === true,
+        isolatedBots: body.isolatedBots === true,
       };
     },
   });

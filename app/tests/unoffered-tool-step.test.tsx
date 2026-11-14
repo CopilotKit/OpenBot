@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import { queryClient } from "@/query-client";
+import { approvalInboxResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -38,14 +39,16 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/approvals")
-        return Response.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: false,
           requests: [],
           rules: [],
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       return Response.json({ error: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

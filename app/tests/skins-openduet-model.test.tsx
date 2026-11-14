@@ -18,6 +18,7 @@ import {
   tabForPath,
 } from "@/skins/openduet/places";
 import { waitingCount } from "@/skins/openduet/tasks-model";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -140,7 +141,7 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
     enabled: true,
     requests: [
       request("waiting", "pending"),
-      request("allowed", "allowed"),
+      request("allowed", "approved"),
       request("denied", "denied"),
     ],
     rules: [],
@@ -157,7 +158,10 @@ test("the Tasks badge counts exactly what OpenBot's Needs input list draws", asy
   };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0];
-    if (path === "/api/approvals") return Response.json(inbox);
+    {
+      const approvals = approvalInboxResponse(path, inbox);
+      if (approvals) return approvals;
+    }
     const bots = answerBotsList(path, init, {
       visible: [{ id: "b-1", name: "Ops Bot" }],
     });

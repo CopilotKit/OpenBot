@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import {
   AbstractAgent,
   type BaseEvent,
@@ -7,6 +6,7 @@ import {
   type Message,
   type RunAgentInput,
 } from "@copilotkit/react-core/v2";
+import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { Observable } from "rxjs";
 import { readOutcome } from "@/lib/computers/activity";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";

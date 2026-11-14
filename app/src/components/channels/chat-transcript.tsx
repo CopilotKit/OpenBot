@@ -76,7 +76,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import { attachmentAddress, attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
@@ -1264,13 +1264,15 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
    * transcript drew, announcing to whoever owns it that this person opened this channel.
    */
   const servable = url.startsWith(ATTACHMENT_URL_PREFIX);
+  // Where the bytes are read from: the API's address for the attachment the message names.
+  const address = servable ? attachmentAddress(url) : url;
   /*
    * ONLY OURS IS EVER ASKED ABOUT, and that is the same rule as the line above rather than a second
    * one: a probe is a request like any other, so asking a third party whether a file is still there
    * announces the reader exactly as fetching it would. An off-site url is already unavailable
    * without anybody being asked.
    */
-  const gone = useDocumentIsGone(url, servable && modality === "document");
+  const gone = useDocumentIsGone(address, servable && modality === "document");
   const unavailable = failedToLoad || gone || !servable;
 
   /*
@@ -1320,12 +1322,12 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
   }
 
   return (
-    <AttachmentLightbox filename={filename} url={url}>
+    <AttachmentLightbox filename={filename} url={address}>
       <img
         alt={filename ? `Attachment: ${filename}` : "Attachment"}
         className="size-32 rounded-xl object-cover"
         onError={() => setFailedToLoad(true)}
-        src={url}
+        src={address}
       />
     </AttachmentLightbox>
   );

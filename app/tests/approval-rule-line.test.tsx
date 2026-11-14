@@ -31,7 +31,7 @@ const GRANT = "host-grant-15407-1794112361547002000";
 function serving() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/api/host-access")
+    if (url === "/api/v2/organizations/default/people/me/host-access")
       return Response.json({
         connected: true,
         grants: [

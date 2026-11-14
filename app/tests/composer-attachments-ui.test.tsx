@@ -15,7 +15,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * What the composer does with a file, from the outside: the button that opens the picker, the drop
@@ -44,12 +49,18 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/** Where this composer's conversation takes an upload: the API's address for it. */
+const UPLOADS =
+  "/api/v2/organizations/default/conversations/channel-1/attachments";
+
 /** Every upload this composer attempted: where it went, and what it carried. */
 let uploads: { path: string; name: string }[];
 
 beforeEach(() => {
   uploads = [];
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     const body = init.body as FormData;
     uploads.push({ path, name: (body.get("file") as File).name });
     return new Response(
@@ -57,6 +68,7 @@ beforeEach(() => {
         id: "attachment-id",
         name: (body.get("file") as File).name,
         mimeType: "text/plain",
+        sizeBytes: (body.get("file") as File).size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -66,11 +78,13 @@ beforeEach(() => {
 /**
  * The same upload stub, with the one answer that matters here under the test's control: what the
  * SERVER says the file is, having read its bytes, as against what the browser claimed when it was
- * picked up. `POST /api/channels/:id/attachments` returns a sniffed `mimeType`, and
+ * picked up. The API's `POST /conversations/:id/attachments` returns a sniffed `mimeType`, and
  * `uploadToChannel` puts it on the `url` source it hands back to the SDK.
  */
 function serverSniffs(mimeType: string) {
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     const body = init.body as FormData;
     uploads.push({ path, name: (body.get("file") as File).name });
     return new Response(
@@ -78,6 +92,7 @@ function serverSniffs(mimeType: string) {
         id: "attachment-id",
         name: (body.get("file") as File).name,
         mimeType,
+        sizeBytes: (body.get("file") as File).size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -246,9 +261,7 @@ test("a dropped screenshot shows its preview and goes up to the conversation", a
   drop(view.container.querySelector("form") as HTMLFormElement, [screenshot]);
   await uploaded(view, screenshot.name);
 
-  expect(uploads).toEqual([
-    { path: "/api/channels/channel-1/attachments", name: screenshot.name },
-  ]);
+  expect(uploads).toEqual([{ path: UPLOADS, name: screenshot.name }]);
   expect(view.container.querySelector("img")).not.toBeNull();
   expect(view.container.querySelector('[role="alert"]')).toBeNull();
 });
@@ -303,9 +316,7 @@ test("a text file the screen accepts is not refused a second time by the SDK", a
 
   await uploaded(view, "notes.txt");
 
-  expect(uploads).toEqual([
-    { path: "/api/channels/channel-1/attachments", name: "notes.txt" },
-  ]);
+  expect(uploads).toEqual([{ path: UPLOADS, name: "notes.txt" }]);
   // Asked once the SDK has been all the way through the file it was handed, which is the only
   // point at which the absence of a second refusal means anything: waiting on `uploads` put this
   // question before `processFiles` could have answered it either way.
@@ -396,9 +407,7 @@ test("a text file whose type differs only in case is not refused by the SDK", as
 
   await uploaded(view, "notes.txt");
 
-  expect(uploads).toEqual([
-    { path: "/api/channels/channel-1/attachments", name: "notes.txt" },
-  ]);
+  expect(uploads).toEqual([{ path: UPLOADS, name: "notes.txt" }]);
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 

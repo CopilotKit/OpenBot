@@ -36,6 +36,11 @@ import {
   personBody,
 } from "./accounts-api";
 import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
+import {
+  APPROVAL_PREFERENCES_PATH,
+  approvalInboxResponse,
+  approvalPreferencesBody,
+} from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -103,7 +108,7 @@ let named: string | null;
 let localEvaluation: boolean;
 /** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
-/** Ask before making changes, as `GET /api/approvals` says it, and every change asked for. */
+/** Ask before making changes, as the approval preferences say it, and every change asked for. */
 let askFirst: boolean;
 let askFirstChanges: unknown[];
 /** Whether the API's `deployment` answers, and how many times it was asked. */
@@ -188,13 +193,15 @@ beforeEach(() => {
       const bots = answerBotsList(path, init, { visible: [BOT] });
       if (bots) return bots;
       if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
-      if (path === "/api/approvals")
-        return Response.json({ enabled: askFirst, rules: [], pending: [] });
-      if (path === "/api/approvals/preferences" && method === "PATCH") {
+      if (path === APPROVAL_PREFERENCES_PATH && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as { enabled?: boolean };
         askFirstChanges.push(body);
         if (body.enabled !== undefined) askFirst = body.enabled;
-        return Response.json({ enabled: askFirst });
+        return Response.json(approvalPreferencesBody({ enabled: askFirst }));
+      }
+      {
+        const approvals = approvalInboxResponse(path, { enabled: askFirst });
+        if (approvals) return approvals;
       }
       return Response.json({});
     },

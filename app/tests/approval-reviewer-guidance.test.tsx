@@ -139,6 +139,7 @@ const REPORT: GuidanceBacktest = {
 };
 
 const sent: { path: string; method: string; body: unknown }[] = [];
+const GUIDANCE = "/api/v2/organizations/default/reviewer-guidance";
 const originalFetch = global.fetch;
 let saved: string | null = null;
 
@@ -150,18 +151,48 @@ beforeEach(() => {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (method !== "GET") sent.push({ path, method, body });
-    if (path.endsWith("/api/approvals/team/guidance/check"))
-      return Response.json(body.text === WEAKENS ? REFUSED : READING);
-    if (path.endsWith("/api/approvals/team/guidance/backtest"))
-      return method === "GET"
-        ? Response.json({ calls: 5, skippedSafety: 1 })
-        : Response.json(REPORT);
-    if (path.endsWith("/api/approvals/team/guidance")) {
-      if (method === "PUT") {
-        saved = body.text;
-        return Response.json({ guidance: saved, ...READING });
+    // The API's addresses and nothing else: a call to an older one finds nothing here.
+    const address = new URL(path, "http://openbot.test").pathname;
+    if (address === GUIDANCE || address.startsWith(`${GUIDANCE}/`)) {
+      // Every write is once per key, as the server takes it.
+      if (
+        method !== "GET" &&
+        !new Headers(init?.headers).get("idempotency-key")
+      )
+        return new Response(
+          JSON.stringify({
+            type: "https://open.bot/errors/validation-error",
+            title: "Request validation failed.",
+            status: 400,
+            detail: "Every write needs an Idempotency-Key header.",
+            code: "VALIDATION_ERROR",
+            category: "validation",
+            retryable: false,
+            requestId: "req_test",
+            traceId: "trace_test",
+          }),
+          {
+            status: 400,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+      if (address === `${GUIDANCE}/check` && method === "POST")
+        return Response.json(body.text === WEAKENS ? REFUSED : READING);
+      if (address === `${GUIDANCE}/replay`)
+        return method === "GET"
+          ? Response.json({ calls: 5, skippedSafety: 1 })
+          : Response.json(REPORT);
+      if (address === GUIDANCE) {
+        if (method === "PUT") {
+          saved = body.text;
+          return Response.json({ guidance: saved, ...READING });
+        }
+        if (method === "DELETE") {
+          saved = null;
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ guidance: saved });
       }
-      return Response.json({ guidance: saved });
     }
     const bots = answerBotsList(path, init, {
       visible: [{ id: BOT, name: "Sales Assistant" }],
@@ -232,9 +263,9 @@ test("guidance is checked, tested on recent decisions after saying how many mode
       "Replays the reviewer with this guidance over the last 5 requests your people decided. That's 5 model calls, one for each.",
     ),
   ).toBeTruthy();
-  expect(sent.filter((call) => call.path.endsWith("/backtest"))).toHaveLength(
-    0,
-  );
+  expect(
+    sent.filter((call) => call.path.endsWith("/reviewer-guidance/replay")),
+  ).toHaveLength(0);
   await user.click(view.getByRole("button", { name: "Test on 5 requests" }));
   expect(
     await view.findByText("Agreed with your people on 2 of 5."),
@@ -264,7 +295,9 @@ test("guidance is checked, tested on recent decisions after saying how many mode
       "A person denied it. The reviewer: “This exactly renames the requested Q3 planning page to the specified title.”",
     ),
   ).toBeTruthy();
-  expect(sent.find((call) => call.path.endsWith("/backtest"))?.body).toEqual({
+  expect(
+    sent.find((call) => call.path.endsWith("/reviewer-guidance/replay"))?.body,
+  ).toEqual({
     text: DEALS,
   });
   expect(sent.filter((call) => call.method === "PUT")).toHaveLength(0);

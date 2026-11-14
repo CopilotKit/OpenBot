@@ -13,6 +13,7 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
+import { answerBotAttention, attentionOf } from "./bots-api";
 import {
   awayFromOpenBot,
   closeDesktop,
@@ -88,25 +89,19 @@ test("OpenBot Desktop never offers notifications: not on opening, not on coming 
  */
 async function aBotStartsNeedingThePerson(waitingIn: string | null = null) {
   let questions = 0;
-  globalThis.fetch = (async () =>
-    Response.json({
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    answerBotAttention(input, init, {
       bots: [
-        {
-          agentId: "expenses",
-          name: "Expenses",
+        attentionOf("expenses", "Expenses", {
           questions,
-          approvals: 0,
-          handoffs: 0,
-          unread: 0,
-          paused: false,
-          notify: "all",
-          items: 0,
-          tasks: { needsInput: 0, ready: 0, failed: 0 },
           waitingIn: questions > 0 ? waitingIn : null,
-        },
+        }),
       ],
-      lastPingId: null,
-    })) as unknown as typeof fetch;
+    }) ??
+    Response.json(
+      { error: "not served" },
+      { status: 404 },
+    )) as unknown as typeof fetch;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });

@@ -58,10 +58,7 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { testAgentConnection } from "@/lib/agents/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
@@ -195,22 +192,21 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
