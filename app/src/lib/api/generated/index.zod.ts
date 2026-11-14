@@ -28,3 +28,5 @@ export * from "./sessions/sessions.zod";
 export * from "./shared-use/shared-use.zod";
 export * from "./team-bots/team-bots.zod";
 export * from "./what-if/what-if.zod";
+export * from "./tasks/tasks.zod";
+export * from "./voice/voice.zod";
