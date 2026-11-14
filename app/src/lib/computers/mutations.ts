@@ -8,7 +8,6 @@ import {
 } from "@/lib/api/generated/computers/computers";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { client } from "@/lib/client";
 import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
 

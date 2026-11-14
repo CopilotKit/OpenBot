@@ -8,7 +8,6 @@ import {
   listComputers,
 } from "@/lib/api/generated/computers/computers";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
-import { client } from "@/lib/client";
 
 /**
  * One computer as Admin sees it: a person's, or an isolated Bot's.
