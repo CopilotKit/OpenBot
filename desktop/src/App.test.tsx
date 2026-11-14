@@ -4251,7 +4251,7 @@ function useInterruptedShutdownSetup() {
   return { root, notice };
 }
 
-test("a local Intelligence stack left running at Quit is shown without holding auto-start", async () => {
+test("a local Intelligence stack left running at Quit does not hold auto-start, which drops its notice", async () => {
   useInterruptedShutdownSetup();
   const notice = {
     said: "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.",
@@ -4269,7 +4269,8 @@ test("a local Intelligence stack left running at Quit is shown without holding a
       true,
     ),
   );
-  expect(view.getByRole("alert").textContent).toContain(notice.said);
+  // The Start that ran starts those services as its own, and its Stop stops them.
+  expect(view.queryByText(notice.said)).toBeNull();
 });
 
 test("Stop that fails only for the local Intelligence stack still stops OpenBot", async () => {
@@ -4349,6 +4350,60 @@ test("an interrupted shutdown restores saved setup for explicit recovery", async
   ).toBe(false);
   expect(view.queryByText(notice)).toBeNull();
   expect(invokeCalls).toContainEqual({ command: "show_openbot" });
+});
+
+test("the last quit's notices go once Start runs, and a Start that stops says only why", async () => {
+  // EC2 Mac: OpenBot quit while its engine machine was stopped. The next launch said "That didn't
+  // finish: OpenBot had trouble shutting down last time." over the stopped card, and the card
+  // stayed through Start, which stopped at "Getting OpenBot ready" with the engine down, and
+  // through Retry: a notice about the last run read as the reason this one stopped. With that
+  // one gone, the same card then said the same quit's other notice, about the services it left
+  // running, through Start and Retry until OpenBot opened.
+  const { notice } = useInterruptedShutdownSetup();
+  const leftover =
+    "When OpenBot last quit, some of its services didn't stop. They may still be running. Stopping OpenBot again asks them to stop.";
+  const engine = { running: false };
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "wake_engine") return null;
+    if (command === "last_local_eval_stop_failure")
+      return {
+        said: leftover,
+        detail: "the backend stack did not stop when OpenBot last quit",
+      };
+    if (command === "run_local_eval" && !engine.running) {
+      return {
+        ...localStatus("unknown", "unknown"),
+        outcome: "blocked",
+        stack: null,
+        reason: "docker-unavailable",
+      };
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  expect(view.getByRole("alert").textContent).toContain(notice);
+
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const row = await view.findByRole("listitem", {
+    name: "Getting OpenBot ready",
+  });
+  await waitFor(() =>
+    expect(row.textContent).toContain(
+      "The software OpenBot runs on isn't running. Retry to start it.",
+    ),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+  expect(view.queryByText(leftover)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+
+  engine.running = true;
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(view.queryByText(notice)).toBeNull();
+  expect(view.queryByText(leftover)).toBeNull();
 });
 
 /*
