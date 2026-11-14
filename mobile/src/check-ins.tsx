@@ -198,7 +198,7 @@ export function TaskCard({
       onPress={() =>
         router.push({
           pathname: "/conversation",
-          params: { channelId: task.channelId, agentId: task.agentId },
+          params: { channelId: task.conversationId, agentId: task.botId },
         })
       }
       style={card}

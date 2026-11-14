@@ -48,7 +48,7 @@ import { newId } from "../../../../lib/new-id";
  * more are a group, answering in the order they were picked. The first Bot stays in the URL so
  * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
-/** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
+/** What the API's `getBot` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
 /** Said when a draft holding files is sent to two or more Bots. */

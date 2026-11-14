@@ -2,10 +2,9 @@ import { Redirect } from "expo-router";
 import { useCallback } from "react";
 import { Text } from "react-native";
 import {
-  api,
-  type Bot,
   type BotTask,
   type CheckInItem,
+  everyBot,
   everyPage,
   ORGANIZATION,
 } from "../src/api";
@@ -34,16 +33,18 @@ export default function NeedsYouScreen() {
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
-  const loadTasks = useCallback(
-    () => api<{ tasks: BotTask[] }>("/api/tasks"),
-    [],
-  );
+  const loadTasks = useCallback(async () => {
+    // Every page: the count of what waits on the person is of all of them.
+    return {
+      tasks: await everyPage<BotTask>(`${ORGANIZATION}/tasks`, "tasks"),
+    };
+  }, []);
   const tasks = useLoad(loadTasks, Boolean(session));
-  const loadBots = useCallback(() => api<{ agents: Bot[] }>("/api/agents"), []);
+  const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const nameOf = (agentId: string) =>
-    bots.data?.agents.find((bot) => bot.id === agentId)?.name ?? "A Bot";
+    bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
   const waiting = waitingTasks(tasks.data?.tasks ?? []);
   const found = items.data ?? [];
 
@@ -89,11 +90,7 @@ export default function NeedsYouScreen() {
       {waiting.length > 0 ? (
         <Section title="Tasks">
           {waiting.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              botName={nameOf(task.agentId)}
-            />
+            <TaskCard key={task.id} task={task} botName={nameOf(task.botId)} />
           ))}
         </Section>
       ) : null}

@@ -6,6 +6,7 @@ import {
   setChannelPinnedMutationOptions,
 } from "../src/lib/channels/mutations";
 import { type ChannelPage, channelKeys } from "../src/lib/channels/queries";
+import { conversationPath, problemBody } from "./conversations-api";
 
 const realFetch = globalThis.fetch;
 
@@ -21,10 +22,19 @@ function capturingFetch(status: number, body: unknown) {
     seen.push({ url: String(url), init });
     return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
-      headers: { "content-type": "application/json" },
+      headers: {
+        // A refusal is a problem document; everything else is plain JSON.
+        "content-type":
+          status >= 400 ? "application/problem+json" : "application/json",
+      },
     });
   }) as unknown as typeof fetch;
   return seen;
+}
+
+/** The key a write carries so a retry of it is recognised as the same write. */
+function idempotencyKeyOf(request: SeenRequest | undefined) {
+  return new Headers(request?.init?.headers).get("Idempotency-Key");
 }
 
 function invalidationRecorder() {
@@ -48,7 +58,7 @@ function mutationContext(queryClient: QueryClient) {
   return { client: queryClient, meta: undefined };
 }
 
-test("pinning PUTs the flag to the channel's pin route and invalidates the roster", async () => {
+test("pinning PATCHes the flag to the conversation and invalidates the roster", async () => {
   const seen = capturingFetch(200, { pinned: true });
   const { queryClient, invalidated } = invalidationRecorder();
   const options = setChannelPinnedMutationOptions(queryClient);
@@ -65,13 +75,14 @@ test("pinning PUTs the flag to the channel's pin route and invalidates the roste
   );
 
   expect(seen).toHaveLength(1);
-  expect(seen[0]?.url).toBe("/api/channels/channel-1/pin");
-  expect(seen[0]?.init?.method).toBe("PUT");
+  expect(seen[0]?.url).toBe(conversationPath("channel-1"));
+  expect(seen[0]?.init?.method).toBe("PATCH");
+  expect(idempotencyKeyOf(seen[0])).toBeTruthy();
   expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({ pinned: true });
   expect(invalidated).toEqual([{ queryKey: ["channels"] }]);
 });
 
-test("deleting sends DELETE to the channel route and invalidates the roster and its searches", async () => {
+test("deleting sends DELETE to the conversation and invalidates the roster and its searches", async () => {
   const seen = capturingFetch(204, undefined);
   const { queryClient, invalidated } = invalidationRecorder();
   const options = deleteChannelMutationOptions(queryClient);
@@ -85,8 +96,9 @@ test("deleting sends DELETE to the channel route and invalidates the roster and 
   );
 
   expect(seen).toHaveLength(1);
-  expect(seen[0]?.url).toBe("/api/channels/channel-1");
+  expect(seen[0]?.url).toBe(conversationPath("channel-1"));
   expect(seen[0]?.init?.method).toBe("DELETE");
+  expect(idempotencyKeyOf(seen[0])).toBeTruthy();
   // A search that found it must not offer it again either.
   expect(invalidated).toEqual([
     { queryKey: ["channels", "list"] },
@@ -95,10 +107,13 @@ test("deleting sends DELETE to the channel route and invalidates the roster and 
 });
 
 test("a refused delete surfaces the server's sentence", async () => {
-  capturingFetch(409, {
-    error:
+  capturingFetch(
+    409,
+    problemBody(
+      409,
       "This channel is defined by the deployment package, so it cannot be deleted here.",
-  });
+    ),
+  );
   const { queryClient } = invalidationRecorder();
   const options = deleteChannelMutationOptions(queryClient);
 
@@ -109,7 +124,7 @@ test("a refused delete surfaces the server's sentence", async () => {
   );
 });
 
-test("marking read PUTs the read route and patches lastReadAt in place", async () => {
+test("marking read POSTs mark-read and patches lastReadAt in place", async () => {
   const seen = capturingFetch(204, undefined);
   const queryClient = new QueryClient();
   queryClient.setQueryData(channelKeys.list(), {
@@ -142,8 +157,9 @@ test("marking read PUTs the read route and patches lastReadAt in place", async (
   await options.mutationFn?.("channel-1", mutationContext(queryClient));
 
   expect(seen).toHaveLength(1);
-  expect(seen[0]?.url).toBe("/api/channels/channel-1/read");
-  expect(seen[0]?.init?.method).toBe("PUT");
+  expect(seen[0]?.url).toBe(conversationPath("channel-1", "/mark-read"));
+  expect(seen[0]?.init?.method).toBe("POST");
+  expect(idempotencyKeyOf(seen[0])).toBeTruthy();
   const patched = queryClient.getQueryData<InfiniteData<ChannelPage>>(
     channelKeys.list(),
   );

@@ -57,7 +57,10 @@ const BOT: AgentProfile = {
 function serving() {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/shared-use/bot/")) {
+    // A Bot's shared apps, at the API's address.
+    if (
+      /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/shared-use$/.test(url)
+    ) {
       return Response.json({
         apps: [{ serverId: "gmail", title: "Gmail", covered: false }],
         pending: [],

@@ -30,6 +30,11 @@ import { authKeys } from "@/lib/auth/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { answerBotsList } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  problem,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -68,6 +73,10 @@ const RECENT = Array.from({ length: 7 }, (_, index) =>
 );
 
 /** Every request the menu made, by path and query. */
+/** Whether a request is a search of the conversations: the list asked with `q`. */
+const isSearch = (request: string) =>
+  request.startsWith(`GET ${CONVERSATIONS_PATH}?`) &&
+  new URLSearchParams(request.split("?")[1]).has("q");
 let requests: string[] = [];
 /** How a history search answers right now. */
 let searchAnswer: "ok" | "fail" = "ok";
@@ -81,13 +90,13 @@ beforeEach(() => {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     requests.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
-    if (url.pathname === "/api/channels/search") {
-      if (searchAnswer === "fail")
-        return Response.json({ error: "Server error" }, { status: 500 });
-      return Response.json({ channels: searchResults, nextCursor: null });
+    // The list and its search are one address: a search is the list asked with `q`.
+    if (url.pathname === CONVERSATIONS_PATH && url.searchParams.has("q")) {
+      if (searchAnswer === "fail") return problem(500, "Server error");
+      return Response.json(conversationPage(searchResults));
     }
-    if (url.pathname === "/api/channels")
-      return Response.json({ channels: RECENT, nextCursor: null });
+    if (url.pathname === CONVERSATIONS_PATH)
+      return Response.json(conversationPage(RECENT));
     const bots = answerBotsList(url, init, {
       visible: [
         { id: "helper", name: "Helper", avatarSeed: "helper" },
@@ -251,7 +260,7 @@ test("typing filters pages and Bots here, and one character asks for one more be
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
   });
-  expect(requests.some((request) => request.includes("/search"))).toBe(false);
+  expect(requests.some(isSearch)).toBe(false);
 });
 
 test("two characters search every conversation's name and recent messages on the server", async () => {
@@ -262,7 +271,7 @@ test("two characters search every conversation's name and recent messages on the
       expect.stringContaining("Quarterly budget review"),
     ]),
   );
-  const searched = requests.filter((request) => request.includes("/search"));
+  const searched = requests.filter(isSearch);
   expect(searched).toHaveLength(1);
   expect(searched[0]).toContain("q=budget");
   // Local matches stay: the Bot is found here, not by the server.

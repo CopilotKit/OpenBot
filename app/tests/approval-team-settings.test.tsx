@@ -19,6 +19,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Admin → Approvals: the team-wide controls and team rules, in one place for administrators. */
@@ -99,11 +100,14 @@ beforeEach(() => {
           method: init.method,
           body: init.body ? JSON.parse(String(init.body)) : undefined,
         });
-        return Response.json({ ok: true });
+        return approvalWriteResponse(path, init) ?? Response.json({ ok: true });
       }
-      if (url === "/api/approvals") return Response.json(inbox);
-      if (url === "/api/approvals/shared-use")
-        return Response.json({ requests: [] });
+      {
+        const approvals = approvalInboxResponse(url, inbox);
+        if (approvals) return approvals;
+      }
+      if (url === "/api/v2/organizations/default/shared-use-requests?limit=100")
+        return Response.json({ sharedUseRequests: [], nextCursor: null });
       if (url === ME_PATH)
         return meResponse({
           user: { id: "me", email: "me@example.test", role: "admin" },
@@ -152,7 +156,7 @@ test("an administrator sets the team-wide controls", async () => {
   await user.click(await view.findByRole("option", { name: "Never" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/team",
+      path: "/api/v2/organizations/default/approval-settings",
       method: "PATCH",
       body: { hostCommandsCap: "never" },
     }),
@@ -173,7 +177,7 @@ test("an administrator adds a team rule for every Bot", async () => {
   await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/team/rules",
+      path: "/api/v2/organizations/default/approval-rules",
       method: "POST",
       body: {
         botId: "*",

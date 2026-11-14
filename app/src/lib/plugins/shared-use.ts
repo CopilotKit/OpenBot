@@ -3,7 +3,14 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  approveSharedUseRequest,
+  createSharedUseRequest,
+  declineSharedUseRequest,
+  getBotSharedUse,
+  listSharedUseRequests,
+} from "@/lib/api/generated/shared-use/shared-use";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 
 export type SharedAudience = "owner" | "people" | "team";
 export type ApprovalMember = { kind: "user" | "group"; value: string };
@@ -48,13 +55,28 @@ export const sharedUseKeys = {
   bot: (botId: string) => ["approvals", "shared-use", "bot", botId] as const,
 };
 
+/** Every request still waiting, read page by page until the list ends. */
+async function waitingRequests(
+  signal?: AbortSignal,
+): Promise<SharedUseRequest[]> {
+  const requests: SharedUseRequest[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listSharedUseRequests(
+      ORGANIZATION_ID,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+      { signal, fallback: "Couldn't load shared account requests." },
+    );
+    requests.push(...page.sharedUseRequests);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return requests;
+}
+
 export function sharedUseRequestsQueryOptions(enabled: boolean) {
   return queryOptions({
     queryKey: sharedUseKeys.requests(),
-    queryFn: () =>
-      client<SharedUseRequest[]>("/api/approvals/shared-use", "requests", {
-        fallback: "Couldn't load shared account requests.",
-      }),
+    queryFn: ({ signal }) => waitingRequests(signal),
     enabled,
     refetchInterval: 10_000,
   });
@@ -63,13 +85,11 @@ export function sharedUseRequestsQueryOptions(enabled: boolean) {
 export function botSharedAppsQueryOptions(botId: string) {
   return queryOptions({
     queryKey: sharedUseKeys.bot(botId),
-    queryFn: async (): Promise<BotSharedApps> => {
-      const response = await client(
-        `/api/approvals/shared-use/bot/${encodeURIComponent(botId)}`,
-        { fallback: "Couldn't load this Bot's shared apps." },
-      );
-      return response.json();
-    },
+    queryFn: ({ signal }): Promise<BotSharedApps> =>
+      getBotSharedUse(ORGANIZATION_ID, botId, {
+        signal,
+        fallback: "Couldn't load this Bot's shared apps.",
+      }),
   });
 }
 
@@ -82,9 +102,13 @@ export function decideSharedUseMutationOptions(queryClient: QueryClient) {
       id: string;
       decision: "approve" | "decline";
     }) =>
-      client(
-        `/api/approvals/shared-use/${encodeURIComponent(id)}/${decision}`,
-        { method: "POST", fallback: "Couldn't save that decision." },
+      (decision === "approve"
+        ? approveSharedUseRequest
+        : declineSharedUseRequest)(
+        ORGANIZATION_ID,
+        id,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't save that decision." },
       ),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["approvals"] }),
   });
@@ -97,11 +121,12 @@ export function requestSharedUseMutationOptions(queryClient: QueryClient) {
       serverId: string;
       reason: "publish" | "trigger";
     }) =>
-      client("/api/approvals/shared-use", {
-        method: "POST",
+      createSharedUseRequest(
+        ORGANIZATION_ID,
         body,
-        fallback: "Couldn't send the request.",
-      }),
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't send the request." },
+      ),
     onSettled: (_data, _error, body) =>
       queryClient.invalidateQueries({
         queryKey: sharedUseKeys.bot(body.botId),

@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { chooseBot } from "./chosen-bot";
 import { useFuse } from "./context";
 import { mainChannel, tabFor } from "./model";
-import { Divider, ErrorNotice, LinkRow, FuseSheet, fuseText } from "./ui";
+import { Divider, ErrorNotice, FuseSheet, fuseText, LinkRow } from "./ui";
 
 /**
  * Who sits at the centre of the frame. This look has one agent; OpenBot has a roster, so this is the
@@ -63,7 +63,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col">
             {agents.data.map((agent) => {
               const waiting = attention.data?.find(
-                (entry) => entry.agentId === agent.id,
+                (entry) => entry.botId === agent.id,
               );
               const asks = waiting ? waitingOnYou(waiting) : 0;
               const summary = waiting ? attentionSummary(waiting) : "";
