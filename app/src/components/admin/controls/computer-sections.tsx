@@ -60,6 +60,7 @@ import {
   AllowlistPreview,
   AllowlistReading,
   DescribeAllowlist,
+  DRAFTED_ALLOWLIST,
   type WrittenAllowlist,
 } from "./network-describe";
 
@@ -158,7 +159,7 @@ export function NetworkSection() {
   >();
   return (
     <ControlsSection
-      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
+      description="Control where Bot computers can connect. Each connection is checked against the policy exactly as written, the same way every time. No model decides. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
       title="Network"
     >
       {({ data }) => {
@@ -425,6 +426,7 @@ function NetworkDialog({
               <Field>
                 <FieldLabel htmlFor="network-rules">Allowlist</FieldLabel>
                 <FieldDescription>
+                  {written ? `${DRAFTED_ALLOWLIST} ` : null}
                   One per line. A domain covers its subdomains. *.name covers
                   only subdomains. Either can list ports. Defaults are{" "}
                   {data.defaultDestinations.slice(0, 4).join(", ")} and{" "}

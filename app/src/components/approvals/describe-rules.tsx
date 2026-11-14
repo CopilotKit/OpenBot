@@ -33,6 +33,13 @@ import type { RuleRowProblem } from "@/lib/approval-rules/translate";
 import { type ApprovalRuleInput, BEHAVIOUR_LABELS } from "@/lib/approvals";
 import { LabelSelect } from "./rules";
 
+/**
+ * Under a rule set to "Take action if pre-approved". Which actions a rule covers is an exact match,
+ * but this behaviour then asks the reviewer model, so the screen says a model decides here.
+ */
+export const PRE_APPROVED_REVIEW =
+  "The reviewer model still checks that the person asked for this exact action.";
+
 /** More than this is not one description's worth; the server refuses it too. */
 export const MAX_RULES = 8;
 
@@ -95,7 +102,9 @@ export function RuleRowsEditor({
     <Field>
       <FieldLabel>Rules</FieldLabel>
       <FieldDescription>
-        Use * to match anything. Change any rule before you save.
+        Your model drafted these from your description. OpenBot matches each
+        action against them exactly as written. Use * to match anything. Change
+        any rule before you save.
       </FieldDescription>
       <div className="flex flex-col gap-4">
         {rules.map((rule, index) => {
@@ -182,6 +191,9 @@ export function RuleRowsEditor({
                       onChange={(behaviour) => set(index, { behaviour })}
                       value={rule.behaviour}
                     />
+                    {rule.behaviour === "pre_approved" ? (
+                      <FieldDescription>{PRE_APPROVED_REVIEW}</FieldDescription>
+                    ) : null}
                   </Field>
                 </div>
               </FieldSet>

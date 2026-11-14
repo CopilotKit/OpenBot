@@ -16,7 +16,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   backtestHeadline,
@@ -98,6 +104,7 @@ const REPORT: ApprovalBacktest = {
 
 const sent: { path: string; body: Record<string, unknown> }[] = [];
 const originalFetch = global.fetch;
+let translation: ApprovalRuleTranslation = OPPORTUNITIES;
 
 /** The check the real backtest route makes of rows as they stand. */
 function checked(rules: ApprovalRuleInput[]): ApprovalRulesPreview {
@@ -134,12 +141,13 @@ function checked(rules: ApprovalRuleInput[]): ApprovalRulesPreview {
 
 beforeEach(() => {
   sent.length = 0;
+  translation = OPPORTUNITIES;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (init?.method === "POST") sent.push({ path, body });
     if (path.endsWith("/api/approvals/team/rules/translate"))
-      return Response.json(OPPORTUNITIES);
+      return Response.json(translation);
     if (path.endsWith("/api/approvals/team/rules/backtest"))
       return Response.json(checked(body.rules));
     if (path.endsWith("/api/approvals/team/rules/batch"))
@@ -289,5 +297,45 @@ test("the headline counts what changed and never what a safety requirement decid
   expect(backtestHeadline(none)).toBe("Would have changed no decisions.");
   expect(replayWords(none, true)).toBe(
     "Replayed over the last 22 actions OpenBot checked. These rules are about 2 of them. 2 were decided by a safety requirement, auto-review or a task, which rules don't change. Actions that ran with nothing to check aren't recorded, so a new ask can reach further than this shows.",
+  );
+});
+
+/** The Field around a control or a label. */
+const fieldOf = (element: HTMLElement) =>
+  element.closest('[data-slot="field"]') as HTMLElement;
+
+test("the drafted rules are labelled as what OpenBot matches actions against, above the reading in words", async () => {
+  const { view } = open();
+  await describeRules(view, TEXT);
+  await view.findByText(OPPORTUNITIES.explanation as string);
+
+  const rules = fieldOf(view.getByText("Rules"));
+  expect(rules.textContent).toContain(
+    "Your model drafted these from your description. OpenBot matches each action against them exactly as written.",
+  );
+  expect(
+    (within(rules).getByLabelText("Tool or app") as HTMLInputElement).value,
+  ).toBe("composio-salesforce/SALESFORCE_UPDATE_OPPORTUNITY*");
+  expect(within(rules).getByText("Take action without asking")).toBeTruthy();
+  const reading = view.getByText("What these rules do");
+  expect(
+    rules.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // No rule here is pre-approved, so nothing says the reviewer model decides.
+  expect(view.queryByText(/reviewer model/)).toBeNull();
+});
+
+test("a pre-approved rule says the reviewer model still checks that the person asked for that exact action", async () => {
+  translation = {
+    ...OPPORTUNITIES,
+    rules: [{ ...OPPORTUNITIES.rules[0]!, behaviour: "pre_approved" }],
+  };
+  const { view } = open();
+  await describeRules(view, TEXT);
+  await view.findByText(OPPORTUNITIES.explanation as string);
+
+  const behaviour = view.getByLabelText("Behaviour");
+  expect(fieldOf(behaviour).textContent).toContain(
+    "The reviewer model still checks that the person asked for this exact action.",
   );
 });

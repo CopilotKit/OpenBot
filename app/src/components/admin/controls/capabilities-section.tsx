@@ -126,7 +126,7 @@ export function CapabilitiesSection() {
                 <ItemContent>
                   <ItemTitle>Describe it in words</ItemTitle>
                   <ItemDescription>
-                    Say who may use what, and your model writes the changes.
+                    Say who may use what, and your model drafts the changes.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

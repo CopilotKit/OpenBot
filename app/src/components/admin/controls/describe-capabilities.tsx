@@ -72,8 +72,8 @@ function settingWords(change: CapabilityChange): {
 }
 
 /**
- * The switches the model wrote, one row each, in the Permissions page's own words. Any can be removed
- * before saving; what is wrong with one, as the server checks them as they stand, is said under it.
+ * The switches the model wrote, one row each, in the Permissions page's own words, labelled as what
+ * OpenBot checks: they, and not the description, are what is saved. Any can be removed before saving; what is wrong with one, as the server checks them as they stand, is said under it.
  */
 export function ChangeRows({
   changes,
@@ -91,7 +91,9 @@ export function ChangeRows({
     <Field>
       <FieldLabel>Changes</FieldLabel>
       <FieldDescription>
-        Each change sets one switch. Remove any you don't want before you save.
+        Your model drafted these from your description. They are the switches
+        OpenBot checks, exactly as set. Remove any you don't want before you
+        save.
       </FieldDescription>
       <PageRows>
         {changes.map((change, index) => {

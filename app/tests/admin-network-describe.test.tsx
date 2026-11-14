@@ -14,7 +14,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NetworkSection } from "@/components/admin/controls/computer-sections";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -309,4 +315,47 @@ test("a domain's ports survive opening the policy and saving it unchanged, and a
   expect(saved[0]?.rules).toEqual(IN_FORCE.rules);
   expect(saved[0]).not.toHaveProperty("authoring");
   expect(replayed).toEqual([]);
+});
+
+test("the section says connections are checked against the policy as written, and the describe field only drafts the list", async () => {
+  const { view, dialog } = await openOrganization();
+  expect(
+    view.getByText(
+      /Each connection is checked against the policy exactly as written, the same way every time\. No model decides\./,
+    ),
+  ).toBeTruthy();
+  expect(
+    within(dialog).getByText(
+      /where Bots may connect, and your model drafts the list\./,
+    ),
+  ).toBeTruthy();
+});
+
+test("a drafted list says it and its mode are what OpenBot checks every connection against, with the reading under it", async () => {
+  const { view } = await openOrganization();
+  const allowlist = () =>
+    (view.getByLabelText("Allowlist") as HTMLTextAreaElement).closest(
+      '[data-slot="field"]',
+    ) as HTMLElement;
+  // A list typed by hand is not called a draft.
+  expect(allowlist().textContent).not.toContain("Your model drafted");
+
+  await userEvent.type(
+    await view.findByLabelText("Describe the allowlist"),
+    recorded.writtenFirstTime.text,
+  );
+  fireEvent.click(view.getByRole("button", { name: "Write list" }));
+  await view.findByText("What becomes reachable");
+
+  const field = allowlist();
+  expect(field.textContent).toContain(
+    "Your model drafted this list and the mode above from your description. OpenBot checks every connection against them, exactly as written.",
+  );
+  // The exact entries are in it, and the plain-language reading is under them.
+  expect(
+    (view.getByLabelText("Allowlist") as HTMLTextAreaElement).value.split("\n"),
+  ).toEqual(TRANSLATION.rules.map((rule) => rule.value));
+  expect(field.textContent).toContain("What becomes reachable");
+  for (const line of reading.reachable)
+    expect(field.textContent).toContain(line);
 });
