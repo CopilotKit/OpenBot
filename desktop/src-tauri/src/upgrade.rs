@@ -9,6 +9,8 @@
 //! 3. Lay the app's release out exactly as Install does.
 //! 4. Pull its images.
 //! 5. Start. Its migrations run once, as the dependency Compose starts before the server.
+//! 6. Once it has started and answered, note the images only the previous version ran, for
+//!    removal after this start (`superseded_images`).
 //!
 //! If any step fails, the previous files go back, the database is restored from the dump, and the
 //! previous version starts. The person is told in one sentence.
@@ -275,6 +277,9 @@ pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
         .and_then(|()| said(steps, Now::Starting, |steps| steps.start()));
     match upgraded {
         Ok(()) => {
+            // The new version answered, and nothing goes back to the previous one from here: its
+            // images are noted for removal while its records are still in `previous` to read.
+            crate::superseded_images::record(root, &previous);
             finish(&previous);
             Ran::Moved
         }
