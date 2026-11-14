@@ -2,6 +2,7 @@ export * from "./api-keys/api-keys.zod";
 export * from "./audit-events/audit-events.zod";
 export * from "./bots/bots.zod";
 export * from "./capabilities/capabilities.zod";
+export * from "./connections/connections.zod";
 export * from "./conversations/conversations.zod";
 export * from "./credentials/credentials.zod";
 export * from "./identity-providers/identity-providers.zod";

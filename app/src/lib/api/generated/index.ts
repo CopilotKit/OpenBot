@@ -2,6 +2,7 @@ export * from "./api-keys/api-keys";
 export * from "./audit-events/audit-events";
 export * from "./bots/bots";
 export * from "./capabilities/capabilities";
+export * from "./connections/connections";
 export * from "./conversations/conversations";
 export * from "./credentials/credentials";
 export * from "./identity-providers/identity-providers";
