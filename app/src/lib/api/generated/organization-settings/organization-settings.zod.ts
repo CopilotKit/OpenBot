@@ -531,13 +531,15 @@ export const GetModelUsageParams = zod.object({
 });
 
 export const getModelUsageQueryDaysDefault = 30;
+export const getModelUsageQueryDaysMax = 365;
 
 export const GetModelUsageQueryParams = zod.object({
   days: zod
     .int()
     .min(1)
+    .max(getModelUsageQueryDaysMax)
     .default(getModelUsageQueryDaysDefault)
-    .describe("How many days back. 1 to 365; more is read as 365."),
+    .describe("How many days back, 1 to 365."),
 });
 
 export const GetModelUsageResponse = zod.object({

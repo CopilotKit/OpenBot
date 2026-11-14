@@ -4,8 +4,9 @@
 
 export type GetModelUsageParams = {
   /**
-   * How many days back. 1 to 365; more is read as 365.
+   * How many days back, 1 to 365.
    * @minimum 1
+   * @maximum 365
    */
   days?: number;
 };
