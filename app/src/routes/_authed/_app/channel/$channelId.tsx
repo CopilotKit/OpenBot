@@ -15,9 +15,11 @@ import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen"
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { conversationLoadFailure } from "@/lib/channels/load-failure";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -45,6 +47,14 @@ function RouteComponent() {
   const { channelId } = Route.useParams();
   const { settings, watch } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
+  // Named in a failure only for somebody with another organization the conversation could be in.
+  const organizations = useOrganizationChoices();
+  const organization =
+    organizations && organizations.organizations.length > 1
+      ? organizations.organizations.find(
+          (one) => one.id === organizations.currentId,
+        )?.name
+      : undefined;
   const navigate = Route.useNavigate();
   const isSettingsOpen = settings === true;
   const prefersReducedMotion = useReducedMotion();
@@ -187,7 +197,11 @@ function RouteComponent() {
       <ChannelBody
         channel={channel.data}
         isPending={channel.isPending}
-        hasError={Boolean(channel.error)}
+        failure={
+          channel.error
+            ? conversationLoadFailure(channel.error, organization)
+            : null
+        }
       />
     </DetailPanel>
   );
@@ -200,18 +214,19 @@ function RouteComponent() {
 function ChannelBody({
   channel,
   isPending,
-  hasError,
+  failure,
 }: {
   channel: AgentChannel | undefined;
   isPending: boolean;
-  hasError: boolean;
+  /** What to say when there is no conversation to draw (`conversationLoadFailure`). */
+  failure: string | null;
 }) {
   // Nothing while the channel loads: a placeholder inside a local round-trip is a flicker.
   if (isPending) return null;
-  if (hasError || !channel) {
+  if (failure || !channel) {
     return (
       <p className="p-8 text-sm text-destructive" role="alert">
-        Couldn't load this conversation. Reload the page.
+        {failure ?? conversationLoadFailure(undefined)}
       </p>
     );
   }
