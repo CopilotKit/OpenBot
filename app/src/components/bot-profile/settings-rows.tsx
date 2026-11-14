@@ -27,7 +27,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { deliveryQueryOptions } from "@/lib/delivery";
+import { destinationsQueryOptions } from "@/lib/delivery";
 import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
@@ -82,7 +82,10 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const plugins = useQuery(agentPluginsQueryOptions(agent.id));
   const approvals = useQuery(approvalInboxOptions());
   const teamBots = useQuery({ ...teamBotsQueryOptions(), enabled: !personal });
-  const reach = useQuery({ ...deliveryQueryOptions(), enabled: !personal });
+  const reach = useQuery({
+    ...destinationsQueryOptions(),
+    enabled: !personal,
+  });
   const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
   const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
@@ -207,12 +210,9 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             icon: IconDeviceMobile,
             summary: reach.data
               ? reachSummary(
-                  reach.data.bindings
-                    .filter(
-                      (binding) =>
-                        binding.enabled && binding.agentId === agent.id,
-                    )
-                    .map((binding) => binding.transport),
+                  reach.data
+                    .filter((destination) => destination.botId === agent.id)
+                    .map((destination) => destination.transport),
                 )
               : "",
           },

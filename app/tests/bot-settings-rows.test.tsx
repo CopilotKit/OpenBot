@@ -12,6 +12,7 @@ import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { notificationsResponse } from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The "Settings for this Bot" card: each row says its current answer and opens its page. */
@@ -79,17 +80,14 @@ function serving(
         ],
       });
     }
-    if (url === "/api/delivery") {
-      return Response.json({
-        bindings: [
-          { id: "b1", transport: "slack", agentId: "expenses", enabled: true },
-          { id: "b2", transport: "sms", agentId: "knowledge", enabled: true },
-        ],
-        devices: [],
-        deliveries: [],
-        available: { slack: true, teams: false, sms: true, push: false },
-      });
-    }
+    const reach = notificationsResponse("GET", url, {
+      bindings: [
+        { id: "b1", transport: "slack", channelId: "c1", agentId: "expenses" },
+        { id: "b2", transport: "sms", channelId: "c2", agentId: "knowledge" },
+      ],
+      available: { slack: true, sms: true },
+    });
+    if (reach) return reach;
     if (url === "/api/memory/sources") {
       return Response.json({
         sources: [{ id: "s1", agentId: "expenses", enabled: true }],

@@ -41,6 +41,10 @@ tags:
     description: Where Bot computers may connect, for the organization and for a directory group.
   - name: Conversations
     description: A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs.
+  - name: Tasks
+    description: 'The work a Bot does for a person in a conversation of its own: started from something a check-in found, or handed to the Bot by another. Where a task stands is read from its conversation, never stored.'
+  - name: Voice
+    description: 'Voice calls with a conversation''s Bot: how a call connects, and the calls a person saved in a conversation with their transcripts.'
   - name: Credentials
     description: 'The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
   - name: Models
@@ -2597,6 +2601,1316 @@ paths:
           $ref: '#/components/responses/ServerError'
         '502':
           $ref: '#/components/responses/LiveChannelsUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Conversations
+      operationId: listConversations
+      summary: List conversations
+      description: 'Return one page of the caller''s conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - name: q
+          in: query
+          description: 'What the person typed to search their conversations: 2 to 200 characters, with no control characters.'
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 200
+        - $ref: '#/components/parameters/ConversationLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of conversations.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Conversations
+      operationId: createConversation
+      summary: Start a conversation
+      description: 'Start a conversation between the caller and one or more Bots they can use. A conversation with the same Bots that the caller already has is returned rather than made twice. With group true it is a group conversation: two or more Bots that answer in the order given, on one transcript other people can be added to. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+      responses:
+        '201':
+          description: The conversation.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+            Location:
+              description: The new conversation's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/conversations/5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/route:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Conversations
+      operationId: routeConversationMessage
+      summary: Choose the Bot for a message
+      description: 'Say which of the caller''s Bots should answer a message that names none: the Bot the message mentions, the one whose role fits it, or the caller''s default when nothing decides. With botId it only confirms that Bot is one the caller can use. With skillSlugs only a Bot that offers every one of them is chosen. Nothing is sent and no conversation is made.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteMessageRequest'
+      responses:
+        '200':
+          description: The Bot to send the message to.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutedMessage'
+              examples:
+                example:
+                  $ref: '#/components/examples/RoutedMessageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/NoBotToAnswer'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Conversations
+      operationId: getConversation
+      summary: Get a conversation
+      description: Return one of the caller's conversations, with what a Bot is still working on in it. A conversation the caller is not in is not found.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The conversation.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    patch:
+      tags:
+        - Conversations
+      operationId: updateConversation
+      summary: Rename or pin a conversation
+      description: Change what the conversation is called, whether the caller has it pinned, or both. Only the person who started a conversation may rename it; title null, or blank, gives the name back to OpenBot to write. A pin is the caller's own and moves nothing for anybody else. The answer holds what was changed.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConversationRequest'
+      responses:
+        '200':
+          description: What the conversation is now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedConversation'
+              examples:
+                example:
+                  $ref: '#/components/examples/UpdatedConversationExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Conversations
+      operationId: deleteConversation
+      summary: Delete a conversation
+      description: Remove the conversation from the caller's list. Deleting one that is already gone answers the same way. A conversation that comes with OpenBot cannot be deleted. discardFailedStart removes a conversation whose first message never reached its Bot, and only that.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: discardFailedStart
+          in: query
+          description: true when the conversation is one whose first message failed to send, so it is removed only if nothing was ever said in it.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '204':
+          description: The conversation is gone.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/ConversationConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/mark-read:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags:
+        - Conversations
+      operationId: markConversationRead
+      summary: Mark a conversation read
+      description: Record that the caller has the conversation open now, so nothing in it counts as unread for them.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The conversation is read.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/activity:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags:
+        - Conversations
+      operationId: recordConversationActivity
+      summary: Report the last thing said in a conversation
+      description: Tell the server what was just said in the conversation, by the person or by a Bot, so the caller's list shows it and orders by it. A time in the future is read as now.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationActivity'
+      responses:
+        '204':
+          description: The activity is recorded.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/signal-busy:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags:
+        - Conversations
+      operationId: signalConversationBusy
+      summary: Say a Bot started or stopped answering
+      description: Tell the caller's other windows and devices that a Bot started answering in the conversation, or stopped, so each shows it as working without waiting for the answer.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationBusy'
+      responses:
+        '204':
+          description: The signal was sent.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Conversations
+      operationId: listConversationMembers
+      summary: List who is in a group conversation
+      description: 'Return one page of a group conversation''s members: its Bots the caller can use, in the order they answer, then its people, in the order they joined. The first person started the group. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of members.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationMemberPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationMemberPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Conversations
+      operationId: addConversationMember
+      summary: Add a person to a group conversation
+      description: Add somebody who has signed in to this OpenBot to a group conversation the caller is in, by their email address. They see the whole transcript. Adding somebody already in it changes nothing.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddConversationMemberRequest'
+      responses:
+        '201':
+          description: The person is in the conversation.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddedConversationMember'
+              examples:
+                example:
+                  $ref: '#/components/examples/AddedConversationMemberExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/MemberId'
+    delete:
+      tags:
+        - Conversations
+      operationId: removeConversationMember
+      summary: Leave a group conversation, or take somebody out
+      description: Take a person out of a group conversation. Anybody may take themselves out; only the person who started the group may take out somebody else, and they cannot leave while others are still in it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The person is out of the conversation.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Conversations
+      operationId: listConversationMessages
+      summary: List the messages in a conversation
+      description: Return one page of what was said in the conversation, newest first. A group conversation answers its shared transcript, with each Bot's reply and where it stands. Any other conversation answers the caller's own exchange with one of its Bots, named by botId. A reply still being written is empty to everybody but the person whose Bot is writing it. A missing cursor starts at the newest page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - name: botId
+          in: query
+          description: Which Bot's exchange to read, in a conversation that is not a group. Leave it out for a group conversation.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/ConversationLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of messages.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationMessagePage'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationMessagePageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Conversations
+      operationId: sendConversationMessage
+      summary: Send a message for the server to answer
+      description: Send the caller's message and have the server run the Bots that answer it, with no window left open. In a group conversation every Bot answers in turn, or only the ones the message names, or the one given as botId. In any other conversation botId says which of its Bots answers. The message's id is the caller's own, so the same id sent again is the same message, not a second one.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendConversationMessageRequest'
+      responses:
+        '202':
+          description: The message is accepted and waiting for its answer.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentConversationMessage'
+              examples:
+                example:
+                  $ref: '#/components/examples/SentConversationMessageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags:
+        - Conversations
+      operationId: uploadConversationAttachment
+      summary: Attach a file to the next message
+      description: Upload one file to send with the caller's next message in the conversation. The file is held until that message is sent, or removed, or a day has passed. OpenBot refuses a file no Bot could read, and says what the file was. A message takes up to 8 files.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AttachmentUpload'
+      responses:
+        '201':
+          description: The file is held for the next message.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+              examples:
+                example:
+                  $ref: '#/components/examples/AttachmentExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/AttachmentConflict'
+        '413':
+          $ref: '#/components/responses/UploadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedFile'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags:
+        - Voice
+      operationId: startVoiceCall
+      summary: Start a voice call with a conversation's Bot
+      description: Open a voice call with the Bot of a conversation that has exactly one. Where calls run over WebRTC, send the browser's audio offer as sdp and the answer comes back; where they run over a WebSocket, the answer says where to connect and with what. One call at a time for each person, and a few attempts a minute.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceCallRequest'
+      responses:
+        '200':
+          description: How to connect the call.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceConnection'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceConnectionExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/ConversationConflict'
+        '413':
+          $ref: '#/components/responses/UploadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags:
+        - Voice
+      operationId: listVoiceSessions
+      summary: List the voice calls saved in a conversation
+      description: Return one page of the voice calls the caller had in the conversation, oldest first, each with its transcript and summary. A page holds at most 50. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of voice calls.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceSessionPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceSessionPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Voice
+      operationId: saveVoiceSession
+      summary: Save a voice call's transcript
+      description: 'Keep a finished voice call in the conversation: when it ran, and what was said. The server writes its summary before answering. The call''s id is the caller''s own, so saving the same call again returns it rather than keeping it twice. When the summary cannot be written yet the transcript is still saved, and the same request may be sent again.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceSessionInput'
+      responses:
+        '200':
+          description: The saved call, with its summary.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceSessionResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceSessionResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ConversationNotFound'
+        '409':
+          $ref: '#/components/responses/ConversationConflict'
+        '413':
+          $ref: '#/components/responses/UploadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/voice-configuration:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Voice
+      operationId: getVoiceConfiguration
+      summary: Get how voice calls connect
+      description: Say whether this OpenBot's voice calls run over WebRTC or a WebSocket, so the app prepares the right one before starting a call. Unavailable when voice calls are not set up.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: How calls connect.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceConfiguration'
+              examples:
+                example:
+                  $ref: '#/components/examples/VoiceConfigurationExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/attachments/{attachmentId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      tags:
+        - Conversations
+      operationId: getAttachment
+      summary: Download an attachment
+      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The file.
+          headers:
+            ETag:
+              description: Names these bytes, for If-None-Match.
+              schema:
+                type: string
+          content:
+            '*/*':
+              schema: {}
+        '304':
+          description: The copy the caller holds is current.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/AttachmentNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Conversations
+      operationId: deleteAttachment
+      summary: Remove a file that has not been sent
+      description: Take back a file the caller uploaded for a message they have not sent yet. A file that is already part of a sent message stays.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The file is removed.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/AttachmentNotFound'
+        '409':
+          $ref: '#/components/responses/AttachmentConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversation-threads:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Conversations
+      operationId: createConversationThread
+      summary: Get a thread id for a chat with one Bot
+      description: Make the id of a new thread for a chat that is kept only as its thread, such as the chat on a Bot's own page. The id belongs to this OpenBot, so two OpenBots sharing one store of threads can tell their conversations apart. Nothing is stored until something is said in it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: A new thread id.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationThread'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationThreadExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/conversation-threads/{threadId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConversationThreadId'
+    get:
+      tags:
+        - Conversations
+      operationId: getConversationThread
+      summary: Check a remembered thread still exists
+      description: Say whether the thread still holds the caller's conversation, so an app that remembers a thread id knows before sending whether its history is still there. known false means the thread is gone for certain; when that could not be checked the answer is a problem, never false.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the thread is still there.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationThreadStatus'
+              examples:
+                example:
+                  $ref: '#/components/examples/ConversationThreadStatusExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Tasks
+      operationId: listTasks
+      summary: List tasks
+      description: 'Return one page of the caller''s tasks: the open ones, and the ones marked done in the last 7 days, newest first. Each says where it stands and what it needs from the person. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of tasks.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags:
+        - Tasks
+      operationId: getTask
+      summary: Get a task
+      description: Return one of the caller's tasks as it stands now. Another person's task is not found.
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The task.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags:
+        - Tasks
+      operationId: resolveTask
+      summary: Mark a task done
+      description: Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The task as it stands now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '409':
+          $ref: '#/components/responses/TaskConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/reopen:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags:
+        - Tasks
+      operationId: reopenTask
+      summary: Reopen a task
+      description: Take back that the task is done, so it stands where its conversation left it.
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The task as it stands now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '409':
+          $ref: '#/components/responses/TaskConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/retry:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags:
+        - Tasks
+      operationId: retryTask
+      summary: Try a failed task again
+      description: Run the task's failed turn once more, in the task's own conversation. Only a task that failed can be tried again. The answer is the task as it stands now, which is working.
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The task as it stands now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '409':
+          $ref: '#/components/responses/TaskConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/transcriptions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Conversations
+      operationId: createTranscription
+      summary: Turn a recording into text
+      description: Transcribe a short recording of the caller speaking, for dictating a message. The recording is WebM, MP4 or WAV audio under 10 MiB, and is not kept. One recording at a time for each person.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TranscriptionUpload'
+      responses:
+        '200':
+          description: What was said.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transcription'
+              examples:
+                example:
+                  $ref: '#/components/examples/TranscriptionExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '413':
+          $ref: '#/components/responses/UploadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedFile'
+        '422':
+          $ref: '#/components/responses/NoSpeech'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/credentials:
@@ -8771,6 +10085,9 @@ components:
           refreshUrl: /api/auth/oauth2/token
           scopes:
             conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
+            conversations:write: Start, rename, pin and delete the signed-in person's conversations, and send messages and files in them.
+            tasks:read: Read the signed-in person's tasks.
+            tasks:write: Mark the signed-in person's tasks done, reopen them and try them again.
             computers:read: Watch the signed-in person's Bots' screens and terminals.
             computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
             bots:read: Read the Bots the signed-in person can see, and what each is doing for them.
@@ -9065,6 +10382,57 @@ components:
           - offered
           - all
         default: offered
+    ConversationLimit:
+      name: limit
+      in: query
+      description: Most items in one page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: The person's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: usr_9b1c6f0e
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      description: The attachment's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    ConversationThreadId:
+      name: threadId
+      in: path
+      required: true
+      description: The thread's id.
+      schema:
+        type: string
+        format: uuid
+      example: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      description: The task's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: \S
+      example: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
     DeviceId:
       name: deviceId
       in: path
@@ -11992,6 +13360,900 @@ components:
           maxLength: 40
           pattern: \S
           description: An effort the model takes, or null for its own. Trimmed, and read in lower case.
+    ConversationWork:
+      type: object
+      description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
+      required:
+        - kind
+        - key
+        - botId
+        - botName
+        - since
+      properties:
+        kind:
+          type: string
+          enum:
+            - handoff
+            - routine
+        key:
+          type: string
+          description: Names this piece of work, so two asks of one Bot are two entries.
+        botId:
+          type: string
+          description: The Bot that was asked, or that the routine runs as.
+        botName:
+          type:
+            - string
+            - 'null'
+          description: That Bot's name when the work started.
+        since:
+          type: string
+          format: date-time
+          description: When it started.
+        routineId:
+          type: string
+          description: The routine, for a routine.
+    ConversationSummary:
+      type: object
+      description: A conversation as the caller's list shows it.
+      required:
+        - id
+        - name
+        - botIds
+        - threadId
+        - active
+        - lastMessageAt
+        - summary
+        - opening
+        - lastMessage
+        - lastMessageBotId
+        - createdAt
+        - pinned
+        - lastReadAt
+        - canRename
+        - task
+        - work
+      properties:
+        id:
+          type: string
+          description: The conversation's id.
+        name:
+          type: string
+          description: The name OpenBot gave it from its Bots.
+        botIds:
+          type: array
+          description: The Bots in the conversation.
+          items:
+            type: string
+        threadId:
+          type: string
+          description: The caller's own thread in the conversation, which its messages, approvals and reactions name.
+        active:
+          type: boolean
+          description: False once every Bot in it is gone, so nothing more can be said.
+        lastMessageAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When something was last said in it. Null for a conversation nobody has used.
+        summary:
+          type:
+            - string
+            - 'null'
+          description: 'What the conversation is called: the name its owner gave it, or the few words OpenBot wrote. Null until it has one.'
+        opening:
+          type:
+            - string
+            - 'null'
+          description: The person's first words in it, which name it until it has a summary.
+        lastMessage:
+          type:
+            - string
+            - 'null'
+          description: The last thing said in it.
+        lastMessageBotId:
+          type:
+            - string
+            - 'null'
+          description: The Bot that said it, or null when a person did.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was started.
+        pinned:
+          type: boolean
+          description: Whether the caller pinned it.
+        lastReadAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the caller last had it open. Null for never.
+        canRename:
+          type: boolean
+          description: Whether the caller started it, and so may rename it.
+        task:
+          type: boolean
+          description: Whether it is a task's own conversation, which holds one piece of work.
+        work:
+          type: array
+          description: What a Bot is still working on in it.
+          items:
+            $ref: '#/components/schemas/ConversationWork'
+        busy:
+          type: boolean
+          description: Present and true while a Bot is working in it.
+    ConversationPage:
+      type: object
+      required:
+        - conversations
+        - nextCursor
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationSummary'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateConversationRequest:
+      type: object
+      required:
+        - botIds
+      additionalProperties: false
+      properties:
+        botIds:
+          type: array
+          description: The Bots to talk to, each once.
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+        group:
+          type: boolean
+          default: false
+          description: 'True for a group conversation: two or more Bots answering in the order given, on one transcript.'
+    Conversation:
+      type: object
+      description: A conversation between the caller and one or more Bots.
+      required:
+        - id
+        - name
+        - botIds
+        - threadId
+        - active
+        - lastMessageAt
+      properties:
+        id:
+          type: string
+          description: The conversation's id.
+        name:
+          type: string
+          description: The name OpenBot gave it from its Bots.
+        botIds:
+          type: array
+          description: The Bots in the conversation.
+          items:
+            type: string
+        threadId:
+          type: string
+          description: The caller's own thread in the conversation, which its messages, approvals and reactions name.
+        active:
+          type: boolean
+          description: False once every Bot in it is gone, so nothing more can be said.
+        lastMessageAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When something was last said in it. Null for a conversation nobody has used.
+        work:
+          type: array
+          description: What a Bot is still working on in the conversation. Present when the conversation is read by its id.
+          items:
+            $ref: '#/components/schemas/ConversationWork'
+    ConversationResponse:
+      type: object
+      required:
+        - conversation
+      properties:
+        conversation:
+          $ref: '#/components/schemas/Conversation'
+    RouteMessageRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: The message.
+          minLength: 1
+          maxLength: 10000
+          pattern: \S
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The Bot the person chose, to confirm they can use it.
+        skillSlugs:
+          type: array
+          description: Skills the message asks for, by their commands.
+          maxItems: 50
+          items:
+            type: string
+            pattern: ^[a-z0-9][a-z0-9-]*$
+            maxLength: 200
+    RoutedMessage:
+      type: object
+      required:
+        - botId
+        - name
+        - reason
+        - fallback
+        - viaMention
+      properties:
+        botId:
+          type: string
+          description: The Bot to send the message to.
+        name:
+          type: string
+          description: Its name.
+        reason:
+          type: string
+          description: Why it was chosen, in a few words.
+        fallback:
+          type: boolean
+          description: True when nothing decided and the default Bot was taken.
+        viaMention:
+          type: boolean
+          description: True when the message named the Bot.
+        undecided:
+          type:
+            - string
+            - 'null'
+          description: Why the choice fell back to the default Bot, when it did and a model was asked. Absent when the person chose the Bot.
+    UpdateConversationRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type:
+            - string
+            - 'null'
+          description: The new name, on one line and at most 80 characters as a person counts them. Null or blank lets OpenBot name it.
+          maxLength: 2000
+        pinned:
+          type: boolean
+          description: Whether the caller has it pinned.
+    UpdatedConversation:
+      type: object
+      description: What was changed, as it now stands.
+      properties:
+        summary:
+          type:
+            - string
+            - 'null'
+          description: What the conversation is called now, when its name was changed. Null when OpenBot has not named it yet.
+        pinned:
+          type: boolean
+          description: Whether the caller has it pinned, when that was changed.
+    ConversationActivity:
+      type: object
+      required:
+        - text
+        - botId
+        - at
+      properties:
+        text:
+          type: string
+          description: What was said.
+          minLength: 1
+          pattern: \S
+        botId:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The Bot that said it, or null when the person did.
+        at:
+          type: string
+          format: date-time
+          description: When it was said.
+    ConversationBusy:
+      type: object
+      required:
+        - busy
+      properties:
+        busy:
+          type: boolean
+          description: True when a Bot started answering, false when it stopped.
+    ConversationMember:
+      type: object
+      description: A Bot or a person in a group conversation.
+      required:
+        - kind
+        - id
+        - name
+      properties:
+        kind:
+          type: string
+          enum:
+            - bot
+            - person
+        id:
+          type: string
+          description: The Bot's id, or the person's.
+        name:
+          type:
+            - string
+            - 'null'
+          description: The Bot's name, or the person's. Null for a person with none.
+        email:
+          type: string
+          description: The person's email address, for a person.
+        creator:
+          type: boolean
+          description: 'For a person: whether they started the group, and so may take others out of it.'
+    ConversationMemberPage:
+      type: object
+      required:
+        - members
+        - nextCursor
+      properties:
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationMember'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    AddConversationMemberRequest:
+      type: object
+      required:
+        - email
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          description: The email address the person signs in to this OpenBot with.
+          format: email
+          minLength: 3
+          maxLength: 320
+    AddedConversationMember:
+      type: object
+      required:
+        - personId
+      properties:
+        personId:
+          type: string
+          description: The person who is now in the conversation.
+    ConversationMessage:
+      type: object
+      description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
+      required:
+        - id
+        - role
+        - personId
+        - botId
+        - text
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: The message's id.
+        role:
+          type: string
+          enum:
+            - person
+            - bot
+            - tool
+            - system
+          description: Who it is from. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group.
+        personId:
+          type:
+            - string
+            - 'null'
+          description: Who sent it, for a person's message; whose turn it answered, for a Bot's reply.
+        botId:
+          type:
+            - string
+            - 'null'
+          description: The Bot that replied. Null for a person's message.
+        text:
+          type: string
+          description: What was said. Empty while another person's Bot is still writing it.
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - waiting
+            - completed
+            - failed
+          description: Where a Bot's reply stands. A person's message is completed.
+        createdAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was said. Null where the time was not kept.
+        reason:
+          type: string
+          description: Why a waiting Bot is waiting.
+        answeredBy:
+          type: string
+          description: 'For an answer passed on from another Bot: which Bot answered.'
+        consent:
+          type: object
+          description: A Team Bot asking the person whose turn it was to use their own account.
+          required:
+            - botId
+            - serverId
+          properties:
+            botId:
+              type: string
+            serverId:
+              type: string
+        toolCalls:
+          type: integer
+          minimum: 0
+          description: How many tools the Bot called in this message, when it called any.
+    ConversationMessagePage:
+      type: object
+      required:
+        - messages
+        - nextCursor
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    SendConversationMessageRequest:
+      type: object
+      required:
+        - id
+        - text
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: The caller's own id for the message, so a retry is the same message.
+          minLength: 1
+          maxLength: 160
+        text:
+          type: string
+          description: The message.
+          minLength: 1
+          maxLength: 16000
+          pattern: \S
+        botId:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 200
+          description: The one Bot to answer. Needed in a conversation that is not a group; in a group, leave it out for every Bot or the ones the message names.
+    SentConversationMessage:
+      type: object
+      required:
+        - queued
+      properties:
+        id:
+          type: string
+          description: The message's id.
+        queued:
+          type: boolean
+          description: True when the message is waiting for its answer. False when the same message was already accepted.
+    AttachmentUpload:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The file.
+        uploadGroup:
+          type: string
+          description: Names the message being written, so the files of two windows are counted apart.
+          maxLength: 200
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
+    VoiceCallRequest:
+      type: object
+      properties:
+        sdp:
+          type: string
+          description: The caller's audio offer, where calls run over WebRTC.
+          minLength: 1
+          maxLength: 65536
+    VoiceConnection:
+      type: object
+      description: 'How to connect a call. Over WebRTC: the answer to the caller''s offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.'
+      required:
+        - transport
+      properties:
+        transport:
+          type: string
+          enum:
+            - webrtc
+            - websocket
+        sdp:
+          type: string
+          description: The answer to the caller's offer.
+        url:
+          type: string
+          description: The socket to open.
+        clientSecret:
+          type: string
+          description: A secret that opens that socket once, for a few minutes.
+        session:
+          type: object
+          description: The session to open on the socket, as the voice service reads it.
+          additionalProperties: true
+    VoiceTranscriptEntry:
+      type: object
+      required:
+        - id
+        - role
+        - text
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          description: The person, or the Bot.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 60000
+          pattern: \S
+    VoiceSession:
+      type: object
+      description: A saved voice call.
+      required:
+        - id
+        - conversationId
+        - anchorMessageId
+        - startedAt
+        - endedAt
+        - transcript
+        - durationSeconds
+        - summary
+        - summaryStatus
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+          description: The conversation the call was in.
+        anchorMessageId:
+          type:
+            - string
+            - 'null'
+          description: The message the call followed.
+        startedAt:
+          type: string
+          format: date-time
+          description: When the call started.
+        endedAt:
+          type: string
+          format: date-time
+          description: When it ended.
+        transcript:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceTranscriptEntry'
+        durationSeconds:
+          type: integer
+          minimum: 0
+        summary:
+          type:
+            - string
+            - 'null'
+          description: What the call was about, in a few lines. Null when it could not be written.
+        summaryStatus:
+          type: string
+          enum:
+            - ready
+            - failed
+    VoiceSessionPage:
+      type: object
+      required:
+        - sessions
+        - nextCursor
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceSession'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    VoiceSessionInput:
+      type: object
+      required:
+        - id
+        - anchorMessageId
+        - startedAt
+        - endedAt
+        - transcript
+      properties:
+        id:
+          type: string
+          description: The caller's own id for the call.
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+        anchorMessageId:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+          description: The message the call followed, so it is shown after it. Null at the start of a conversation.
+        startedAt:
+          type: string
+          format: date-time
+          description: When the call started.
+        endedAt:
+          type: string
+          format: date-time
+          description: 'When it ended: after it started, within a day.'
+        transcript:
+          type: array
+          minItems: 1
+          maxItems: 300
+          description: What was said, in order, at most 60,000 characters in all.
+          items:
+            $ref: '#/components/schemas/VoiceTranscriptEntry'
+    VoiceSessionResponse:
+      type: object
+      required:
+        - session
+      properties:
+        session:
+          $ref: '#/components/schemas/VoiceSession'
+        notice:
+          type: string
+          description: Present when the call is saved but its summary could not be written yet, because too many are being written. Says so, in words for the person. Saving the same call again later writes it.
+    VoiceConfiguration:
+      type: object
+      required:
+        - transport
+      properties:
+        transport:
+          type: string
+          enum:
+            - webrtc
+            - websocket
+          description: How a call connects.
+    ConversationThread:
+      type: object
+      required:
+        - threadId
+      properties:
+        threadId:
+          type: string
+          description: The new thread's id.
+    ConversationThreadStatus:
+      type: object
+      required:
+        - threadId
+        - known
+      properties:
+        threadId:
+          type: string
+        known:
+          type: boolean
+          description: Whether the thread still holds the caller's conversation.
+    TaskStatus:
+      type: string
+      enum:
+        - needs_input
+        - working
+        - resolved
+        - failed
+        - ready_for_review
+      description: 'Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.'
+    Task:
+      type: object
+      description: A piece of work a Bot does for a person in a conversation of its own.
+      required:
+        - id
+        - botId
+        - conversationId
+        - threadId
+        - title
+        - why
+        - origin
+        - suggestionId
+        - sourceApp
+        - sourceLink
+        - originConversationId
+        - status
+        - failure
+        - failedAt
+        - next
+        - resolvedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: The task's id.
+        botId:
+          type: string
+          description: The Bot doing it.
+        conversationId:
+          type: string
+          description: The task's own conversation, where the person reads it and replies.
+        threadId:
+          type:
+            - string
+            - 'null'
+          description: That conversation's thread. Null once it is gone.
+        title:
+          type: string
+          description: What the task is.
+        why:
+          type:
+            - string
+            - 'null'
+          description: Why it was raised.
+        origin:
+          type: string
+          enum:
+            - check_in
+            - delegated
+          description: Whether the person started it from a check-in, or a Bot was asked to do it.
+        suggestionId:
+          type:
+            - string
+            - 'null'
+          description: The check-in item it was started from.
+        sourceApp:
+          type:
+            - string
+            - 'null'
+          description: The app the item came from.
+        sourceLink:
+          type:
+            - string
+            - 'null'
+          description: Where the item is in that app.
+        originConversationId:
+          type:
+            - string
+            - 'null'
+          description: The conversation a delegated task was asked for in, where its result is said.
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        failure:
+          type:
+            - string
+            - 'null'
+          description: Why its turn could not finish, while it is failed.
+        failedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it failed.
+        next:
+          type:
+            - string
+            - 'null'
+          description: One line on what comes next.
+        resolvedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the person marked it done.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was started.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+    TaskPage:
+      type: object
+      required:
+        - tasks
+        - nextCursor
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    TaskResponse:
+      type: object
+      required:
+        - task
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+    TranscriptionUpload:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: 'The recording: WebM, MP4 or WAV audio.'
+    Transcription:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: What was said.
     DevicePlatform:
       type: string
       enum:
@@ -17859,6 +20121,265 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    NoBotToAnswer:
+      description: 'No Bot can answer the message: the caller has none, none offers every skill asked for, or more than one has the name the message used. Or the Idempotency-Key was already used for a different request.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            none:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: No Bot is available.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ambiguous:
+              value:
+                type: https://open.bot/errors/bot-name-ambiguous
+                title: More than one Bot has that name.
+                status: 409
+                detail: More than one Bot has that name. Research Helper, Research Helper. Choose one with @.
+                code: BOT_NAME_AMBIGUOUS
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConversationConflict:
+      description: 'The conversation cannot take this: it comes with OpenBot and cannot be deleted, it is no longer active, or the call was already saved in another conversation. Or the Idempotency-Key was already used for a different request.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            builtIn:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This conversation is built in and can't be deleted.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ServiceUnavailable:
+      description: 'Something this needs is not set up or did not answer: the service behind it, or OpenBot''s own store. Try again.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: The service is unavailable.
+                status: 503
+                detail: Couldn't load your tasks. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    AttachmentConflict:
+      description: 'The file cannot be taken: the message already holds as many files as it may, or the caller is holding too many unsent files. Or it cannot be removed because it is already part of a sent message. Or the Idempotency-Key was already used for a different request.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sent:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This attachment is already part of a sent message.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    UploadTooLarge:
+      description: The file or the request is larger than OpenBot takes.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tooLarge:
+              value:
+                type: https://open.bot/errors/payload-too-large
+                title: The request is too large.
+                status: 413
+                detail: Recordings must be smaller than 10 MiB.
+                code: PAYLOAD_TOO_LARGE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    UnsupportedFile:
+      description: The file is not a type OpenBot can read.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unsupported:
+              value:
+                type: https://open.bot/errors/unsupported-media-type
+                title: That media type is not supported.
+                status: 415
+                detail: This recording format is not supported. Use WebM, MP4, or WAV audio.
+                code: UNSUPPORTED_MEDIA_TYPE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TooManyRequests:
+      description: The caller already has one of these running, or asked too often. Try again after the time Retry-After gives.
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again, when the server knows.
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            busy:
+              value:
+                type: https://open.bot/errors/rate-limited
+                title: Too many requests.
+                status: 429
+                detail: Too many call attempts. Try again in a moment.
+                code: RATE_LIMITED
+                category: rate_limit
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    AttachmentNotFound:
+      description: The attachment does not exist or the caller may not read it, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/not-found
+                title: Not found.
+                status: 404
+                detail: No such attachment.
+                code: NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TaskNotFound:
+      description: The task does not exist or is another person's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/not-found
+                title: Not found.
+                status: 404
+                detail: Couldn't find that task.
+                code: NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TaskConflict:
+      description: The task is not in a state this can change. Or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notFailed:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Only a task that failed can be tried again.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    NoSpeech:
+      description: The recording held no speech to write down.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            silent:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 422
+                detail: No speech was detected. Try recording again.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     TransportUnavailable:
       description: 'This deployment hasn''t set up that way of reaching people: push notifications, the Slack and Teams pairing, or text messages. Or the organization does not exist.'
       content:
@@ -19716,6 +22237,211 @@ components:
       value:
         model: gpt-6.1-pro
         effort: xhigh
+    ConversationPageExample:
+      summary: One page of conversations, and the last.
+      value:
+        conversations:
+          - id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            name: General Assistant
+            botIds:
+              - general-assistant
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            active: true
+            lastMessageAt: '2026-11-14T12:00:00.000Z'
+            summary: Quarterly forecast
+            opening: Can you draft the quarterly forecast?
+            lastMessage: Here is the first draft.
+            lastMessageBotId: general-assistant
+            createdAt: '2026-11-13T09:00:00.000Z'
+            pinned: false
+            lastReadAt: '2026-11-14T12:00:05.000Z'
+            canRename: true
+            task: false
+            work: []
+        nextCursor: null
+    ConversationResponseExample:
+      summary: A conversation with one Bot.
+      value:
+        conversation:
+          id: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          name: General Assistant
+          botIds:
+            - general-assistant
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          active: true
+          lastMessageAt: '2026-11-14T12:00:00.000Z'
+          work: []
+    RoutedMessageExample:
+      summary: A message the default Bot takes.
+      value:
+        botId: general-assistant
+        name: General Assistant
+        reason: fallback
+        fallback: true
+        viaMention: false
+        undecided: null
+    UpdatedConversationExample:
+      summary: A conversation renamed and pinned.
+      value:
+        summary: Quarterly forecast
+        pinned: true
+    ConversationMemberPageExample:
+      summary: A group of two Bots and one person.
+      value:
+        members:
+          - kind: bot
+            id: general-assistant
+            name: General Assistant
+          - kind: bot
+            id: research-helper
+            name: Research Helper
+          - kind: person
+            id: usr_9b1c6f0e
+            name: Ada Lovelace
+            email: ada@example.com
+            creator: true
+        nextCursor: null
+    AddedConversationMemberExample:
+      summary: The person who was added.
+      value:
+        personId: usr_2f4a8c1b
+    ConversationMessagePageExample:
+      summary: A person's message and a Bot's reply, newest first.
+      value:
+        messages:
+          - id: m2
+            role: bot
+            personId: usr_9b1c6f0e
+            botId: general-assistant
+            text: Ship the importer first.
+            status: completed
+            createdAt: '2026-11-14T12:00:20.000Z'
+          - id: m1
+            role: person
+            personId: usr_9b1c6f0e
+            botId: null
+            text: What should we ship?
+            status: completed
+            createdAt: '2026-11-14T12:00:00.000Z'
+        nextCursor: null
+    SentConversationMessageExample:
+      summary: A message waiting for its answer.
+      value:
+        id: m1
+        queued: true
+    AttachmentExample:
+      summary: A spreadsheet held for the next message.
+      value:
+        id: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        name: budget.csv
+        mimeType: text/csv
+        sizeBytes: 2048
+    VoiceConnectionExample:
+      summary: A call over WebRTC.
+      value:
+        transport: webrtc
+        sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    VoiceSessionPageExample:
+      summary: One saved call.
+      value:
+        sessions:
+          - id: call-1
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            anchorMessageId: null
+            startedAt: '2026-11-14T12:00:00.000Z'
+            endedAt: '2026-11-14T12:00:30.000Z'
+            transcript:
+              - id: '1'
+                role: user
+                text: When do we launch?
+              - id: '2'
+                role: assistant
+                text: On Friday.
+            durationSeconds: 30
+            summary: They agreed to launch on Friday.
+            summaryStatus: ready
+        nextCursor: null
+    VoiceSessionResponseExample:
+      summary: A saved call with its summary.
+      value:
+        session:
+          id: call-1
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          anchorMessageId: null
+          startedAt: '2026-11-14T12:00:00.000Z'
+          endedAt: '2026-11-14T12:00:30.000Z'
+          transcript:
+            - id: '1'
+              role: user
+              text: When do we launch?
+            - id: '2'
+              role: assistant
+              text: On Friday.
+          durationSeconds: 30
+          summary: They agreed to launch on Friday.
+          summaryStatus: ready
+    VoiceConfigurationExample:
+      summary: Calls over WebRTC.
+      value:
+        transport: webrtc
+    ConversationThreadExample:
+      summary: A new thread id.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+    ConversationThreadStatusExample:
+      summary: A thread that is still there.
+      value:
+        threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+        known: true
+    TaskPageExample:
+      summary: One task, ready to read.
+      value:
+        tasks:
+          - id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+            botId: general-assistant
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+            title: Reply to Sam about the spec
+            why: Sam asked for the spec by Friday.
+            origin: check_in
+            suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            sourceApp: Gmail
+            sourceLink: null
+            originConversationId: null
+            status: ready_for_review
+            failure: null
+            failedAt: null
+            next: Read the draft and send it.
+            resolvedAt: null
+            createdAt: '2026-11-14T09:00:00.000Z'
+            updatedAt: '2026-11-14T09:05:00.000Z'
+        nextCursor: null
+    TaskResponseExample:
+      summary: A task ready to read.
+      value:
+        task:
+          id: 7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+          botId: general-assistant
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          threadId: 6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a
+          title: Reply to Sam about the spec
+          why: Sam asked for the spec by Friday.
+          origin: check_in
+          suggestionId: 0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          sourceApp: Gmail
+          sourceLink: null
+          originConversationId: null
+          status: ready_for_review
+          failure: null
+          failedAt: null
+          next: Read the draft and send it.
+          resolvedAt: null
+          createdAt: '2026-11-14T09:00:00.000Z'
+          updatedAt: '2026-11-14T09:05:00.000Z'
+    TranscriptionExample:
+      summary: What was said.
+      value:
+        text: Remind me to send the forecast on Friday.
     DevicePageLast:
       summary: A person's iPhone, on one page.
       value:

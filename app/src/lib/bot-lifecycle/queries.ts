@@ -1,4 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
+import { getNotificationSettings } from "@/lib/api/generated/notification-settings/notification-settings";
+import { organizationId } from "@/lib/api/request";
 import { client } from "@/lib/client";
 
 /** How loudly one Bot may reach the signed-in person. Badges on the web always show. */
@@ -182,12 +184,16 @@ export function botResetPlanQueryOptions(agentId: string) {
   });
 }
 
+/** Where each kind of update may go: the person's own notification settings, through the API. */
 export function updateRoutingQueryOptions() {
   return queryOptions({
     queryKey: botLifecycleKeys.routing,
-    queryFn: (): Promise<UpdateRouting> =>
-      client("/api/bots/routing", "routing", {
-        fallback: "Could not load where your updates go",
-      }),
+    queryFn: async ({ signal }): Promise<UpdateRouting> =>
+      (
+        await getNotificationSettings(organizationId(), "me", {
+          signal,
+          fallback: "Could not load where your updates go",
+        })
+      ).routing,
   });
 }

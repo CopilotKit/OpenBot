@@ -1,4 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  updateBotNotificationSettings,
+  updateNotificationSettings,
+} from "@/lib/api/generated/notification-settings/notification-settings";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 import {
@@ -33,17 +38,18 @@ export function setBotPausedMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** How much one Bot may reach the person: their own setting for that Bot, through the API. */
 export function setBotNotifyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: {
-      agentId: string;
-      notify: BotNotify;
-    }): Promise<BotLifecycle> =>
-      client(`${botPath(variables.agentId)}/notifications`, "lifecycle", {
-        method: "PUT",
-        body: { notify: variables.notify },
-        fallback: FALLBACK,
-      }),
+    mutationFn: (variables: { agentId: string; notify: BotNotify }) =>
+      updateBotNotificationSettings(
+        organizationId(),
+        "me",
+        variables.agentId,
+        { notify: variables.notify },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     onSuccess: () => invalidateLifecycle(queryClient),
   });
 }
@@ -96,11 +102,14 @@ export function setUpdateRoutingMutationOptions(queryClient: QueryClient) {
       kind: UpdateKind;
       transports: UpdateTransport[] | "all";
     }) => {
-      await client(`/api/bots/routing/${variables.kind}`, {
-        method: "PUT",
-        body: { transports: variables.transports },
-        fallback: "Could not save where updates go",
-      });
+      // One kind at a time, so a change on one device keeps the kinds another changed.
+      await updateNotificationSettings(
+        organizationId(),
+        "me",
+        { routing: { [variables.kind]: variables.transports } },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Could not save where updates go" },
+      );
     },
     onSuccess: () => invalidateLifecycle(queryClient),
   });

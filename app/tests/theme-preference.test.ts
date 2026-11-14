@@ -19,6 +19,7 @@ function recorded() {
       toggleRootClass: (name: string, force: boolean) =>
         calls.push(["class", name, force]),
       setRootColorScheme: (scheme: string) => calls.push(["scheme", scheme]),
+      setRootChoice: (choice: string) => calls.push(["choice", choice]),
     },
   };
 }
@@ -47,6 +48,7 @@ describe("theme preference", () => {
       ["set", THEME_STORAGE_KEY, "dark"],
       ["class", "dark", true],
       ["scheme", "dark"],
+      ["choice", "dark"],
     ]);
   });
 
@@ -58,6 +60,7 @@ describe("theme preference", () => {
       ["remove", THEME_STORAGE_KEY],
       ["class", "dark", true],
       ["scheme", "dark"],
+      ["choice", "system"],
     ]);
   });
 });

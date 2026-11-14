@@ -1,7 +1,23 @@
 import { authClient, serverUrl } from "./auth";
+/** A refusal from the server, with its status and the API's problem code when it gave one. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 export async function api<T>(
   path: string,
-  input?: { method?: string; body?: unknown; signal?: AbortSignal },
+  input?: {
+    method?: string;
+    body?: unknown;
+    signal?: AbortSignal;
+    headers?: Record<string, string>;
+  },
 ): Promise<T> {
   if (!path.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const cookie = await authClient.getCookie();
@@ -9,6 +25,7 @@ export async function api<T>(
     method: input?.method,
     credentials: "omit",
     headers: {
+      ...input?.headers,
       ...(cookie ? { Cookie: cookie } : {}),
       ...(input?.body !== undefined
         ? { "content-type": "application/json" }
@@ -30,7 +47,18 @@ export async function api<T>(
             ? body.error
             : undefined))
         : undefined;
-    throw new Error(said ?? `Request failed (${response.status}).`);
+    const code =
+      body &&
+      typeof body === "object" &&
+      "code" in body &&
+      typeof body.code === "string"
+        ? body.code
+        : undefined;
+    throw new ApiError(
+      said ?? `Request failed (${response.status}).`,
+      response.status,
+      code,
+    );
   }
   return body as T;
 }

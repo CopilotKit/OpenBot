@@ -18,6 +18,9 @@
           (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        // For OpenBot Desktop, whose window follows the system unless the person chose.
+        document.documentElement.dataset.themeChoice =
+          theme === "light" || theme === "dark" ? theme : "system";
       } catch {}
       try {
         const saved = window.localStorage.getItem("openbot-skin");

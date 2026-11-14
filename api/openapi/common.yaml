@@ -53,6 +53,8 @@ tags:
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
   - { name: Network policies, description: "Where Bot computers may connect, for the organization and for a directory group." }
   - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
+  - { name: Tasks, description: "The work a Bot does for a person in a conversation of its own: started from something a check-in found, or handed to the Bot by another. Where a task stands is read from its conversation, never stored." }
+  - { name: Voice, description: "Voice calls with a conversation's Bot: how a call connects, and the calls a person saved in a conversation with their transcripts." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
   - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
@@ -116,6 +118,28 @@ paths:
   /api/v2/organizations/{organizationId}/setup-checklist: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist' }
   /api/v2/organizations/{organizationId}/setup-checklist/check: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1setup-checklist~1check' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/join-tokens: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1join-tokens' }
+  /api/v2/organizations/{organizationId}/conversations: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations' }
+  /api/v2/organizations/{organizationId}/conversations/route: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1route' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/mark-read: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1mark-read' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/activity: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1activity' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/signal-busy: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1signal-busy' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members~1{memberId}' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1messages' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1attachments' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-calls' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-sessions' }
+  /api/v2/organizations/{organizationId}/voice-configuration: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1voice-configuration' }
+  /api/v2/organizations/{organizationId}/attachments/{attachmentId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1attachments~1{attachmentId}' }
+  /api/v2/organizations/{organizationId}/conversation-threads: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversation-threads' }
+  /api/v2/organizations/{organizationId}/conversation-threads/{threadId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversation-threads~1{threadId}' }
+  /api/v2/organizations/{organizationId}/tasks: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1resolve' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/reopen: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1reopen' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/retry: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1retry' }
+  /api/v2/organizations/{organizationId}/transcriptions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1transcriptions' }
   /api/v2/organizations/{organizationId}/credentials: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials' }
   /api/v2/organizations/{organizationId}/credentials/{credentialId}/revoke: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials~1{credentialId}~1revoke' }
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
@@ -245,6 +269,9 @@ components:
           refreshUrl: /api/auth/oauth2/token
           scopes:
             conversations:read: Read the signed-in person's conversations, and watch a Bot's runs in them.
+            conversations:write: Start, rename, pin and delete the signed-in person's conversations, and send messages and files in them.
+            tasks:read: Read the signed-in person's tasks.
+            tasks:write: Mark the signed-in person's tasks done, reopen them and try them again.
             computers:read: Watch the signed-in person's Bots' screens and terminals.
             computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers.
             bots:read: Read the Bots the signed-in person can see, and what each is doing for them.
