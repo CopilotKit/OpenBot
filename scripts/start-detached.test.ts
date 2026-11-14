@@ -98,7 +98,9 @@ test("startup closes updater pipes while its background services remain live", a
     "curl",
     `case "$*" in
   *"/api/copilotkit/info"*)
-    printf '{"licenseStatus":"valid","mode":"test","agents":{"test":{}}}' ;;
+    # What a server answers nobody signed in, where people sign in: its licence, and no Bots,
+    # which are listed to somebody working in an organization. Startup must not read that as a fault.
+    printf '{"licenseStatus":"valid","mode":"test","agents":{}}' ;;
   *"http://localhost:3010/"*)
     [ -f "$TEST_ROOT/app.pid" ] || exit 7
     printf '<title>OpenBot</title>' ;;
