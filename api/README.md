@@ -20,6 +20,9 @@ not touch the same lines:
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
+| `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |
+| `browsers.yaml` | A Bot's browser and a person's own OpenBot browser |
+| `passwords-and-recorder.yaml` | Sign-in requests, saved logins and the Recorder |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual
