@@ -96,8 +96,7 @@ Use `bun run dev` only when you want the app on its own, against a server that i
 | `app`             | 3010                       |
 | `server`          | 3001                       |
 | `agent-computer`  | 4100                       |
-| `agent-bot`       | 4200                       |
-| `agent-langgraph` | 4201                       |
+| `agent-langgraph-agui` | 4201 host / 4206 container |
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 

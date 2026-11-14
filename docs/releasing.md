@@ -820,8 +820,7 @@ is a service, so the references can be read straight out of it:
 ```sh
 export COMPUTER_IMAGE="$(jq -r '.images["agent-computer"].reference' container-images.json)"
 export SUPERVISOR_IMAGE="$(jq -r .images.supervisor.reference container-images.json)"
-export BOT_IMAGE="$(jq -r '.images["agent-bot"].reference' container-images.json)"
-export LANGGRAPH_IMAGE="$(jq -r '.images["agent-langgraph"].reference' container-images.json)"
+export LANGGRAPH_IMAGE="$(jq -r '.images["agent-langgraph-agui"].reference' container-images.json)"
 export SERVER_IMAGE="$(jq -r .images.server.reference container-images.json)"
 export IMAGE_PULL_POLICY=missing
 docker compose up -d

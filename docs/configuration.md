@@ -58,7 +58,7 @@ server starts without a managed Bot, the shipped Risk Analyst coworker is omitte
 created without its own endpoint runs in the server as a built-in Bot on its role description. A
 leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
-at `agent-langgraph` on a laptop.
+at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
 ## General variables
 
@@ -69,11 +69,11 @@ at `agent-langgraph` on a laptop.
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY` and `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from the server's working directory (`/app/server` in its image). |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project, and prefixes the identity a Shared app's account is held under at the vendor. That identity is fixed when the app is made Shared, so changing this later does not move it. |
-| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
+| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and the managed Bot.          |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
 | `COPILOTKIT_OPENAI_API` | unset                          | Which OpenAI API the built-in Bots call behind an `OPENAI_BASE_URL` that is not OpenAI or Azure: `responses` or `chat`. Unset, the model decides. See [OpenAI-compatible endpoints](#openai-compatible-endpoints). |
 | `ROUTER_MODEL`       | `claude-haiku-5-5` / `gpt-6-luna`  | Model that picks which Bot an untagged message from the home page goes to. It runs while the person waits, so it defaults to a light model on the deployment's provider and falls back to the Bots' model when that one is refused. Behind `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` it defaults to the Bots' model, since the endpoint's catalogue is unknown. |
-| `BOT_PROVIDER`       | `openai`                           | Provider the framework Bot (`agent-langgraph`) and the picked harness run on: `openai`, `anthropic`, or `google`. The Python Bots read it too; `agent-bot` does not, it is OpenAI only. The API server reads it for the built-in Bots as well: `anthropic`, `openai` or an empty value (read as `openai`) moves them off the tenant package's `model.yaml` provider, and `google` or an absent variable leaves them on it. |
+| `BOT_PROVIDER`       | `openai`                           | Provider the managed Bot (`agent-langgraph-agui`) and the picked harness run on: `openai`, `anthropic`, or `google`. The other Python Bots read it too. The API server reads it for the built-in Bots as well: `anthropic`, `openai` or an empty value (read as `openai`) moves them off the tenant package's `model.yaml` provider, and `google` or an absent variable leaves them on it. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
@@ -82,12 +82,9 @@ at `agent-langgraph` on a laptop.
 | `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
-| `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
-| `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
-| `BOT_REASONING_EFFORT` | unset (provider default)         | OpenAI and the Responses API only: one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `agent-langgraph` refuses to start on any other value, on a non-`openai` provider, or without the Responses API. |
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it, in milliseconds. A value that is not a whole number of zero or more refuses to start. |
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
-| `OPENBOT_TOOL_URL`   | `http://127.0.0.1:3001/api/agent-tools/call`; Compose passes `http://host.docker.internal:3001/api/agent-tools/call` | Read by the framework Bots (`agent-langgraph` and the Python LangGraph harness): where they call a granted tool back through this server. Set it when the server is not on that address, as when it runs in a container or on another port. |
+| `OPENBOT_TOOL_URL`   | `http://127.0.0.1:3001/api/agent-tools/call`; Compose passes `http://host.docker.internal:3001/api/agent-tools/call` | Read by the framework Bots (the LangGraph harness and the other Python Bots): where they call a granted tool back through this server. Set it when the server is not on that address, as when it runs in a container or on another port. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows, at least `1`; older ones are removed. Unset keeps the trail forever. Any other value refuses to start. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default; the Helm chart generates one | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
@@ -226,7 +223,7 @@ provider and model each Bot runs:
     }
   },
   "bots": {
-    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-agno": { "provider": "openai", "model": "gpt-5.5" },
     "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" }
   }
 }
@@ -240,7 +237,7 @@ of it:
 3. the provider's `default_model` — what is left when neither says.
 
 Each Bot retains its existing default: for example, `agent-mastra` uses `gpt-4o-mini`, while
-`agent-langgraph` uses `gpt-5.5`. Editing a Bot's row changes that Bot's default without changing
+`agent-agno` uses `gpt-5.5`. Editing a Bot's row changes that Bot's default without changing
 another Bot's choice. The Python LangGraph harness also accepts `BOT_PROVIDER=google_genai` as an
 alias for the spec's `google` provider.
 
@@ -262,14 +259,11 @@ own loader has never heard of, nor against a provider their own loader names whe
 row for it. Either refusal names the key that is wrong, at startup rather than at the first model
 call, in either language.
 
-`agent-bot` is the one Bot that pins its provider: it speaks `/v1/chat/completions` directly and
-has never read `BOT_PROVIDER`, and `bots.agent-bot` supplies only its model.
-
 ## OpenAI-compatible endpoints
 
 `OPENAI_BASE_URL` decides where an OpenAI-shaped request is answered. Unset, that is OpenAI. Set, it is any endpoint speaking the same API: a gateway in front of several providers, a proxy, or a model on hardware you control.
 
-It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, `agent-bot` reads it for the client it constructs, and `agent-langgraph` reads it for `BOT_PROVIDER=openai`.
+It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, and the managed Bot and the other harnesses read it for `BOT_PROVIDER=openai`.
 
 `OPENAI_CONTAINER_BASE_URL` overrides that value inside Compose's containers only (the Bots, and the `server` service when OpenBot itself runs in Compose), for an endpoint the containers reach by a different route than the host does. Unset, the containers use `OPENAI_BASE_URL` like everything else. Compose's `server` service takes `INTELLIGENCE_CONTAINER_API_URL` and `INTELLIGENCE_CONTAINER_GATEWAY_WS_URL` the same way, in place of `INTELLIGENCE_API_URL` and `INTELLIGENCE_GATEWAY_WS_URL`; the browser is still given `INTELLIGENCE_GATEWAY_WS_URL`.
 
@@ -1141,8 +1135,7 @@ stack without a toolchain and without waiting for Chromium to build.
 | ----------------- | ------------------- | ------------------------------------------ |
 | `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot-agent-computer` |
 | `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
-| `agent-bot`       | `BOT_IMAGE`         | `ghcr.io/copilotkit/openbot-agent-bot`      |
-| `agent-langgraph` | `LANGGRAPH_IMAGE`   | `ghcr.io/copilotkit/openbot-agent-langgraph`|
+| `agent-langgraph-agui` | `LANGGRAPH_IMAGE` | `ghcr.io/copilotkit/openbot-agent-langgraph-agui` |
 | `server`, `worker`, `migrate` | `SERVER_IMAGE` | `ghcr.io/copilotkit/openbot-server` |
 
 Unset, each names a local tag and Compose builds it, which is what a checkout of this repository
@@ -1185,8 +1178,7 @@ Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks aga
 | `app`             | 3010                       | `APP_PORT`        |
 | `server`          | 3001                       | `SERVER_PORT`     |
 | `agent-computer`  | 4100                       | `COMPUTER_PORT`   |
-| `agent-bot`       | 4200                       | `BOT_PORT`        |
-| `agent-langgraph` | 4201                       | `LANGGRAPH_PORT`  |
+| `agent-langgraph-agui` | 4201 host / 4206 container | `LANGGRAPH_PORT` |
 | `supervisor`      | 4500 host / 4300 container | `SUPERVISOR_PORT` |
 | PostgreSQL        | 5432                       | `POSTGRES_PORT`   |
 

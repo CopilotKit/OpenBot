@@ -21,8 +21,6 @@
     }
   },
   "bots": {
-    "agent-bot": { "provider": "openai", "model": "gpt-5.5" },
-    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
     "agent-mastra": { "provider": "openai", "model": "gpt-4o-mini" },
     "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" },
     "agent-antigravity": { "provider": "google", "model": "gemini-3.6-flash" },

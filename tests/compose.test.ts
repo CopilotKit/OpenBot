@@ -446,6 +446,30 @@ test("runs no SPIRE", () => {
   }
 });
 
+/**
+ * The managed Bot is the LangGraph harness. agent-bot, a proof of concept that wrote the protocol by
+ * hand, and the TypeScript agent-langgraph were retired; the fintech example's Risk Analyst is
+ * registered at MANAGED_AGENT_AG_UI_URL, so the address the server is given must name a service
+ * this file starts, built from a harness this repository has, on the port its image listens on.
+ */
+test("runs the LangGraph harness as the managed Bot, and neither retired Bot", () => {
+  const services = composeServices();
+  expect(Object.keys(services)).not.toContain("agent-bot");
+  expect(Object.keys(services)).not.toContain("agent-langgraph");
+  const address = new URL(
+    runComposeConfig({
+      MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",
+    }).services.server.environment.MANAGED_AGENT_AG_UI_URL ?? "",
+  );
+  const managed = services[address.hostname];
+  expect(managed?.build?.dockerfile).toBe("agent-langgraph-agui/Dockerfile");
+  const dockerfile = readFileSync(
+    join(import.meta.dir, "..", "agent-langgraph-agui", "Dockerfile"),
+    "utf8",
+  );
+  expect(address.port).toBe(/^EXPOSE (\d+)$/m.exec(dockerfile)?.[1]);
+});
+
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();
 
@@ -467,8 +491,7 @@ test("publishes every service on a settable port with the documented default", (
     ["POSTGRES_PORT", "5432", "5432"],
     ["COMPUTER_PORT", "4100", "4100"],
     ["SUPERVISOR_PORT", "4500", "4300"],
-    ["BOT_PORT", "4200", "4200"],
-    ["LANGGRAPH_PORT", "4201", "4201"],
+    ["LANGGRAPH_PORT", "4201", "4206"],
     ["SERVER_PORT", "3001", "3001"],
   ] as const;
 
@@ -501,7 +524,6 @@ test("publishes every service that holds a secret on loopback only", () => {
     "POSTGRES_PORT",
     "SUPERVISOR_PORT",
     "COMPUTER_PORT",
-    "BOT_PORT",
     "LANGGRAPH_PORT",
     "PICKED_HARNESS_PORT",
     "APP_PORT",
@@ -566,7 +588,7 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
       OPENAI_API_KEY: "synthetic-openai-key",
       ...environment,
     });
-    for (const service of ["agent-bot", "agent-langgraph", "agent-harness"]) {
+    for (const service of ["agent-langgraph-agui", "agent-harness"]) {
       expect(config.services[service].environment.OPENAI_BASE_URL).toBe(
         expected,
       );
@@ -574,7 +596,7 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
   });
 }
 
-test("passes every other provider's key and endpoint into the framework Bot and the picked harness", () => {
+test("passes every other provider's key and endpoint into the managed Bot and the picked harness", () => {
   const config = runComposeConfig({
     ANTHROPIC_API_KEY: "sk-ant-synthetic",
     ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
@@ -584,7 +606,7 @@ test("passes every other provider's key and endpoint into the framework Bot and 
 
   // A service either receives the variable or it does not; reading the file's text cannot tell
   // the difference, because any one service declaring it would satisfy a raw `toContain`.
-  for (const service of ["agent-langgraph", "agent-harness"]) {
+  for (const service of ["agent-langgraph-agui", "agent-harness"]) {
     expect(config.services[service].environment).toMatchObject({
       ANTHROPIC_API_KEY: "sk-ant-synthetic",
       ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
@@ -800,12 +822,12 @@ test("tells the shared computer which edition it runs in", () => {
   ).toBe("");
 });
 
-test("gives the selected harness the same governed callback as the framework Bot", () => {
+test("gives the selected harness the same governed callback as the managed Bot", () => {
   const config = runComposeConfig({
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of ["agent-harness", "agent-langgraph"] as const) {
+  for (const service of ["agent-harness", "agent-langgraph-agui"] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",
@@ -827,7 +849,7 @@ test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
   for (const service of [
     "server",
     "agent-harness",
-    "agent-langgraph",
+    "agent-langgraph-agui",
   ] as const) {
     expect(config.services[service].extra_hosts).toContain(
       "host.docker.internal=10.0.2.2",
@@ -937,7 +959,7 @@ test("hands the desktop's host-access token to the server and nothing else", () 
 
 test("addresses the server's Bots and endpoints from inside the network", () => {
   const withBots = runComposeConfig({
-    MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/ag-ui",
+    MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",
     PICKED_HARNESS_URL: "http://127.0.0.1:4202/run",
     PICKED_HARNESS_CONTAINER_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://127.0.0.1:3001/api/model-provider/v1",
@@ -950,7 +972,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
   expect(withBots.services.server.environment).toMatchObject({
     // How the server reaches an agent the person registered on their own loopback.
     OPENBOT_THIS_MACHINE_HOST: "host.docker.internal",
-    MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph:4201/ag-ui",
+    MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph-agui:4206/",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
     // The server's own way to the gateway, and the browser's, which is on the host.

@@ -922,11 +922,11 @@ fn compose_start_command(
             }
         }
     }
+    let podman_ports = macos_podman
+        .then(|| macos_podman_ports(root, &files))
+        .flatten();
     for (file, contents) in [
-        (
-            MACOS_PODMAN_PORTS_FILE,
-            macos_podman.then_some(MACOS_PODMAN_PORTS),
-        ),
+        (MACOS_PODMAN_PORTS_FILE, podman_ports.as_deref()),
         (HARNESS_PORT_FILE, harness_ports.as_deref()),
     ] {
         if let Some(contents) = contents {
@@ -949,6 +949,83 @@ fn compose_start_command(
         }
     }
     Ok(command)
+}
+
+/// The services a Compose file defines: the keys one level under its top-level `services:`.
+///
+/// Read as text, not parsed: the installation's files are the ones OpenBot ships, block-style with
+/// two-space indentation, and a file this cannot read simply contributes no names.
+fn compose_service_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            inside = line.trim_end() == "services:";
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("  ") else {
+            continue;
+        };
+        if rest.starts_with(' ') {
+            continue;
+        }
+        let key = rest.split('#').next().unwrap_or(rest).trim_end();
+        if let Some(name) = key.strip_suffix(':') {
+            names.push(name.trim_matches(['"', '\'']).to_owned());
+        }
+    }
+    names
+}
+
+/// The Mac Podman port overlay for this installation: [`MACOS_PODMAN_PORTS`] with only the services
+/// its own Compose files define, or nothing when they define none of them.
+///
+/// The overlay names every service any release has published a port for. Compose refuses a project
+/// in which a file names a service that has no image ("has neither an image nor a build context
+/// specified"), and that refusal fails every command given the overlay. An installation being
+/// updated still has the previous release's `docker-compose.yml` while this app backs its database
+/// up, and again if the update is rolled back, so the overlay follows the file that is there.
+fn macos_podman_ports(root: &Path, files: &[String]) -> Option<String> {
+    let defined: std::collections::HashSet<String> = files
+        .iter()
+        .filter_map(|file| std::fs::read_to_string(root.join(file)).ok())
+        .flat_map(|text| compose_service_names(&text))
+        .collect();
+    let (header, services) = MACOS_PODMAN_PORTS.split_once("services:\n")?;
+    // A block is a service's own line and what is indented under it; a comment line above a
+    // service belongs to the block it introduces.
+    let mut blocks: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in services.lines() {
+        let service = line
+            .strip_prefix("  ")
+            .filter(|rest| !rest.starts_with(' ') && !rest.starts_with('#'))
+            .and_then(|rest| rest.trim_end().strip_suffix(':'));
+        if let Some(name) = service {
+            let mut lines = std::mem::take(&mut pending);
+            lines.push(line);
+            blocks.push((name, lines));
+        } else if line.starts_with("  #") {
+            pending.push(line);
+        } else if let Some((_, lines)) = blocks.last_mut() {
+            lines.push(line);
+        }
+    }
+    let kept: Vec<&str> = blocks
+        .iter()
+        .filter(|(name, _)| defined.contains(*name))
+        .flat_map(|(_, lines)| lines.iter().copied())
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    Some(format!("{header}services:\n{}\n", kept.join("\n")))
 }
 
 fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
@@ -9009,6 +9086,133 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The Compose file release 1.0.2 installed, which an installation still has while a newer app
+    /// updates it and after an update that rolled back.
+    const RELEASED_COMPOSE_1_0_2: &str =
+        include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml");
+
+    fn overlay_services(overlay: &str) -> Vec<String> {
+        compose_service_names(overlay)
+    }
+
+    /// Updating 1.0.2 on a Mac with Podman failed, and the fall-back start failed too: the overlay
+    /// named a service the installed Compose file did not define, and Compose refused every command
+    /// with "service ... has neither an image nor a build context specified". The overlay names
+    /// only what the installation's own file defines, whichever release wrote that file.
+    #[test]
+    fn the_mac_podman_overlay_names_only_services_the_installation_defines() {
+        let root = temp_root("compose-ports-installed");
+        std::fs::create_dir_all(&root).unwrap();
+        let files = ["docker-compose.yml".to_owned()];
+
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        let released = macos_podman_ports(&root, &files).unwrap();
+        let defined = compose_service_names(RELEASED_COMPOSE_1_0_2);
+        for service in overlay_services(&released) {
+            assert!(defined.contains(&service), "{service} is not in 1.0.2");
+        }
+        assert_eq!(
+            overlay_services(&released),
+            [
+                "postgres",
+                "supervisor",
+                "agent-computer",
+                "agent-bot",
+                "agent-langgraph",
+                "agent-harness",
+                "server"
+            ]
+        );
+        assert!(released.contains("${BOT_PORT:-4200}:4200"), "{released}");
+
+        // And this release's own file, once the update has put it in place.
+        let current = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), current).unwrap();
+        let updated = macos_podman_ports(&root, &files).unwrap();
+        assert_eq!(
+            overlay_services(&updated),
+            [
+                "postgres",
+                "supervisor",
+                "agent-computer",
+                "agent-langgraph-agui",
+                "agent-harness",
+                "server"
+            ]
+        );
+
+        // A service a person's own override file defines counts as defined.
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            "services:\n  postgres:\n    image: x\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("docker-compose.override.yml"),
+            "services:\n  server: # theirs\n    image: y\n",
+        )
+        .unwrap();
+        let both = [
+            "docker-compose.yml".to_owned(),
+            "docker-compose.override.yml".to_owned(),
+        ];
+        assert_eq!(
+            overlay_services(&macos_podman_ports(&root, &both).unwrap()),
+            ["postgres", "server"]
+        );
+
+        // Nothing to override is no overlay at all, not an empty `services:`.
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        assert_eq!(macos_podman_ports(&root, &files), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The same, read by real Compose: with the overlay this app writes, 1.0.2's file is a valid
+    /// project, and with every service named it is the refusal the update met.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn compose_accepts_the_mac_podman_overlay_over_the_1_0_2_compose_file() {
+        let root = temp_root("compose-ports-1-0-2");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        std::fs::write(root.join(".env"), "BOT_PORT=4200\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: &str| {
+            std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), overlay).unwrap();
+            Command::new(&docker)
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"))
+                .args([
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ])
+                .args(["config", "--quiet"])
+                .output()
+                .unwrap()
+        };
+        let every_service = config(MACOS_PODMAN_PORTS);
+        assert!(!every_service.status.success());
+        assert!(
+            String::from_utf8_lossy(&every_service.stderr)
+                .contains("has neither an image nor a build context specified"),
+            "{}",
+            String::from_utf8_lossy(&every_service.stderr)
+        );
+        let installed =
+            config(&macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap());
+        assert!(
+            installed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
     /// This only reads configuration; it never contacts a container engine or registry.
     #[test]
@@ -9018,7 +9222,11 @@ fn main() {
         std::fs::create_dir_all(&root).unwrap();
         let source = include_str!("../../../docker-compose.yml");
         std::fs::write(root.join("docker-compose.yml"), source).unwrap();
-        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(
+            root.join(MACOS_PODMAN_PORTS_FILE),
+            macos_podman_ports(&root, &["docker-compose.yml".to_owned()]).unwrap(),
+        )
+        .unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
         let docker =
             std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
@@ -9060,9 +9268,11 @@ fn main() {
             let mut published = 0;
             for (_, service) in before["services"].as_object_mut().unwrap() {
                 if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
-                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    // Each published port is on both loopbacks; the server publishes two.
+                    let both = ports.len();
+                    assert_eq!(both % 2, 0, "the released port pattern must exercise dual loopback");
                     ports.retain(|port| port["host_ip"] == "127.0.0.1");
-                    assert_eq!(ports.len(), 1);
+                    assert_eq!(ports.len(), both / 2);
                     published += 1;
                 }
             }
@@ -9085,7 +9295,8 @@ fn main() {
         let path = PathFixture::with_fake_engine("macos-podman-start");
         let [_, podman] = computer_stop_addresses(&path);
         let (root, record) = computer_stop_root(&path, "podman-start", "{}");
-        let original = "services: {}\n";
+        let original = RELEASED_COMPOSE_1_0_2;
+        std::fs::write(root.join("docker-compose.yml"), original).unwrap();
         let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
         std::fs::write(root.join(".env"), settings).unwrap();
         std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();

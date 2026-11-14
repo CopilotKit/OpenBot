@@ -8,7 +8,7 @@ here. So this process drives a governed browser it has no direct access to.
 
 Unlike those two, it is Python. OpenBot knows a Bot only as an AG-UI endpoint URL, so the language
 and framework behind that URL are the deployment's business, not the surface's. This is the same
-contract as ``agent-bot``, the LangGraph example, and the Mastra example, in a third language.
+contract as the LangGraph example and the Mastra example, in a third language.
 """
 
 import os

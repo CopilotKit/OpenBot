@@ -145,8 +145,8 @@ and the fix would not be available.
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside
 the container, so there is nothing to share it with.
 
-`MANAGED_AGENT_AG_UI_URL` is not required here. The image does not carry `agent-langgraph` or
-`agent-bot`. Leave it unset and the shipped Risk Analyst coworker is omitted rather than registered
+`MANAGED_AGENT_AG_UI_URL` is not required here. The image does not carry the managed Bot
+(`agent-langgraph-agui`). Leave it unset and the shipped Risk Analyst coworker is omitted rather than registered
 against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when a Bot is actually
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://localhost:4201/ag-ui`.

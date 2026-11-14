@@ -1,8 +1,8 @@
 """LangGraph as a Bot, through the AG-UI integration rather than by hand.
 
-OpenBot already ships `agent-langgraph`, which speaks AG-UI itself because it predates the rule
-against writing adapters. This is the same framework served through `ag-ui-langgraph`, which is the
-package the AG-UI project maintains, so the protocol stops being ours to keep working.
+The framework is served through `ag-ui-langgraph`, which is the package the AG-UI project
+maintains, so the protocol is not ours to keep working. It is also the managed Bot: the team
+edition's Risk Analyst runs on it.
 """
 
 import hmac

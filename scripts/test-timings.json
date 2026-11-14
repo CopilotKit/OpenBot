@@ -1,12 +1,6 @@
 {
   "version": 1,
   "files": {
-    "agent-bot/tests/history.test.ts": 227,
-    "agent-langgraph/tests/deltas.test.ts": 0,
-    "agent-langgraph/tests/history.test.ts": 84,
-    "agent-langgraph/tests/model-options.test.ts": 1,
-    "agent-langgraph/tests/stream.test.ts": 4,
-    "agent-langgraph/tests/tool-answer.test.ts": 1,
     "agent-mastra/src/mastra/index.test.ts": 12572,
     "app/src/components/channels/chat-origin.test.ts": 1,
     "app/src/components/channels/composer/draft.test.ts": 3,
@@ -560,7 +554,6 @@
     "shared/this-machine.test.ts": 0,
     "shared/user-content-hardening.test.ts": 1,
     "shared/work-owner.test.ts": 0,
-    "tests/agent-bot.test.ts": 245,
     "tests/clean-checkout.test.ts": 8,
     "tests/compose.test.ts": 1638,
     "tests/desktop-release-tree.test.ts": 25,
