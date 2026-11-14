@@ -5,6 +5,9 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BrandName } from "@/components/edition/brand-name";
+import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
+import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
+import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +49,7 @@ import {
   type NavigationLink,
   useNavigationItems,
 } from "@/lib/navigation";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
@@ -377,6 +381,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
+  // Somebody with nothing to switch to or create has no organizations in the menu at all.
+  const organizationChoices = useOrganizationChoices();
+  const switchOrganization = useSwitchOrganization();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -562,6 +569,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 side="top"
                 sideOffset={8}
               >
+                {organizationChoices ? (
+                  <OrganizationMenuItems
+                    choices={organizationChoices}
+                    itemClassName={userMenuItemClassName}
+                    onNew={() => {
+                      // A narrow window's sheet would wait behind the dialog.
+                      setOpenMobile(false);
+                      openNewOrganization();
+                    }}
+                    switching={switchOrganization}
+                  />
+                ) : null}
                 {navigation
                   .filter((item) => item.section === "account")
                   .map((item) => (

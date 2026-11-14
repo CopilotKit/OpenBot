@@ -1,7 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { createBot, deleteBot, updateBot } from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 import { type AgentProfile, agentApiPath, agentKeys } from "./queries";
@@ -30,7 +30,7 @@ export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
       (
-        await createBot(ORGANIZATION_ID, input, once(), {
+        await createBot(organizationId(), input, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -46,7 +46,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
     }): Promise<AgentProfile> =>
       (
         await updateBot(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.agentId,
           variables.input,
           once(),
@@ -100,7 +100,7 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await deleteBot(ORGANIZATION_ID, agentId, once(), {
+      await deleteBot(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },

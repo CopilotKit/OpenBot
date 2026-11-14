@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { Reaction } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { client } from "@/lib/client";
 
 /*
@@ -112,7 +112,7 @@ export const reactionsQueryOptions = (threadId: string) =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listReactions(
-          ORGANIZATION_ID,
+          organizationId(),
           { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load reactions." },
         );

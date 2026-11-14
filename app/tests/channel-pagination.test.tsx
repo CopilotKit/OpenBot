@@ -30,6 +30,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { organizationKeys } from "@/lib/organizations/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
@@ -190,6 +191,12 @@ function renderSidebar() {
     selfHostBanner: false,
     localEvaluation: false,
     edition: "team",
+  });
+  // Read by the sign-in gate before the sidebar is drawn: the one organization, nothing to switch to.
+  queryClient.setQueryData(organizationKeys.mine(), {
+    organizations: [],
+    canCreate: false,
+    currentId: "default",
   });
   // The sidebar's attention list polls on its own schedule; this test counts channel requests only.
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {

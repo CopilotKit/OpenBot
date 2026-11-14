@@ -34,13 +34,11 @@ export type ApiRequestOptions = RequestInit & {
 const TEXT_ANSWERS = ["text/csv"];
 
 /**
- * The organization every request is in.
- *
- * Until multi-organization lands an install has exactly one, and the API addresses it as `default`
- * (api/openapi.yaml, `OrganizationId`). When a person can belong to several, this becomes the one
- * they are working in.
+ * The organization a request is addressed to: the one the person is working in
+ * (lib/organizations/current.ts). Called where the request is made, never kept, so a request made
+ * after a switch goes to the organization the person switched to.
  */
-export const ORGANIZATION_ID = "default";
+export { organizationId } from "@/lib/organizations/current";
 
 /**
  * A key for one write, so a retry of the same write is recognised as the same one.

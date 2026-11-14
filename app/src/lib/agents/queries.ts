@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getBot, listBots } from "@/lib/api/generated/bots/bots";
 import type { Bot, BotVisibility } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { client, tryClient } from "@/lib/client";
 
 export type AgentVisibility = BotVisibility;
@@ -97,7 +97,7 @@ async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
   let cursor: string | undefined;
   do {
     const page = await listBots(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         ...(hidden ? { hidden } : {}),
         limit: 100,
@@ -133,7 +133,7 @@ export function agentQueryOptions(agentId: string) {
     queryKey: agentKeys.detail(agentId),
     queryFn: async (): Promise<AgentProfile> =>
       (
-        await getBot(ORGANIZATION_ID, agentId, {
+        await getBot(organizationId(), agentId, {
           fallback: "Couldn't load this Bot.",
         })
       ).bot,

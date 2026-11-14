@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { updatePerson } from "@/lib/api/generated/people/people";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { client } from "@/lib/client";
 import { clearSkin } from "@/skins/store";
 import { authKeys } from "./queries";
@@ -35,7 +35,7 @@ export function updateProfileNameMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (name: string) =>
       updatePerson(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         { name },
         { "Idempotency-Key": idempotencyKey() },
