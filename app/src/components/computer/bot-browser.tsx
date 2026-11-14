@@ -349,78 +349,93 @@ function RecordPanel({
   /** Why a recording of the person's ended that Stop did not end: the wheel going back, as a rule. */
   const ended = state.mine ? "The recording ended." : ENDED_WITH_THE_WHEEL;
   return (
-    <section aria-label="Record a task">
-      <h2 className="font-semibold text-sm">Record a task</h2>
-      <p className="mt-1 text-pretty text-muted-foreground text-sm">
-        Do the task in the Bot's browser while you have control. Only what you
-        do is recorded, and it goes to your own Learning space.
-      </p>
-      {/* What the Recorder keeps, said before Record, quieter than what to do. */}
-      <p className="mt-2 text-pretty text-muted-foreground text-xs leading-relaxed">
-        {RECORDER_COLLECTS_SHORT}
-      </p>
-      <PageRows className="mt-3">
-        {recording.theirs ? (
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <RecordingMark live={false} />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Someone is recording</ItemTitle>
-              <ItemDescription>You can record once they stop.</ItemDescription>
-            </ItemContent>
-          </Item>
-        ) : (
-          <RecordingRow
-            recording={recording}
-            placeholder="Name the task to record"
-          />
-        )}
-        {/* Narration is for the person who can record: their own microphone, while they hold the wheel. */}
-        {state.mine && !recording.theirs ? (
-          <>
-            <Separator />
-            <NarrationRow
-              narration={narration}
-              language={language}
-              recording={listening}
-              onChange={(on) => {
-                narration.setOn(on);
-                choice.choose(on);
-              }}
-            />
-          </>
-        ) : null}
-        {recording.unreported ? (
-          <>
-            <Separator />
-            <Item size="sm" role="status">
+    /*
+     * Two columns where there is the width for them (under the Bot's screen in a narrow window): what Record does
+     * beside the rows that do it, so the panel is short and the screen above it keeps its height. One column beside
+     * the screen and on a phone. By the width the panel is given (`WheelColumn` is the container), not the window's.
+     * The rows keep the width the task's name needs to show its placeholder whole, and the words take the rest.
+     */
+    <section
+      aria-label="Record a task"
+      className="@xl:grid @xl:grid-cols-[minmax(0,1fr)_minmax(22rem,1fr)] @xl:items-start @xl:gap-x-6"
+    >
+      <div className="min-w-0">
+        <h2 className="font-semibold text-sm">Record a task</h2>
+        <p className="mt-1 text-pretty text-muted-foreground text-sm">
+          Do the task in the Bot's browser while you have control. Only what you
+          do is recorded, and it goes to your own Learning space.
+        </p>
+        {/* What the Recorder keeps, said before Record, quieter than what to do. */}
+        <p className="mt-2 text-pretty text-muted-foreground text-xs leading-relaxed">
+          {RECORDER_COLLECTS_SHORT}
+        </p>
+      </div>
+      <div className="min-w-0">
+        <PageRows className="mt-3 @xl:mt-0">
+          {recording.theirs ? (
+            <Item size="sm">
               <ItemMedia variant="icon">
-                <IconPlayerStop className="text-muted-foreground" />
+                <RecordingMark live={false} />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>{recording.unreported.title}</ItemTitle>
-                <ItemDescription className="line-clamp-none">
-                  {ended}
+                <ItemTitle>Someone is recording</ItemTitle>
+                <ItemDescription>
+                  You can record once they stop.
                 </ItemDescription>
               </ItemContent>
             </Item>
-          </>
-        ) : recording.stopped ? (
-          <>
-            <Separator />
-            <StoppedRow
-              stopped={recording.stopped}
-              ended={recording.endedWithoutStop ? ended : undefined}
+          ) : (
+            <RecordingRow
+              recording={recording}
+              placeholder="Name the task to record"
             />
-          </>
+          )}
+          {/* Narration is for the person who can record: their own microphone, while they hold the wheel. */}
+          {state.mine && !recording.theirs ? (
+            <>
+              <Separator />
+              <NarrationRow
+                narration={narration}
+                language={language}
+                recording={listening}
+                onChange={(on) => {
+                  narration.setOn(on);
+                  choice.choose(on);
+                }}
+              />
+            </>
+          ) : null}
+          {recording.unreported ? (
+            <>
+              <Separator />
+              <Item size="sm" role="status">
+                <ItemMedia variant="icon">
+                  <IconPlayerStop className="text-muted-foreground" />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{recording.unreported.title}</ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    {ended}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            </>
+          ) : recording.stopped ? (
+            <>
+              <Separator />
+              <StoppedRow
+                stopped={recording.stopped}
+                ended={recording.endedWithoutStop ? ended : undefined}
+              />
+            </>
+          ) : null}
+        </PageRows>
+        {recording.error ? (
+          <p className="mt-2 text-destructive text-sm" role="alert">
+            {recording.error.message}
+          </p>
         ) : null}
-      </PageRows>
-      {recording.error ? (
-        <p className="mt-2 text-destructive text-sm" role="alert">
-          {recording.error.message}
-        </p>
-      ) : null}
+      </div>
       <NarrationChoiceDialog {...recording.question} />
     </section>
   );
