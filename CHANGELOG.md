@@ -191,8 +191,9 @@ every deployment:
   conversations and opens them; it can't send, approve, run or delete anything, and it never lists
   a page you can't open. In a Bot's browser the shortcut goes to the browser.
 - **Searching conversations searches all your history on the server**, by name and recent
-  messages, instead of only the conversations already loaded in the sidebar. The new
-  `GET /api/channels/search` uses the conversation list's own rules for who can see what.
+  messages, instead of only the conversations already loaded in the sidebar. The search
+  (`GET /api/v2/organizations/{organizationId}/conversations?q=...`) uses the conversation list's
+  own rules for who can see what.
 
 ### Personal edition
 
@@ -257,8 +258,7 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   with a migrations Job is still held to the guarded `pre-upgrade` one, and a chart with neither
   is still refused.
 - **The Routines page no longer warns that routines aren't running.** That warning was for a
-  deployment with no worker, which no longer exists as a state. `GET /api/routines` still answers
-  with the `sweep` record older apps read.
+  deployment with no worker, which no longer exists as a state.
 
 ### Running from source
 

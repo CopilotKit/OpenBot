@@ -164,11 +164,11 @@ It used to take a second process: a worker that ran the sweep in a loop and hand
 the server at `/internal/routines/run`. A deployment that never started one stored every routine,
 showed it with a next run time, and fired nothing, so the Routines page carried a warning for it.
 With the sweep in the server there is no such state to warn about, and the page no longer does.
-`GET /api/routines` still answers with the `sweep` record that warning read, for apps from before
-this.
+The routines list (`GET /api/v2/organizations/{organizationId}/routines`) carries no record of the
+sweep.
 
-A sweep no longer records that it happened: nothing writes `routine_sweeps` now, the `sweep`
-record always says the sweep is working, and the table stays for one more release.
+A sweep no longer records that it happened: nothing writes `routine_sweeps` now, and the table
+stays for one more release.
 
 The server has no `/internal/routines/run` now and reads neither of the two settings that worker
 took: `WORKER_SHARED_SECRET`, the credential it presented there, and `SERVER_INTERNAL_URL`, where it

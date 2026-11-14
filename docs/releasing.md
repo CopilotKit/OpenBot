@@ -37,8 +37,7 @@ and all dropped together in the release after:
   work itself, which the file says on its `x-openbot-scheduled-work: server` line.
 - The two commands those services run in the OpenBot image, `/app/bin/openbot worker` and
   `/app/bin/openbot migrate`, which do nothing there now.
-- The `routine_sweeps` table, which the server still writes for the `sweep` record
-  `GET /api/routines` answers older apps with.
+- The `routine_sweeps` table, which nothing writes now.
 
 Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
 nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,
