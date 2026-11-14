@@ -23,6 +23,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppAccessCard } from "@/components/channels/app-access-card";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { appAccess } from "./app-access-fixture";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
@@ -121,8 +122,8 @@ function serving(before: AppAccess, signIn: Promise<void>) {
     if (method !== "GET") writes.push(`${method} ${url}`);
     if (url === "/api/capabilities")
       return Response.json({ edition: "personal" });
-    if (url === "/api/me")
-      return Response.json({
+    if (url === ME_PATH)
+      return meResponse({
         user: { id: "usr_me", role: "admin", name: "Me" },
       });
     if (url === botPath("assistant"))

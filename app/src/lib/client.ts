@@ -60,10 +60,16 @@ export function tryClient(
 /** The server answered, and said no. `status` tells a refusal (4xx) from a server that broke (5xx). */
 export class ClientError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /**
+   * The refusal's stable name, when the server gave one: the API's problem `code`
+   * (`LINKED_ACCOUNTS_UNAVAILABLE`), or the `code` a few of today's routes answer beside `error`.
+   */
+  readonly code: string | undefined;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ClientError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -78,19 +84,21 @@ async function refusal(
   response: Response,
   fallback: string | undefined,
 ): Promise<ClientError> {
-  const message = await response
-    .json()
-    .then((body: { error?: unknown; detail?: unknown }) =>
-      typeof body.error === "string"
-        ? body.error
-        : typeof body.detail === "string"
-          ? body.detail
-          : undefined,
-    )
-    .catch(() => undefined);
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    detail?: unknown;
+    code?: unknown;
+  } | null;
+  const message =
+    typeof body?.error === "string"
+      ? body.error
+      : typeof body?.detail === "string"
+        ? body.detail
+        : undefined;
   return new ClientError(
     message ?? fallback ?? "That request failed.",
     response.status,
+    typeof body?.code === "string" ? body.code : undefined,
   );
 }
 

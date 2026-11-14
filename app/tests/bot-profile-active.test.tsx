@@ -10,6 +10,7 @@ import {
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { BotProfile } from "@/components/bot-profile/profile";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -81,8 +82,8 @@ function serving(paused: boolean, writes: string[] = []) {
     if (url.includes("/shared-use/bot/")) {
       return Response.json({ apps: [], pending: [] });
     }
-    if (url.includes("/api/me")) {
-      return Response.json({
+    if (url.includes(ME_PATH)) {
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
       });
     }

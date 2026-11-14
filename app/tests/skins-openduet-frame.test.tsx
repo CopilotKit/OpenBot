@@ -28,6 +28,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
+import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -87,7 +88,7 @@ function channel(id: string, agentIds: string[], summary: string) {
 function api(role: "admin" | "user") {
   const sent: Sent[] = [];
   const bodies: Record<string, unknown> = {
-    "/api/me": {
+    [ME_PATH]: meBody({
       user: {
         id: "u-1",
         name: "Maya Chen",
@@ -95,13 +96,11 @@ function api(role: "admin" | "user") {
         role,
         onboarding: null,
       },
-    },
+    }),
     "/api/capabilities": { transcription: true },
-    "/api/settings/preferences": {
-      preferences: {
-        messageListEmphasis: "thread",
-        selfHostBannerDismissed: true,
-      },
+    [PREFERENCES_PATH]: {
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: true,
     },
     "/api/channels": {
       channels: [

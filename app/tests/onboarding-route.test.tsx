@@ -28,6 +28,13 @@ import userEvent from "@testing-library/user-event";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
+import {
+  ME_PATH,
+  meResponse,
+  ONBOARDING_ADVANCE_PATH,
+  ONBOARDING_COMPLETE_PATH,
+  personBody,
+} from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -129,8 +136,8 @@ beforeEach(() => {
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const method = init?.method ?? "GET";
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH && method === "GET")
+        return meResponse({
           user: {
             id: "person-1",
             email: "maya@example.com",
@@ -143,23 +150,27 @@ beforeEach(() => {
             },
           },
         });
-      if (path === "/api/me/profile" && method === "PATCH") {
+      if (path === ME_PATH && method === "PATCH") {
         named = (JSON.parse(String(init?.body)) as { name: string }).name;
-        return Response.json({ profile: { name: named, needsName: false } });
+        return Response.json({
+          person: personBody({
+            id: "person-1",
+            email: "maya@example.com",
+            name: named,
+            role: "admin",
+          }),
+        });
       }
-      if (path === "/api/me/onboarding" && method === "POST") {
-        const body = JSON.parse(String(init?.body)) as {
-          step?: number;
-          completed?: boolean;
-        };
-        if (body.completed) {
-          if (completeFail)
-            return Response.json({ error: "down" }, { status: 503 });
-          completed = true;
-          return Response.json({
-            onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
-          });
-        }
+      if (path === ONBOARDING_COMPLETE_PATH && method === "POST") {
+        if (completeFail)
+          return Response.json({ error: "down" }, { status: 503 });
+        completed = true;
+        return Response.json({
+          onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
+        });
+      }
+      if (path === ONBOARDING_ADVANCE_PATH && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { step?: number };
         if (body.step === undefined) throw new Error("Missing onboarding step");
         saves.push(body.step);
         saved = body.step;

@@ -76,7 +76,7 @@ export const ListIdentityProvidersResponse = zod.object({
           "A company's own identity provider, registered for single sign-on at its email domain. Never its client secret or signing certificate.",
         ),
     )
-    .describe("By domain."),
+    .describe("By domain, then by id."),
   nextCursor: zod
     .string()
     .max(listIdentityProvidersResponseNextCursorMax)

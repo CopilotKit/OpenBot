@@ -83,7 +83,7 @@ export const ListApiKeysResponse = zod.object({
         })
         .describe("An API key a person made. Never the key itself."),
     )
-    .describe("Newest first."),
+    .describe("Newest first, then by id."),
   nextCursor: zod
     .string()
     .max(listApiKeysResponseNextCursorMax)

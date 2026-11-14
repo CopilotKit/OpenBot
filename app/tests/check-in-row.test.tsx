@@ -21,6 +21,7 @@ import type * as React from "react";
 import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { queryClient } from "@/query-client";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -111,8 +112,8 @@ function serving() {
     }
     if (path === "/api/proactive/settings")
       return Response.json({ settings, allowed: true });
-    if (path === "/api/settings/preferences")
-      return Response.json({
+    if (path === PREFERENCES_PATH)
+      return preferencesResponse({
         preferences: {
           messageListEmphasis: "thread",
           selfHostBannerDismissed: true,

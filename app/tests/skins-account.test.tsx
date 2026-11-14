@@ -37,6 +37,7 @@ import {
   setSkin,
   useSkinId,
 } from "@/skins/store";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { BOTS_PATH } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -154,11 +155,9 @@ function renderSettings() {
 
 test("picking a skin draws it at once and saves it on the account", async () => {
   signedIn();
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openbot"),
-  });
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openbot"));
   const save = Promise.withResolvers<Response>();
-  answers.set("PATCH /api/settings/preferences", () => save.promise);
+  answers.set(`PATCH ${PREFERENCES_PATH}`, () => save.promise);
   const { view, user } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
@@ -181,13 +180,13 @@ test("picking a skin draws it at once and saves it on the account", async () => 
   expect(sent).toEqual([
     {
       method: "PATCH",
-      path: "/api/settings/preferences",
+      path: PREFERENCES_PATH,
       body: { skin: "opendots" },
     },
   ]);
 
   await act(async () => {
-    save.resolve(Response.json({ preferences: preferences("opendots") }));
+    save.resolve(preferencesResponse({ preferences: preferences("opendots") }));
   });
   await waitFor(() =>
     expect(
@@ -202,9 +201,7 @@ test("picking a skin draws it at once and saves it on the account", async () => 
 
 test("the picker lists OpenFuse, and never OpenMuse", async () => {
   signedIn();
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openbot"),
-  });
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openbot"));
   const { view, user } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
@@ -220,9 +217,10 @@ test("an account still holding OpenMuse's id draws OpenFuse, and saves nothing",
   signedIn();
   // The id the skin had before it was renamed. The server answers with the new id, and the app reads
   // the old one the same way, so an account is never dropped to the default by the rename.
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openmuse" as UserPreferences["skin"]),
-  });
+  serve(
+    `GET ${PREFERENCES_PATH}`,
+    preferences("openmuse" as UserPreferences["skin"]),
+  );
   const { view } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
@@ -239,11 +237,9 @@ test("an account still holding OpenMuse's id draws OpenFuse, and saves nothing",
 test("a skin the account could not save is put back, and the picker says so", async () => {
   signedIn();
   setSkin("openduet");
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openduet"),
-  });
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openduet"));
   const save = Promise.withResolvers<Response>();
-  answers.set("PATCH /api/settings/preferences", () => save.promise);
+  answers.set(`PATCH ${PREFERENCES_PATH}`, () => save.promise);
   const { view, user } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
@@ -273,12 +269,12 @@ test("the account's skin wins over a different one this browser cached", async (
   // What a reload paints first: the cached skin, before the preferences have answered.
   setSkin("openfuse");
   const read = Promise.withResolvers<Response>();
-  answers.set("GET /api/settings/preferences", () => read.promise);
+  answers.set(`GET ${PREFERENCES_PATH}`, () => read.promise);
   const { view } = renderSettings();
   expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse");
 
   await act(async () => {
-    read.resolve(Response.json({ preferences: preferences("opendots") }));
+    read.resolve(preferencesResponse({ preferences: preferences("opendots") }));
   });
   await waitFor(() =>
     expect(view.getByLabelText("Drawn skin").textContent).toBe("opendots"),

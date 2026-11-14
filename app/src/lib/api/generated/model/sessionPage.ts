@@ -4,7 +4,7 @@
 import type { Session } from "./session";
 
 export interface SessionPage {
-  /** The most recently used first. */
+  /** The newest sign-in first, then by id, an order that doesn't move while somebody pages. */
   sessions: Session[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

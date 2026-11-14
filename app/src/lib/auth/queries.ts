@@ -1,5 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import type { GetPersonResponse } from "@/lib/api/generated/model";
+import { getPerson } from "@/lib/api/generated/people/people";
+import { ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError, client } from "@/lib/client";
 
 /**
  * Where this person is in first-run onboarding.
@@ -23,8 +26,9 @@ export type AuthenticatedUser = {
   onboarding: OnboardingStatus | null;
   /**
    * The OpenBot release the server runs, such as "v0.3.1", drawn small under this person's name.
-   * Not the person's: /api/me carries it beside them, and it rides here so the request the
-   * `_authed` gate already makes brings it. Null when the server was built without one.
+   * Not the person's: the API answers it beside them (getPerson's `openbotVersion`), and it rides here
+   * so the request the `_authed` gate already makes brings it. Null when the server was built without
+   * one.
    */
   openbotVersion?: string | null;
 };
@@ -91,30 +95,40 @@ export function authProvidersQueryOptions() {
   });
 }
 
-async function currentUser(): Promise<AuthenticatedUser | null> {
+async function currentUser(
+  signal?: AbortSignal,
+): Promise<AuthenticatedUser | null> {
   /*
-   * `tryClient` rather than `client`: not being signed in is an answer here, not a failure, and it
-   * arrives as a 401 that has to be read before anything decides the request went wrong.
+   * Not being signed in is an answer here, not a failure: the API refuses with 401, and the `_authed`
+   * gate reads null as "go and sign in". Any other refusal is a failed request.
    */
-  const response = await tryClient("/api/me");
-  if (response.status === 401) {
-    return null;
+  let answer: GetPersonResponse;
+  try {
+    answer = await getPerson(ORGANIZATION_ID, "me", {
+      ...(signal ? { signal } : {}),
+      fallback: "Could not load the current user",
+    });
+  } catch (error) {
+    if (error instanceof ClientError && error.status === 401) return null;
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(`Could not load the current user (${response.status})`);
-  }
-
-  const body = (await response.json()) as {
-    user: AuthenticatedUser;
-    version?: string | null;
+  const { person } = answer;
+  return {
+    id: person.id,
+    email: person.email,
+    name: person.name,
+    needsName: person.needsName,
+    image: person.image,
+    role: person.role,
+    onboarding: person.onboarding,
+    openbotVersion: answer.openbotVersion,
   };
-  return { ...body.user, openbotVersion: body.version ?? null };
 }
 
 export function currentUserQueryOptions() {
   return queryOptions({
     queryKey: authKeys.currentUser(),
-    queryFn: currentUser,
+    queryFn: ({ signal }) => currentUser(signal),
     staleTime: 60_000,
   });
 }

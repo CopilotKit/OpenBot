@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SharedUseRequests } from "../src/components/approvals/shared-use-requests";
+import { ME_PATH, meResponse } from "./accounts-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -42,8 +43,8 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
-      if (url === "/api/me")
-        return Response.json({
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role },
         });
       if (url === "/api/approvals/shared-use")

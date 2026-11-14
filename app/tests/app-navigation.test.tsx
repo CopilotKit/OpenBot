@@ -16,9 +16,9 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CommandMenu } from "@/components/navigation/command-menu";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
+import { CommandMenu } from "@/components/navigation/command-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
@@ -27,6 +27,7 @@ import { channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { isNavigationLink, NAVIGATION, navigationFor } from "@/lib/navigation";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -106,8 +107,8 @@ function renderSidebar(
   if (me) {
     globalThis.fetch = Object.assign(
       async (input: RequestInfo | URL) =>
-        new URL(String(input), "http://localhost/").pathname === "/api/me"
-          ? Response.json({ user: person, ...me })
+        new URL(String(input), "http://localhost/").pathname === ME_PATH
+          ? meResponse({ user: person, ...me })
           : Response.json({ error: "not served" }, { status: 404 }),
       { preconnect: originalFetch.preconnect },
     );

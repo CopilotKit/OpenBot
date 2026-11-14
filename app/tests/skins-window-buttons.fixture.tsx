@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { PageShell } from "@/components/layout/page-shell";
 import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
+import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -66,7 +67,7 @@ function channel(id: string, agentIds: string[], summary: string) {
 }
 
 const bodies: Record<string, unknown> = {
-  "/api/me": {
+  [ME_PATH]: meBody({
     user: {
       id: "u-1",
       name: "Pat Example",
@@ -74,13 +75,11 @@ const bodies: Record<string, unknown> = {
       role: "admin",
       onboarding: null,
     },
-  },
+  }),
   "/api/capabilities": { transcription: true },
-  "/api/settings/preferences": {
-    preferences: {
-      messageListEmphasis: "thread",
-      selfHostBannerDismissed: true,
-    },
+  [PREFERENCES_PATH]: {
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: true,
   },
   "/api/channels": {
     channels: [

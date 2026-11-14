@@ -28,6 +28,12 @@ import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerView } from "@/components/computer/computer-view";
 import { Toaster, toast } from "@/components/ui/toast";
 import { queryClient } from "@/query-client";
+import {
+  ME_PATH,
+  meResponse,
+  PREFERENCES_PATH,
+  preferencesResponse,
+} from "./accounts-api";
 import { installChrome } from "./browser-narration.fixture";
 import { settleReactWork } from "./settle-react-work";
 
@@ -156,15 +162,15 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
   const computer = `/api/computers/${encodeURIComponent(botId)}`;
   const mine = answer().mine;
 
-  if (path === "/api/me")
-    return Response.json({
+  if (path === ME_PATH)
+    return meResponse({
       user: { id: ME, email: "me@example.com", role: "user", onboarding: null },
     });
-  if (path === "/api/settings/preferences") {
+  if (path === PREFERENCES_PATH) {
     // As the server's own route takes it: one preference at a time, merged into the rest.
     if (method === "PATCH" && body && "narration" in body)
       narrationChoice = body.narration;
-    return Response.json({
+    return preferencesResponse({
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
@@ -437,8 +443,7 @@ const disabled = (element: HTMLElement) =>
   (element as HTMLButtonElement).disabled;
 const preferenceWrites = () =>
   requests.filter(
-    (sent) =>
-      sent.path === "/api/settings/preferences" && sent.method === "PATCH",
+    (sent) => sent.path === PREFERENCES_PATH && sent.method === "PATCH",
   );
 
 test("while the Bot holds the wheel the bar shows where the Bot is, read only, and Record asks for control", async () => {
@@ -850,7 +855,7 @@ test("someone else taking the wheel does not open the Computer for this person o
   );
   await waitFor(() =>
     expect(
-      requests.some((sent) => sent.path === "/api/me") &&
+      requests.some((sent) => sent.path === ME_PATH) &&
         requests.some((sent) => sent.path.endsWith("/control")),
     ).toBe(true),
   );

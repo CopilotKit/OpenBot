@@ -22,6 +22,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as SetupRoute } from "@/routes/_authed/settings/setup";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -82,8 +83,8 @@ beforeEach(() => {
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       requested.push(path);
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH)
+        return meResponse({
           user: {
             id: "person-1",
             email: "maya@example.com",

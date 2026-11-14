@@ -119,6 +119,7 @@ export const getListApiKeysQueryOptions = <
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -170,6 +171,7 @@ export type ListApiKeysQueryError =
   | SignedInOwnOnlyResponse
   | OrganizationNotFoundResponse
   | ServerErrorResponse
+  | SignInUnavailableResponse
   | UnexpectedErrorResponse;
 
 export function useListApiKeys<
@@ -180,6 +182,7 @@ export function useListApiKeys<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -211,6 +214,7 @@ export function useListApiKeys<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -242,6 +246,7 @@ export function useListApiKeys<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -269,6 +274,7 @@ export function useListApiKeys<
     | SignedInOwnOnlyResponse
     | OrganizationNotFoundResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
 >(
   organizationId: string,
@@ -520,6 +526,7 @@ export const getDeleteApiKeyMutationOptions = <
     | ApiKeyNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -574,6 +581,7 @@ export type DeleteApiKeyMutationError =
   | ApiKeyNotFoundResponse
   | IdempotencyConflictResponse
   | ServerErrorResponse
+  | SignInUnavailableResponse
   | UnexpectedErrorResponse;
 export type DeleteApiKeyMutationVariables = {
   organizationId: string;
@@ -593,6 +601,7 @@ export const useDeleteApiKey = <
     | ApiKeyNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
+    | SignInUnavailableResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(

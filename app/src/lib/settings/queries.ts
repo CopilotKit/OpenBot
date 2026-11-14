@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { getStandingInstructions } from "@/lib/api/generated/people/people";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 
 /**
  * How much one person may say, in characters.
@@ -20,9 +21,12 @@ export const settingsKeys = {
 export function instructionsQueryOptions() {
   return queryOptions({
     queryKey: settingsKeys.instructions(),
-    queryFn: async (): Promise<string> =>
-      client("/api/settings/instructions", "instructions", {
-        fallback: "Could not load your standing instructions",
-      }),
+    queryFn: async ({ signal }): Promise<string> =>
+      (
+        await getStandingInstructions(ORGANIZATION_ID, "me", {
+          signal,
+          fallback: "Could not load your standing instructions",
+        })
+      ).instructions,
   });
 }

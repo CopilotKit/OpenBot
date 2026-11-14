@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { SharingSections } from "@/components/bot-profile/sharing";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { TeamBot, TeamBotsData } from "@/lib/team-bots";
+import { meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -87,7 +88,7 @@ function serving(data: TeamBotsData, role: "admin" | "user") {
     if (url.includes("/api/team-bots")) return Response.json(data);
     if (url.includes("/shared-use/bot/")) return Response.json({ apps: [] });
     if (url.includes("/shared-use")) return Response.json({ requests: [] });
-    return Response.json({
+    return meResponse({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;

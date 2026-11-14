@@ -18,6 +18,7 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Admin → Approvals: the team-wide controls and team rules, in one place for administrators. */
@@ -103,8 +104,8 @@ beforeEach(() => {
       if (url === "/api/approvals") return Response.json(inbox);
       if (url === "/api/approvals/shared-use")
         return Response.json({ requests: [] });
-      if (url === "/api/me")
-        return Response.json({
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role: "admin" },
         });
       return new Response(null, { status: 404 });
