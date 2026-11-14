@@ -259,6 +259,12 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       "unless the change's own result already shows what changed, such as a sent message with its link",
     );
     expect(said).toContain("say 'all' only if you checked every item");
+    // No aside about what was never looked at: a Slack summary said "no thread replies" with no
+    // replies fetched.
+    expect(said).toContain("leave out what you did not look at");
+    expect(said).toContain(
+      "no replies, nothing else or nothing newer unless a result showed that",
+    );
     // Never the general plea Anthropic says makes its newest models over-verify.
     expect(said).not.toContain("double-check");
     expect(said).not.toContain("verify your work");
@@ -308,9 +314,11 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     );
     expect(said).toContain("say which part in one sentence");
     expect(said).toContain("do not do the work");
+    // Nor a numbered list of everything it would need: one question now, the rest once started.
     expect(said).toContain(
-      "list what you can and cannot do, or ask for a brief",
+      "list what you can and cannot do, list the details you would need, or ask for a brief",
     );
+    expect(said).toContain("the rest can be asked once the work has started");
     // A request worded as a question is still a request.
     expect(said).toContain("a request worded as a question");
     expect(said).toContain("is a request: do it");
