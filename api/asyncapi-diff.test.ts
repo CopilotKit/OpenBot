@@ -45,7 +45,7 @@ test.skipIf(!installed)(
         "address: /api/channels/events",
         "address: /api/channels/happenings",
       ),
-    ).toEqual(["edit /channels/conversationEvents/address"]);
+    ).toEqual(["edit /channels/legacyConversationEvents/address"]);
   },
   slow,
 );
@@ -57,7 +57,7 @@ test.skipIf(!installed)(
     const inChannel =
       '      screenText:\n        $ref: "#/components/messages/ScreenText"\n';
     const inOperation =
-      '      - $ref: "#/channels/botScreen/messages/screenText"\n';
+      '      - $ref: "#/channels/legacyBotScreen/messages/screenText"\n';
     expect(original).toContain(inChannel);
     expect(original).toContain(inOperation);
     const head = join(
@@ -71,7 +71,7 @@ test.skipIf(!installed)(
     const failed = failing(differences(SPEC, head)).map(
       (change) => `${change.action} ${change.path}`,
     );
-    expect(failed).toContain("remove /channels/botScreen/messages/screenText");
+    expect(failed).toContain("remove /channels/legacyBotScreen/messages/screenText");
   },
   slow,
 );
@@ -161,7 +161,7 @@ test.skipIf(!installed)(
         "address: /api/channels/happenings",
         accepted,
       ),
-    ).toEqual(["edit /channels/conversationEvents/address"]);
+    ).toEqual(["edit /channels/legacyConversationEvents/address"]);
   },
   slow,
 );

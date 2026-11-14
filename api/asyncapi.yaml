@@ -15,7 +15,10 @@ info:
 
 
     A run streams through CopilotKit Intelligence's realtime gateway, which
-    OpenBot uses as it ships. The other sockets are served by OpenBot itself.
+    OpenBot uses as it ships. The other sockets are served by OpenBot itself,
+    and are described at the addresses they have today, as the channels whose
+    names start with legacy. Addresses under the organization's, like every
+    REST resource has, are to follow, and these stay served beside them.
 
 
     Every operation is written from the server's side, as AsyncAPI has it:
@@ -51,7 +54,7 @@ servers:
     security:
       - $ref: "#/components/securitySchemes/joinToken"
 channels:
-  conversationEvents:
+  legacyConversationEvents:
     address: /api/channels/events
     title: Conversation events
     description: >-
@@ -72,7 +75,7 @@ channels:
         $ref: "#/components/messages/ConversationActivity"
       conversationResync:
         $ref: "#/components/messages/ConversationResync"
-  botScreen:
+  legacyBotScreen:
     address: /api/computers/{botId}/stream
     title: A Bot's screen
     description: >-
@@ -109,7 +112,7 @@ channels:
         $ref: "#/components/messages/ScreenKey"
       screenText:
         $ref: "#/components/messages/ScreenText"
-  botTerminal:
+  legacyBotTerminal:
     address: /api/computers/{botId}/terminal
     title: A Bot's terminal
     description: >-
@@ -210,59 +213,59 @@ channels:
       threadError:
         $ref: "#/components/messages/ThreadError"
 operations:
-  sendConversationEvents:
+  sendLegacyConversationEvents:
     action: send
     title: Tell a person what changed in their conversations
     summary: A conversation the person is in changed, or everything may have.
     channel:
-      $ref: "#/channels/conversationEvents"
+      $ref: "#/channels/legacyConversationEvents"
     messages:
-      - $ref: "#/channels/conversationEvents/messages/conversationActivity"
-      - $ref: "#/channels/conversationEvents/messages/conversationResync"
-  sendBotScreen:
+      - $ref: "#/channels/legacyConversationEvents/messages/conversationActivity"
+      - $ref: "#/channels/legacyConversationEvents/messages/conversationResync"
+  sendLegacyBotScreen:
     action: send
     title: Show a Bot's screen
     summary: The screen's pictures, and why something could not be shown or done.
     channel:
-      $ref: "#/channels/botScreen"
+      $ref: "#/channels/legacyBotScreen"
     messages:
-      - $ref: "#/channels/botScreen/messages/screenHello"
-      - $ref: "#/channels/botScreen/messages/screenFrame"
-      - $ref: "#/channels/botScreen/messages/screenError"
-      - $ref: "#/channels/botScreen/messages/screenInputError"
-  receiveBotScreenInput:
+      - $ref: "#/channels/legacyBotScreen/messages/screenHello"
+      - $ref: "#/channels/legacyBotScreen/messages/screenFrame"
+      - $ref: "#/channels/legacyBotScreen/messages/screenError"
+      - $ref: "#/channels/legacyBotScreen/messages/screenInputError"
+  receiveLegacyBotScreenInput:
     action: receive
     title: Take a person's mouse and keyboard
     summary: The person's input to the Bot's computer, and each picture's receipt.
     channel:
-      $ref: "#/channels/botScreen"
+      $ref: "#/channels/legacyBotScreen"
     messages:
-      - $ref: "#/channels/botScreen/messages/screenFrameReceived"
-      - $ref: "#/channels/botScreen/messages/screenMouse"
-      - $ref: "#/channels/botScreen/messages/screenWheel"
-      - $ref: "#/channels/botScreen/messages/screenKey"
-      - $ref: "#/channels/botScreen/messages/screenText"
-  sendBotTerminal:
+      - $ref: "#/channels/legacyBotScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/legacyBotScreen/messages/screenMouse"
+      - $ref: "#/channels/legacyBotScreen/messages/screenWheel"
+      - $ref: "#/channels/legacyBotScreen/messages/screenKey"
+      - $ref: "#/channels/legacyBotScreen/messages/screenText"
+  sendLegacyBotTerminal:
     action: send
     title: Show a Bot's terminal
     summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
     channel:
-      $ref: "#/channels/botTerminal"
+      $ref: "#/channels/legacyBotTerminal"
     messages:
-      - $ref: "#/channels/botTerminal/messages/terminalOutput"
-      - $ref: "#/channels/botTerminal/messages/terminalSnapshot"
-      - $ref: "#/channels/botTerminal/messages/terminalReady"
-      - $ref: "#/channels/botTerminal/messages/terminalError"
-  receiveBotTerminalInput:
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalOutput"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalSnapshot"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalReady"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalError"
+  receiveLegacyBotTerminalInput:
     action: receive
     title: Take a person's typing
     summary: What the person typed, the size of their terminal, and how much they have drawn.
     channel:
-      $ref: "#/channels/botTerminal"
+      $ref: "#/channels/legacyBotTerminal"
     messages:
-      - $ref: "#/channels/botTerminal/messages/terminalInput"
-      - $ref: "#/channels/botTerminal/messages/terminalResize"
-      - $ref: "#/channels/botTerminal/messages/terminalAck"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalInput"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalResize"
+      - $ref: "#/channels/legacyBotTerminal/messages/terminalAck"
   sendThreadStream:
     action: send
     title: Stream a conversation's runs
