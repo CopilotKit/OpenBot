@@ -13,7 +13,8 @@ import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 
 /**
  * A skin's frame around a page, as `_authed/_app` draws it, as a page of its own for
@@ -35,18 +36,10 @@ function attention(asked: string | null) {
   if (!asked) return [];
   const waiting = asked === "dot" ? 0 : Number(asked);
   return [
-    {
-      agentId: "b-1",
-      name: "Inbox Bot",
-      questions: 0,
-      approvals: 0,
-      handoffs: 0,
+    attentionOf("b-1", "Inbox Bot", {
       unread: asked === "dot" ? 1 : 0,
-      paused: false,
-      notify: "all",
-      items: 0,
       tasks: { needsInput: 0, ready: waiting, failed: 0 },
-    },
+    }),
   ];
 }
 
@@ -82,17 +75,10 @@ const bodies: Record<string, unknown> = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
   },
-  "/api/channels": {
-    channels: [
-      channel("c-1", ["b-1"], "Renewal for the studio policy"),
-      channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
-    ],
-    nextCursor: null,
-  },
-  "/api/bots/attention": {
-    bots: attention(params.get("attention")),
-    lastPingId: null,
-  },
+  [CONVERSATIONS_PATH]: conversationPage([
+    channel("c-1", ["b-1"], "Renewal for the studio policy"),
+    channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
+  ]),
 };
 
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -104,6 +90,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     ],
   });
   if (bots) return bots;
+  const waiting = answerBotAttention(url, init, {
+    bots: attention(params.get("attention")),
+  });
+  if (waiting) return waiting;
   if (url.pathname in bodies) return Response.json(bodies[url.pathname]);
   return Response.json({ error: "not served" }, { status: 404 });
 }) as typeof fetch;

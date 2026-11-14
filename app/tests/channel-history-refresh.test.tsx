@@ -22,11 +22,18 @@ import { answerBotsList, botPath } from "./bots-api";
 import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
-const ActivityRequestSchema = z.object({
-  agentId: z.string().nullable(),
-  at: z.string(),
-  text: z.string(),
-});
+/**
+ * What the app sends to record activity, as the API reads it: the Bot is `botId`. The socket
+ * announces the same activity with the Bot as `agentId`, which is how it is kept here.
+ */
+const ActivityRequestSchema = z
+  .object({
+    botId: z.string().nullable(),
+    at: z.string(),
+    text: z.string(),
+  })
+  .strict()
+  .transform(({ botId, ...rest }) => ({ agentId: botId, ...rest }));
 type ActivityRequest = z.infer<typeof ActivityRequestSchema>;
 const NativeResponse = globalThis.Response;
 const channel: AgentChannel = {
@@ -130,7 +137,11 @@ beforeAll(() => {
         runRequests.push({ path: url.pathname, input: body });
         return sse(runEvents(body));
       }
-      if (/\/api\/channels\/[^/]+\/activity$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/activity$/.test(
+          url.pathname,
+        )
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         activityRequests.push(
@@ -138,9 +149,17 @@ beforeAll(() => {
         );
         return new NativeResponse(null, { status: 204 });
       }
-      if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/signal-busy$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {

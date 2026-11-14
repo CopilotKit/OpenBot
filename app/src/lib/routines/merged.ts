@@ -63,8 +63,8 @@ export function mergeRoutines({
   checkIns: readonly ProactiveSetting[];
   agentId?: string;
 }): MergedRoutine[] {
-  const mine = <T extends { agentId: string }>(rows: readonly T[]) =>
-    rows.filter((row) => agentId === undefined || row.agentId === agentId);
+  const mine = <T extends { botId: string }>(rows: readonly T[]) =>
+    rows.filter((row) => agentId === undefined || row.botId === agentId);
   const goalIds = new Set(goals.map((goal) => goal.id));
   const rows: MergedRoutine[] = [
     ...mine(routines)
@@ -73,7 +73,7 @@ export function mergeRoutines({
         (routine): MergedRoutine => ({
           kind: "routine",
           id: routine.id,
-          agentId: routine.agentId,
+          agentId: routine.botId,
           routine,
         }),
       ),
@@ -81,7 +81,7 @@ export function mergeRoutines({
       (goal): MergedRoutine => ({
         kind: "goal",
         id: goal.id,
-        agentId: goal.agentId,
+        agentId: goal.botId,
         goal,
         routines: routines.filter((routine) => routine.goalId === goal.id),
       }),
@@ -90,7 +90,7 @@ export function mergeRoutines({
       (checkIn): MergedRoutine => ({
         kind: "check-in",
         id: checkIn.id,
-        agentId: checkIn.agentId,
+        agentId: checkIn.botId,
         checkIn,
       }),
     ),

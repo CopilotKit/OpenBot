@@ -23,6 +23,7 @@ import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { queryClient } from "@/query-client";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
 import {
   ASKED_SO_FAR,
   ASKED_TEXT,
@@ -32,6 +33,7 @@ import {
   askPersonStored,
 } from "./ask-person-replay.fixture";
 import { answerBotsList, botPath } from "./bots-api";
+import { conversationOf, conversationPath } from "./conversations-api";
 import {
   ANSWER_TEXT,
   ANSWERED_EARLY,
@@ -175,14 +177,16 @@ beforeAll(() => {
         return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",
@@ -226,17 +230,25 @@ beforeAll(() => {
             topic: TOPIC,
           },
         });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname)) {
         historyReads += 1;
         return history();
       }
       // The conversation's own page, for the test that goes through the router.
-      if (url.pathname === `/api/channels/${channel.id}`)
-        return NativeResponse.json({ channel });
+      if (url.pathname === conversationPath(channel.id))
+        return NativeResponse.json({ conversation: conversationOf(channel) });
       throw new Error(`Unexpected fixture request: ${url.pathname}`);
     },
     {

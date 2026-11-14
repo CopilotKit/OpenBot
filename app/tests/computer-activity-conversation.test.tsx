@@ -32,6 +32,12 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  COMPUTER_STEPS_PATH,
+  computerStepResponse,
+} from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import {
@@ -303,19 +309,21 @@ beforeAll(() => {
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
-      // The gate: `POST /api/approvals/computer/:botId` in server/src/approvals/routes.ts.
-      if (url.pathname === `/api/approvals/computer/${bot}`) {
-        const body = (await request.json()) as GatedStep;
+      // The gate: the API's computer step, which carries the conversation with the call in it.
+      if (url.pathname === COMPUTER_STEPS_PATH) {
+        const { conversation: body } = (await request.json()) as {
+          conversation: GatedStep;
+        };
         const step = {
           toolCallId: body.toolCallId,
           toolName: body.toolName,
           args: body.args,
         };
         gated.push(step);
-        return gate(step);
+        return computerStepResponse(gate(step));
       }
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: inbox.map((request) => ({
             ...request,
@@ -325,15 +333,27 @@ beforeAll(() => {
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       const decided = url.pathname.match(
-        /^\/api\/approvals\/([^/]+)\/decision$/,
+        /^\/api\/v2\/organizations\/default\/people\/me\/approvals\/([^/]+)\/decide$/,
       );
       if (decided?.[1]) {
         onDecision(decodeURIComponent(decided[1]));
-        return NativeResponse.json({ ok: true });
+        // The approval, as decided, which is what the API answers a decision with.
+        return (
+          approvalWriteResponse(url.pathname, {
+            method: "POST",
+            body: await request.text(),
+          }) ?? NativeResponse.json({})
+        );
       }
       // Whether this conversation asks before every step: the person's own conversation, so it does not.
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
       if (url.pathname.startsWith(`/api/computers/${bot}/`)) {
         const route = url.pathname.replace(`/api/computers/${bot}`, "");
@@ -362,9 +382,17 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === `/api/plugins/for/${bot}`)
         return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
       if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();

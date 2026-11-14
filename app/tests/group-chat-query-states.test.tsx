@@ -13,7 +13,13 @@ import { GroupChat } from "@/components/channels/group-chat";
 import { groupKeys } from "@/lib/groups";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse } from "./approvals-api";
 import { answerBotsList } from "./bots-api";
+import {
+  answerGroupRead,
+  type GroupFixture,
+  problem,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -31,27 +37,27 @@ let answer: "ok" | "fail" | "hold" = "ok";
 let release: (() => void) | null = null;
 let originalFetch: typeof fetch;
 
-const group = () =>
-  Response.json({
-    bots: [
-      { id: "errands", name: "Errand Helper" },
-      { id: "budget", name: "Budget Buddy" },
-    ],
-    people: [
-      { userId: "me", email: "me@example.test", name: null, creator: true },
-    ],
-    messages: [
-      {
-        id: "m-1",
-        channelId: CHANNEL,
-        ownerUserId: "me",
-        agentId: null,
-        text: "Which area first?",
-        status: "completed",
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  });
+/** The group as the app draws it; the API answers it as its members and its lines. */
+const group = (): GroupFixture => ({
+  bots: [
+    { id: "errands", name: "Errand Helper" },
+    { id: "budget", name: "Budget Buddy" },
+  ],
+  people: [
+    { userId: "me", email: "me@example.test", name: null, creator: true },
+  ],
+  messages: [
+    {
+      id: "m-1",
+      channelId: CHANNEL,
+      ownerUserId: "me",
+      agentId: null,
+      text: "Which area first?",
+      status: "completed",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+});
 
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://localhost/" });
@@ -61,14 +67,16 @@ beforeAll(() => {
     init?: RequestInit,
   ) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname === `/api/groups/${CHANNEL}`) {
-      if (answer === "fail")
-        return Response.json({ error: "Server error" }, { status: 500 });
-      if (answer === "hold")
+    // The two reads the conversation is drawn from: its members and its lines.
+    const read = answerGroupRead(url, init, CHANNEL, group());
+    if (read) {
+      if (answer === "fail") return problem(500, "Server error");
+      // Held on its lines; its members answer, so one release lets the whole read through.
+      if (answer === "hold" && url.pathname.endsWith("/messages"))
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-      return group();
+      return read;
     }
     if (url.pathname === ME_PATH)
       return meResponse({
@@ -76,14 +84,16 @@ beforeAll(() => {
       });
     const bots = answerBotsList(url, init, { visible: [] });
     if (bots) return bots;
-    if (url.pathname === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(url.pathname, {
         enabled: true,
         requests: [],
         rules: [],
         teamRules: [],
         questions: [],
       });
+      if (approvals) return approvals;
+    }
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
 });

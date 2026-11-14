@@ -1,3 +1,5 @@
+import { startVoiceCall } from "@/lib/api/generated/voice/voice";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import type { ConnectVoice, VoiceEvent } from "./types";
 
 /** WebRTC owns audio buffering and interruption truncation; the data channel carries controls. */
@@ -110,26 +112,17 @@ export const connectWebRtc: ConnectVoice = async ({
     };
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
-    const response = await fetch("/api/voice/calls", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json", "x-openbot-voice": "1" },
-      body: JSON.stringify({ channelId, sdp: offer.sdp }),
-      signal,
-    });
-    if (!response.ok) {
-      const body: unknown = await response.json().catch(() => null);
-      throw new Error(
-        body &&
-          typeof body === "object" &&
-          "error" in body &&
-          typeof body.error === "string"
-          ? body.error
-          : "Could not connect the voice call. Please try again.",
-      );
-    }
+    const answer: unknown = await startVoiceCall(
+      ORGANIZATION_ID,
+      channelId,
+      { ...(offer.sdp === undefined ? {} : { sdp: offer.sdp }) },
+      { "Idempotency-Key": idempotencyKey() },
+      {
+        fallback: "Could not connect the voice call. Please try again.",
+        signal,
+      },
+    );
     if (closed) throw new DOMException("Call ended", "AbortError");
-    const answer: unknown = await response.json();
     if (
       !answer ||
       typeof answer !== "object" ||

@@ -25,7 +25,15 @@ import {
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
+import {
+  answerBotAttention,
+  attentionOf,
+  BOTS_PATH,
+  lifecycleOf,
+  lifecycleResponse,
+} from "./bots-api";
 import { closeDesktop, launchDesktop } from "./desktop-notifications.fixture";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -106,7 +114,7 @@ let originalWebSocket: typeof WebSocket;
 let originalFocus: typeof window.focus;
 const originalFetch = globalThis.fetch;
 /**
- * What `GET /api/bots/attention` answers now, read fresh when a reply is about to be announced.
+ * What the person's Bot attention answers now, read fresh when a reply is about to be announced.
  * Null: what the page was opened with.
  */
 let served: { bots: BotAttention[]; lastPingId: null } | null = null;
@@ -115,32 +123,32 @@ let openedWith: { bots: BotAttention[]; lastPingId: null } = {
   lastPingId: null,
 };
 /**
- * Each Bot's own notification setting, as `GET /api/bots/:id/lifecycle` answers it: what the person
+ * Each Bot's own notification setting, as its lifecycle answers it: what the person
  * saved, or "all" for a Bot they never set, as the server does. The attention list carries the same
  * setting for the Bots it names, and names only Bots with something waiting.
  */
 let settings: Record<string, BotNotify> = {};
-const serveAttention = (async (input: RequestInfo | URL) => {
+const serveAttention = (async (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => {
   const url = String(input);
-  if (url.endsWith("/api/bots/attention"))
-    return Response.json(served ?? openedWith);
-  const lifecycle = url.match(/\/api\/bots\/([^/]+)\/lifecycle$/);
+  const waiting = answerBotAttention(input, init, served ?? openedWith);
+  if (waiting) return waiting;
+  const lifecycle = url.match(new RegExp(`^${BOTS_PATH}/([^/]+)/lifecycle$`));
   if (lifecycle?.[1]) {
-    const agentId = decodeURIComponent(lifecycle[1]);
+    const botId = decodeURIComponent(lifecycle[1]);
     const listed = (served ?? openedWith).bots.find(
-      (bot) => bot.agentId === agentId,
+      (bot) => bot.botId === botId,
     );
-    return Response.json({
-      lifecycle: {
-        agentId,
-        paused: false,
-        pausedAt: null,
-        notify: listed?.notify ?? settings[agentId] ?? "all",
-      },
-    });
+    return lifecycleResponse(
+      lifecycleOf(botId, {
+        notify: listed?.notify ?? settings[botId] ?? "all",
+      }),
+    );
   }
-  if (url.endsWith("/api/proactive/suggestions"))
-    return Response.json({ suggestions: [] });
+  if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+    return Response.json({ checkInItems: [], nextCursor: null });
   return Response.json({ error: "not served" }, { status: 404 });
 }) as unknown as typeof fetch;
 // A turn's replies settle quickly here; the rule is the same.
@@ -193,18 +201,7 @@ afterAll(async () => {
 });
 
 function attention(notify: BotNotify): BotAttention {
-  return {
-    agentId: "expenses",
-    name: "Expenses",
-    questions: 0,
-    approvals: 0,
-    handoffs: 0,
-    unread: 0,
-    paused: false,
-    notify,
-    items: 0,
-    tasks: { needsInput: 0, ready: 0, failed: 0 },
-  };
+  return attentionOf("expenses", "Expenses", { notify });
 }
 
 /** The page, with the hook that keeps the roster live, and the Bots it knows. */

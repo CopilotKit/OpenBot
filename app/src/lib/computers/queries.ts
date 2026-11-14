@@ -1,4 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
+import {
+  getBoundaries,
+  replayBoundaries,
+} from "@/lib/api/generated/boundaries/boundaries";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { client } from "@/lib/client";
 
 /**
@@ -119,8 +124,9 @@ export function computerFleetQueryOptions() {
 export function actionPolicyQueryOptions() {
   return queryOptions({
     queryKey: computerKeys.policy(),
-    queryFn: (): Promise<ActionPolicy> =>
-      client("/api/computers/policy", "policy", {
+    queryFn: ({ signal }): Promise<ActionPolicy> =>
+      getBoundaries(ORGANIZATION_ID, {
+        signal,
         fallback: "The boundary could not be read.",
       }),
   });
@@ -166,11 +172,13 @@ export type DryRunReport = {
 export async function dryRunActionPolicy(
   candidate: ActionPolicy,
 ): Promise<DryRunReport> {
-  return client("/api/computers/policy-dry-run", "report", {
-    method: "POST",
-    body: { policy: candidate },
-    fallback: "The rule could not be tested against history.",
-  });
+  // A test writes nothing, but it is a POST to the API, so it carries a key of its own.
+  return replayBoundaries(
+    ORGANIZATION_ID,
+    { boundaries: candidate },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "The rule could not be tested against history." },
+  );
 }
 
 /**

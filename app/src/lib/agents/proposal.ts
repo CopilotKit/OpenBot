@@ -15,8 +15,8 @@ import type { AgentProfile } from "./queries";
  * and a person making one are then held to one rule, with no second parser to drift from the
  * server's.
  *
- * Nothing here decides whether the coworker may be created. That stays the server's: `POST
- * /api/agents` already answers who may, records `bot.created`, and refuses in its own words.
+ * Nothing here decides whether the coworker may be created. That stays the server's: the API's
+ * `createBot` already answers who may, records `bot.created`, and refuses in its own words.
  */
 
 /**

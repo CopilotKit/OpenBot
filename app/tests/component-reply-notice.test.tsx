@@ -36,7 +36,14 @@ import { refreshNotificationPermission } from "@/lib/notifications/permission";
 import { forgetReplies, replyTiming } from "@/lib/notifications/reply-notice";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
-import { answerBotsList, botPath } from "./bots-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  botOperationPath,
+  botPath,
+  lifecycleOf,
+  lifecycleResponse,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import {
   ANNOUNCE_COMPONENTS_PATH,
@@ -154,7 +161,7 @@ let runs: RunAgentInput[] = [];
 /** Holds the Bot's first run until the person has had the chance to switch away. */
 let arrive: Promise<void> = Promise.resolve();
 let stored: Message[] = [];
-/** Every line the conversation reported to the roster, as `POST /api/channels/:id/activity`. */
+/** Every line the conversation reported to the roster, as `POST /conversations/:id/activity` in the API. */
 let reported: { agentId: string | null; text: string }[] = [];
 let notify: BotNotify = "all";
 let originalFetch: typeof fetch;
@@ -350,25 +357,29 @@ function runEvents(input: RunAgentInput): unknown[] {
 async function serve(url: URL, request: Request): Promise<Response> {
   const path = url.pathname;
   // The server's part of the roster: what a conversation reports is announced to its members.
-  const activity = path.match(/^\/api\/channels\/([^/]+)\/activity$/);
+  const activity = path.match(
+    /^\/api\/v2\/organizations\/default\/conversations\/([^/]+)\/activity$/,
+  );
   if (activity?.[1] && request.method === "POST") {
     const body = (await request.json()) as {
-      agentId: string | null;
+      botId: string | null;
       at: string;
       text: string;
     };
-    reported.push({ agentId: body.agentId, text: body.text });
+    reported.push({ agentId: body.botId, text: body.text });
     announce({
       channelId: activity[1],
       memberIds: ["user"],
       lastMessage: body.text,
       lastMessageAt: body.at,
-      lastMessageAgentId: body.agentId,
-      ...(body.agentId !== null ? { firstLine: body.text } : {}),
+      lastMessageAgentId: body.botId,
+      ...(body.botId !== null ? { firstLine: body.text } : {}),
     });
     return new NativeResponse(null, { status: 204 });
   }
-  const busy = path.match(/^\/api\/channels\/([^/]+)\/busy$/);
+  const busy = path.match(
+    /^\/api\/v2\/organizations\/default\/conversations\/([^/]+)\/signal-busy$/,
+  );
   if (busy?.[1] && request.method === "POST") {
     const body = (await request.json()) as { busy: boolean };
     announce({
@@ -384,12 +395,10 @@ async function serve(url: URL, request: Request): Promise<Response> {
     return new NativeResponse(null, { status: 204 });
   }
   // The Bot's own notification setting, and nothing of it waiting on the person.
-  if (path === "/api/bots/attention")
-    return NativeResponse.json({ bots: [], lastPingId: null });
-  if (path === `/api/bots/${BOT}/lifecycle`)
-    return NativeResponse.json({
-      lifecycle: { agentId: BOT, paused: false, pausedAt: null, notify },
-    });
+  const waiting = answerBotAttention(url, request, { bots: [] });
+  if (waiting) return waiting;
+  if (path === botOperationPath(BOT, "lifecycle"))
+    return lifecycleResponse(lifecycleOf(BOT, { notify }));
   const bots = answerBotsList(url, request, {
     visible: [{ id: BOT, name: "Trip Planner" }],
   });
@@ -437,9 +446,17 @@ async function serve(url: URL, request: Request): Promise<Response> {
     return NativeResponse.json({ messages: stored });
   if (/^\/api\/plugins\/for\/[^/]+$/.test(path))
     return NativeResponse.json({ skills: [], tools: [] });
-  if (path === "/api/voice/sessions")
+  if (
+    /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+      path,
+    )
+  )
     return NativeResponse.json({ sessions: [], nextCursor: null });
-  if (/^\/api\/approvals\/threads\/[^/]+$/.test(path))
+  if (
+    /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+      path,
+    )
+  )
     return NativeResponse.json({ asksEveryStep: false });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }

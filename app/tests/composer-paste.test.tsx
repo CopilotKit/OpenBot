@@ -16,7 +16,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * PASTE, THE THIRD AND LAST DOOR A FILE COMES IN THROUGH.
@@ -51,7 +56,9 @@ let uploads: string[];
 
 beforeEach(() => {
   uploads = [];
-  global.fetch = (async (_path: string, init: RequestInit) => {
+  global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     const file = (init.body as FormData).get("file") as File;
     uploads.push(file.name);
     return new Response(
@@ -59,6 +66,7 @@ beforeEach(() => {
         id: "attachment-id",
         name: file.name,
         mimeType: file.type,
+        sizeBytes: file.size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );

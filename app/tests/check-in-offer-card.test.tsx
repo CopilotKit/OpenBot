@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ActiveBotProvider, useActiveBot } from "@/lib/copilot/active-bot";
 import { CheckInOfferCard } from "@/lib/copilot/check-in-offer-tool";
 import { botPath } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -48,14 +49,15 @@ function drawn(
   const posted: unknown[] = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/api/proactive/settings" && init?.method === "POST") {
+    if (url === CHECK_INS_PATH && init?.method === "POST") {
       posted.push(JSON.parse(String(init.body)));
-      return Response.json({ setting: { id: "set_new" } }, { status: 201 });
+      return Response.json({ checkIn: { id: "set_new" } }, { status: 201 });
     }
-    if (url === "/api/proactive/settings")
+    if (pathOf(url) === CHECK_INS_PATH)
       return Response.json({
-        settings: options.settings ?? [],
+        checkIns: options.settings ?? [],
         allowed: options.allowed ?? true,
+        nextCursor: null,
       });
     if (url === botPath("assistant"))
       return Response.json({
@@ -106,8 +108,8 @@ test("asks about the one thing, and turns on a daily check-in only when pressed"
   await waitFor(() =>
     expect(posted).toEqual([
       {
-        agentId: "assistant",
-        channelId: "ch_1",
+        botId: "assistant",
+        conversationId: "ch_1",
         subject: BRIEF.subject,
         focus: "",
         sourceLink: BRIEF.link,
@@ -136,8 +138,8 @@ test("says so where the Bot already watches that page", async () => {
     settings: [
       {
         id: "set_1",
-        agentId: "assistant",
-        channelId: "ch_1",
+        botId: "assistant",
+        conversationId: "ch_1",
         focus: "",
         subject: "Brief",
         sourceLink: BRIEF.link,

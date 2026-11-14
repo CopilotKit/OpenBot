@@ -23,6 +23,7 @@ import {
   type RoutineRecord,
 } from "@/lib/routines/queries";
 import { answerBotsList } from "./bots-api";
+import { answerScheduleLists, pathOf, ROUTINES_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -90,8 +91,8 @@ const goal = (
   overrides: Partial<ResponsibilityRecord> = {},
 ): ResponsibilityRecord => ({
   id: "g1",
-  agentId: "expenses",
-  channelId: "channel-expenses",
+  botId: "expenses",
+  conversationId: "channel-expenses",
   threadId: "thread",
   title: "Reconcile receipts",
   instruction: "Do it.",
@@ -102,18 +103,20 @@ const goal = (
   subscriptions: [],
   recurring: false,
   endsWhenMet: true,
+  createdAt: "2026-10-09T10:00:00Z",
   updatedAt: "2026-10-09T10:00:00Z",
+  completedAt: null,
   ...overrides,
 });
 
 const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "r1",
-  agentId: "expenses",
+  botId: "expenses",
   schedule: "Weekdays at 09:00",
   timezone: "UTC",
   instruction: 'Run the goal "Reconcile receipts" (g1) with run_goal.',
   title: "Reconcile receipts",
-  channel: {
+  conversation: {
     id: "channel-expenses",
     name: null,
     title: "Finance",
@@ -123,6 +126,7 @@ const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   nextRunAt: "2999-01-01T09:00:00.000Z",
   lastRun: null,
   goalId: "g1",
+  createdAt: "2026-10-09T10:00:00Z",
   ...overrides,
 });
 
@@ -137,22 +141,23 @@ function serving() {
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
       if ((init?.method ?? "GET") !== "GET") return Response.json({});
-      if (url === "/api/responsibilities")
-        return Response.json({ responsibilities: server.goals });
-      if (url === "/api/routines")
-        return server.routines === "fails"
-          ? new Response(null, { status: 500 })
-          : Response.json({
-              routines: server.routines,
-              sweep: { lastSweptAt: new Date().toISOString(), working: true },
-            });
-      if (url === "/api/proactive/settings")
-        return Response.json({ settings: [], allowed: true });
+      if (pathOf(url) === ROUTINES_PATH && server.routines === "fails")
+        return new Response(null, { status: 500 });
+      const schedules = answerScheduleLists(url, init, {
+        goals: server.goals,
+        routines: server.routines === "fails" ? [] : server.routines,
+      });
+      if (schedules) return schedules;
       const bots = answerBotsList(url, init, {
         visible: [{ id: "expenses", name: "Expenses" }],
       });
       if (bots) return bots;
-      return Response.json({ runs: [], triggers: [], channels: [] });
+      return Response.json({
+        runs: [],
+        triggers: [],
+        channels: [],
+        nextCursor: null,
+      });
     },
     { preconnect: originalFetch.preconnect },
   );

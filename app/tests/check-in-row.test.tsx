@@ -23,10 +23,12 @@ import { ProactiveResearchSettings } from "@/components/suggestions/proactive-pa
 import { queryClient } from "@/query-client";
 import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * One Bot's check-ins, against a server answering as `/api/proactive` does: the row says how often
+ * One Bot's check-ins, against a server answering as the API's check-ins do: the row says how often
  * and when it runs next whatever the focus and links to the check-in's page, which says what the last
  * check-in did (a skip and why included) and what Run now did. Turn on check-ins is offered only for
  * a Bot that has none, over the person's own conversations with it, never a task's.
@@ -60,11 +62,11 @@ type LastRun = {
 
 const setting = (overrides: Record<string, unknown> = {}) => ({
   id: "p1",
-  ownerUserId: "alice",
-  agentId: "expenses",
-  channelId: "own",
-  threadId: "t-p1",
+  botId: "expenses",
+  conversationId: "own",
   focus: "",
+  subject: "",
+  sourceLink: null,
   enabled: true,
   intervalMinutes: 60,
   nextRunAt: new Date(Date.now() + 45 * 60_000).toISOString(),
@@ -105,13 +107,18 @@ function serving() {
     const path = String(input);
     const method = init?.method ?? "GET";
     if (method !== "GET") writes.push(`${method} ${path}`);
-    if (path === "/api/proactive/settings/p1/run" && method === "POST") {
+    if (path === `${CHECK_INS_PATH}/p1/run` && method === "POST") {
       if (afterRun)
         settings = settings.map((row) => ({ ...row, lastRun: afterRun }));
       return Response.json(runAnswer);
     }
-    if (path === "/api/proactive/settings")
-      return Response.json({ settings, allowed: true });
+    if (method === "DELETE") return new Response(null, { status: 204 });
+    if (pathOf(path) === CHECK_INS_PATH)
+      return Response.json({
+        checkIns: settings,
+        allowed: true,
+        nextCursor: null,
+      });
     if (path === PREFERENCES_PATH)
       return preferencesResponse({
         preferences: {
@@ -122,14 +129,13 @@ function serving() {
           proactive: "on",
         },
       });
-    if (path.startsWith("/api/channels"))
-      return Response.json({
-        channels: [
+    if (path.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json(
+        conversationPage([
           channel("own", "Expense reports", false),
           channel("task", "Deno 2.9.8 Upgrade Review", true),
-        ],
-        nextCursor: null,
-      });
+        ]),
+      );
     const bots = answerBotsList(input, init, {
       visible: [{ id: "expenses", name: "Expenses" }],
     });
@@ -226,7 +232,7 @@ test("Run now skipped at once says why on the page, never nothing", async () => 
   const view = page();
   const user = userEvent.setup({ document });
   await user.click(await view.findByRole("button", { name: /^Run now/ }));
-  expect(writes).toEqual(["POST /api/proactive/settings/p1/run"]);
+  expect(writes).toEqual([`POST ${CHECK_INS_PATH}/p1/run`]);
   expect(
     await view.findByText(`Skipped just now. ${NOTHING_TO_READ}`),
   ).toBeTruthy();
@@ -290,7 +296,5 @@ test("Remove asks first, and only then removes the check-in", async () => {
   });
   expect(writes).toEqual([]);
   await user.click(within(confirm).getByRole("button", { name: "Remove" }));
-  await waitFor(() =>
-    expect(writes).toEqual(["DELETE /api/proactive/settings/p1"]),
-  );
+  await waitFor(() => expect(writes).toEqual([`DELETE ${CHECK_INS_PATH}/p1`]));
 });

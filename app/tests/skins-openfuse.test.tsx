@@ -58,7 +58,27 @@ import {
   PREFERENCES_PATH,
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerBotsList } from "./bots-api";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
+import {
+  activityOf,
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  botOperationPath,
+} from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPage,
+  noContent,
+  problem,
+} from "./conversations-api";
+import {
+  CHECK_IN_ITEMS_PATH,
+  CHECK_INS_PATH,
+  GOALS_PATH,
+  ROUTINES_PATH,
+} from "./schedules-api";
 
 /*
  * The OpenFuse frame against OpenBot's own API shapes. Every payload below is what the server's
@@ -200,33 +220,11 @@ const inbox: ApprovalInboxData = {
 };
 
 const attention: BotAttention[] = [
-  {
-    agentId: fuse.id,
-    name: fuse.name,
-    questions: 0,
-    approvals: 1,
-    handoffs: 0,
-    unread: 0,
-    paused: false,
-    notify: "all",
-    items: 0,
-    tasks: { needsInput: 0, ready: 0, failed: 0 },
-  },
-  {
-    agentId: scout.id,
-    name: scout.name,
-    questions: 0,
-    approvals: 0,
-    handoffs: 0,
-    unread: 1,
-    paused: false,
-    notify: "all",
-    items: 0,
-    tasks: { needsInput: 0, ready: 0, failed: 0 },
-  },
+  attentionOf(fuse.id, fuse.name, { approvals: 1 }),
+  attentionOf(scout.id, scout.name, { unread: 1 }),
 ];
 
-const activity: BotActivity = {
+const activity: BotActivity = activityOf({
   inProgress: [
     {
       id: "a-live",
@@ -256,44 +254,57 @@ const activity: BotActivity = {
       cancellable: false,
     },
   ],
-};
+});
 
 const settings: ProactiveSetting[] = [
   {
     id: "p-fuse",
-    agentId: fuse.id,
-    channelId: "c-fuse",
+    botId: fuse.id,
+    conversationId: "c-fuse",
     focus: "",
+    subject: "",
+    sourceLink: null,
     enabled: true,
     intervalMinutes: 240,
     nextRunAt: now,
     lastRunAt: earlier,
     lastStatus: "succeeded",
     lastError: null,
+    lastRun: null,
+    createdAt: earlier,
+    updatedAt: earlier,
   },
 ];
 
 const suggestions: ProactiveSuggestion[] = [
   {
     id: "s-fuse",
-    agentId: fuse.id,
+    botId: fuse.id,
     title: "Book a table for Friday dinner",
     detail: "Jamie asked about Friday.\nThe thread is in your inbox.",
     sourceApp: "Gmail",
     sourceRef: "gmail/thread",
     sourceLink: "https://mail.example.com/thread/1",
     pingId: "ping-1",
+    checkInId: "p-fuse",
+    status: "open",
+    deliveredAt: null,
+    resolvedAt: null,
     createdAt: now,
   },
   {
     id: "s-scout",
-    agentId: scout.id,
+    botId: scout.id,
     title: "Compare pricing pages",
     detail: "A competitor changed theirs.",
     sourceApp: null,
     sourceRef: null,
     sourceLink: null,
     pingId: null,
+    checkInId: "p-scout",
+    status: "open",
+    deliveredAt: null,
+    resolvedAt: null,
     createdAt: now,
   },
 ];
@@ -301,12 +312,12 @@ const suggestions: ProactiveSuggestion[] = [
 const routines: RoutineRecord[] = [
   {
     id: "rt-1",
-    agentId: fuse.id,
+    botId: fuse.id,
     schedule: "Every weekday at 9:00",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
     title: null,
-    channel: {
+    conversation: {
       id: "c-fuse",
       name: "Fuse",
       title: "Morning headlines",
@@ -315,14 +326,16 @@ const routines: RoutineRecord[] = [
     enabled: true,
     nextRunAt: now,
     lastRun: null,
+    goalId: null,
+    createdAt: earlier,
   },
 ];
 
 const responsibilities: ResponsibilityRecord[] = [
   {
     id: "g-1",
-    agentId: fuse.id,
-    channelId: "c-fuse",
+    botId: fuse.id,
+    conversationId: "c-fuse",
     threadId: "thread-c-fuse",
     title: "Keep my inbox at zero",
     instruction: "Triage new mail each morning",
@@ -333,12 +346,14 @@ const responsibilities: ResponsibilityRecord[] = [
     subscriptions: [],
     recurring: false,
     endsWhenMet: false,
+    createdAt: now,
     updatedAt: now,
+    completedAt: null,
   },
   {
     id: "g-scout",
-    agentId: scout.id,
-    channelId: "c-scout",
+    botId: scout.id,
+    conversationId: "c-scout",
     threadId: "thread-c-scout",
     title: "Watch the competition",
     instruction: "",
@@ -349,7 +364,9 @@ const responsibilities: ResponsibilityRecord[] = [
     subscriptions: [],
     recurring: false,
     endsWhenMet: false,
+    createdAt: now,
     updatedAt: now,
+    completedAt: null,
   },
 ];
 
@@ -416,20 +433,20 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     }),
-    "/api/channels": { channels, nextCursor: null },
-    "/api/approvals": inbox,
-    "/api/bots/attention": { bots: attention, lastPingId: null },
-    [`/api/bots/${fuse.id}/activity`]: { activity },
-    [`/api/bots/${scout.id}/activity`]: {
-      activity: { inProgress: [], scheduled: [], completed: [] },
+    [CONVERSATIONS_PATH]: conversationPage(channels),
+    [botOperationPath(fuse.id, "activity")]: activity,
+    [botOperationPath(scout.id, "activity")]: activityOf(),
+    [`${CHECK_INS_PATH}?limit=100`]: {
+      checkIns: settings,
+      allowed: true,
+      nextCursor: null,
     },
-    "/api/proactive/settings": { settings, allowed: true },
-    "/api/proactive/suggestions": { suggestions },
-    "/api/routines": {
-      routines,
-      sweep: { lastSweptAt: now, working: true },
+    [`${CHECK_IN_ITEMS_PATH}?limit=100`]: {
+      checkInItems: suggestions,
+      nextCursor: null,
     },
-    "/api/responsibilities": { responsibilities },
+    [`${ROUTINES_PATH}?limit=100`]: { routines, nextCursor: null },
+    [`${GOALS_PATH}?limit=100`]: { goals: responsibilities, nextCursor: null },
     "/api/memory": { memories },
     "/api/plugins": plugins,
     "/api/plugins/connections": {
@@ -456,16 +473,33 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-      if (method !== "GET") return Response.json({ ok: true });
+      // A conversation marked read, or saying what it is doing, answers with nothing.
+      if (
+        method === "POST" &&
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(mark-read|activity|signal-busy)$/.test(
+          path,
+        )
+      )
+        return noContent();
+      if (method !== "GET")
+        return (
+          approvalWriteResponse(input, init) ?? Response.json({ ok: true })
+        );
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
-      const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
+      const waiting = answerBotAttention(input, init, { bots: attention });
+      if (waiting) return waiting;
+      const detail = path.match(
+        /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
+      );
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);
         return found
-          ? Response.json({ channel: found })
-          : Response.json({ error: "Not found" }, { status: 404 });
+          ? Response.json({ conversation: conversationOf(found) })
+          : problem(404, "Couldn't find that conversation.");
       }
+      const approvals = approvalInboxResponse(input, inbox);
+      if (approvals) return approvals;
       if (path in routes) return Response.json(routes[path]);
       return Response.json({ error: "Not here" }, { status: 404 });
     },
@@ -711,10 +745,8 @@ describe("the frame", () => {
       const real = globalThis.fetch;
       return Object.assign(
         (input: RequestInfo | URL, init?: RequestInit) =>
-          String(input) === "/api/channels"
-            ? Promise.resolve(
-                Response.json({ channels: roster, nextCursor: null }),
-              )
+          String(input) === CONVERSATIONS_PATH
+            ? Promise.resolve(Response.json(conversationPage(roster)))
             : real(input, init),
         { preconnect: originalFetch.preconnect },
       );
@@ -937,7 +969,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
         calls.some(
           (call) =>
             call.method === "POST" &&
-            call.path === "/api/proactive/suggestions/s-fuse/start",
+            call.path === `${CHECK_IN_ITEMS_PATH}/s-fuse/start`,
         ),
       ).toBe(true),
     );
@@ -967,9 +999,9 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     );
     await waitFor(() =>
       expect(calls).toContainEqual({
-        method: "PUT",
-        path: "/api/routines/rt-1/enabled",
-        body: { enabled: false },
+        method: "POST",
+        path: `${ROUTINES_PATH}/rt-1/pause`,
+        body: undefined,
       }),
     );
   });
@@ -990,7 +1022,7 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: "POST",
-        path: "/api/approvals/r-pending/decision",
+        path: "/api/v2/organizations/default/people/me/approvals/r-pending/decide",
         body: { decision: "allow_once" },
       }),
     );
@@ -1038,18 +1070,7 @@ describe("the rules the frame runs on", () => {
     const busy = [
       channel({ id: "x", agentIds: ["b"], busy: true, summary: "Report" }),
     ];
-    const base = {
-      agentId: "b",
-      name: "B",
-      questions: 0,
-      approvals: 0,
-      handoffs: 0,
-      unread: 0,
-      paused: false,
-      notify: "all" as const,
-      items: 0,
-      tasks: { needsInput: 0, ready: 0, failed: 0 },
-    };
+    const base = attentionOf("b", "B");
     expect(
       statusLine({ attention: undefined, channels: busy, agentId: "b" }),
     ).toBe("Working on Report…");

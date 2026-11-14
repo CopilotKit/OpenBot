@@ -28,6 +28,7 @@ import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabili
 import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as SettingsMemoryRoute } from "@/routes/_authed/settings/memory";
 import { botPath } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -68,8 +69,8 @@ function servingNothing() {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === "/api/proactive/settings")
-        return Response.json({ settings: [], allowed: true });
+      if (pathOf(path) === CHECK_INS_PATH)
+        return Response.json({ checkIns: [], allowed: true, nextCursor: null });
       if (path === botPath("expenses"))
         return Response.json({
           bot: { id: "expenses", name: "Expenses", mine: true },

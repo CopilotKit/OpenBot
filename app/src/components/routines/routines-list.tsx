@@ -110,7 +110,7 @@ function RoutineItem({
             {lastRun.text}
           </ItemDescription>
         ) : null}
-        {routine.channel.gone ? (
+        {routine.conversation.gone ? (
           <ItemDescription className="text-destructive">
             Its conversation was deleted
           </ItemDescription>
