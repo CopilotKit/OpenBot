@@ -361,7 +361,8 @@ services:
       # The laptop's loopback addresses a browser here is handed, as this container reaches them
       # (`<port>=<host>:<port>`, comma-separated). The Recorder reaches OpenBot only at https or at
       # loopback, so on a laptop it is given `http://127.0.0.1:<port>`, which in here is this
-      # container. OpenBot Desktop sets it; unset, nothing is relayed (loopback-relay.ts).
+      # container. OpenBot Desktop and scripts/start.sh set it; unset, nothing is relayed
+      # (loopback-relay.ts).
       COMPUTER_LOOPBACK_RELAYS: ${COMPUTER_LOOPBACK_RELAYS:-}
     # Where a relay above sends a local Intelligence gateway: this machine. As for the server.
     extra_hosts:
@@ -417,6 +418,9 @@ services:
       # Set to runsc to run every computer under gVisor, when the host has it. Left unset each
       # computer is an ordinary container and shares the host kernel.
       COMPUTER_RUNTIME: ${COMPUTER_RUNTIME:-}
+      # Forwarded into every computer the supervisor creates, as agent-computer is given it above:
+      # Record in a Bot's browser there reaches OpenBot at this machine's loopback address too.
+      COMPUTER_LOOPBACK_RELAYS: ${COMPUTER_LOOPBACK_RELAYS:-}
     ports:
       # For the server on the host to ask for a Bot's computer.
       #
