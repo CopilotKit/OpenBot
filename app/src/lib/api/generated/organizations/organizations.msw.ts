@@ -34,6 +34,7 @@ export const getListOrganizationsResponseMock = (): OrganizationPage => ({
       active: false,
     },
   ],
+  canCreate: true,
   nextCursor: null,
 });
 

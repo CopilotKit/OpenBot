@@ -3841,13 +3841,19 @@ components:
             for a request with no session.
     OrganizationPage:
       type: object
-      required: [organizations, nextCursor]
+      required: [organizations, canCreate, nextCursor]
       properties:
         organizations:
           type: array
           description: The one the caller joined first at the top.
           items:
             $ref: '#/components/schemas/Organization'
+        canCreate:
+          type: boolean
+          description: >-
+            Whether the caller may create an organization: the server's
+            verdict, true for the deployment's admins and for anybody signed
+            in when the deployment lets them. The same on every page.
         nextCursor:
           type: [string, 'null']
           maxLength: 4096
@@ -6537,6 +6543,7 @@ components:
             name: Acme Research
             role: owner
             active: false
+        canCreate: true
         nextCursor: null
     CreatedOrganization:
       summary: A new organization, owned by whoever created it.

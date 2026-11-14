@@ -66,6 +66,11 @@ export const ListOrganizationsResponse = zod.object({
         ),
     )
     .describe("The one the caller joined first at the top."),
+  canCreate: zod
+    .boolean()
+    .describe(
+      "Whether the caller may create an organization: the server's verdict, true for the deployment's admins and for anybody signed in when the deployment lets them. The same on every page.",
+    ),
   nextCursor: zod
     .string()
     .max(listOrganizationsResponseNextCursorMax)
