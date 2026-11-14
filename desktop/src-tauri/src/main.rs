@@ -6595,12 +6595,13 @@ fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url)
 }
 
 /**
-The appearance the setup screens use: OpenBot's own light or dark, the last time its page reported
-one (`page_appearance`), and the system's until then. Both themes exist; the page follows the
-window's appearance through `prefers-color-scheme`, so `Some(Dark)` or `Some(Light)` pins one.
+The appearance the setup screens use: the light or dark the person chose in OpenBot, the last time
+its page reported one (`page_appearance`), and the system's until then or when OpenBot follows the
+system. Both themes exist; the page follows the window's appearance through `prefers-color-scheme`,
+so `Some(Dark)` or `Some(Light)` pins one and `None` follows the system.
 
-OpenBot's, not the system's: somebody who set OpenBot to light on a Mac in dark mode saw setup in
-dark, then OpenBot in light, as if they were two apps.
+The person's choice, not the system's: somebody who set OpenBot to light on a Mac in dark mode saw
+setup in dark, then OpenBot in light, as if they were two apps.
 */
 fn setup_theme<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::Theme> {
     let record = app.path().app_config_dir().ok()?.join(APPEARANCE_FILE);
@@ -6624,10 +6625,12 @@ fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
     tauri::window::Color(red, green, blue, 0xff)
 }
 
-/// Where OpenBot's last light or dark is kept, in the app's own configuration folder.
+/// Where OpenBot's last light or dark, or that it follows the system, is kept, in the app's own
+/// configuration folder.
 const APPEARANCE_FILE: &str = "appearance.json";
 
-/// The theme a saved record names, or None for no record or one that cannot be read.
+/// The theme a saved record names, or None for no record, one that cannot be read, or one that says
+/// OpenBot follows the system.
 fn theme_from_record(record: Option<&str>) -> Option<tauri::Theme> {
     let record: serde_json::Value = serde_json::from_str(record?).ok()?;
     match record.get("dark")?.as_bool()? {
@@ -6636,14 +6639,24 @@ fn theme_from_record(record: Option<&str>) -> Option<tauri::Theme> {
     }
 }
 
+/// The record for what OpenBot's page reported: the light or dark the person chose, or that OpenBot
+/// follows the system, which names no theme, so setup follows the system too.
+fn appearance_record(dark: bool, system: bool) -> String {
+    if system {
+        serde_json::json!({ "system": true }).to_string()
+    } else {
+        serde_json::json!({ "dark": dark }).to_string()
+    }
+}
+
 /// Keep OpenBot's light or dark for the next setup screen. Best effort: a record that cannot be
 /// written only means setup follows the system next time.
-fn remember_appearance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, dark: bool) {
+fn remember_appearance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, dark: bool, system: bool) {
     let Ok(directory) = app.path().app_config_dir() else {
         return;
     };
     let record = directory.join(APPEARANCE_FILE);
-    let wanted = serde_json::json!({ "dark": dark }).to_string();
+    let wanted = appearance_record(dark, system);
     if std::fs::read_to_string(&record).ok().as_deref() == Some(wanted.as_str()) {
         return;
     }
@@ -7000,11 +7013,16 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPag
     }
 }
 
-/// OpenBot's own page reporting its light or dark (`APP_THEME_PAGE`). On Windows the title bar
-/// takes the page's ground, when the page is one whose ground that is: an OpenBot from before the
-/// reskin keeps Windows's own bar, in the page's light or dark.
-pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark: bool) {
-    remember_appearance(window.app_handle(), dark);
+/// OpenBot's own page reporting its light or dark, and whether that is the system's
+/// (`APP_THEME_PAGE`). On Windows the title bar takes the page's ground, when the page is one whose
+/// ground that is: an OpenBot from before the reskin keeps Windows's own bar, in the page's light or
+/// dark.
+pub(crate) fn page_appearance<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    dark: bool,
+    system: bool,
+) {
+    remember_appearance(window.app_handle(), dark, system);
     #[cfg(target_os = "windows")]
     {
         let app = window.app_handle();
@@ -7018,6 +7036,18 @@ pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark
     }
     #[cfg(not(target_os = "windows"))]
     let _ = (window, dark);
+}
+
+/// The window's theme for what OpenBot's page reported: pinned to the light or dark the person
+/// chose, and the system's own (`None`) when OpenBot follows the system. A pinned window answers
+/// the page's `prefers-color-scheme` with the pin, so a window left pinned would never show the
+/// page that the system changed.
+pub(crate) fn window_theme(dark: bool, system: bool) -> Option<tauri::Theme> {
+    match (system, dark) {
+        (true, _) => None,
+        (false, true) => Some(tauri::Theme::Dark),
+        (false, false) => Some(tauri::Theme::Light),
+    }
 }
 
 /**
@@ -7202,28 +7232,37 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
 })();"#;
 
 /**
-Keeps the window's appearance on OpenBot's own light or dark, which it chooses itself (Settings)
-rather than following the system.
+Keeps the window's appearance on OpenBot's own light or dark when the person chose one (Settings),
+and on the system's when OpenBot follows the system.
 
 MEASURED: with the Mac in dark and OpenBot set to light, the window kept the dark appearance, and
 macOS drew its dark-window outline, a black line, around a light window. The page sets the window's
 theme to its own whenever its `dark` class changes, through `desktop_page::appearance`.
+
+The page names the choice in `data-theme-choice` on its root (app/index.html, app/src/lib/theme.ts).
+"system" lets the window follow the system, which is what lets the page see the system change. It
+is watched as well as the class: going back to System from a chosen dark on a dark window changes
+no class, and the window must still be let go. An OpenBot from before it followed the system names
+no choice, and its window stays pinned to its light or dark.
 */
 const APP_THEME_PAGE: &str = r#"(() => {
   const internals = window.__TAURI_INTERNALS__;
   if (!internals || typeof internals.invoke !== "function") return;
   let applied = null;
   const sync = () => {
-    const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-    if (theme === applied) return;
-    applied = theme;
+    const root = document.documentElement;
+    const dark = root.classList.contains("dark");
+    const system = root.dataset.themeChoice === "system";
+    const reported = `${dark}:${system}`;
+    if (reported === applied) return;
+    applied = reported;
     internals
-      .invoke("plugin:openbot-desktop|appearance", { dark: theme === "dark" })
+      .invoke("plugin:openbot-desktop|appearance", { dark, system })
       .catch(() => {});
   };
   new MutationObserver(sync).observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-theme-choice"],
   });
   sync();
 })();"#;
@@ -13002,8 +13041,44 @@ mod tests {
             assert_eq!(theme_from_record(unreadable), None, "{unreadable:?}");
         }
         // What `remember_appearance` writes is what this reads.
-        let written = serde_json::json!({ "dark": false }).to_string();
-        assert_eq!(theme_from_record(Some(&written)), Some(tauri::Theme::Light));
+        assert_eq!(
+            theme_from_record(Some(&appearance_record(false, false))),
+            Some(tauri::Theme::Light)
+        );
+        assert_eq!(
+            theme_from_record(Some(&appearance_record(true, false))),
+            Some(tauri::Theme::Dark)
+        );
+    }
+
+    /// When OpenBot follows the system, so do its window and the setup screens: the window is not
+    /// pinned, whatever the page showed when it reported, and the record names no theme.
+    #[test]
+    fn a_window_following_the_system_is_not_pinned() {
+        assert_eq!(window_theme(true, true), None);
+        assert_eq!(window_theme(false, true), None);
+        assert_eq!(window_theme(true, false), Some(tauri::Theme::Dark));
+        assert_eq!(window_theme(false, false), Some(tauri::Theme::Light));
+        for dark in [true, false] {
+            assert_eq!(
+                theme_from_record(Some(&appearance_record(dark, true))),
+                None
+            );
+        }
+        // The page says which, and says again when only the choice changes.
+        assert!(APP_THEME_PAGE.contains(r#"root.dataset.themeChoice === "system""#));
+        assert!(APP_THEME_PAGE.contains(r#"attributeFilter: ["class", "data-theme-choice"]"#));
+        assert!(APP_THEME_PAGE.contains("{ dark, system }"));
+        // The app this release ships names its choice there, before paint and after.
+        let page = include_str!("../../../app/index.html");
+        assert!(page.contains("document.documentElement.dataset.themeChoice"));
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains(".set_theme(crate::window_theme(dark, system))"),
+            "{command}"
+        );
     }
     use std::io::{Read, Write};
 
@@ -17238,7 +17313,7 @@ mod tests {
         let command = &command[command.find("async fn appearance(").unwrap()..];
         let command = &command[..command.find("\n}\n").unwrap()];
         assert!(
-            command.contains("crate::page_appearance(&window, dark);"),
+            command.contains("crate::page_appearance(&window, dark, system);"),
             "{command}"
         );
         // As the main window first shows, before `build()` returns.

@@ -89,7 +89,7 @@ async function open(
     );
   }
   await page.goto(`${ORIGIN}/`);
-  await page.locator("[data-theme-choice]").waitFor({ timeout: 8000 });
+  await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
   return page;
 }
 
@@ -106,8 +106,8 @@ function shown(page: Page) {
         now: root.classList.contains("dark") ? "dark" : "light",
         colorScheme: root.style.colorScheme,
         choice: document
-          .querySelector("[data-theme-choice]")
-          ?.getAttribute("data-theme-choice"),
+          .querySelector("[data-setting-shows]")
+          ?.getAttribute("data-setting-shows"),
         stored: localStorage.getItem(key),
         legacy: localStorage.getItem(legacyKey),
       };
@@ -225,7 +225,7 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
       () => !document.documentElement.classList.contains("dark"),
     );
     await page.reload();
-    await page.locator("[data-theme-choice]").waitFor({ timeout: 8000 });
+    await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
     expect(await shown(page)).toMatchObject({
       firstPaint: "light",
       now: "light",
@@ -250,7 +250,7 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
     });
 
     await page.reload();
-    await page.locator("[data-theme-choice]").waitFor({ timeout: 8000 });
+    await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
     expect(await shown(page)).toMatchObject({
       firstPaint: "light",
       now: "light",
@@ -268,7 +268,7 @@ describe.skipIf(!asked)("the app follows the system's light or dark", () => {
     });
 
     await page.reload();
-    await page.locator("[data-theme-choice]").waitFor({ timeout: 8000 });
+    await page.locator("[data-setting-shows]").waitFor({ timeout: 8000 });
     expect(await shown(page)).toMatchObject({
       firstPaint: "dark",
       now: "dark",
