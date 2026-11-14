@@ -25,11 +25,17 @@ import { PluginPage } from "@/components/manage/plugin-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { pluginKeys } from "@/lib/plugins/queries";
 import {
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+  APPS_PATH,
+  type AppsFixture,
+  answerAppsApi,
+  appBody,
+  appPath,
+  seedAppReads,
+  type TodayCatalogueItem,
+  type TodayServer,
+} from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -39,7 +45,7 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-const catalogueNotion = {
+const catalogueNotion: TodayCatalogueItem = {
   key: "notion",
   title: "Notion",
   vendor: "Notion",
@@ -49,7 +55,7 @@ const catalogueNotion = {
   perInstance: false,
 };
 
-const notionServer = {
+const notionServer: TodayServer = {
   id: "notion",
   title: "Notion",
   vendor: "Notion",
@@ -69,23 +75,22 @@ const notionServer = {
   sharedVendorConnected: false,
   ownerGrants: "any",
   ownerGrantsChosen: null,
-} as unknown as PluginServer;
+};
 
-function pageWith(servers: PluginServer[]): PluginsPage {
+function pageWith(servers: TodayServer[]): AppsFixture {
   return {
     catalogue: [catalogueNotion],
     servers,
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: true,
     provider: "composio",
     authorizesPerAction: false,
-  } as unknown as PluginsPage;
+  };
 }
 
 /** Exa as an app added from Composio's directory: no catalogue entry, reached as each person. */
-const exaServer = {
+const exaServer: TodayServer = {
   ...notionServer,
   id: "composio-exa",
   title: "Exa",
@@ -97,14 +102,14 @@ const exaServer = {
   dynamicClient: false,
   authScheme: "API_KEY",
   accountMode: "personal",
-} as unknown as PluginServer;
+};
 
 /**
- * Every write the page sends, in order. The plugin list answers with whatever the test drew until
+ * Every write the page sends, in order. The apps list answers with whatever the test drew until
  * the page adds Notion, and with Notion turned on after.
  */
 const writes: string[] = [];
-let servers: PluginServer[] = [];
+let servers: TodayServer[] = [];
 /** Your accounts, as `/api/plugins/connections` answers. A disconnect empties it. */
 let connections: unknown[] = [];
 const originalFetch = global.fetch;
@@ -116,18 +121,22 @@ beforeEach(() => {
       const path = String(input).split("?")[0];
       if (init?.method && init.method !== "GET") {
         writes.push(`${init.method} ${path}`);
-        if (path === "/api/plugins/servers") servers = [notionServer];
+        if (init.method === "POST" && path === APPS_PATH) {
+          servers = [notionServer];
+          return Response.json(appBody(notionServer), { status: 201 });
+        }
         if (path.endsWith("/connect"))
           return Response.json({ connected: true });
         if (init.method === "DELETE" && path.endsWith("/connection"))
           connections = [];
-        else if (init.method === "DELETE")
-          servers = servers.filter(
-            (server) => path !== `/api/plugins/servers/${server.id}`,
-          );
+        else if (init.method === "DELETE") {
+          servers = servers.filter((server) => path !== appPath(server.id));
+          return new Response(null, { status: 204 });
+        }
         return Response.json({ ok: true });
       }
-      if (path === "/api/plugins") return Response.json(pageWith(servers));
+      const apps = answerAppsApi(input, init, pageWith(servers));
+      if (apps) return apps;
       if (path === "/api/plugins/connections")
         return Response.json({ connections });
       return new Response(null, { status: 404 });
@@ -141,7 +150,7 @@ afterEach(() => {
 
 function draw(
   edition: "team" | "personal",
-  drawn: PluginServer[],
+  drawn: TodayServer[],
   pluginKey = "notion",
   page: () => React.ReactNode = () => <PluginPage pluginKey={pluginKey} />,
   bots: unknown[] = [],
@@ -156,7 +165,7 @@ function draw(
     localEvaluation: edition === "personal",
     edition,
   });
-  client.setQueryData(pluginKeys.page(), pageWith(drawn));
+  seedAppReads(client, pageWith(drawn));
   client.setQueryData(pluginKeys.connections(), { connections: [] });
   client.setQueryData(agentKeys.list(false), bots);
   client.setQueryData(agentKeys.list(true), bots);
@@ -190,7 +199,7 @@ describe("an app's page in the personal edition", () => {
     );
     await waitFor(() =>
       expect(writes).toEqual([
-        "POST /api/plugins/servers",
+        `POST ${APPS_PATH}`,
         "POST /api/plugins/servers/notion/connect",
       ]),
     );
@@ -216,7 +225,7 @@ describe("an app's page in the personal edition", () => {
           grantedTo: [],
         },
       ],
-    } as unknown as PluginServer;
+    } as TodayServer;
     const view = draw("personal", [withTools]);
     expect(await view.findByText("Search")).toBeTruthy();
     // The setting by its name in Settings > Approvals; it was once "Ask before acting", named nowhere.
@@ -254,7 +263,7 @@ const gmailTool = (
   destructive: false,
   grantedTo: [],
 });
-const gmailServer = {
+const gmailServer: TodayServer = {
   ...notionServer,
   id: "composio-gmail",
   title: "Gmail",
@@ -294,7 +303,7 @@ const gmailServer = {
       "Sends an email immediately through Gmail to specified To, Cc, or Bcc recipients, with a subject or body and optional attachments. Supports plain text or HTML and may append the configured Gmail signature; attachments are limited to 20 MiB in total before encoding.",
     ),
   ],
-} as unknown as PluginServer;
+} as TodayServer;
 
 describe("Gmail's page in the personal edition", () => {
   test("names each tool in words, with what it does and whether it changes things", async () => {
@@ -384,7 +393,7 @@ const gmailToolsForModels = {
       "Tool to insert a message into the user's mailbox similar to IMAP APPEND. Use when you need to add an email directly to a mailbox bypassing most scanning and classification. This does not send a message.",
     ),
   ],
-} as unknown as PluginServer;
+} as TodayServer;
 
 test("Gmail's page says what each tool does as a person would, not as its description tells a model", async () => {
   const view = draw("personal", [gmailToolsForModels], "composio-gmail");
@@ -429,7 +438,7 @@ test("team Admin keeps the descriptions as the app wrote them", async () => {
  * An app's page with Connections behind it, as `/connections/$key` sits under `/connections`, so
  * where the page sends somebody is where they land.
  */
-function drawAtConnections(drawn: PluginServer[], pluginKey: string) {
+function drawAtConnections(drawn: TodayServer[], pluginKey: string) {
   servers = drawn;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -440,7 +449,7 @@ function drawAtConnections(drawn: PluginServer[], pluginKey: string) {
     localEvaluation: true,
     edition: "personal",
   });
-  client.setQueryData(pluginKeys.page(), pageWith(drawn));
+  seedAppReads(client, pageWith(drawn));
   client.setQueryData(pluginKeys.connections(), { connections });
   client.setQueryData(agentKeys.list(false), []);
   client.setQueryData(agentKeys.list(true), []);
@@ -484,7 +493,7 @@ describe("turning an app off from its own page", () => {
     expect(await view.findByText("The Connections list")).toBeTruthy();
     expect(router.state.location.pathname).toBe("/connections");
     expect(writes.filter((write) => write.startsWith("DELETE"))).toEqual([
-      "DELETE /api/plugins/servers/composio-exa",
+      `DELETE ${appPath("composio-exa")}`,
     ]);
     expect(view.queryByText("Not an app")).toBeNull();
   });
@@ -554,7 +563,7 @@ test("Routines' tool and per-Bot pages say always on, rather than offer a switch
         grantedTo: ["bot-1"],
       },
     ],
-  } as unknown as PluginServer;
+  } as TodayServer;
   const bots = [{ id: "bot-1", name: "Expenses", hidden: false }];
   for (const page of [
     () => <PluginToolPage pluginKey="routines" toolName="schedule" />,
@@ -574,7 +583,7 @@ test("Routines is always on in the team edition too, with no switch to turn it o
     title: "Routines",
     url: "builtin://routines/",
     dynamicClient: false,
-  } as PluginServer;
+  } as TodayServer;
   const view = draw("team", [routines], "routines");
   expect(await view.findByText("Always on")).toBeTruthy();
   expect(view.queryByText("Enable for this deployment")).toBeNull();
@@ -651,7 +660,7 @@ const gmailNamedLikeIds = {
       "Replace selected fields on an existing saved Google contact.",
     ),
   ],
-} as unknown as PluginServer;
+} as TodayServer;
 
 test("Gmail's page names each tool as a person would, and says what each one does", async () => {
   const view = draw("personal", [gmailNamedLikeIds], "composio-gmail");

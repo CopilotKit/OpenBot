@@ -49,33 +49,39 @@ import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import {
+  addCuratedServerMutationOptions,
+  refreshPluginServerMutationOptions,
+  registerOAuthClientMutationOptions,
+  removePluginServerMutationOptions,
+  setOwnerGrantsMutationOptions,
+} from "@/lib/apps/mutations";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { atStart, useManagePaths } from "@/lib/manage-paths";
 import {
-  addCuratedServerMutationOptions,
   connectAccountMutationOptions,
   grantPlugin,
   invalidatePlugins,
-  refreshPluginServerMutationOptions,
-  registerOAuthClientMutationOptions,
-  removePluginServerMutationOptions,
-  setOwnerGrantsMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
   brokeredConnectionDescription,
   brokeredDisconnectNote,
-  brokeredProvenance,
   brokeredReach,
+  directoryProvider,
+  fromDirectory,
 } from "@/lib/plugins/provider-vocabulary";
 import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import {
   botSharedAppsQueryOptions,
@@ -186,9 +192,9 @@ function listedTools<T extends { name: string }>(
 /**
  * How this vendor is reached, from whichever record we have.
  *
- * The row's own provenance is asked first because it is a fact this deployment recorded when the
- * app was enabled, not an inference: a brokered app is reached through Composio whatever the
- * catalogue does or does not say about it.
+ * Where the app came from (its `source`) is asked first because it is a fact this deployment
+ * recorded when the app was added, not an inference: an app from the directory is reached through
+ * the directory's service whatever the catalogue does or does not say about it.
  *
  * That order matters because the catalogue has nothing to say about a brokered app — it is not a
  * curated entry — and what stood here was `entry?.auth ?? "deployment-bearer"`: a guess, and the
@@ -205,7 +211,7 @@ export function connectionKindFor(
   server: PluginServer | undefined,
   auth: CatalogueItem["auth"] | undefined,
 ): CatalogueItem["auth"] | "brokered" | "person-entra" {
-  if (server && brokeredProvenance(server.provenance)) return "brokered";
+  if (server && fromDirectory(server)) return "brokered";
   if (server?.entraScope) return "person-entra";
   // Added by its address, and it signs each person in: the same shape as a catalogue OAuth vendor.
   if (server?.signIn) return "user-oauth";
@@ -259,8 +265,10 @@ export function PluginPage({
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
   const alwaysOn = key === ALWAYS_ON_APP;
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
-  const provider = pluginsProvider(plugins.data);
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
+  const provider = directoryProvider(setup.data);
   /*
    * The administrator's OWN connections, not the deployment's.
    *
@@ -370,8 +378,8 @@ export function PluginPage({
      */
     onSuccess: async (_data, serverId) => {
       const listed = queryClient
-        .getQueryData(pluginsPageQueryOptions().queryKey)
-        ?.catalogue.some((item) => item.key === serverId);
+        .getQueryData(catalogueQueryOptions().queryKey)
+        ?.some((item) => item.key === serverId);
       if (!listed) await navigate(paths.plugins());
     },
   });
@@ -407,8 +415,8 @@ export function PluginPage({
       window.location.href = authorizationUrl;
     },
   });
-  const entry = plugins.data?.catalogue.find((item) => item.key === key);
-  const server = plugins.data?.servers.find((item) => item.id === key);
+  const entry = catalogue.data?.find((item) => item.key === key);
+  const server = plugins.data?.find((item) => item.id === key);
   /*
    * Everybody on the roster, and anybody hidden from it who holds one of this app's grants,
    * withdrawn ones included: see `grantRoster`. Named from the roster rows themselves, because the
@@ -442,7 +450,7 @@ export function PluginPage({
   const auth = connectionKindFor(server, entry?.auth);
   /* Added by its address, and it answered with no account at all: nothing is missing here. */
   const openByUrl =
-    server?.provenance === "custom" &&
+    server?.source === "address" &&
     !server.signIn &&
     !server.entraScope &&
     !server.hasCredential;
@@ -475,11 +483,11 @@ export function PluginPage({
    * no Disconnect beside it and nothing brokered to confirm.
    */
   const brokeredAccount = useBrokeredAccount({
-    authScheme: server?.authScheme ?? null,
+    connectsWith: server?.connectsWith ?? null,
     // Off the declared capability, never off the vendor's name. See the row's own field.
-    reconnectsInPlace: plugins.data?.authorizesPerAction ?? false,
+    reconnectsInPlace: setup.data?.authorizesPerAction ?? false,
     brokered: auth === "brokered",
-    configured: plugins.data?.composioConfigured ?? false,
+    configured: setup.data?.directoryAvailable ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
     report: setError,
     // Back to this page afterwards, not to the personal settings screen.
@@ -551,10 +559,10 @@ export function PluginPage({
   const connectNew = async () => {
     if (!(await add()) || auth !== "user-oauth") return;
     const fresh = await queryClient.fetchQuery({
-      ...pluginsPageQueryOptions(),
+      ...appsQueryOptions(),
       staleTime: 0,
     });
-    const added = fresh.servers.find((item) => item.id === key);
+    const added = fresh.find((item) => item.id === key);
     if (added && (added.hasCredential || added.dynamicClient)) {
       connectSelf.mutate(key);
     }
@@ -600,7 +608,7 @@ export function PluginPage({
    * still in flight drew the brokered row with the whole of its state defaulted to "you have never
    * connected this". The personal screen had the identical gap; see its own note.
    */
-  if (plugins.isPending || connections.isPending) {
+  if (plugins.isPending || catalogue.isPending || connections.isPending) {
     return <PageShell title="App">{null}</PageShell>;
   }
   /*
@@ -611,7 +619,7 @@ export function PluginPage({
    * is no evidence for the first. Nothing on this page survives the failure: the title, the tools
    * and the grants are all that one response.
    */
-  if (!plugins.data) {
+  if (!plugins.data || !catalogue.data) {
     return (
       <PageShell
         backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
@@ -752,8 +760,8 @@ export function PluginPage({
           {/* The personal edition has one person, so whose account it is has one answer: yours. */}
           {!personal &&
           server &&
-          brokeredProvenance(server.provenance) &&
-          server.authScheme !== "NO_AUTH" ? (
+          fromDirectory(server) &&
+          server.connectsWith !== "nothing" ? (
             <>
               <Separator />
               <Item size="sm">
@@ -1221,7 +1229,7 @@ export function PluginPage({
                   </ItemContent>
                   <ItemActions>
                     <span className="text-muted-foreground text-xs">
-                      {server?.url ?? "Not set"}
+                      {server?.address ?? "Not set"}
                     </span>
                     <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   </ItemActions>
@@ -1261,14 +1269,14 @@ export function PluginPage({
              * A server added by its address has no catalogue entry to say where it is, so the
              * address itself is shown. Read-only: a server at a different address is another server.
              */}
-            {server?.provenance === "custom" ? (
+            {server?.source === "address" ? (
               <>
                 <Separator />
                 <Item size="sm">
                   <ItemContent>
                     <ItemTitle>Server address</ItemTitle>
                     <ItemDescription className="line-clamp-none break-all font-mono text-xs">
-                      {server.url}
+                      {server.address}
                     </ItemDescription>
                   </ItemContent>
                 </Item>
@@ -1290,7 +1298,7 @@ export function PluginPage({
                   with an error that doesn't mention OpenBot.
                 </p>
               )}
-              {!plugins.data?.redirectUri ? (
+              {!setup.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
                   {atStart(paths.deploymentName)} has no public URL, so{" "}
                   {personal ? "you can't" : "nobody can"} finish connecting. Set
@@ -1299,7 +1307,7 @@ export function PluginPage({
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
                 <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {plugins.data.redirectUri}
+                  {setup.data.redirectUri}
                 </code>
               )}
             </div>

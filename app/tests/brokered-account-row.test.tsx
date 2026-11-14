@@ -30,7 +30,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { answerBotsList } from "./bots-api";
@@ -178,8 +178,8 @@ function asDay(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string, title = "Gmail"): PluginServer {
+/** A minimal but complete app from the directory, as `GET /api/plugins` listed it. */
+function brokeredServer(authScheme: string, title = "Gmail"): TodayServer {
   return {
     authScheme,
     id: APP_KEY,
@@ -207,11 +207,10 @@ function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
   title?: string,
-): PluginsPage {
+): AppsFixture {
   return {
     catalogue: [],
     servers: [brokeredServer(authScheme, title)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
@@ -663,11 +662,13 @@ function installDeployment(deployment: Deployment): Server {
     }
     const bots = answerBotsList(path, init, { visible: [] });
     if (bots) return bots;
-    if (path.startsWith("/api/plugins")) {
-      return json(
-        pluginsPage(state.composioConfigured, state.authScheme, state.title),
-      );
-    }
+    const apps = answerAppsApi(
+      input,
+      init,
+      pluginsPage(state.composioConfigured, state.authScheme, state.title),
+    );
+    if (apps) return apps;
+    if (path.startsWith("/api/plugins")) return json({ skills: [] });
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
@@ -2693,7 +2694,7 @@ function AccountProbe() {
     probe: null,
     checkable: true,
     reconnectsInPlace: false,
-    authScheme: "API_KEY",
+    connectsWith: "key",
     returnTo: "settings",
     report: () => {},
   });

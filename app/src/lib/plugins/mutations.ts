@@ -1,7 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import { client } from "@/lib/client";
 import { desktopConsentQuery } from "@/lib/desktop/shell";
-import { type PluginServer, pluginKeys } from "./queries";
+import { pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
 
 /**
@@ -29,27 +29,6 @@ export type SkillInput = {
   tools?: string[];
 };
 
-/** A curated server from the catalogue, which supplies the URL. */
-export type CuratedServerInput = {
-  key: string;
-  instanceHost?: string;
-  credentialId?: string;
-};
-
-/**
- * A server somebody typed the URL of, which therefore has to pass the URL checks.
- *
- * `token` is carried through as the previous version did. It is already a credential by the time
- * this is sent — the id beside it is what the record keeps — so the server has no use for it.
- */
-export type CustomServerInput = {
-  id: string;
-  title: string;
-  url: string;
-  token?: string;
-  credentialId?: string;
-};
-
 /** Which kinds of plugin a grant can be about. */
 export type PluginKind = "mcp" | "skill";
 
@@ -67,10 +46,9 @@ const FALLBACK = "That didn't work. Try again.";
  * changed — it is very often the opposite, and the write it leaves behind is exactly the one the
  * screen is drawing.
  *
- * THE SHAPE, IN THE SERVER'S OWN WORDS. `POST /servers` inserts the row and then refreshes the
- * server's tools, answering 409 when that refresh faults over a row that is now there.
- * `POST /composio/apps` creates the authorization config at Composio, writes the row, and says so in
- * its own 409. `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each
+ * THE SHAPE, IN THE SERVER'S OWN WORDS. Adding an app (createApp) writes the app and then asks it
+ * what it offers, answering 409 when that faults over an app that is now there, and adding one from
+ * the directory creates its authorization config at the directory's service first. `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each
  * commit and then file the trail row, and a failing audit insert is a 500 over a change that
  * happened. `DELETE /servers/:id/connection` revokes the account at the vendor before it deletes
  * anything here. And the two brokered writes the screens draw hardest on raise from inside the
@@ -129,96 +107,6 @@ export function grantPlugin(variables: {
 }
 
 /**
- * What switching a server's account mode would do, asked before it is done.
- *
- * `wouldRevoke` is who loses their account: a person's own connection when the switch is into
- * Shared, or the deployment's shared one when it is switched back out of it. `bots` is every Bot
- * currently granted this app's actions when switching to Shared (empty when switching to
- * Personal), each with its exposure now — who can reach it and whether outside input can — which
- * is what the switch would approve for it.
- */
-export type AccountModePreview = {
-  mode: "personal" | "shared";
-  wouldRevoke: { holder: "person" | "deployment"; count: number };
-  bots: { botId: string; exposure: SharedUseApproval }[];
-};
-
-/**
- * Ask what switching a server to this mode would change, without changing anything.
- *
- * `confirm: false` is the whole of the contract: the same route decides and the same body shape
- * answers either way, so a preview is not a second endpoint to keep in step with the real switch —
- * it is the real switch, asked not to commit.
- */
-export async function accountModePreview(
-  serverId: string,
-  mode: "personal" | "shared",
-): Promise<AccountModePreview> {
-  const response = await client(
-    `/api/plugins/servers/${encodeURIComponent(serverId)}/account-mode`,
-    {
-      method: "PUT",
-      body: { mode, confirm: false },
-      fallback: "What the switch would change could not be read.",
-    },
-  );
-  return ((await response.json()) as { preview: AccountModePreview }).preview;
-}
-
-/**
- * Switch a server's account mode for real.
- *
- * `approvals` carries the administrator's narrowed approvals, keyed by Bot id, for Bots the preview
- * listed; a Bot not named gets its exposure as listed.
- */
-export function setAccountModeMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (variables: {
-      serverId: string;
-      mode: "personal" | "shared";
-      approvals?: Record<string, SharedUseApproval>;
-    }) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/account-mode`,
-        {
-          method: "PUT",
-          body: {
-            mode: variables.mode,
-            confirm: true,
-            ...(variables.approvals ? { approvals: variables.approvals } : {}),
-          },
-          fallback: "The switch did not finish, and nothing was changed.",
-        },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Who may give an app to a Bot: any Bot's owner (`any`) or only an admin (`admin`). The server writes
- * the choice to the trail.
- */
-export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (variables: {
-      serverId: string;
-      ownerGrants: "any" | "admin";
-    }) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/owner-grants`,
-        {
-          method: "PUT",
-          body: { ownerGrants: variables.ownerGrants },
-          fallback: "Couldn't change who can give this app.",
-        },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
  * Whether one Bot carries one plugin.
  *
  * Granting posts to the collection; withholding deletes from it, and the delete identifies the row
@@ -245,164 +133,6 @@ export function setPluginGrantMutationOptions(queryClient: QueryClient) {
   });
 }
 
-export function addCuratedServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: CuratedServerInput) => {
-      await client("/api/plugins/servers", {
-        method: "POST",
-        body: input,
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function addCustomServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: CustomServerInput) => {
-      await client("/api/plugins/servers/custom", {
-        method: "POST",
-        body: input,
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/** What a person types to add an MCP server from Connections. */
-export type AddServerByUrlInput = {
-  title: string;
-  url: string;
-  /** A key the server gave them, for a server that needs one. Only an admin may send it. */
-  token?: string;
-};
-
-/**
- * What adding a server by its address came to. A refusal is an answer here, not a failure: the
- * server needed a key, the admin's MCP allowlist doesn't include it, or it is already added. The
- * screen draws each of them, so they come back as values rather than as a thrown error.
- */
-export type AddServerByUrlOutcome =
-  | { added: true; server: PluginServer; signIn: boolean }
-  | {
-      added: false;
-      error: string;
-      /** `needs-key` or `not-approved`, when the refusal is one the screen can offer a step for. */
-      code?: "needs-key" | "not-approved";
-      /** Whether the person may approve the address themselves (an admin). */
-      canApprove?: boolean;
-      /** The server already added at this address, when that is why. */
-      serverId?: string;
-    };
-
-/**
- * Add an MCP server by its address, from Connections. The server is asked how it is reached and
- * the answer comes back on `signIn`: true means each person signs in to it next.
- */
-export function addServerByUrlMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (
-      input: AddServerByUrlInput,
-    ): Promise<AddServerByUrlOutcome> => {
-      const response = await tryClient("/api/plugins/servers/by-url", {
-        method: "POST",
-        body: input,
-      });
-      const body = (await response.json().catch(() => null)) as {
-        server?: PluginServer;
-        signIn?: boolean;
-        error?: string;
-        code?: string;
-        canApprove?: boolean;
-        serverId?: string;
-      } | null;
-      if (response.ok && body?.server) {
-        return {
-          added: true,
-          server: body.server,
-          signIn: Boolean(body.signIn),
-        };
-      }
-      return {
-        added: false,
-        error: body?.error ?? "Couldn't add that server. Try again.",
-        ...(body?.code === "needs-key" || body?.code === "not-approved"
-          ? { code: body.code }
-          : {}),
-        ...(body?.canApprove ? { canApprove: true } : {}),
-        ...(typeof body?.serverId === "string"
-          ? { serverId: body.serverId }
-          : {}),
-      };
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Add a Composio app to the deployment, named by its slug.
- *
- * Its own endpoint rather than a curated key, because the catalogue is the vendor's rather than
- * ours: the slug is all the server needs to look the app up and record the row.
- *
- * Answers the new row's id, which is what a sign-in started on the same press is asked against.
- */
-export function enableComposioAppMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: { slug: string }): Promise<string> => {
-      const server = await client<{ id: string }>(
-        "/api/plugins/composio/apps",
-        "server",
-        {
-          method: "POST",
-          body: input,
-          fallback: "That app could not be added.",
-        },
-      );
-      return server.id;
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Re-read a server's tool list, which is what makes a newly-added tool appear.
- *
- * The id is encoded, as every id in this file is. It is not this app's text: a custom server's id
- * is whatever an administrator typed when they added it, so a `/` in one adds a path segment the
- * URL parser resolves before any handler sees it, and a `?` truncates the id into a query. This was
- * the one interpolation here that went in raw.
- */
-export function refreshPluginServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (serverId: string) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/refresh`,
-        {
-          method: "POST",
-          body: {},
-          fallback: FALLBACK,
-        },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function removePluginServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (serverId: string) => {
-      await client(`/api/plugins/servers/${encodeURIComponent(serverId)}`, {
-        method: "DELETE",
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
 /**
  * Write a skill, or rewrite one.
  *
@@ -421,40 +151,6 @@ export function saveSkillMutationOptions(queryClient: QueryClient) {
          */
         fallback: "Couldn't save the skill.",
       }),
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/** The deployment's OAuth client for a vendor reached as the person asking. */
-export type OAuthClientInput = {
-  serverId: string;
-  clientId: string;
-  clientSecret: string;
-};
-
-/**
- * Register the deployment's OAuth client for a `user-oauth` server.
- *
- * Its own write rather than a field on the curated-server input, because it has its own lifetime: a
- * client is rotated without the server being re-added, and re-adding a server should not mean
- * re-typing a client. It is also recorded against the server row, so it can only happen once that
- * row exists — which is why the page chains it rather than sending both at once.
- *
- * Nobody's documents are reachable with what this sends. A client identifies this deployment to the
- * vendor; the grant that reads anything belongs to each person and is made on their own settings page.
- */
-export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: OAuthClientInput) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(input.serverId)}/oauth-client`,
-        {
-          method: "POST",
-          body: { clientId: input.clientId, clientSecret: input.clientSecret },
-          fallback: "That OAuth client could not be registered.",
-        },
-      );
-    },
     onSettled: () => invalidatePlugins(queryClient),
   });
 }

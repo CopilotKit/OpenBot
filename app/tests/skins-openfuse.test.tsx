@@ -58,6 +58,7 @@ import {
   PREFERENCES_PATH,
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { type AppsFixture, answerAppsApi } from "./apps-api";
 import { answerBotsList } from "./bots-api";
 
 /*
@@ -370,7 +371,7 @@ const memories: MemoryRecord[] = [
   },
 ];
 
-const plugins: PluginsPage = {
+const plugins: AppsFixture = {
   catalogue: [
     {
       key: "notion",
@@ -392,15 +393,15 @@ const plugins: PluginsPage = {
     },
   ],
   servers: [
-    { id: "notion" },
-    { id: "google-drive" },
-  ] as unknown as PluginsPage["servers"],
-  skills: [],
+    { id: "notion", title: "Notion", provenance: "first-party" },
+    { id: "google-drive", title: "Google Drive", provenance: "first-party" },
+  ],
   botsMayCallBack: false,
   redirectUri: null,
   composioConfigured: false,
   authorizesPerAction: false,
 };
+const skills: PluginsPage = { skills: [] };
 
 type Call = { method: string; path: string; body: unknown };
 
@@ -431,7 +432,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     },
     "/api/responsibilities": { responsibilities },
     "/api/memory": { memories },
-    "/api/plugins": plugins,
+    "/api/plugins": skills,
     "/api/plugins/connections": {
       connections: [{ serverId: "notion", holder: "person" }],
       redirectUri: null,
@@ -459,6 +460,8 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       if (method !== "GET") return Response.json({ ok: true });
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
+      const apps = answerAppsApi(input, init, plugins);
+      if (apps) return apps;
       const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);

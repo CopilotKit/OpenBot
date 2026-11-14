@@ -11,9 +11,9 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { GrantState } from "@/lib/plugins/grants";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { ME_PATH } from "./accounts-api";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 
 /**
  * `?action=` IS DROPPED FROM THE URL AFTER ITS ONE READ, AND THE GRANT LIST STILL MARKS ITS ROW.
@@ -50,7 +50,7 @@ const GMAIL: GrantState[] = [
   { action: "Gmail.SendEmail", state: "needs-consent", scopes: ["gmail.send"] },
 ];
 
-function server(accountMode: "shared" | null): PluginServer {
+function server(accountMode: "shared" | null): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -80,10 +80,9 @@ function install(accountMode: "shared" | null) {
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(accountMode)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: true,
@@ -95,7 +94,7 @@ function install(accountMode: "shared" | null) {
       headers: { "content-type": "application/json" },
       status,
     });
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
     if (path.endsWith("/grants")) {
       await held;
@@ -103,7 +102,8 @@ function install(accountMode: "shared" | null) {
     }
     if (path === ME_PATH)
       return json({ user: { id: "u", role: "admin", email: "u@x.io" } });
-    if (path === "/api/plugins") return json(page);
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
     if (path.startsWith("/api/plugins/connections")) {
       return json({
         connections:

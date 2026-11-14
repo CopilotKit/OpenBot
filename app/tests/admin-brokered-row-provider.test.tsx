@@ -17,8 +17,8 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminPluginRoute } from "@/routes/_authed/admin/plugins/$key";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -64,7 +64,7 @@ afterEach(() => {
 
 type Provider = "composio" | "arcade";
 
-function server(provider: Provider, shared: boolean): PluginServer {
+function server(provider: Provider, shared: boolean): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -92,12 +92,11 @@ function install(setup: {
   provider: Provider;
   shared: boolean;
   configured: boolean;
-  overrides?: Partial<PluginServer>;
+  overrides?: Partial<TodayServer>;
 }) {
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [{ ...server(setup.provider, setup.shared), ...setup.overrides }],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: setup.configured,
@@ -111,7 +110,8 @@ function install(setup: {
     });
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
-    if (path === "/api/plugins") return json(page);
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
     if (path.startsWith("/api/plugins/connections"))
       return json({ connections: [], redirectUri: null });
     const bots = answerBotsList(path, init, { visible: [] });

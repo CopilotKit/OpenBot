@@ -21,12 +21,9 @@ import {
   brokeredKeyMissing,
   brokeredReach,
 } from "@/lib/plugins/provider-vocabulary";
-import {
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
+import { type AppsFixture, seedAppReads, type TodayServer } from "./apps-api";
 import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
@@ -44,7 +41,7 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-const notion = {
+const notion: TodayServer = {
   id: "notion",
   title: "Notion",
   vendor: "Notion",
@@ -64,9 +61,9 @@ const notion = {
   sharedVendorConnected: false,
   ownerGrants: "any",
   ownerGrantsChosen: null,
-} as unknown as PluginServer;
+};
 
-const page = {
+const page: AppsFixture = {
   catalogue: [
     {
       key: "notion",
@@ -79,12 +76,12 @@ const page = {
     },
   ],
   servers: [notion],
-  skills: [],
   botsMayCallBack: true,
   redirectUri: null,
   composioConfigured: false,
   authorizesPerAction: false,
-} as unknown as PluginsPage;
+};
+const skills: PluginsPage = { skills: [] };
 
 const startedByOpenBot = {
   id: "e1",
@@ -128,7 +125,8 @@ function draw(edition: "team" | "personal", screen: () => ReactNode) {
     localEvaluation: edition === "personal",
     edition,
   });
-  client.setQueryData(pluginKeys.page(), page);
+  seedAppReads(client, page);
+  client.setQueryData(pluginKeys.page(), skills);
   client.setQueryData(pluginKeys.connections(), { connections: [] });
   client.setQueryData(agentKeys.list(false), []);
   client.setQueryData(agentKeys.list(true), []);

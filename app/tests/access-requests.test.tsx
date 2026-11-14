@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import type { AppAccessRequest } from "@/lib/app-access/queries";
 import { Route as PluginsIndexRoute } from "@/routes/_authed/admin/plugins/index";
+import { answerAppsApi } from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -91,30 +92,27 @@ function serving(options: {
     }
     if (url === "/api/plugins/connections")
       return Response.json({ connections: [], redirectUri: null });
-    if (url === "/api/plugins")
-      return Response.json({
-        catalogue: [],
-        servers: [
-          {
-            id: "composio-gmail",
-            title: "Gmail",
-            summary: "Mail.",
-            tools: [],
-            lastError: null,
-          },
-          {
-            id: "notion",
-            title: "Notion",
-            summary: "Docs.",
-            tools: [],
-            lastError: null,
-          },
-        ],
-        composioConfigured: true,
-        botsMayCallBack: true,
-        redirectUri: null,
-        skills: [],
-      });
+    const apps = answerAppsApi(input, init, {
+      servers: [
+        {
+          id: "composio-gmail",
+          title: "Gmail",
+          summary: "Mail.",
+          tools: [],
+          lastError: null,
+        },
+        {
+          id: "notion",
+          title: "Notion",
+          summary: "Docs.",
+          tools: [],
+          lastError: null,
+        },
+      ],
+      composioConfigured: true,
+      botsMayCallBack: true,
+    });
+    if (apps) return apps;
     return Response.json({});
   }) as unknown as typeof fetch;
   return sent;

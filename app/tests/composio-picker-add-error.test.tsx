@@ -19,6 +19,7 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
+import { APPS_PATH, answerAppsApi, appBody } from "./apps-api";
 
 /**
  * WHAT A FAILED ADD SAYS WHEN A SECOND ADD IS PRESSED BEFORE THE FIRST ONE ANSWERS.
@@ -70,53 +71,78 @@ beforeEach(() => {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const requested = typeof input === "string" ? input : String(input);
     const path = requested.split("?")[0] ?? requested;
-    const json = (body: unknown, status = 200) =>
+    const json = (body: unknown, status = 200, type = "application/json") =>
       new Response(JSON.stringify(body), {
         status,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": type },
       });
 
-    if (path === "/api/plugins/composio/apps" && init?.method === "POST") {
-      const slug = (JSON.parse(String(init.body)) as { slug: string }).slug;
+    if (path === APPS_PATH && init?.method === "POST") {
+      const { directoryEntryId } = JSON.parse(String(init.body)) as {
+        directoryEntryId: string;
+      };
+      const slug = directoryEntryId.replace(/^directory:/, "");
       if (slug === "slack") {
         // HELD, so the second press genuinely overtakes the first rather than following it. This is
         // the window the defect lives in and the only way a test can stand inside it.
         await slackWaits;
-        return json({ error: SLACK_REFUSAL }, 409);
+        return json(
+          {
+            type: "https://open.bot/errors/app-service-failed",
+            title: "The service behind this app didn't answer.",
+            status: 502,
+            detail: SLACK_REFUSAL,
+            code: "APP_SERVICE_FAILED",
+            category: "dependency",
+            retryable: true,
+            requestId: "req_test",
+            traceId: "trace_test",
+          },
+          502,
+          "application/problem+json",
+        );
       }
-      // The route's own answer: the row it made.
-      return json({ server: { id: `composio-${slug}` } }, 201);
+      // The API's own answer: the app it added.
+      return json(
+        appBody({
+          id: `composio-${slug}`,
+          title: slug,
+          url: `composio://${slug}`,
+          provenance: "composio",
+          authScheme: "OAUTH2",
+        }),
+        201,
+      );
     }
-    if (path === "/api/plugins/composio/apps") {
-      return json({
-        apps: [
-          {
-            slug: "slack",
-            name: "Slack",
-            description: "Messages, channels and files.",
-            logo: null,
-            categories: [],
-            actionCount: 167,
-            // What the server sends on every row; Slack and Gmail are both sign-in apps.
-            connection: { kind: "consent" },
-            enabled: false,
-          },
-          {
-            slug: "gmail",
-            name: "Gmail",
-            description: "Mail, threads and labels.",
-            logo: null,
-            categories: [],
-            actionCount: 42,
-            // What the server sends on every row; Slack and Gmail are both sign-in apps.
-            connection: { kind: "consent" },
-            enabled: false,
-          },
-        ],
-      });
-    }
-    // Everything else this screen's invalidation touches.
-    return json({ servers: [], catalogue: [], composioConfigured: true });
+    // Every read this screen and its invalidation make.
+    const apps = answerAppsApi(input, init, {
+      composioConfigured: true,
+      directory: [
+        {
+          slug: "slack",
+          name: "Slack",
+          description: "Messages, channels and files.",
+          logo: null,
+          categories: [],
+          actionCount: 167,
+          // Slack and Gmail are both sign-in apps.
+          connection: { kind: "consent" },
+          enabled: false,
+        },
+        {
+          slug: "gmail",
+          name: "Gmail",
+          description: "Mail, threads and labels.",
+          logo: null,
+          categories: [],
+          actionCount: 42,
+          connection: { kind: "consent" },
+          enabled: false,
+        },
+      ],
+    });
+    if (apps) return apps;
+    return json({ connections: [] });
   }) as unknown as typeof fetch;
 });
 
