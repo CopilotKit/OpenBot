@@ -45,7 +45,7 @@ export type ConnectPrompt = {
   /**
    * The app, as the server names it: the plugin server to connect, as
    * connectApp names it, or the key an app nobody enabled would
-   * have. What the card asks `GET /api/plugins/for/:agentId/apps/:app` about.
+   * have. What the card asks about, as the app's id on the Bot (getBotApp).
    */
   serverId: string;
   /** The app's own name, for a card that says what it is asking for. */

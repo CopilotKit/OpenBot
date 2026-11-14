@@ -31,6 +31,7 @@ import {
   askPersonReplayStart,
   askPersonStored,
 } from "./ask-person-replay.fixture";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import {
   ANSWER_TEXT,
@@ -164,8 +165,8 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/join-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("join-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("join-bot"))
         return NativeResponse.json({
           bot: { id: "join-bot", visibility: "public", canManage: true },

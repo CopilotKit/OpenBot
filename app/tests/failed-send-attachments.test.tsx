@@ -32,6 +32,7 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -144,8 +145,8 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === "/api/voice/sessions")
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/plugins/for/failed-send-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("failed-send-bot"))
+        return botGrantsResponse();
       // What the Bot's runs are offered is read from these, as the server answers them.
       if (url.pathname === botPath("failed-send-bot"))
         return NativeResponse.json({

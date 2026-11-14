@@ -1,19 +1,17 @@
 import type { AppAccess } from "@/lib/app-access/queries";
 
 /**
- * One app as `GET /api/plugins/for/:agentId/apps` answers it: Gmail, through Composio, under each
- * person's own account, ready. Each test overrides only the fields its case is about.
+ * One app on a Bot as the screens read it (listBotApps, getBotApp): Gmail, from the directory, under
+ * each person's own account, ready. Each test overrides only the fields its case is about.
  */
 export function appAccess(overrides: Partial<AppAccess> = {}): AppAccess {
   return {
     key: "composio-gmail",
     displayName: "Gmail",
     logo: null,
-    provider: "composio",
+    source: "directory",
     account: "personal",
     connect: "consent",
-    authScheme: "OAUTH2",
-    accountMode: "personal",
     state: "ready",
     unavailable: null,
     accountHolder: "you",

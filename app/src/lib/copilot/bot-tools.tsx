@@ -141,7 +141,7 @@ function ProposedBotRender(props: {
       create={async (values: AgentFormValues, chosen: string[]) => {
         /*
          * TWO CALLS, AND THE SECOND ONE IS PER SKILL. `POST /api/agents` makes the coworker
-         * and `POST /api/plugins/grants` puts a skill on it, which is how the profile screen
+         * and replaceBotGrant puts a skill on it, which is how the profile screen
          * does both — so ownership, refusal and the audit rows are the existing ones rather
          * than a third path that has to be kept in step with them.
          *
@@ -174,7 +174,7 @@ function ProposedBotRender(props: {
          * Once at the end rather than between every pair, matching `grantPlugin`'s own note.
          *
          * AND UNCONDITIONALLY, BECAUSE A GRANT THAT THREW IS NOT A GRANT THAT DID NOT HAPPEN.
-         * `POST /api/plugins/grants` upserts the row and THEN files the trail entry, with no
+         * A grant upserts the row and THEN files the trail entry, with no
          * catch over either, so an audit insert that fails answers 500 for a grant that is
          * recorded — see `invalidatePlugins`, which spells this out for the whole surface.
          * Gating the refetch on `granted.length` meant the one run where every grant "failed"

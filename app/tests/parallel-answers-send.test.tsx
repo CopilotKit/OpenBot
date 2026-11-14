@@ -16,6 +16,7 @@ import {
 import { UNANSWERED } from "@/lib/copilot/repair-history";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import {
   ANSWERED_EARLY,
@@ -79,8 +80,7 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({
           bot: { id: BOT, visibility: "public", canManage: true },
