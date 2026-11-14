@@ -3492,15 +3492,7 @@ paths:
                 type: string
           content:
             '*/*':
-              schema:
-                type: string
-                format: binary
-              examples:
-                spreadsheet:
-                  summary: A small spreadsheet, as its own bytes.
-                  value: |
-                    name,total
-                    rent,1200
+              schema: {}
         '304':
           description: The copy the caller holds is current.
         '400':

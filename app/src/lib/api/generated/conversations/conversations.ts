@@ -3052,11 +3052,14 @@ export const getAttachment = async (
   organizationId: string,
   attachmentId: string,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<Blob> => {
-  return apiRequest<Blob>(getGetAttachmentUrl(organizationId, attachmentId), {
-    ...options,
-    method: "GET",
-  });
+): Promise<unknown> => {
+  return apiRequest<unknown>(
+    getGetAttachmentUrl(organizationId, attachmentId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export const getGetAttachmentQueryKey = (

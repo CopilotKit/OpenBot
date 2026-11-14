@@ -1068,14 +1068,9 @@ paths:
               schema:
                 type: string
           content:
+            # The file's own bytes, in its own type. No schema: a schema here would describe JSON.
             '*/*':
-              schema:
-                type: string
-                format: binary
-              examples:
-                spreadsheet:
-                  summary: A small spreadsheet, as its own bytes.
-                  value: "name,total\nrent,1200\n"
+              schema: {}
         '304':
           description: The copy the caller holds is current.
         '400':

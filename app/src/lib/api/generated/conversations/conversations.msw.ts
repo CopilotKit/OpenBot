@@ -157,9 +157,6 @@ export const getUploadConversationAttachmentResponseMock = (): Attachment => ({
   sizeBytes: 2048,
 });
 
-export const getGetAttachmentResponseMock = (): Blob =>
-  "name,total\nrent,1200\n";
-
 export const getCreateConversationThreadResponseMock =
   (): ConversationThread => ({
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
@@ -728,12 +725,12 @@ export const getUploadConversationAttachmentMockHandler = (
 
 export const getGetAttachmentMockHandler = (
   overrideResponse?:
-    | Blob
+    | unknown
     | ((
         info: Parameters<
           HttpResponseResolver<{ organizationId: string; attachmentId: string }>
         >[0],
-      ) => Promise<Blob> | Blob),
+      ) => Promise<unknown> | unknown),
   options?: RequestHandlerOptions,
 ) => {
   return http.get<{ organizationId: string; attachmentId: string }>(
@@ -743,16 +740,11 @@ export const getGetAttachmentMockHandler = (
         HttpResponseResolver<{ organizationId: string; attachmentId: string }>
       >[0],
     ) => {
-      const binaryBody =
-        overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
-            ? await overrideResponse(info)
-            : overrideResponse
-          : getGetAttachmentResponseMock();
-      return new HttpResponse(binaryBody, {
-        status: 200,
-        headers: { "Content-Type": "application/octet-stream" },
-      });
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 200 });
     },
     options,
   );
