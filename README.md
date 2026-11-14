@@ -160,7 +160,7 @@ For a team deployment, follow the Helm guide (`helm show readme` on the chart) t
 
 ## Run from source
 
-Use the template to customize the workspace, branding, Bots, and skills. The source setup below uses managed Intelligence by default; [local Intelligence](#intelligence-on-your-own-machine) is also available.
+Use the template to customize the workspace, branding, Bots, and skills. The source setup below uses [an Intelligence on your own machine](#intelligence-on-your-own-machine) by default; managed Intelligence is the alternative.
 
 ```sh
 git clone https://github.com/CopilotKit/OpenBot.git
@@ -177,12 +177,12 @@ To run the open-source template locally, you’ll need the following.
   release's own version in a release (`v1.0.3` in the v1.0.3 tag). Nothing else is built or needed
   for them.
 - [Bun](https://bun.sh) 1.4+, for the app, the setup helpers and the tests (some tests fail on 1.3).
-- A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
+- A CopilotKit account, for CopilotKit Intelligence. The free plan covers an Intelligence on your own machine and a managed project.
 - A model key. The example configuration uses OpenAI; Anthropic and Google work too, with `BOT_PROVIDER` set.
 
 ### Quick start
 
-The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access. On a Mac, the free Developer plan also covers [running Intelligence locally](#intelligence-on-your-own-machine) with Docker.
+The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access.
 
 > **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
 > same steps as below plus the things that are easy to get wrong: which of the blank keys in
@@ -197,7 +197,31 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
    bun install
    ```
 
-2. Connect a fresh managed Intelligence project:
+2. Connect Intelligence. `.env.example` leaves its two addresses and its key empty, for one of
+   these to fill.
+
+   **On this machine**, the default (a preview for macOS with Docker Desktop; see
+   [Intelligence on your own machine](#intelligence-on-your-own-machine)):
+
+   ```sh
+   npx --yes copilotkit@latest login
+   npx --yes copilotkit@latest local setup
+   npx --yes copilotkit@latest local connect --approve-connection
+   ```
+
+   `local setup` installs Intelligence in a local cluster of its own, and `local connect` writes
+   its two addresses and its project key to `.env`. Each installation has its own ports, which is
+   why the example file has no address to ship.
+
+   **A managed project instead**, where the local Intelligence does not run or to keep
+   conversations in the managed service. Set the two addresses in `.env` first:
+
+   ```sh
+   INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai
+   INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai
+   ```
+
+   then:
 
    ```sh
    npx --yes copilotkit@latest login
@@ -244,7 +268,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
    - `OPENAI_API_KEY`, or for Anthropic both `ANTHROPIC_API_KEY` and `BOT_PROVIDER=anthropic`
 
-   Keep the managed Intelligence URLs from `.env.example` unless you run Intelligence yourself. The example `KEY_ENCRYPTION_KEY` is public and fine locally; generate your own with:
+   The example `KEY_ENCRYPTION_KEY` is public and fine locally; generate your own with:
 
    ```sh
    openssl rand -base64 32
@@ -267,12 +291,12 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 Run the clone inside WSL 2 with Ubuntu, and run every step above from an Ubuntu terminal.
 [Windows (WSL 2)](docs/development.md#windows-wsl-2) lists what to install in Ubuntu first. Keep an
 Ubuntu terminal open while you use OpenBot, and open the app from your Windows browser at
-<http://127.0.0.1:3010>.
+<http://127.0.0.1:3010>. These steps were checked there with a managed project in step 2.
 
 ### Intelligence on your own machine
 
-To try Intelligence on one Mac instead of the managed service, follow
-[Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local). The free
+The example configuration expects Intelligence on this machine, installed by the CopilotKit CLI as
+[Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local) describes. The free
 [Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local license lasts 30 days and
 `npx copilotkit@latest local renew` renews it as often as you need, while your account is in good
 standing. It is a preview for macOS with Docker Desktop,
@@ -508,7 +532,7 @@ Every OpenBot client uses one API, and its spec is in this repository under [`ap
 
 The conventions are the same everywhere. An error is a problem detail (`application/problem+json`, RFC 9457). A list pages with `cursor` and `limit`. Every write takes an `Idempotency-Key` header, and repeating a request with the same key within 24 hours does it once. The web app signs in with its session cookie; anything else sends `Authorization: Bearer` with an API key, which acts as the person who made it, or with an access token from OAuth 2.1 with PKCE. Both work on `/api/v2` only.
 
-The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. The app's screens are moving onto it area by area; an area that has not moved yet still uses the earlier `/api/...` routes, which the server keeps serving.
+The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. The app's screens are moving onto it area by area, and the earlier `/api/...` addresses are retired as each area moves, so a script should call only `/api/v2`.
 
 ## Sign in
 

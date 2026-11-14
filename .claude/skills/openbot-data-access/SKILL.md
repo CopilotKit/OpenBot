@@ -55,7 +55,6 @@ app/src/lib/
   client.ts                # the only fetch in the app
   api/
     request.ts             # Orval's mutator: apiRequest, ORGANIZATION_ID, idempotencyKey()
-    served-today.ts        # where today's server answers a spec operation, until it serves /api/v2
     generated/             # Orval's output: functions, hooks, types, Zod schemas, MSW handlers
   <entity>/
     queries.ts   # read types, key factory, queryOptions factories
@@ -130,10 +129,7 @@ factories already hold.
    until `nextCursor` is null (`everyBot` in `lib/agents/queries.ts`).
 5. Make the entity's type the generated one (`export type AgentProfile = Bot`), so the browser's type
    and the spec cannot drift. Test fixtures typed with it then need every field the spec requires.
-6. If today's server still answers the operation at an older address, add it to the table in
-   `lib/api/served-today.ts`: its address there and how to put its answer in the spec's shape. That
-   table goes, entry by entry, as the server answers at `/api/v2`.
-7. Changing a published operation: removing or renaming a field, making a request field required, or
+6. Changing a published operation: removing or renaming a field, making a request field required, or
    removing an operation fails CI's breaking-change check. Add instead: a new optional field, a new
    operation.
 
@@ -178,8 +174,8 @@ factories already hold.
    unwraps the key so the caller receives the payload rather than the wrapper:
 
    ```ts
-   queryFn: (): Promise<AgentProfile[]> =>
-     client("/api/agents", "agents", { fallback: "Could not load coworkers" }),
+   queryFn: (): Promise<PluginStatus[]> =>
+     client("/api/plugins", "plugins", { fallback: "Could not load apps" }),
    ```
 
    Where the whole body is the payload, omit the key and read it: `(await client(path, { fallback
@@ -212,8 +208,8 @@ factories already hold.
    error extraction, and one of the four had quietly dropped the extraction. `client` owns it now:
 
    ```ts
-   mutationFn: (input: AgentInput): Promise<AgentProfile> =>
-     client("/api/agents", "agent", { method: "POST", body: input, fallback: FALLBACK }),
+   mutationFn: (input: CustomServerInput): Promise<PluginStatus> =>
+     client("/api/plugins/servers/custom", "plugin", { method: "POST", body: input, fallback: FALLBACK }),
    ```
 
    Where the write returns nothing a caller needs, omit the key and `await client(path, { ... })`.
@@ -316,9 +312,7 @@ factories already hold.
    has a helper that does it (`app/tests/bots-api.ts`, `audit-api.ts`, `accounts-api.ts`,
    `schedules-api.ts` and the others): use the area's helper, never a hand-written address.
 2. To prove a screen reads and writes through the generated client, serve it the spec's own mocks:
-   `setupServer(...get<Tag>Mock())` from `@/lib/api/generated/<tag>/<tag>.msw`, with
-   `todayRoutes.on = false` for the file when an operation it calls is still in `served-today.ts`
-   (restored in `afterAll`), and happy-dom given a page address
+   `setupServer(...get<Tag>Mock())` from `@/lib/api/generated/<tag>/<tag>.msw`, with happy-dom given a page address
    (`GlobalRegistrator.register({ url: "http://openbot.invalid/" })`) so relative requests resolve.
    `app/tests/bots-generated-client.test.tsx` is the reference.
 3. Use `msw` 2. MSW 3 intercepts at Node's socket layer, which Bun's `fetch` does not go through, so
@@ -374,7 +368,7 @@ factories already hold.
   The one place a 401 is expected is `currentUserQueryOptions`, which uses `tryClient` because not
   being signed in is an answer there rather than a failure.
 - **The server returns no `error` field**: `client` falls back to the `fallback` option. Name the
-  entity in it ("Could not load coworkers"). Do not print a status code to a person.
+  entity in it ("Could not load apps"). Do not print a status code to a person.
 - **A refusal arrives as a thrown `Error` instead of a value**: the call site used `client` where it
   needed `tryClient`. The gateway declining is the product working, not a fault.
 - **The server rejects a body it should accept, or reads it as a string**: something stringified

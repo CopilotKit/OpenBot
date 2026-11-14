@@ -333,10 +333,12 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   server also issues access tokens through OAuth 2.1 with PKCE, which work on `/api/v2` only too.
   Both end when the person is removed.
 - **The web app calls the new addresses**, through a client generated from the spec, for Bots,
-  the audit trail, accounts, admin settings, model connections, notifications and routines, and
-  opens its sockets there. A reverse proxy or firewall that allows OpenBot's paths one by one has
-  to allow `/api/v2/`. The earlier `/api/...` routes and socket addresses are still served, for
-  apps released before this.
+  the audit trail, accounts, admin settings, model connections, notifications, routines,
+  conversations and approvals, and opens its sockets there. A reverse proxy or firewall that
+  allows OpenBot's paths one by one has to allow `/api/v2/`.
+- **The earlier `/api/...` addresses are retired as each area moves.** A script that calls one
+  has to call its `/api/v2` address, which `api/openapi.yaml` lists. Sign-in (`/api/auth`),
+  webhooks, SCIM and a Bot's tool callback keep their addresses.
 
 ### Kubernetes
 

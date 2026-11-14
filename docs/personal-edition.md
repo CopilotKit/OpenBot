@@ -245,10 +245,10 @@ because the server reads no value saved for it here:
 | Overview, Skills, UI components, Playground, Boundaries, What would happen, Vault, Providers | Work as in the team edition. |
 
 The server answers `404` for the API behind the team-only screens: people, identity providers,
-enterprise controls (except `/api/admin/enterprise/me`, which any page may ask), the admin learning
+enterprise controls (except a person's own permissions, which any page may ask), the admin learning
 and check-in settings, and SCIM and SSO registration. Admin reads two of them to show your own
-Bots: which models they ran on (`GET /api/admin/enterprise/models/usage`) and how their check-ins
-went (`GET /api/admin/proactive`).
+Bots: which models they ran on (`GET /api/v2/organizations/{organizationId}/model-usage`) and how
+their check-ins went (`GET /api/v2/organizations/{organizationId}/check-in-usage`).
 
 ## Web search is on from the start
 

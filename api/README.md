@@ -19,6 +19,8 @@ not touch the same lines:
 | `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls and conversation join tokens |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `notifications.yaml` | Devices, destinations, deliveries and notification settings |
+| `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
+| `skills.yaml` | Skills |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
 | `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |

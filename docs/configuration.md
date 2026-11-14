@@ -122,7 +122,7 @@ editable amounts that add up to a total, each in its own color, with a bar of ho
 Their buttons send their named action and the values entered back to the current conversation's Bot.
 Set `OPENBOT_GENERATIVE_UI=false` or `0` to disable both. `true`, `1`, an empty value, or an unset
 value leave the capability on. The server configures both runtime renderers and reports the same
-setting through `/api/capabilities` to the browser.
+setting to the browser as `generativeUi` in `GET /api/v2/organizations/{organizationId}/deployment`.
 
 **`OPENBOT_SELF_HOST_BANNER`** shows a slim bar at the top of the signed-in app offering
 CopilotKit's help self-hosting OpenBot, linking to the OpenBot for Business page,
@@ -1160,7 +1160,8 @@ useful answer is that the image could not be fetched. Somewhere that must never 
 
 **Settings → Setup** shows admins one row each for
 CopilotKit Intelligence, the AI model, the Bot computer, more apps (Composio or Arcade) and Slack and
-Teams. They are read from `GET /api/setup`, and `POST /api/setup/check` asks again.
+Teams. They are read from `GET /api/v2/organizations/{organizationId}/setup-checklist`, and
+`POST /api/v2/organizations/{organizationId}/setup-checklist/check` asks again.
 
 - **Ready means it works.** Intelligence is read from its own entitlement answer and the model from
   the provider's answer for the key in use now. A computer is Ready when every running one took its

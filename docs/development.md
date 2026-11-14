@@ -11,7 +11,20 @@ cp .env.example .env
 bun install
 ```
 
-Provision CopilotKit Intelligence after `.env` exists:
+Connect CopilotKit Intelligence after `.env` exists. `.env.example` leaves its two addresses and
+its key empty. By default they are an Intelligence on this machine, which the CopilotKit CLI
+installs and connects (a preview for macOS with Docker Desktop):
+
+```sh
+npx --yes copilotkit@latest login
+npx --yes copilotkit@latest local setup
+npx --yes copilotkit@latest local connect --approve-connection
+```
+
+`local connect` writes `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
+`CPK_INTELLIGENCE_API_KEY` to `.env`; each installation has its own ports. For a managed project
+instead, set `INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai` and
+`INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai` in `.env`, then:
 
 ```sh
 npx --yes copilotkit@latest login

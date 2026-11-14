@@ -73,8 +73,12 @@ Requirements for the clone path:
   Bots and the LangGraph framework Bot. Use the provider-specific key and model variables below.
   Google is supported by the LangGraph framework Bot, not by the example built-in package model.
 
-Fresh managed OpenAI clone setup needs a CopilotKit sign-in and an OPENAI_API_KEY model credential.
-The setup helper writes the project runtime key and Learning container assignment.
+Fresh clone setup needs a CopilotKit sign-in and a model credential (OPENAI_API_KEY by default).
+`.env.example` leaves the two Intelligence addresses and the key empty. By default the CopilotKit
+CLI fills all three for an Intelligence on their own machine (LOCAL, below). For a managed project
+(MANAGED, below) they write the two managed addresses and the setup helper writes the key and the
+Learning container assignment. Ask which they want; on macOS with Docker Desktop, local is the
+default.
 
 `scripts/start.sh` fills the local secrets it owns: COMPUTER_TOKEN has a dev default, and
 MANAGED_AGENT_TOKEN plus AGENT_TOOL_TOKEN are generated and written back into `.env`.
@@ -85,6 +89,13 @@ The clone commands are:
 
   cp .env.example .env
   bun install
+
+MANAGED. They set these two lines in `.env`, which the example leaves empty:
+
+  INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai
+  INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai
+
+then run:
 
   npx --yes copilotkit@latest login           # opens a browser
   npx --yes copilotkit@latest project select  # selects the managed project
@@ -113,10 +124,10 @@ CPK_INTELLIGENCE_SKILLS_REVISION optionally pins a published revision. Saved Adm
 precedence, including off. Keep the project key server-side and use the existing Intelligence UI
 for management (a runtime project key cannot authorize those writes). See docs/automatic-learning.md.
 
-To run Intelligence on their own Mac instead of the managed service, point them at
+LOCAL, the default. Intelligence runs on their own machine, installed by the CopilotKit CLI: see
 https://docs.copilotkit.ai/intelligence/self-hosting-local. It is a preview for macOS with Docker
 Desktop, not a production installation, and the free Developer plan qualifies. They run, from the
-OpenBot root where `.env` is:
+OpenBot root where `.env` is, after `cp .env.example .env` and `bun install`:
 
   npx copilotkit@latest login
   npx copilotkit@latest local setup
@@ -315,8 +326,9 @@ WHAT YOU MUST NOT DO FOR THEM
   second prints their license. Tell them to run both.
 - Do not put their API keys into any file you did not just tell them about, and do not echo
   values back.
-- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL unless they run Intelligence
-  themselves (self-hosted, or locally through `copilotkit local connect`).
+- Do not type addresses into INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL for a local
+  Intelligence: `copilotkit local connect` writes them, and each installation has its own ports.
+  Only the two managed addresses, or a self-hosted deployment's own, are written by hand.
 - Do not run `helm install` or `helm upgrade` before they confirm the cluster and namespace.
 - Do not put a license, model key, client secret or database URL into a values file in the
   repository, or into any file that gets committed.
@@ -387,9 +399,9 @@ After the install:
 
 HOW TO KNOW IT WORKED
 
-For a clone, `curl -s 127.0.0.1:3001/api/capabilities` should return JSON with
-`"mode":"intelligence"`. On Kubernetes, the same curl answers through the port-forward, and
-`kubectl -n openbot get pods` shows nothing Pending, crash-looping or failing to pull. Then use the
+For a clone, `curl -s 127.0.0.1:3001/api/v2/organizations/default/deployment` should return JSON
+with an `"edition"`. On Kubernetes, `curl -s 127.0.0.1:3001/api/copilotkit/info` answers through
+the port-forward, and `kubectl -n openbot get pods` shows nothing Pending, crash-looping or failing to pull. Then use the
 app, not just curl: ask a Bot to open a public site in its
 browser, report something visible on the page, and show a small chart. A plain text/math answer is
 not enough for the main path because it does not prove browser tools or component rendering.
