@@ -4,7 +4,7 @@ import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 
 const key = "openbot-device-id";
 export async function registerPush() {
@@ -39,16 +39,30 @@ export async function registerPush() {
     id = Crypto.randomUUID();
     await SecureStore.setItemAsync(key, id);
   }
-  await api("/api/delivery/devices", {
-    method: "POST",
-    body: { id, token, projectId, platform: Platform.OS },
+  // Registered under the id this install made, every time the app starts: a token Expo has changed
+  // replaces the old one rather than adding a second phone.
+  await api(devicePath(id), {
+    method: "PUT",
+    headers: { "Idempotency-Key": Crypto.randomUUID() },
+    body: { token, projectId, platform: Platform.OS },
   });
   return id;
 }
 export async function unregisterPush() {
   const id = await SecureStore.getItemAsync(key);
-  if (id)
-    await api(`/api/delivery/devices/${encodeURIComponent(id)}`, {
+  if (!id) return;
+  try {
+    await api(devicePath(id), {
       method: "DELETE",
+      headers: { "Idempotency-Key": Crypto.randomUUID() },
     });
+  } catch (error) {
+    // Removed already: by another sign-out, or by OpenBot once Expo said the phone stopped taking them.
+    if (error instanceof ApiError && error.status === 404) return;
+    throw error;
+  }
+}
+/** This phone, as one of the signed-in person's devices. */
+function devicePath(id: string) {
+  return `/api/v2/organizations/default/people/me/devices/${encodeURIComponent(id)}`;
 }

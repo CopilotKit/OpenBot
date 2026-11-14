@@ -4,7 +4,7 @@
 import type { App } from "./app";
 
 export interface AppPage {
-  /** By title, then by id. */
+  /** By title, ignoring case, then by id. */
   apps: App[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
