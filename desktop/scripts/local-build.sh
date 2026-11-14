@@ -223,7 +223,10 @@ for pair in openbot:openbot server:openbot-server agent-computer:openbot-agent-c
 done
 MANIFEST="$STATE/manifests/container-images-$SHORT.json"
 jq --arg version "$VERSION" --arg commit "$COMMIT" --argjson built "$BUILT" --argjson pinned "$PINNED" \
-  '.version = $version | .commit = $commit | .images += $pinned | .images += $built' "$base" > "$MANIFEST"
+  '.version = $version | .commit = $commit | .images += $pinned | .images += $built
+   # The server image under two more names, as a release writes them (.github/workflows/images.yml):
+   # kept for one release, so the 1.0.2 and 1.0.3 apps can start an installation this build updated.
+   | .images["agent-bot"] = .images.server | .images["agent-langgraph"] = .images.server' "$base" > "$MANIFEST"
 # Every image the published list names must be pinned, or the app refuses the manifest at Install.
 jq -e --slurpfile names .github/published-images.json \
   '[$names[0][] as $n | .images[$n].reference // "" | test("@sha256:[0-9a-f]{64}$")] | all' \

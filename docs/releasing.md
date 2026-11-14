@@ -24,6 +24,11 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
 
+Kept for one release, and dropped in the release after: `container-images.json` names `agent-bot`
+and `agent-langgraph` (both the server image, written in `.github/workflows/images.yml`), and
+`docker-compose.yml` defines two services of those names that nothing starts, so that the 1.0.2 and
+1.0.3 apps can start a newer installation (`tests/older-apps.test.ts`).
+
 Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
 nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,
 which then fails to attach anything because the tag has no release.

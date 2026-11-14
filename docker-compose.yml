@@ -248,6 +248,25 @@ services:
     networks:
       - data
 
+  # KEPT FOR ONE RELEASE, and started by nothing. Defined only so an app from the release before
+  # (1.0.2 or 1.0.3) can merge its own port settings onto this file: on a Mac with Podman it names
+  # this service in an overlay, and Compose refuses an overlay that names a service this file does
+  # not define. Behind a profile nothing turns on, on the server image, so nothing more is pulled.
+  # Dropped in the next release.
+  agent-bot:
+    profiles: ["for-older-apps"]
+    image: *server-image
+    pull_policy: never
+    restart: "no"
+
+  # KEPT FOR ONE RELEASE, and started by nothing, for the same reason as `agent-bot` above: an app
+  # from the release before names this service in its port overlay. Dropped in the next release.
+  agent-langgraph:
+    profiles: ["for-older-apps"]
+    image: *server-image
+    pull_policy: never
+    restart: "no"
+
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
     # Named rather than Compose-derived, because the supervisor starts one computer per Bot from this
