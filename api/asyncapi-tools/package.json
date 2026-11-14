@@ -1,0 +1,9 @@
+{
+  "name": "openbot-asyncapi-tools",
+  "private": true,
+  "license": "MIT",
+  "description": "The AsyncAPI CLI, pinned, for the breaking-change check on api/asyncapi.yaml. Its own package so only the API check installs it.",
+  "dependencies": {
+    "@asyncapi/cli": "6.3.0"
+  }
+}
