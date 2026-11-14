@@ -24,6 +24,7 @@ import type {
   ComputerActionConflictResponse,
   ComputerActionRefusedResponse,
   ComputerActionResult,
+  ComputerAnswerNotKeptResponse,
   ComputerBotNotFoundResponse,
   ComputerClick,
   ComputerCommand,
@@ -2967,7 +2968,7 @@ export const getSupplyComputerSecretUrl = (
 };
 
 /**
- * Type the secret the Bot asked for into the field it named. The value goes to the page and nowhere else: it is not logged, not recorded and never answered back. Needs the password manager to be on for the caller.
+ * Type the secret the Bot asked for into the field it named. The value goes to the page and nowhere else: it is not logged, not recorded and never answered back. Needs the password manager to be on for the caller. What is typed is never kept, not even to recognise a retry: a request sent again with the same Idempotency-Key is matched to the first by everything but its text.
  * @summary Type the value a Bot asked for
  */
 export const supplyComputerSecret = async (
@@ -3133,7 +3134,7 @@ export const getSendComputerHumanInputUrl = (
 };
 
 /**
- * Send one gesture from the person driving the Bot's computer: a click at a point, text to type, a key, or a scroll. Only while the caller holds control. What a person types is not recorded; the takeover is.
+ * Send one gesture from the person driving the Bot's computer: a click at a point, text to type, a key, or a scroll. Only while the caller holds control. What a person types is not recorded; the takeover is. What is typed is never kept, not even to recognise a retry: a request sent again with the same Idempotency-Key is matched to the first by everything but its text.
  * @summary Send a person's own mouse or keyboard input
  */
 export const sendComputerHumanInput = async (
@@ -3301,7 +3302,7 @@ export const getSnapshotComputerUrl = (
 };
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List what a Bot can act on in the page
  */
 export const snapshotComputer = async (
@@ -3350,7 +3351,7 @@ export const getSnapshotComputerMutationOptions = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -3399,7 +3400,7 @@ export type SnapshotComputerMutationError =
   | UnauthenticatedResponse
   | ForbiddenResponse
   | ComputerBotNotFoundResponse
-  | ComputerActionConflictResponse
+  | ComputerAnswerNotKeptResponse
   | ServerErrorResponse
   | ComputerUnavailableResponse
   | UnexpectedErrorResponse;
@@ -3418,7 +3419,7 @@ export const useSnapshotComputer = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -3761,7 +3762,7 @@ export const getTypeComputerUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Type text into the field a ref from the latest snapshot names, and with submit, send its form. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Type text into the field a ref from the latest snapshot names, and with submit, send its form. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. What is typed is never kept, not even to recognise a retry: a request sent again with the same Idempotency-Key is matched to the first by everything but its text.
  * @summary Type into an element in a Bot's browser
  */
 export const typeComputer = async (
@@ -4230,7 +4231,7 @@ export const getRunComputerCommandUrl = (
 };
 
 /**
- * Run a shell command in the Bot's workspace and return what it printed. timeoutMs is between 1000 and 600000. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Run a shell command in the Bot's workspace and return what it printed. timeoutMs is between 1000 and 600000. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the command printed, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary Run a command on a Bot's computer
  */
 export const runComputerCommand = async (
@@ -4285,7 +4286,7 @@ export const getRunComputerCommandMutationOptions = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -4340,7 +4341,7 @@ export type RunComputerCommandMutationError =
   | UnauthenticatedResponse
   | ComputerActionRefusedResponse
   | ComputerBotNotFoundResponse
-  | ComputerActionConflictResponse
+  | ComputerAnswerNotKeptResponse
   | ServerErrorResponse
   | ComputerUnavailableResponse
   | UnexpectedErrorResponse;
@@ -4360,7 +4361,7 @@ export const useRunComputerCommand = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -4395,7 +4396,7 @@ export const getListComputerFilesUrl = (
 };
 
 /**
- * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the names of a person's files, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List a Bot's files
  */
 export const listComputerFiles = async (
@@ -4450,7 +4451,7 @@ export const getListComputerFilesMutationOptions = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -4505,7 +4506,7 @@ export type ListComputerFilesMutationError =
   | UnauthenticatedResponse
   | ComputerActionRefusedResponse
   | ComputerBotNotFoundResponse
-  | ComputerActionConflictResponse
+  | ComputerAnswerNotKeptResponse
   | ServerErrorResponse
   | ComputerUnavailableResponse
   | UnexpectedErrorResponse;
@@ -4525,7 +4526,7 @@ export const useListComputerFiles = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -4557,7 +4558,7 @@ export const getReadComputerFileUrl = (
 };
 
 /**
- * Return the text of one file in the Bot's workspace. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Return the text of one file in the Bot's workspace. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the file's text, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary Read one of a Bot's files
  */
 export const readComputerFile = async (
@@ -4612,7 +4613,7 @@ export const getReadComputerFileMutationOptions = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,
@@ -4667,7 +4668,7 @@ export type ReadComputerFileMutationError =
   | UnauthenticatedResponse
   | ComputerActionRefusedResponse
   | ComputerBotNotFoundResponse
-  | ComputerActionConflictResponse
+  | ComputerAnswerNotKeptResponse
   | ServerErrorResponse
   | ComputerUnavailableResponse
   | UnexpectedErrorResponse;
@@ -4687,7 +4688,7 @@ export const useReadComputerFile = <
     | UnauthenticatedResponse
     | ComputerActionRefusedResponse
     | ComputerBotNotFoundResponse
-    | ComputerActionConflictResponse
+    | ComputerAnswerNotKeptResponse
     | ServerErrorResponse
     | ComputerUnavailableResponse
     | UnexpectedErrorResponse,

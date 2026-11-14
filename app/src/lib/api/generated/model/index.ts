@@ -300,6 +300,7 @@ export * from "./conversationConflictResponse";
 export * from "./conversationGrant";
 export * from "./conversationGrantNotFoundResponse";
 export * from "./conversationGrantPage";
+export * from "./computerAnswerNotKeptResponse";
 export * from "./computerBotNotFoundResponse";
 export * from "./computerChallenge";
 export * from "./computerChallengeKind";
