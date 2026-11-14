@@ -55,9 +55,9 @@ test.skipIf(!installed)(
   () => {
     const original = readFileSync(SPEC, "utf8");
     const inChannel =
-      '      screenText:\n        $ref: "#/components/messages/ScreenText"\n';
+      '      threadError:\n        $ref: "#/components/messages/ThreadError"\n';
     const inOperation =
-      '      - $ref: "#/channels/legacyBotScreen/messages/screenText"\n';
+      '      - $ref: "#/channels/threadStream/messages/threadError"\n';
     expect(original).toContain(inChannel);
     expect(original).toContain(inOperation);
     const head = join(
@@ -72,7 +72,7 @@ test.skipIf(!installed)(
       (change) => `${change.action} ${change.path}`,
     );
     expect(failed).toContain(
-      "remove /channels/legacyBotScreen/messages/screenText",
+      "remove /channels/threadStream/messages/threadError",
     );
   },
   slow,
