@@ -245,6 +245,25 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     expect(said).toContain("stop and say briefly what failed");
   });
 
+  test("nothing is made up in a call, and an empty search is tried another way", () => {
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    // A Bot searched an address it had invented, found nothing and said no such email existed.
+    expect(said).toContain(
+      "never make up an id, an address or a name to put in a call",
+    );
+    expect(said).toContain(
+      "search for a person by the name you were given, not an address you guessed",
+    );
+    expect(said).toContain(
+      "a search that finds nothing has not shown there is nothing",
+    );
+    expect(said).toContain("before you say something does not exist");
+    // Said before the work, not only among the failed calls, where an empty result is no failure.
+    expect(said.indexOf("never make up an id")).toBeLessThan(
+      said.indexOf("when a call fails"),
+    );
+  });
+
   test("a claim needs a tool result, and an app change is read back once before it is called done", () => {
     const said = flat(HOW_TO_WORK_GUIDANCE);
     expect(said).toContain(
