@@ -698,16 +698,14 @@ test("mounts the ChatGPT token store directory into the picked harness", () => {
 });
 
 /**
- * The server, the worker, the migrations, the computer and the supervisor are pulled, never built:
+ * The server, the computer and the supervisor are pulled, never built:
  * the published OpenBot images, at the one tag backend-images.env names, read as OPENBOT_BACKEND_TAG.
  * Each image is still overridable, which is how OpenBot Desktop pins a release's digests.
  */
-test("runs the server, worker, migrations, computer and supervisor from the published images", () => {
+test("runs the server, computer and supervisor from the published images", () => {
   const services = composeServices();
   const images = {
-    migrate: "openbot-server",
     server: "openbot-server",
-    worker: "openbot-server",
     "agent-computer": "openbot-agent-computer",
     supervisor: "openbot-supervisor",
   } as const;
@@ -741,11 +739,33 @@ test("runs the server, worker, migrations, computer and supervisor from the publ
   );
 });
 
-test("runs the server migrator after PostgreSQL becomes healthy", () => {
+/**
+ * The server applies its own migrations when it starts and does its scheduled work itself (firing
+ * routines, cleaning up unsent attachments, suspending idle computers), so the file defines no
+ * `migrate` and no `worker` service, nothing waits on either, and nothing is handed the secret the
+ * worker used to present.
+ */
+test("defines no migrate and no worker service, and nothing that waits on one", () => {
   const services = composeServices();
-  expect(services.migrate.command).toEqual(["bun", "scripts/migrate.ts"]);
-  expect(services.migrate.depends_on?.postgres).toEqual({
-    condition: "service_healthy",
+
+  expect(Object.keys(services)).not.toContain("migrate");
+  expect(Object.keys(services)).not.toContain("worker");
+  for (const [name, service] of Object.entries(services)) {
+    const waitsOn = Object.keys(service.depends_on ?? {});
+    expect(`${name}: ${waitsOn}`).not.toMatch(/migrate|worker/);
+    expect(Object.keys(service.environment ?? {})).not.toContain(
+      "WORKER_SHARED_SECRET",
+    );
+  }
+  expect(composeFile()).not.toContain("WORKER_SHARED_SECRET");
+});
+
+test("starts the server once PostgreSQL is healthy, because it migrates as it starts", () => {
+  const server = composeServices().server;
+
+  expect(server.command).toBeUndefined();
+  expect(server.depends_on).toEqual({
+    postgres: { condition: "service_healthy" },
   });
 });
 
@@ -865,32 +885,18 @@ test("sends host.docker.internal where OPENBOT_HOST_GATEWAY says", () => {
 });
 
 /**
- * OpenBot's own server and worker, started by name.
+ * OpenBot's own server, started by name.
  *
  * A plain `docker compose up -d` starts what it always did; `scripts/start.sh` and an installed
- * OpenBot name the two. The profile is what keeps them out of the plain run; naming the service is
+ * OpenBot name it. The profile is what keeps it out of the plain run; naming the service is
  * still enough to start it.
  */
-test("keeps OpenBot's own server and worker behind a profile", () => {
-  const services = composeServices();
+test("keeps OpenBot's own server behind a profile, restarted by Docker", () => {
+  const server = composeServices().server;
 
-  for (const name of ["server", "worker"]) {
-    expect(services[name].profiles).toEqual(["openbot"]);
-  }
-});
-
-test("runs the server and the worker from the image migrations already use", () => {
-  const services = composeServices();
-
-  for (const name of ["server", "worker"]) {
-    expect(services[name].image).toBe(services.migrate.image);
-    expect(services[name].depends_on?.migrate).toEqual({
-      condition: "service_completed_successfully",
-    });
-    // Restarted by Docker, because nothing on the host is watching them any more.
-    expect(services[name].restart).toBe("unless-stopped");
-  }
-  expect(services.worker.command).toEqual(["bun", "../worker/src/index.ts"]);
+  expect(server.profiles).toEqual(["openbot"]);
+  // Restarted by Docker, because nothing on the host is watching it.
+  expect(server.restart).toBe("unless-stopped");
 });
 
 /**
@@ -937,19 +943,14 @@ test("gives the server the supervisor unless the deployment empties it", () => {
   expect(none?.AGENT_COMPUTER_URL).toBe("http://agent-computer:4100");
 });
 
-test("puts the server beside the database and the Bots, and the worker beside the database only", () => {
+test("puts the server beside the database and the Bots, and nothing else beside the database", () => {
   const services = composeServices();
 
   expect(services.server.networks).toEqual(["data", "default"]);
-  expect(services.worker.networks).toEqual(["data"]);
-  expect(Object.keys(services.worker.environment ?? {}).sort()).toEqual([
-    "DATABASE_URL",
-    "SERVER_INTERNAL_URL",
-    "WORKER_SHARED_SECRET",
-  ]);
-  expect(services.worker.environment?.SERVER_INTERNAL_URL).toBe(
-    "http://server:3001",
-  );
+  const besideTheDatabase = Object.entries(services)
+    .filter(([, service]) => service.networks?.includes("data"))
+    .map(([name]) => name);
+  expect(besideTheDatabase.sort()).toEqual(["postgres", "server"]);
 });
 
 test("hands the desktop's host-access token to the server and nothing else", () => {

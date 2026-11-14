@@ -446,3 +446,105 @@ test("host planning allows established unrelated workers and refuses its own or 
   expect((await planning("p4242\n")).allowed).toBe(false);
   expect(f.calls.some((command) => command.includes(" stop "))).toBe(false);
 });
+
+/**
+ * A run against a release whose server applies its own migrations and does the scheduled work
+ * itself, so its Compose file defines no `migrate` and no `worker`. The candidate's file is the one
+ * read with `--file` before it is installed and the one in place after the merge. With
+ * `installedToo`, the installation is already on such a release. The previous release left one
+ * `worker` container behind, which only its labels find once the file no longer defines it.
+ */
+function serverDoesTheWork(
+  f: ReturnType<typeof fixture>,
+  { installedToo = false } = {},
+): CommandRunner {
+  let activated = false;
+  return async (command, options) => {
+    if (command[0] === "docker" && command[1] === "ps") {
+      f.calls.push(command.join(" "));
+      return command.includes("label=com.docker.compose.service=worker") &&
+        !installedToo
+        ? "previous-worker\n"
+        : "";
+    }
+    const result = await f.run(command, options);
+    if (command[0] === "git" && command.includes("merge")) activated = true;
+    if (
+      command.includes("config") &&
+      (installedToo || activated || command.includes("--file"))
+    ) {
+      const configuration = JSON.parse(result);
+      delete configuration.services.worker;
+      delete configuration.services.migrate;
+      return JSON.stringify(configuration);
+    }
+    return result;
+  };
+}
+
+test("image apply onto a release whose server migrates and sweeps for itself runs no migrate or worker service, and removes the previous worker's container", async () => {
+  const f = fixture();
+  const result = await applyLocalUpdate({
+    ...f.options,
+    run: serverDoesTheWork(f),
+  });
+  expect(result.phase).toBe("accepted");
+
+  const compose = f.calls.filter((c) => c.startsWith("docker compose "));
+  // The installed file still defines the worker, so it is stopped with the server.
+  const stop = f.calls.findIndex((c) =>
+    c.endsWith(" stop --timeout 30 worker server"),
+  );
+  expect(stop).toBeGreaterThan(-1);
+  // From the candidate's file on, neither name is handed to Compose again.
+  expect(compose.filter((c) => c.includes(" pull "))).toEqual([
+    expect.stringMatching(/ pull server$/),
+  ]);
+  expect(f.calls.some((c) => c.includes("--exit-code-from"))).toBe(false);
+  expect(compose.filter((c) => c.includes(" up "))).toEqual([
+    expect.stringMatching(/ up -d --no-build --no-deps server$/),
+  ]);
+  expect(compose.some((c) => / ps --quiet (worker|migrate)$/.test(c))).toBe(
+    false,
+  );
+  // The previous release's worker container is an orphan now: removed, by this project's labels,
+  // before the server starts.
+  const lookup = f.calls.indexOf(
+    "docker ps --all --quiet --filter label=com.docker.compose.project=original-project --filter label=com.docker.compose.service=worker",
+  );
+  const removal = f.calls.indexOf("docker rm --force previous-worker");
+  const up = f.calls.findIndex((c) => c.includes(" up -d "));
+  expect(lookup).toBeGreaterThan(stop);
+  expect(removal).toBeGreaterThan(lookup);
+  expect(up).toBeGreaterThan(removal);
+  expect(f.calls.filter((c) => c.startsWith("docker rm "))).toHaveLength(1);
+  expect(
+    f.calls.some((c) => c.includes("--volumes") || c.includes(" -v")),
+  ).toBe(false);
+});
+
+test("an installation already on such a release updates without ever naming migrate or worker to Compose", async () => {
+  const f = fixture();
+  const result = await applyLocalUpdate({
+    ...f.options,
+    run: serverDoesTheWork(f, { installedToo: true }),
+  });
+  expect(result.phase).toBe("accepted");
+  for (const call of f.calls.filter((c) => c.startsWith("docker compose ")))
+    expect(call).not.toMatch(/\b(migrate|worker)\b/);
+  expect(f.calls.some((c) => c.endsWith(" stop --timeout 30 server"))).toBe(
+    true,
+  );
+  expect(f.calls.some((c) => c.startsWith("docker rm "))).toBe(false);
+});
+
+test("host apply onto such a release leaves the migrations to the server that start.sh starts", async () => {
+  const f = fixture("host");
+  const result = await applyLocalUpdate({
+    ...f.options,
+    run: serverDoesTheWork(f),
+  });
+  expect(result.phase).toBe("accepted");
+  expect(f.calls.some((c) => c.includes("scripts/start.sh"))).toBe(true);
+  expect(f.calls.some((c) => c.includes("--exit-code-from"))).toBe(false);
+});

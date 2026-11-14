@@ -222,10 +222,33 @@ every deployment:
   work up as soon as it continues, so the answer streams in as it is written, and a message typed
   while the Bot works waits for it, as it does when you never left.
 
+### The server migrates and does the scheduled work itself
+
+The server applies its own database migrations when it starts, and fires routines, cleans up
+unsent attachments and suspends idle computers inside its own process. `docker-compose.yml` no
+longer defines the `migrate` and `worker` services, nothing waits on `migrate`, and the server is
+no longer handed `WORKER_SHARED_SECRET`. A Compose override that names either service, or a script
+that runs `docker compose run migrate` or reads `docker compose logs worker`, has to stop naming
+them.
+
+- **OpenBot Desktop** names only the services the installed Compose file defines. An installation
+  still on 1.0.2's file, which is the state during an update and after one that rolled back, is
+  run as that file requires: its migrations run before its server and its worker starts, restarts
+  and stops with it. Once the update puts this release's file in place, Start removes the `worker`
+  and `migrate` containers 1.0.2 left, found by the installation's own Compose project and those
+  two services. No other container and no volume is touched.
+- **`bash scripts/start.sh`** runs no migration step and starts no worker, and removes a `worker`
+  or `migrate` container an earlier start left. `bash scripts/stop.sh` does the same removal.
+  `bun scripts/update.ts local apply` asks each release's Compose file only for the services it defines, so it
+  updates to and from a release with either shape.
+- **The Routines page no longer warns that routines aren't running.** That warning was for a
+  deployment with no worker, which no longer exists as a state. `GET /api/routines` still answers
+  with the `sweep` record older apps read.
+
 ### Running from source
 
 - **The server runs from the published OpenBot images.** `bash scripts/start.sh` pulls the server,
-  routine worker, computer and supervisor images at the tag in `backend-images.env` and runs them as
+  computer and supervisor images at the tag in `backend-images.env` and runs them as
   Compose services, with the app served from the checkout as before. The server's log is
   `docker compose logs server`. A server and worker an earlier start left running on the host are
   stopped first. The personal edition's own browser now shows in the page, as in OpenBot Desktop.

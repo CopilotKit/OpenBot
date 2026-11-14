@@ -199,7 +199,7 @@ if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then ech
 # The server's container refused: for any reason, every time; or the way Docker Desktop refuses a
 # strict bind of a folder whose view is stale, until a plain -v bind of that folder resolves it.
 if [[ "$args" == run*" -v $PWD/.openbot:"* ]]; then touch "$DOCKER_LOG.seen"; fi
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then
   if [ -n "\${TEST_SERVER_FAILS:-}" ]; then echo "Error response from daemon: no space left on device" >&2; exit 1; fi
   if [ -n "\${TEST_MOUNT_NOT_SEEN:-}" ] && [ ! -f "$DOCKER_LOG.seen" ]; then
     echo "Error response from daemon: invalid mount config for type bind: bind source path does not exist: /host_mnt$PWD/.openbot" >&2
@@ -207,7 +207,12 @@ if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
   fi
 fi
 # The settings the server's container would be created with, kept for the test to read.
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+# What Compose calls this checkout's project, and the services its file defines.
+if [[ "$args" == "compose config" ]]; then printf 'name: fixture-project\\nservices: {}\\n'; fi
+if [[ "$args" == "compose --profile openbot config --services" ]]; then printf 'postgres\\nserver\\n'; fi
+# A routine worker's container, left by a start from when the worker was a Compose service.
+if [[ "$args" == "ps -aq --filter label=com.docker.compose.project=fixture-project --filter label=com.docker.compose.service=worker" ]] && [ -n "\${TEST_OLD_WORKER_CONTAINER:-}" ]; then echo old-worker-container; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
 if [[ "$args" == *"to_regclass('public.agent_preferences')"* ]]; then echo agent_preferences; fi
 exit 0
@@ -308,7 +313,7 @@ describe("start.sh and a server an earlier start ran on the host", () => {
     );
     expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     expect(result.pkillLog).toContain("bun worker/src/index.ts");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 });
 
@@ -669,9 +674,58 @@ describe("start.sh and the managed Bot", () => {
   });
 });
 
+describe("start.sh and the work the server does itself", () => {
+  /**
+   * The server applies its own migrations when it starts and does the scheduled work itself, and
+   * docker-compose.yml defines no `migrate` and no `worker` service. So the start runs no migration
+   * step and starts no worker, as a container or on the host, and looks for the migrated tables
+   * once the server is up.
+   */
+  test("runs no migrate step and starts no worker", async () => {
+    const result = await runStart();
+
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    const calls = result.dockerLog.trim().split("\n");
+    // Compose is never handed either name: not to pull, run, start or read logs from.
+    for (const call of calls.filter((call) => call.startsWith("compose "))) {
+      expect(call).not.toMatch(/\b(migrate|worker)\b/);
+    }
+    expect(calls.filter((call) => call.includes("--no-deps"))).toHaveLength(1);
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
+    expect(result.stdout).not.toMatch(/\bworker\b/);
+    expect(result.dockerLog.indexOf("to_regclass")).toBeGreaterThan(
+      result.dockerLog.indexOf("compose up -d --no-deps server tool="),
+    );
+    expect(result.stdout).toContain("coworker tables migrated");
+    // Nothing of an earlier start's is there to remove.
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+  });
+
+  /**
+   * A checkout started before this had a `worker` container. Its service is gone from the Compose
+   * file, so Compose would leave it running beside a server that now does the same work. It is
+   * removed, found by this checkout's own Compose project and that one service.
+   */
+  test("removes the worker container an earlier start left", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).toMatch(/^rm -f old-worker-container /m);
+    expect(result.dockerLog.match(/^rm /gm)).toHaveLength(1);
+    expect(result.stdout).toContain(
+      "worker: removed the container an earlier start left",
+    );
+  });
+});
+
 describe("start.sh and the OpenBot images", () => {
   /**
-   * The server, the worker, the migrations, the computer and the supervisor all run from the
+   * The server, the computer and the supervisor all run from the
    * published OpenBot images, at the one tag `backend-images.env` names. Compose reads it as
    * OPENBOT_BACKEND_TAG, so every Compose call the script makes is handed it.
    */
@@ -682,8 +736,7 @@ describe("start.sh and the OpenBot images", () => {
     const calls = result.dockerLog.trim().split("\n");
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) expect(call).toEndWith(" tag=sha-from-the-file");
-    expect(result.dockerLog).toContain("compose run --rm migrate");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   /**
@@ -711,7 +764,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("OpenBot images: main");
     const pull = result.dockerLog.indexOf(
-      "compose pull --quiet migrate supervisor agent-computer policy=always",
+      "compose pull --quiet server supervisor agent-computer policy=always",
     );
     expect(pull).toBeGreaterThan(-1);
     expect(pull).toBeLessThan(
@@ -758,7 +811,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain(
       "Could not fetch the OpenBot images at sha-pinned-for-the-test",
     );
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("IMAGE_PULL_POLICY=never fetches nothing", async () => {
@@ -768,7 +821,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).not.toContain("compose pull");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("a tag in .env or the environment runs another build", async () => {
@@ -779,7 +832,7 @@ describe("start.sh and the OpenBot images", () => {
       const result = await runStart(run);
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toMatch(
-        /compose up -d --no-deps server worker .* tag=sha-from-env-file\n/,
+        /compose up -d --no-deps server tool=.* tag=sha-from-env-file\n/,
       );
     }
     // Two whole starts, one after the other.

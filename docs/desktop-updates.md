@@ -16,7 +16,9 @@ The app's own release is the tag it was released as, or, for an internal or cand
 2. Takes one `pg_dump` of its database (a custom-format archive, checked with `pg_restore --list`), and sets the previous version's files aside in `.openbot-previous/`: `docker-compose.yml`, `container-images.json`, `.openbot-deployment`, the installation records, and what earlier versions laid out for a browser they ran on the desktop (`agent-computer/`, `shared/`, `extension/`), which goes with the previous version.
 3. Lays the new version out exactly as Install does.
 4. Pulls its images.
-5. Starts. Migrations run once, as the `migrate` service Compose completes before it starts `server`.
+5. Starts. The new version's server applies its migrations as it starts. Start names only the services the installed Compose file defines, and removes the `worker` and `migrate` containers a version up to 1.0.2 left once that file no longer defines them: by this installation's Compose project and those two services, with no volume touched.
+
+Putting a version up to 1.0.2 back works the same way in reverse: its Compose file defines `migrate` and `worker`, so Start runs its migrations as the dependency Compose completes before `server`, and raises its worker with the server.
 
 If any step fails, the previous files go back, the database is restored from the dump, the previous version starts, and the window says so in one sentence before handing over. The next Start tries the upgrade again. If the app stops part way (a crash, Quit, Stop), or the previous version could not be put back, `.openbot-previous/` is still there, and the next Start (Retry, on the screen a failed Start leaves) or Install puts the previous version back first; until then the tray, reopen and Recorder handoff refuse to adopt the half-upgraded installation.
 

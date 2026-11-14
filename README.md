@@ -171,7 +171,7 @@ cd OpenBot
 
 To run the open-source template locally, you’ll need the following.
 
-- Docker, for PostgreSQL, the API server and the shipped Bots. The server, its routine worker and
+- Docker, for PostgreSQL, the API server and the shipped Bots. The server and
   the Bots' computers run from the published OpenBot images, which `scripts/start.sh` pulls at the
   tag in `backend-images.env`: `main` in a checkout of `main`, the images built from main, and the
   release's own version in a release (`v1.0.3` in the v1.0.3 tag). Nothing else is built or needed
@@ -253,7 +253,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 5. Open <http://localhost:3010>.
 
-`scripts/start.sh` pulls the OpenBot images at the tag in `backend-images.env`, starts Docker services, applies migrations, starts the API server on port 3001 and the routine worker from the OpenBot server image, starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. It pulls on every start, so a checkout of `main` runs the images built from main now; offline, it uses the copies already on the machine. The server's log is `docker compose logs server`.
+`scripts/start.sh` pulls the OpenBot images at the tag in `backend-images.env`, starts Docker services, starts the API server on port 3001 from the OpenBot server image (it applies its own migrations as it starts and fires routines itself), starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. It pulls on every start, so a checkout of `main` runs the images built from main now; offline, it uses the copies already on the machine. The server's log is `docker compose logs server`.
 
 `scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
 
@@ -397,7 +397,7 @@ Old addresses redirect to the pages above:
 - **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
 - **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port. The supervisor binds there too, because it holds the Docker socket and its token is a shared secret rather than a network boundary.
 - **Durable threads and memory**: conversations survive restarts through CopilotKit Intelligence, and each deployment stamps the threads it owns.
-- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. Needs a worker process, which `scripts/start.sh` starts locally; see [docs/routines.md](docs/routines.md).
+- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. The server fires them itself, so there is nothing else to run; see [docs/routines.md](docs/routines.md).
 
 ## Bring your own agent
 
@@ -480,7 +480,6 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
 | `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
-| `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
 | PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |
 

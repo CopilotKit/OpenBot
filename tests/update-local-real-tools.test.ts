@@ -242,7 +242,8 @@ describe.skipIf(!docker)(
       expect(result.phase).toBe("accepted");
       expect(available(["docker", "image", "inspect", reference])).toBe(true);
       const pull = calls.findIndex((call) =>
-        call.includes(" pull server worker migrate"),
+        // The real Compose file defines neither a worker nor a migrate service to pull for.
+        call.endsWith(" pull server"),
       );
       const stop = calls.findIndex((call) => call.includes(" stop "));
       expect(pull).toBeGreaterThan(-1);
@@ -276,7 +277,7 @@ describe.skipIf(!docker)(
       const f = installation(
         "DATABASE_URL=postgres://openbot:openbot@127.0.0.1:5432/openbot\n",
       );
-      // start.sh runs `up --build` and `run --build migrate` on the real Compose file. Each service is
+      // start.sh runs `up --build` on the real Compose file. Each service built here is
       // pointed at a one-file Dockerfile, and its default tag is made unique so no real local
       // `openbot-*:latest` image is replaced; the `${VARIABLE:-...}` each one reads stays the real one.
       const project = directory("openbot-real-build-");
@@ -457,9 +458,11 @@ describe.skipIf(!docker)("image migration with real Docker Compose", () => {
       f.candidate.artifacts.images.server = { reference };
       // An executable cached image and no Dockerfile in the checkout: any accidental build fails.
       // SQL/backup/server boundaries remain recorded; the actual migration CLI must reach this process.
+      // The `migrate` service is the override's own, as an earlier release's Compose file defined
+      // it: the real file has none, because its server applies its migrations when it starts.
       writeFileSync(
         join(f.root, "docker-compose.override.yml"),
-        `services:\n  migrate:\n    entrypoint: ["/bin/sh"]\n    command: ${JSON.stringify(["-ec", `printf 'compose-migration-executed\\n'; exit ${exitCode}`])}\n`,
+        `services:\n  migrate:\n    image: \${SERVER_IMAGE:-registry:2}\n    environment:\n      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot\n    entrypoint: ["/bin/sh"]\n    command: ${JSON.stringify(["-ec", `printf 'compose-migration-executed\\n'; exit ${exitCode}`])}\n`,
       );
       cleanup.push(() =>
         sh([

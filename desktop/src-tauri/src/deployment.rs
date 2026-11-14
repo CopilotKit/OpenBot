@@ -241,20 +241,22 @@ fn covers(recorded: &[String]) -> bool {
     })
 }
 
-/// Whether the deployment on disk is a release from before OpenBot's server and worker were
-/// Compose services.
+/// Whether the deployment on disk is a release from before OpenBot's server was a Compose
+/// service.
 ///
-/// Such a release ran both as Bun processes on the host, and this app no longer starts those. Its
-/// Compose file has no `server` or `worker` to raise, and its server image has no worker in it, so
-/// keeping its pin would leave an installation that used to start unable to. Answered from the
-/// Compose file because that is what is missing; an unreadable or absent file is a damaged
-/// deployment, not an old one, and the ordinary repair of the pinned version covers it.
+/// Such a release ran the server and its routines worker as Bun processes on the host, and this app
+/// no longer starts those. Its Compose file has no `server` to raise, so keeping its pin would
+/// leave an installation that used to start unable to. Answered from the Compose file because that
+/// is what is missing; an unreadable or absent file is a damaged deployment, not an old one, and
+/// the ordinary repair of the pinned version covers it.
+///
+/// `server` alone decides. Releases up to 1.0.2 define a `worker` service beside it and later ones
+/// do not, because their server does the scheduled work itself: both run in containers.
 pub fn predates_containers(root: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(root.join("docker-compose.yml")) else {
         return false;
     };
-    let services = compose_services(&text);
-    !(services.contains(&"server") && services.contains(&"worker"))
+    !compose_services(&text).contains(&"server")
 }
 
 /// The service names in a Compose file, read line by line.
@@ -1015,13 +1017,40 @@ mod tests {
         assert_eq!(connections(&count), 2);
     }
 
+    /// The server applies its own migrations when it starts and does the scheduled work itself,
+    /// so this release's file has a `server` and neither a `migrate` nor a `worker`.
     #[test]
-    fn this_repositorys_compose_file_runs_the_server_and_worker_as_services() {
+    fn this_repositorys_compose_file_runs_the_server_and_no_migrate_or_worker_service() {
         let text = include_str!("../../../docker-compose.yml");
         let services = compose_services(text);
-        for name in ["postgres", "supervisor", "server", "worker"] {
+        for name in ["postgres", "supervisor", "server"] {
             assert!(services.contains(&name), "{name} not in {services:?}");
         }
+        for name in ["migrate", "worker"] {
+            assert!(!services.contains(&name), "{name} is in {services:?}");
+        }
+    }
+
+    /// A release without a `worker` service is not one from before the server ran in a container.
+    /// Read as one, this app refused to start it and Install laid out another release over it.
+    #[test]
+    fn a_release_whose_server_does_the_scheduled_work_itself_runs_in_containers() {
+        let root = crate::test_support::temp_root("deployment-no-worker");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v1.0.3", false).unwrap();
+        for (release, text) in [
+            ("this release", include_str!("../../../docker-compose.yml")),
+            (
+                "1.0.2",
+                include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml"),
+            ),
+        ] {
+            std::fs::write(root.join("docker-compose.yml"), text).unwrap();
+            assert!(!predates_containers(&root), "{release}");
+            assert!(!needs_fetch(&root, "v1.0.3"), "{release}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1298,13 +1327,10 @@ mod tests {
         record(&root, "v0.0.15", false).unwrap();
         assert!(predates_containers(&root));
 
-        // The latest release's Compose file has the server and worker in it.
+        // The latest release's Compose file has the server in it.
         let tarball = release_tarball(
             "OpenBot-0.0.16",
-            &[(
-                "docker-compose.yml",
-                "services:\n  server: {}\n  worker: {}\n",
-            )],
+            &[("docker-compose.yml", "services:\n  server: {}\n")],
         );
         let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
         let images = serde_json::to_vec(&manifest(&published)).unwrap();

@@ -138,3 +138,33 @@ running_here() {
   done
   [ "$found" = true ]
 }
+
+# Remove the containers an earlier start made for `migrate` and `worker`, and print each name
+# removed.
+#
+# Both were Compose services until the server took the work over: it applies its migrations when it
+# starts and does the scheduled work itself. docker-compose.yml defines neither now, and Compose
+# leaves a container whose service is gone running (it calls it an orphan and only warns), where an
+# old routine worker would go on sweeping beside the server.
+#
+# Only this checkout's Compose project, by the labels Compose itself put on the container, and only
+# these two services, so no other project's container can match. A service this project's files do
+# define, in an override for instance, is left alone. `docker rm` without `-v`: no volume is touched.
+remove_retired_services() {
+  local project defined service ids
+  project="$(docker compose config 2>/dev/null | sed -n 's/^name: *//p' | head -1 | tr -d "\"'\r" || true)"
+  [ -n "$project" ] || return 0
+  defined="$(docker compose --profile openbot config --services 2>/dev/null | tr -d '\r' || true)"
+  for service in migrate worker; do
+    if printf '%s\n' "$defined" | grep -qx "$service"; then
+      continue
+    fi
+    ids="$(docker ps -aq \
+      --filter "label=com.docker.compose.project=$project" \
+      --filter "label=com.docker.compose.service=$service" 2>/dev/null | tr -d '\r' || true)"
+    [ -n "$ids" ] || continue
+    # shellcheck disable=SC2086
+    docker rm -f $ids >/dev/null 2>&1 || continue
+    printf '%s\n' "$service"
+  done
+}

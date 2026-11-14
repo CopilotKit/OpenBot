@@ -1145,9 +1145,10 @@ pub fn compose(
         loopback_relays(ports, &intelligence.gateway_ws_url),
     );
 
-    // The worker refuses to start without this, by design: it is a fact about where this process
-    // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
-    // from a developer's machine does not carry it either.
+    // For an installation whose Compose file is a release's up to 1.0.2, which runs the routines
+    // sweep as a `worker` service: that worker refuses to start without this, by design. It is a
+    // fact about where the process runs, and it would rather stop than guess. Later releases' server
+    // does the sweep itself and reads neither this nor the worker's secret.
     env.insert(
         "SERVER_INTERNAL_URL".into(),
         format!("http://127.0.0.1:{}", ports.server),

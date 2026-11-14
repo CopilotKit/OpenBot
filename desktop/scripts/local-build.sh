@@ -40,9 +40,9 @@ REGISTRY_NAME="openbot-local-registry"
 REGISTRY_PORT="${OPENBOT_LOCAL_REGISTRY_PORT:-5050}"
 REGISTRY="127.0.0.1:${REGISTRY_PORT}"
 STATE="${OPENBOT_LOCAL_BUILD_DIR:-$HOME/.openbot-local-build}"
-# agent-claude-sdk, the harness a Claude plan picks and the sign-in image. The server (server,
-# migrate, worker), supervisor and agent-computer a Claude-plan install also runs are the published
-# OpenBot images, at the tag in backend-images.env.
+# agent-claude-sdk, the harness a Claude plan picks and the sign-in image. The server, supervisor
+# and agent-computer a Claude-plan install also runs are the published OpenBot images, at the tag
+# in backend-images.env.
 DEFAULT_IMAGES="agent-claude-sdk"
 IMAGES=()
 for image in ${OPENBOT_LOCAL_IMAGES-$DEFAULT_IMAGES}; do IMAGES+=("$image"); done
