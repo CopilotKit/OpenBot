@@ -502,11 +502,7 @@ mod tests {
     fn laid_out(version: &str, pinned: bool) -> PathBuf {
         let root = temp_root("upgrade-due");
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
         deployment::record(&root, version, pinned).unwrap();
         root
@@ -698,10 +694,7 @@ mod tests {
             self.step("lay_out")?;
             std::fs::write(
                 self.root.join("docker-compose.yml"),
-                format!(
-                    "# {}\nservices:\n  server: {{}}\n  worker: {{}}\n",
-                    self.version
-                ),
+                format!("# {}\nservices:\n  server: {{}}\n", self.version),
             )
             .unwrap();
             std::fs::write(deployment::images_path(&self.root), &self.version).unwrap();
@@ -1072,8 +1065,9 @@ mod tests {
 
 /// The upgrade against a real container engine, with the product's own layout (`deployment`), pull
 /// (`pull_metrics`), Start (`stack::up`), Stop (`stack::down`), `pg_dump` and `pg_restore` (`stack`).
-/// Releases are two versions of a fixture with the shape of OpenBot's own Compose file: Postgres, a
-/// `migrate` that `server` depends on, and the other services Start raises, all from a "server"
+/// Releases are two versions of a fixture with the shape of OpenBot's Compose file up to 1.0.3,
+/// which Start still raises as that file requires: Postgres, a `migrate` that `server` depends on, a
+/// `worker`, and the other services Start raises, all from a "server"
 /// image the fixture pushes to a local registry, so every pull is a real pull. Each migration
 /// records that it ran, so "once" is counted rather than assumed. Its own Compose project, volume,
 /// folder and image tags; nothing else on the engine is touched.

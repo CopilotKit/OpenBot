@@ -3,10 +3,11 @@
 # Stop everything `scripts/start.sh` started, in the reverse order it started them.
 # Safe to rerun: anything already stopped is reported and skipped.
 #
-# Four things run, and they are stopped in this order so nothing is left calling something that has
-# gone: the app, then the routine worker, then the API server, then Docker. The worker and the server
-# are Compose services; a host process an earlier start ran for either is stopped too. The Bot
-# computers come last because they are made by the supervisor rather than by compose, so
+# Three things run, and they are stopped in this order so nothing is left calling something that
+# has gone: the app, then the API server, then Docker. The server is a Compose service, and it does
+# the scheduled work itself. What an earlier start ran is stopped too: a server or a routine worker
+# on the host, and the `worker` container from when that was a Compose service. The Bot computers
+# come last because they are made by the supervisor rather than by compose, so
 # `docker compose down` leaves them running and they are the heaviest thing here, one Chromium each.
 
 # Before anything else, and before the `set` line below, which is itself bash-only: this file is
@@ -29,7 +30,7 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: bash scripts/stop.sh [--keep-computers]
 
-Stops the app, the routine worker, the API server, the Docker services, and each Bot's computer.
+Stops the app, the API server, the Docker services, and each Bot's computer.
 
   --keep-computers  Leave the Bot computers running, so their browsers stay signed in and warm.
                     Their files and browser profiles are Docker volumes and survive either way.
@@ -134,24 +135,21 @@ echo
 echo "OpenBot"
 echo "======="
 
-info "1/4  App"
+info "1/3  App"
 stop_port "$APP_PORT" app
 
-info "2/4  Routine worker"
-if [ -n "$(docker compose ps -q worker 2>/dev/null)" ]; then
-  docker compose stop worker >/dev/null 2>&1
-  green "  worker: stopped"
-else
-  info "  worker: not running"
-fi
-# One an earlier start ran on the host, by the pattern it was started with. It has to stay that
-# specific: a bare `bun src/index.ts` matches the computer and supervisor containers on a Linux host.
+info "2/3  API server"
+# A routine worker an earlier start ran. As a Compose service, which nothing here starts any
+# more: removed here, by this project's labels.
+for retired in $(remove_retired_services); do
+  green "  $retired from an earlier start: removed"
+done
+# Or on the host, by the pattern it was started with. It has to stay that specific: a bare
+# `bun src/index.ts` matches the computer and supervisor containers on a Linux host.
 if running "bun worker/src/index.ts"; then
   stop_matching "bun worker/src/index.ts"
   green "  worker on the host: stopped"
 fi
-
-info "3/4  API server"
 if [ -n "$(docker compose ps -q server 2>/dev/null)" ]; then
   docker compose stop server >/dev/null 2>&1
   green "  server: stopped"
@@ -165,7 +163,7 @@ if running "bun scripts/start-local-chrome-computer.ts"; then
   green "  your browser: stopped"
 fi
 
-info "4/4  Docker"
+info "3/3  Docker"
 if docker compose ps --quiet 2>/dev/null | grep -q .; then
   docker compose down >/dev/null 2>&1
   green "  compose services: stopped"

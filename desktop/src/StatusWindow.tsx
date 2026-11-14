@@ -116,7 +116,7 @@ const BUSY_SAID: Record<Busy, string> = {
  * What OpenBot is running, what each part costs, and Restart and Stop for each.
  *
  * Memory is read every few seconds while the window shows; it is Docker's figure per container,
- * OpenBot's own server and worker among them. Intelligence's readiness is the CLI's, asked only on
+ * OpenBot's own server among them. Intelligence's readiness is the CLI's, asked only on
  * opening, on Refresh and after an action here: the main window's own Intelligence calls take the
  * same lock, and a status window polling it would make them fail as busy.
  */
@@ -233,7 +233,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               />
               {status.openbotRunning && (
                 <div className="row">
-                  {/* Restart is Compose restarting the server and worker containers this session started. */}
+                  {/* Restart is Compose restarting the server's container this session started. */}
                   {status.openbotHeld && (
                     <button
                       type="button"

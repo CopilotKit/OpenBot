@@ -24,10 +24,21 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
 
-Kept for one release, and dropped in the release after: `container-images.json` names `agent-bot`
-and `agent-langgraph` (both the server image, written in `.github/workflows/images.yml`), and
-`docker-compose.yml` defines two services of those names that nothing starts, so that the 1.0.2 and
-1.0.3 apps can start a newer installation (`tests/older-apps.test.ts`).
+Kept for one release, so that the 1.0.2 and 1.0.3 apps can read and start a newer installation,
+and all dropped together in the release after:
+
+- `container-images.json` names `agent-bot` and `agent-langgraph` (both the server image, written
+  in `.github/workflows/images.yml`).
+- `docker-compose.yml` defines two services of those names that nothing starts, behind the
+  `for-older-apps` profile (`tests/older-apps.test.ts`).
+- `docker-compose.yml` defines a `worker` and a `migrate` service that nothing starts, behind the
+  `openbot` profile. Those apps read a Compose file as current only when it defines `worker`, and
+  ask for `migrate`'s image by name. The server applies its own migrations and does the scheduled
+  work itself, which the file says on its `x-openbot-scheduled-work: server` line.
+- The two commands those services run in the server image, `bun ../worker/src/index.ts` and
+  `bun scripts/migrate.ts`, which do nothing there now.
+- The `routine_sweeps` table, which the server still writes for the `sweep` record
+  `GET /api/routines` answers older apps with.
 
 Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
 nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,

@@ -320,7 +320,6 @@
     "app/tests/root-drop-guard.test.tsx": 8,
     "app/tests/router.test.ts": 231,
     "app/tests/routines-conversation-title.test.tsx": 13,
-    "app/tests/routines-no-worker.test.ts": 1,
     "app/tests/routines-title.test.tsx": 27,
     "app/tests/running-step-shimmer.test.tsx": 77,
     "app/tests/screen-connection.test.ts": 2,

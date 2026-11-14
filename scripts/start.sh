@@ -59,7 +59,7 @@ setting() {
   printf '%s' "${value:-$fallback}"
 }
 
-# The tag of the OpenBot images the server, worker, migrations, computer and supervisor run from:
+# The tag of the OpenBot images the server, computer and supervisor run from:
 # backend-images.env, unless the environment or .env names another build. Compose reads it as
 # OPENBOT_BACKEND_TAG. Without it Compose would ask for a tag that does not exist.
 BACKEND_TAG_PINNED="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' "$ROOT/backend-images.env" 2>/dev/null | tail -1 || true)"
@@ -82,15 +82,6 @@ ONE_COMPUTER_EACH="$(setting OPENBOT_ONE_COMPUTER_EACH true)"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
-# A fixed default is fine here, unlike `AGENT_TOOL_TOKEN` below, but not because of where the server
-# listens — it binds no hostname, so this port is reachable from the network like any other. It is
-# fine because this is a dev-only default on a machine's own dev stack, and the endpoint it guards
-# accepts nothing but an unguessable `routine_run_<uuid>` id: the server re-reads the routine, the
-# owner and the channel from its own tables rather than trusting anything else the caller says, so
-# the fixed default gates nothing sensitive here. That is also why it is generated fresh and
-# persisted for AGENT_TOOL_TOKEN (see the SECRETS_ROTATED block) but not for this one — production
-# must set a real WORKER_SHARED_SECRET.
-WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 
 # The secret the server sends to a managed Bot, generated and written back on first run.
 #
@@ -330,7 +321,7 @@ else
   SERVICES+=(agent-langgraph-agui)
 fi
 
-export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
+export SUPERVISOR_TOKEN COMPUTER_TOKEN
 export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 # Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
 # terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
@@ -343,7 +334,7 @@ export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 # whatever copy is here, so this pull asks for `always`. Offline, or with IMAGE_PULL_POLICY=never,
 # the copies already on this machine are used.
 if [ "${IMAGE_PULL_POLICY:-missing}" != never ]; then
-  PULL=(migrate)
+  PULL=(server)
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     PULL+=(supervisor)
   fi
@@ -359,25 +350,17 @@ if ! COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/
   red "  The Docker services did not start. The OpenBot images are at $OPENBOT_BACKEND_TAG (backend-images.env)."
   exit 1
 fi
-if ! docker compose run --rm migrate >"$LOGS/migrate.log" 2>&1; then
-  red "  Migrations did not apply. The database is not the schema this server expects."
-  red "  Log: $LOGS/migrate.log"
-  exit 1
-fi
+# No migration step here: the server applies its own migrations when it starts, below.
+#
+# An earlier start ran `migrate` and `worker` as Compose services. Nothing here starts either
+# now (docker-compose.yml says the server does that work), so a container of one is left over.
+for retired in $(remove_retired_services); do
+  info "  $retired: removed the container an earlier start left (the server does that work now)"
+done
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
   wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
 fi
-
-for table in agent_profiles agent_preferences; do
-  if ! docker compose exec -T postgres \
-       psql -U openbot -d openbot -tAc "select to_regclass('public.$table')" 2>/dev/null \
-       | grep -q "^$table$"; then
-    red "  $table is missing. Run: docker compose --env-file backend-images.env --env-file .env run --rm migrate"
-    exit 1
-  fi
-done
-green "  coworker tables migrated"
 
 # Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
 # .env again here would have demanded the line be present in a file the comment above that default
@@ -411,12 +394,14 @@ fi
 # OpenBot Desktop: the server offers it there whenever OPENBOT_BROWSER_URL names no other.
 
 info "2/4  Server"
-# The server and the routine worker run from the OpenBot server image, as Compose services, and the
-# app below is this checkout's, served by Vite with its `/api` proxied to the server's port.
+# The server runs from the OpenBot server image, as a Compose service: it applies its migrations
+# as it starts and does the scheduled work itself (firing routines, cleaning up unsent attachments,
+# suspending idle computers). The app below is this checkout's, served by Vite with its `/api`
+# proxied to the server's port.
 #
-# A server an earlier start ran on the host from source, still holding the port: stopped, with its
-# routine worker, the way a restart always stopped them, so the container can have the port. Only a
-# host `bun` that answers as OpenBot; anything else on the port is reported and left alone.
+# A server an earlier start ran on the host from source, still holding the port: stopped, with the
+# routine worker that start ran beside it, so the container can have the port. Only a host `bun`
+# that answers as OpenBot; anything else on the port is reported and left alone.
 if [ -z "$(docker compose ps -q server 2>/dev/null)" ]; then
   SERVER_HOLDER="$(holder "$SERVER_PORT")"
   if [[ "$SERVER_HOLDER" == bun* ]] && identifies_as_openbot "$SERVER_PORT" server; then
@@ -476,7 +461,7 @@ fi
 # bind of the folder does, so on that refusal this makes one and starts the server again. Any other
 # failure stops the start at once, as before.
 start_server() {
-  COMPOSE_PROGRESS=quiet docker compose up -d --no-deps ${RECREATE[@]+"${RECREATE[@]}"} server worker \
+  COMPOSE_PROGRESS=quiet docker compose up -d --no-deps ${RECREATE[@]+"${RECREATE[@]}"} server \
     >/dev/null 2>"$LOGS/server-start.log"
 }
 server_did_not_start() {
@@ -497,7 +482,23 @@ fi
 rm -f "$SERVER_ENV"
 unset OPENBOT_SERVER_ENV_FILE
 wait_for_openbot "$SERVER_PORT" server 90
-info "  worker: running (routine sweep loop)"
+# The server applies its migrations as it starts, so the tables they make are there once it is up.
+# Asked for a little while, not once: nothing says its health check waits for the last migration.
+has_table() {
+  docker compose exec -T postgres \
+    psql -U openbot -d openbot -tAc "select to_regclass('public.$1')" 2>/dev/null \
+    | grep -q "^$1$"
+}
+for table in agent_profiles agent_preferences; do
+  for _ in $(seq 1 30); do
+    if has_table "$table"; then continue 2; fi
+    sleep 2
+  done
+  red "  $table is missing. The server applies its migrations when it starts, and this one did not."
+  red "  Log: docker compose logs server"
+  exit 1
+done
+green "  coworker tables migrated"
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
@@ -550,11 +551,11 @@ Try:
   4. Add a deny rule in /admin/boundaries, then retry the same action.
 
 Logs: $LOGS (the app)
-  The server and the routine worker: docker compose logs server worker
+  The server: docker compose logs server
   Images: ghcr.io/copilotkit/openbot-server:$OPENBOT_BACKEND_TAG and the rest, from backend-images.env
 
 Stop all of it: bash scripts/stop.sh
-  The app, the server and worker, the Docker services, and each Bot's computer, which compose
+  The app, the server, the Docker services, and each Bot's computer, which compose
   does not own because the supervisor makes it. Pass --keep-computers to leave the browsers signed
   in. Nothing is deleted either way: the database, the files and the browser profiles are volumes.
 EOF

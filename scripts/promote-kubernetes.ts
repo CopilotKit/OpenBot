@@ -113,6 +113,20 @@ function imageParts(reference: string) {
     digest,
   };
 }
+/** The init container a chart gives its server Deployment when that server applies its own
+ * migrations as it starts: the pod waits for the database, then the server migrates before it
+ * listens. */
+const WAITS_FOR_DATABASE = "wait-for-database";
+/** Requires that the effective target chart migrates the database with the target image, in one of
+ * the two ways a chart does:
+ *
+ * - a guarded `pre-upgrade` Job that runs the target image's `scripts/migrate.ts`; or
+ * - no migrations Job of any kind, and a server Deployment that runs the target image behind a
+ *   `wait-for-database` init container, which is the shape of a chart whose server applies its own
+ *   migrations when it starts.
+ *
+ * A chart with a migrations Job is held to the first: one that is disabled, not a `pre-upgrade`
+ * hook, or runs another image or runner is refused, and so is a chart with neither shape. */
 async function requireRenderedMigration(
   options: KubernetesPromotionOptions,
   values: PromotionValues,
@@ -147,11 +161,29 @@ async function requireRenderedMigration(
       repository: values.image.repository,
       digest: values.image.digest,
     };
-    const guarded = parseAllDocuments(rendered).some((document) => {
+    const documents = parseAllDocuments(rendered);
+    for (const document of documents)
       if (document.errors.length)
         throw new Error(
           "Target chart rendered invalid YAML during migration preflight",
         );
+    const component = (document: (typeof documents)[number]) =>
+      document.getIn(["metadata", "labels", "app.kubernetes.io/component"]);
+    const runsTargetImage = (container: unknown) => {
+      if (!isMap(container)) return false;
+      const image = container.get("image");
+      if (typeof image !== "string") return false;
+      try {
+        const actual = imageParts(image);
+        return (
+          actual.repository === expected.repository &&
+          actual.digest === expected.digest
+        );
+      } catch {
+        return false;
+      }
+    };
+    const guarded = documents.some((document) => {
       const hook = document.getIn(["metadata", "annotations", "helm.sh/hook"]);
       if (
         document.get("kind") !== "Job" ||
@@ -202,9 +234,39 @@ async function requireRenderedMigration(
         })
       );
     });
-    if (!guarded)
+    if (guarded) return;
+    // No Job at all that migrates, by its label or by what it runs. A chart that has one is held to
+    // the guarded Job above, so a disabled or replaced Job is never read as a server that migrates.
+    const anyMigrationJob = documents.some(
+      (document) =>
+        document.get("kind") === "Job" &&
+        (component(document) === "migrations" ||
+          /scripts\/migrate\.ts/.test(String(document))),
+    );
+    const serverMigratesAtStart =
+      !anyMigrationJob &&
+      documents.some((document) => {
+        if (
+          document.get("kind") !== "Deployment" ||
+          component(document) !== "server"
+        )
+          return false;
+        const pod = ["spec", "template", "spec"];
+        const containers = document.getIn([...pod, "containers"]);
+        const initContainers = document.getIn([...pod, "initContainers"]);
+        return (
+          isSeq(containers) &&
+          containers.items.some(runsTargetImage) &&
+          isSeq(initContainers) &&
+          initContainers.items.some(
+            (container) =>
+              isMap(container) && container.get("name") === WAITS_FOR_DATABASE,
+          )
+        );
+      });
+    if (!serverMigratesAtStart)
       throw new Error(
-        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart; migrations must remain enabled",
+        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart, and its server Deployment is not one that applies its own migrations at start (the target image behind a wait-for-database init container, with no migrations Job); migrations must remain enabled",
       );
   } finally {
     rmSync(directory, { recursive: true, force: true });

@@ -265,14 +265,24 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   expect(view.queryByText("Run the goal.")).toBeNull();
 });
 
-test("a stopped worker is said when the only schedule is a goal's", async () => {
+/**
+ * The server fires routines itself, so there is no separate worker to be missing and nothing for
+ * the list to warn about. It still sends the `sweep` record older apps read, and one that says
+ * nothing is sweeping draws no warning here.
+ */
+test("a sweep record that says nothing is working draws no warning", async () => {
   serving({
     working: false,
-    routines: [routine("r1", "expenses", { goalId: "g1" })],
+    routines: [
+      routine("r1", "expenses", { goalId: "g1" }),
+      routine("r2", "expenses", { instruction: "Post the summary." }),
+    ],
   });
   const view = draw();
   await view.findByText("Reconcile receipts");
-  expect(view.getByText("Routines aren't running.")).toBeTruthy();
+  await view.findByText("Post the summary.");
+  expect(view.queryByText(/Routines aren't running/)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
 });
 
 test("a goal's row claims no start when routines couldn't be read", async () => {

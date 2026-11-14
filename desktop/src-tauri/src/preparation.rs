@@ -391,8 +391,8 @@ mod tests {
         );
     }
 
-    /// A Compose file from a release that runs the server and worker as services.
-    const COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
+    /// A Compose file from a release that runs the server as a service.
+    const COMPOSE: &str = "services:\n  server: {}\n";
 
     #[test]
     fn the_saved_engine_outlives_a_new_preparation() {

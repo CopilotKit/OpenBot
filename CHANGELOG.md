@@ -38,7 +38,10 @@ every deployment:
   over one, they stopped with "container-images.json for … names no agent-bot image". For one
   release, `container-images.json` names `agent-bot` and `agent-langgraph` again, both as the
   server image, and `docker-compose.yml` defines two services of those names that nothing starts.
-  Nothing more is downloaded or run. Both are dropped in the release after.
+  Nothing more is downloaded or run. Everything kept for those apps for this one release is
+  dropped together in the release after: those two `container-images.json` entries and the two
+  services of their names, the `worker` and `migrate` services `docker-compose.yml` still defines
+  (below), the two commands they run in the server image, and the `routine_sweeps` table.
 - **Get Troubleshooting Logs… no longer quits OpenBot Desktop on a Mac.** Chosen from the OpenBot
   menu, it could seem to do nothing for a few seconds and then close the app, after saving the
   file. macOS refused to show the file in Finder from where OpenBot asked. It now asks from the
@@ -222,10 +225,45 @@ every deployment:
   work up as soon as it continues, so the answer streams in as it is written, and a message typed
   while the Bot works waits for it, as it does when you never left.
 
+### The server migrates and does the scheduled work itself
+
+The server applies its own database migrations when it starts, and fires routines, cleans up
+unsent attachments and suspends idle computers inside its own process. Nothing in this release
+starts the `migrate` or `worker` Compose service, nothing waits on `migrate`, and the server is no
+longer handed `WORKER_SHARED_SECRET`. A Compose override that makes something depend on either
+service, or a script that runs `docker compose run migrate` or reads `docker compose logs worker`,
+has to stop.
+
+`docker-compose.yml` still defines both services, for this one release, doing nothing: an OpenBot
+Desktop app from the release before reads a Compose file as current only when it defines `worker`,
+and asks for `migrate`'s image by name. Both go in the release after, with the rest of what is
+kept for those apps (under OpenBot Desktop, above). What tells this file from an
+earlier release's is one top-level line in it, `x-openbot-scheduled-work: server`.
+
+- **OpenBot Desktop** reads that line in the installed Compose file. An installation still on the
+  file of a release up to 1.0.3, which has no such line and is the state during an update and
+  after one that rolled back, is run as that file requires: its migrations run before its server,
+  and its worker starts, restarts and stops with it. With this release's file Desktop never names
+  either service, and Start removes the `worker` and `migrate` containers the earlier release left,
+  found by the installation's own Compose project and those two services. No other container and
+  no volume is touched.
+- **`bash scripts/start.sh`** runs no migration step and starts no worker, and removes a `worker`
+  or `migrate` container an earlier start left. `bash scripts/stop.sh` does the same removal.
+  `bun scripts/update.ts local apply` asks each release's Compose file only for the services
+  it uses, so it updates to and from a release of either kind.
+- **`bun scripts/update.ts kubernetes`** accepts, for a promotion that changes the database
+  version, a chart whose server applies its own migrations: one that renders no migrations Job and
+  a server Deployment running the target image behind a `wait-for-database` init container. A chart
+  with a migrations Job is still held to the guarded `pre-upgrade` one, and a chart with neither
+  is still refused.
+- **The Routines page no longer warns that routines aren't running.** That warning was for a
+  deployment with no worker, which no longer exists as a state. `GET /api/routines` still answers
+  with the `sweep` record older apps read.
+
 ### Running from source
 
 - **The server runs from the published OpenBot images.** `bash scripts/start.sh` pulls the server,
-  routine worker, computer and supervisor images at the tag in `backend-images.env` and runs them as
+  computer and supervisor images at the tag in `backend-images.env` and runs them as
   Compose services, with the app served from the checkout as before. The server's log is
   `docker compose logs server`. A server and worker an earlier start left running on the host are
   stopped first. The personal edition's own browser now shows in the page, as in OpenBot Desktop.

@@ -83,11 +83,11 @@ Ubuntu 26.04.
 
 ## Running services
 
-Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server and the routine worker, starts the app, and verifies health routes.
+Use `bash scripts/start.sh` for the full local stack. It starts Docker services, starts the API server, which applies its own migrations as it starts and fires routines itself, starts the app, and verifies health routes.
 
-The API server, the routine worker, the migrations, the computer and the supervisor run from the published OpenBot images, pulled at the one tag in `backend-images.env`: `main` on the `main` branch, the images built from main, and the release's own version (`v1.0.3`) in a release's checkout, which the release PR pins. `start.sh` pulls them on every start, so `main` is current; offline, or with `IMAGE_PULL_POLICY=never`, it uses the copies already on the machine. An `OPENBOT_BACKEND_TAG` in the environment or `.env` runs another build. The app runs from this checkout, with Vite, so a change to it shows as you save; its `/api` calls go to the server's container on port 3001. The server's log is `docker compose logs server`, and the worker's `docker compose logs worker`. Run Compose by hand with `--env-file backend-images.env --env-file .env`, so it pulls the same images.
+The API server, the computer and the supervisor run from the published OpenBot images, pulled at the one tag in `backend-images.env`: `main` on the `main` branch, the images built from main, and the release's own version (`v1.0.3`) in a release's checkout, which the release PR pins. `start.sh` pulls them on every start, so `main` is current; offline, or with `IMAGE_PULL_POLICY=never`, it uses the copies already on the machine. An `OPENBOT_BACKEND_TAG` in the environment or `.env` runs another build. The app runs from this checkout, with Vite, so a change to it shows as you save; its `/api` calls go to the server's container on port 3001. The server's log is `docker compose logs server`. Run Compose by hand with `--env-file backend-images.env --env-file .env`, so it pulls the same images.
 
-Use `bash scripts/stop.sh` to take it down: the app, the routine worker, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
+Use `bash scripts/stop.sh` to take it down: the app, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
 
 Use `bun run dev` only when you want the app on its own, against a server that is already running.
 
@@ -100,7 +100,7 @@ Use `bun run dev` only when you want the app on its own, against a server that i
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 
-`start.sh` hands every selected Docker service, the API server and the worker included, to `docker compose up -d` on every run, so one whose configuration or image changed is recreated and an unchanged one is left as it is. It recreates the server when it generated a secret, leaves an app that already answers as OpenBot alone, and reports when a port is held by another process.
+`start.sh` hands every selected Docker service, the API server included, to `docker compose up -d` on every run, so one whose configuration or image changed is recreated and an unchanged one is left as it is. It recreates the server when it generated a secret, leaves an app that already answers as OpenBot alone, and reports when a port is held by another process.
 
 **Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
 message is sent, and the only thing that reclaims the ones never sent is the server image's
@@ -118,9 +118,12 @@ in the composer deletes it outright, so it takes abandoned drafts rather than or
 
 ## Migrations
 
-The database schema and its migrations come with the server image. `start.sh` applies them with the
-`migrate` service before it starts the server, every run, and a database that is already current is
-left as it is.
+The database schema and its migrations come with the server image. The server applies them itself
+when it starts, every run, and a database that is already current is left as it is. There is no
+migration step in `start.sh`, which only checks, once the server is up, that the tables are there.
+`docker-compose.yml` still defines a `migrate` and a `worker` service for one release, for an
+OpenBot Desktop app from the release before to read, and nothing starts them; a container of
+either that an earlier start left is removed.
 
 ## Quality checks
 

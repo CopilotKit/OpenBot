@@ -130,10 +130,10 @@ one night's attempt will fix that — only switching it off, and saying so, does
 
 ## Missed windows are skipped, not replayed
 
-A routine's next run is a stamp, not a queue. If nothing was watching the clock — a worker that was
-never started, or one that was down for a month — a routine's stamp falls behind, and the deployment
+A routine's next run is a stamp, not a queue. If nothing was watching the clock (a deployment
+that was stopped for a month), a routine's stamp falls behind, and the deployment
 does not owe it every occurrence it missed: catching up is a silent drain, not a burst. A deployment
-whose worker comes back after a quiet month drains that backlog by advancing the stamp forward without
+that comes back after a quiet month drains that backlog by advancing the stamp forward without
 firing anything for it, occurrence by occurrence, until it is current again — not by firing thirty
 stale summaries of thirty different mornings.
 
@@ -143,41 +143,37 @@ because the clock had already moved on before that firing was attempted. A serve
 loses more than that: every occurrence whose stamp ages past the grace window while nothing can
 carry it out is skipped, not just the one that was in flight.
 
-## The worker requirement
+## What fires them
 
-Nothing above happens without a second process. The API server answers `/internal/routines/run` when
-it is handed a run, but nothing hands it one on its own — that is a separate worker's whole job, and a
-deployment that never started one schedules nothing.
+The server does. It sweeps for due routines itself, inside its own process, alongside the rest of
+its scheduled work (cleaning up unsent attachments, suspending idle computers), so a deployment
+needs nothing beside the server for a routine to fire. `scripts/start.sh` starts no worker and
+OpenBot Desktop runs none. (`docker-compose.yml` still defines a `worker` service for one release,
+which nothing starts and which does nothing if started: an OpenBot Desktop app from the release
+before reads a Compose file as current only when it defines one.)
 
-This used to fail silently. A routine created in chat is stored, its schedule is computed, and the
-Routines page shows it sitting there with a next run time like any other — because as far as that
-page knows, it is correct. A deployment with no worker looked identical to one running normally,
-right up until nobody's standup notes ever arrive.
+It used to take a second process: a worker that ran the sweep in a loop and handed each due run to
+the server at `/internal/routines/run`. A deployment that never started one stored every routine,
+showed it with a next run time, and fired nothing, so the Routines page carried a warning for it.
+With the sweep in the server there is no such state to warn about, and the page no longer does.
+`GET /api/routines` still answers with the `sweep` record that warning read, for apps from before
+this.
 
-Each sweep now records that it happened, in `routine_sweeps`, and the Routines page reads it. A
-person with standing routines and nothing sweeping is told so: that no worker has ever checked in,
-or when the last one did. The window is `MINIMUM_INTERVAL_MS` — fifteen minutes, the floor a
-routine's own schedule already has, so a gap longer than that is one no routine could have wanted.
-A CronJob scheduled less often than that will read as quiet between runs.
+Each sweep still records that it happened, in `routine_sweeps`. The window that matters is
+`MINIMUM_INTERVAL_MS`: fifteen minutes, the floor a routine's own schedule already has, so a gap
+longer than that is one no routine could have wanted.
 
-Two settings carry this:
+Two settings belong to the separate worker, and matter only to a deployment that still runs one
+beside the server:
 
-- **`WORKER_SHARED_SECRET`** — the credential the worker presents to `/internal/routines/run`. The API
-  server refuses every handoff without it configured on both sides, and the worker refuses to start
-  without it at all, rather than firing routines nobody could ever prove came from it.
-- **`SERVER_INTERNAL_URL`** — where the worker reaches this deployment's own API server. It is a fact
-  about where the worker process runs rather than a fact about the deployment, so it is read from the
-  environment directly rather than from the rest of the deployment's configuration.
+- **`WORKER_SHARED_SECRET`**: the credential a worker presents to `/internal/routines/run`. The API
+  server refuses every handoff without it configured on both sides.
+- **`SERVER_INTERNAL_URL`**: where a worker reaches this deployment's own API server.
 
-On Kubernetes, the chart runs a CronJob of `fire-routines.ts` on `routines.schedule`, on by default
-(`routines.enabled`), and generates the shared secret for it and the API server unless one is
-supplied (see the routines sweep in the Helm guide that comes with the chart). It is a
-CronJob the same way the computer culler is a CronJob rather than a timer inside the API: a timer fires in
-every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
-starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two
-shapes are the same code doing the same thing on two different clocks, not two implementations to keep
-in sync. OpenBot Desktop runs the same loop as the `worker` Compose service, from the server image,
-behind the `openbot` profile in `docker-compose.yml`.
+That includes an OpenBot Desktop installation whose Compose file is a release's up to 1.0.3, which
+runs the sweep in its `worker` service: Desktop reads the installed file, so it still starts,
+restarts and stops that worker with the server, and removes its container once an update puts in
+place a Compose file that says its server does the work (see [Desktop updates](desktop-updates.md)).
 
 ## Who a routine runs as
 
@@ -192,7 +188,7 @@ separate, because as far as the channel is concerned, that is exactly what it is
 ## Scope
 
 This ships the core: creating, listing, changing and deleting routines from chat; the schedule, the
-cap and the fatigue rule; the worker that fires them. Four follow-ups were listed in
+cap and the fatigue rule; the sweep that fires them. Four follow-ups were listed in
 [#193](https://github.com/CopilotKit/OpenBot/issues/193), which is now closed; the first of them has
 been built. Audit rows now say what started the run they came out of, so a
 routine's action is told apart from the same person's own by reading the row rather than by
@@ -207,4 +203,4 @@ limit; and a tenant package cannot yet ship routines the way it ships agents, ch
 - [Architecture](architecture.md) — where the routines sweep sits beside the computer culler on the
   shared work queue.
 - [Coworkers](coworkers.md) — durable Bot profiles and channels, which a routine posts into.
-- [Configuration](configuration.md) — `WORKER_SHARED_SECRET`, `SERVER_INTERNAL_URL`.
+- [Configuration](configuration.md): `WORKER_SHARED_SECRET`, `SERVER_INTERNAL_URL`, for a deployment that still runs a separate worker.

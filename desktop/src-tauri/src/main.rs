@@ -3047,7 +3047,7 @@ async fn prepare_installation_inner(
         /*
          * NO BUN, NO `bun install`, NO APP BUILD.
          *
-         * The server, the app and the worker run from the published server image, so installing
+         * The server and the app it serves run from the published server image, so installing
          * OpenBot is pulling images and nothing else. This step used to download Bun and install
          * the app's packages here, on every machine, and on a fresh Windows machine that took longer
          * than everything else in the install together: Defender scans each of the thousands of
@@ -4563,8 +4563,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         remember_own_ports(&ports);
         acquire::readied_for_backend(Some(&found), || ());
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
-        // The migrations ran with that: `migrate` is the dependency Compose completes before it
-        // starts `server`, once, and a failed one fails the `up`.
+        // The server applies its migrations as it starts. In an installation whose Compose file is
+        // an earlier release's, they ran with that `up`: `migrate` is the dependency Compose
+        // completes before it starts `server`, once, and a failed one fails the `up`.
         report_plain(&app, "services", true, "OpenBot's services are running.");
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
@@ -8095,7 +8096,7 @@ pub(crate) struct DesktopStatus {
     /// This session of the desktop app started the OpenBot that is running, so it can restart it.
     /// False for an OpenBot left running by an earlier session that ended without its Quit.
     openbot_held: bool,
-    /// Always empty now: OpenBot's server and worker are containers and are listed with them.
+    /// Always empty now: OpenBot's server is a container and is listed with the rest.
     /// Kept so a Status window from before that still reads the shape it expects.
     processes: Vec<desktop_status::Part>,
     containers: Vec<desktop_status::Part>,
@@ -8366,7 +8367,8 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
 }
 
 /**
-Restart OpenBot itself: the server and the worker containers, through Compose. The other
+Restart OpenBot itself: the server's container, through Compose, and the worker's in an
+installation whose Compose file still defines one. The other
 containers, its database among them, keep running, so nothing is lost and the restart takes seconds.
 Only an OpenBot this session started, whose engine it knows.
 */
@@ -10543,7 +10545,7 @@ const SERVER_GONE_AFTER: std::time::Duration = std::time::Duration::from_secs(10
 Watch a running OpenBot for a connection it reports refused, and send the window back to setup to
 refresh it.
 
-What is left of the host-process supervisor. Docker's restart policy keeps the server and the worker
+What is left of the host-process supervisor. Docker's restart policy keeps the server
 up now, so nothing here starts anything. The server still knows, as only it can, when the model, the
 Intelligence it was given has been refused, and it tells the desktop
 through the token minted for this run. The watcher ends with the run it was started for: a Stop or
@@ -12963,11 +12965,7 @@ mod tests {
         )
         .unwrap();
         assert!(!app_makes_room_for_window_buttons(&root));
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         assert!(app_makes_room_for_window_buttons(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -19258,6 +19256,8 @@ fn main() {
         ["compose","-f","docker-compose.yml","config","--format","json"] => println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}"),
         ["compose","-f","docker-compose.yml","stop","supervisor"] => (),
         ["ps","--quiet","--filter",_,"--filter",_] => (),
+        // Start and Stop look for a `migrate` or `worker` container an earlier release left; none here.
+        ["ps","--all","--quiet","--filter",_,"--filter",_] => (),
         ["compose","-f","docker-compose.yml","--profile","harness","--profile","openbot","down"] => {
             if cwd.join("fail-down").exists() { eprintln!("synthetic down refusal");std::process::exit(73); }
             if fs::read_to_string(cwd.join("fixture-containers-running")).ok().as_deref()==Some(&identity) {
@@ -20181,39 +20181,39 @@ fn main() {
         let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
         let (expected_up, expected_image) = match case {
             "remote" | "remote-stale-image" => (
-                "compose up -d --no-build --pull never postgres agent-computer server worker",
+                "compose up -d --no-build --pull never postgres agent-computer server",
                 None,
             ),
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
                 (
-                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    "compose up -d --no-build --pull never postgres agent-computer server",
                     None,
                 )
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
                 (
-                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    "compose up -d --no-build --pull never postgres agent-computer server",
                     None,
                 )
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-claude-sdk"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -20293,9 +20293,14 @@ fn main() {
             vec![expected_up],
             "case={case}, actual Start IPC commands:\n{commands}"
         );
-        // Migrations run once, as the dependency `up` starts before `server`: never a second
-        // `compose run migrate` after it.
-        assert!(!commands.contains("migrate"), "{commands}");
+        // The server applies its migrations as it starts (in a release that has a `migrate`
+        // service, as the dependency `up` completes before `server`): never a `compose run migrate`.
+        assert!(
+            !commands
+                .lines()
+                .any(|line| line.contains("\tcompose ") && line.contains("migrate")),
+            "{commands}"
+        );
         assert!(!root.join(".logs").exists(), "no host runtime was launched");
         // The server container's own credential reaches Compose for `up`, and only Compose.
         assert_eq!(
@@ -20501,7 +20506,7 @@ fn main() {
         assert!(commands.contains("\tcompose version\n"), "{commands}");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "{commands}"
         );
@@ -20581,7 +20586,7 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "Start reached the runtime handoff: {commands}"
         );
@@ -20646,7 +20651,7 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "{commands}"
         );
@@ -21481,8 +21486,8 @@ fn main() {
         let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
-    /// A Compose file from a release that runs the server and worker as services.
-    const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
+    /// A Compose file from a release that runs the server as a service.
+    const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n";
 
     /// The key `local connect` would have stored, which Start reads from the credential store.
     fn remember_local_intelligence_key(root: &Path) {

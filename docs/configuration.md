@@ -87,7 +87,7 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 | `OPENBOT_TOOL_URL`   | `http://127.0.0.1:3001/api/agent-tools/call`; Compose passes `http://host.docker.internal:3001/api/agent-tools/call` | Read by the framework Bots (the LangGraph harness and the other Python Bots): where they call a granted tool back through this server. Set it when the server is not on that address, as when it runs in a container or on another port. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows, at least `1`; older ones are removed. Unset keeps the trail forever. Any other value refuses to start. |
-| `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default; the Helm chart generates one | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
+| `WORKER_SHARED_SECRET` | unset; the Helm chart generates one | The secret a separate routines worker presents to fire a due routine. Without it the server refuses every handoff. The server fires routines itself, so only a deployment that still runs a worker beside it sets this. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
@@ -153,30 +153,23 @@ itself to a Bot, this is a Bot proving itself to the server. Rotating either mea
 holding the old one refuses every call, which is why `start.sh` restarts the server and recreates the
 Bot containers on a run that mints one.
 
-**`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what the routines
-worker presents to `/internal/routines/run` to prove a routine's dispatch actually came from it. The
-API server refuses a handoff without one configured, and the worker refuses to start without one at
-all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — the
-Routines page says so when nothing has swept.
+**`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what a separate
+routines worker presents to `/internal/routines/run` to prove a routine's dispatch actually came
+from it. The API server refuses a handoff without one configured. The server fires due routines
+itself, so nothing starts the `worker` service `docker-compose.yml` still defines for one
+release, `start.sh` runs no worker, and neither sets this; see
+[routines.md](routines.md).
 
-Unlike `AGENT_TOOL_TOKEN`, `start.sh` does not generate and persist this one. It supplies a fixed
-local default, `openbot-dev-worker-secret`, the same value every clone of this repository gets. That
-is fine here not because of where the server listens — it binds no hostname, so the port itself is
-reachable like any other — but because this is a dev-only default on a machine's own dev stack, and
-the endpoint it guards accepts nothing but an unguessable `routine_run_<uuid>` id: the server
+The endpoint it guards accepts nothing but an unguessable `routine_run_<uuid>` id: the server
 re-reads the routine, the owner and the channel from its own tables rather than trusting anything
-else the caller says, so a well-known value from a public repository gates nothing sensitive here.
-`AGENT_TOOL_TOKEN` is generated fresh and written to `.env` precisely because it is not that: it is
-copied into every Bot container, and a framework Bot holding it may be running on a machine of its
-own, so a fixed default there would be no boundary at all. Production deployments must set a real
+else the caller says. A deployment that does run a worker beside the server must set a real
 `WORKER_SHARED_SECRET`; the Helm chart generates one and gives it to both the server and its routines
 CronJob, unless one is supplied (see
 the chart's routines sweep, in the Helm guide that comes with the chart).
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about
-where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
-it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
+where the worker runs rather than a fact about the deployment `loadConfig` describes. The Helm chart's routines CronJob points it at the server's
 in-cluster Service address. The worker refuses to start without it, or with a value that is not an
 `http(s)` URL, and also needs `DATABASE_URL`.
 

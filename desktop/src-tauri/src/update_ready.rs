@@ -635,11 +635,7 @@ mod tests {
     fn laid_out(label: &str, version: &str) -> std::path::PathBuf {
         let root = crate::test_support::temp_root(label);
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         std::fs::write(crate::deployment::images_path(&root), "{}").unwrap();
         crate::deployment::record(&root, version, false).unwrap();
         root
