@@ -1,0 +1,1096 @@
+asyncapi: 3.1.0
+info:
+  title: OpenBot live channels
+  version: 0.1.0
+  license:
+    name: MIT
+    url: https://opensource.org/license/mit
+  description: >-
+    Everything live in OpenBot runs on WebSockets, and this file describes
+    every one of them: a Bot's run as it streams into a conversation, what
+    changed in a person's conversations, a Bot's screen, and its terminal. It
+    is the companion of api/openapi.yaml, which describes the REST API, and
+    the two are one API: the REST operations hand out what a socket needs, and
+    the sockets carry what changes afterwards.
+
+
+    A run streams through CopilotKit Intelligence's realtime gateway, which
+    OpenBot uses as it ships. The other sockets are served by OpenBot itself.
+
+
+    Every operation is written from the server's side, as AsyncAPI has it:
+    `send` is a message the server sends and a client receives, `receive` is a
+    message a client sends.
+
+
+    This file is the single source of truth for the sockets. A change that
+    breaks an existing client fails the pull request, and the frames a real
+    server sends are checked against it.
+defaultContentType: application/json
+servers:
+  openbot:
+    host: 127.0.0.1:3001
+    protocol: ws
+    description: >-
+      An OpenBot server on this machine (the default local port). The sockets
+      are on the same address as the REST API, over wss wherever the API is
+      served over https.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+  intelligenceGateway:
+    host: 127.0.0.1:4401
+    pathname: /client
+    protocol: ws
+    description: >-
+      CopilotKit Intelligence's realtime gateway, where runs stream. Its
+      address is never configured in a client: the REST answer that carries a
+      join token carries the address to dial with it (realtime.clientUrl).
+      Where an OpenBot is set to relay the gateway, that address is OpenBot's
+      own, at /api/intelligence/client, and the relay also asks for the
+      person's session.
+    security:
+      - $ref: "#/components/securitySchemes/joinToken"
+channels:
+  conversationEvents:
+    address: /api/channels/events
+    title: Conversation events
+    description: >-
+      What changed in the signed-in person's conversations, as it happens: a
+      new message, a Bot starting or finishing work, a rename, a pin, a
+      removal. One socket per signed-in person and tab. The server only ever
+      sends; anything a client sends is ignored. Nothing is replayed: on
+      opening the socket, and again on a resync message, a client reads its
+      conversations afresh over REST.
+    servers:
+      - $ref: "#/servers/openbot"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      conversationActivity:
+        $ref: "#/components/messages/ConversationActivity"
+      conversationResync:
+        $ref: "#/components/messages/ConversationResync"
+  botScreen:
+    address: /api/computers/{botId}/stream
+    title: A Bot's screen
+    description: >-
+      The screen of a Bot's computer, live, and the person's mouse and
+      keyboard going back to it. Frames are whole pictures, so a viewer shows
+      the newest and needs nothing before it. Input is taken only while the
+      person has control of the computer. One viewer at a time per person and
+      Bot: a newer one replaces the older, which is told so.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      botId:
+        $ref: "#/components/parameters/botId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      screenHello:
+        $ref: "#/components/messages/ScreenHello"
+      screenFrame:
+        $ref: "#/components/messages/ScreenFrame"
+      screenError:
+        $ref: "#/components/messages/ScreenError"
+      screenInputError:
+        $ref: "#/components/messages/ScreenInputError"
+      screenFrameReceived:
+        $ref: "#/components/messages/ScreenFrameReceived"
+      screenMouse:
+        $ref: "#/components/messages/ScreenMouse"
+      screenWheel:
+        $ref: "#/components/messages/ScreenWheel"
+      screenKey:
+        $ref: "#/components/messages/ScreenKey"
+      screenText:
+        $ref: "#/components/messages/ScreenText"
+  botTerminal:
+    address: /api/computers/{botId}/terminal
+    title: A Bot's terminal
+    description: >-
+      The terminal on a Bot's computer. The terminal's own bytes arrive as
+      binary frames; everything else is a JSON text frame. A snapshot message
+      means "clear, and draw what follows", and ready means the viewer is live.
+      Typing is taken only while the person has control of the computer.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      botId:
+        $ref: "#/components/parameters/botId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      terminalOutput:
+        $ref: "#/components/messages/TerminalOutput"
+      terminalSnapshot:
+        $ref: "#/components/messages/TerminalSnapshot"
+      terminalReady:
+        $ref: "#/components/messages/TerminalReady"
+      terminalError:
+        $ref: "#/components/messages/TerminalError"
+      terminalInput:
+        $ref: "#/components/messages/TerminalInput"
+      terminalResize:
+        $ref: "#/components/messages/TerminalResize"
+      terminalAck:
+        $ref: "#/components/messages/TerminalAck"
+  threadStream:
+    address: /websocket
+    title: A conversation's runs
+    description: >-
+      A Bot's runs in one conversation thread, as AG-UI events, on the
+      gateway's socket for clients. The socket speaks the Phoenix Channels
+      protocol, version 2: every frame is a JSON array of five items, [join
+      reference, reference, topic, event, payload]. The topic is
+      thread:{threadId}, and a join token opens exactly one thread.
+
+
+      A client joins the topic, and the gateway answers with connected, then
+      replays what the thread already holds as ag_ui_event messages, then says
+      replay_complete, and from there on sends events as they happen. A run in
+      progress is replayed from its start, so a reload, or a second tab or
+      device of the same person, shows the whole of it. Every event carries an
+      id (metadata.cpki_event_id): a client that reconnects sends the last one
+      it saw and is sent only what came after, and it drops any id it has
+      already drawn.
+    servers:
+      - $ref: "#/servers/intelligenceGateway"
+    bindings:
+      ws:
+        method: GET
+        query:
+          type: object
+          required:
+            - join_token
+            - vsn
+          properties:
+            join_token:
+              type: string
+              description: >-
+                The join token from the REST answer. It works once and for
+                about half a minute, so every connection, and every
+                reconnection, starts with a new one.
+            vsn:
+              type: string
+              const: 2.0.0
+              description: The Phoenix Channels protocol version.
+        bindingVersion: 0.1.0
+    messages:
+      threadJoin:
+        $ref: "#/components/messages/ThreadJoin"
+      threadReply:
+        $ref: "#/components/messages/ThreadReply"
+      threadHeartbeat:
+        $ref: "#/components/messages/ThreadHeartbeat"
+      threadConnected:
+        $ref: "#/components/messages/ThreadConnected"
+      threadAgUiEvent:
+        $ref: "#/components/messages/ThreadAgUiEvent"
+      threadReplayComplete:
+        $ref: "#/components/messages/ThreadReplayComplete"
+      threadStreamIdle:
+        $ref: "#/components/messages/ThreadStreamIdle"
+      threadReplayFailed:
+        $ref: "#/components/messages/ThreadReplayFailed"
+      threadExpired:
+        $ref: "#/components/messages/ThreadExpired"
+      threadStopRun:
+        $ref: "#/components/messages/ThreadStopRun"
+operations:
+  sendConversationEvents:
+    action: send
+    title: Tell a person what changed in their conversations
+    summary: A conversation the person is in changed, or everything may have.
+    channel:
+      $ref: "#/channels/conversationEvents"
+    messages:
+      - $ref: "#/channels/conversationEvents/messages/conversationActivity"
+      - $ref: "#/channels/conversationEvents/messages/conversationResync"
+  sendBotScreen:
+    action: send
+    title: Show a Bot's screen
+    summary: The screen's pictures, and why something could not be shown or done.
+    channel:
+      $ref: "#/channels/botScreen"
+    messages:
+      - $ref: "#/channels/botScreen/messages/screenHello"
+      - $ref: "#/channels/botScreen/messages/screenFrame"
+      - $ref: "#/channels/botScreen/messages/screenError"
+      - $ref: "#/channels/botScreen/messages/screenInputError"
+  receiveBotScreenInput:
+    action: receive
+    title: Take a person's mouse and keyboard
+    summary: The person's input to the Bot's computer, and each picture's receipt.
+    channel:
+      $ref: "#/channels/botScreen"
+    messages:
+      - $ref: "#/channels/botScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/botScreen/messages/screenMouse"
+      - $ref: "#/channels/botScreen/messages/screenWheel"
+      - $ref: "#/channels/botScreen/messages/screenKey"
+      - $ref: "#/channels/botScreen/messages/screenText"
+  sendBotTerminal:
+    action: send
+    title: Show a Bot's terminal
+    summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
+    channel:
+      $ref: "#/channels/botTerminal"
+    messages:
+      - $ref: "#/channels/botTerminal/messages/terminalOutput"
+      - $ref: "#/channels/botTerminal/messages/terminalSnapshot"
+      - $ref: "#/channels/botTerminal/messages/terminalReady"
+      - $ref: "#/channels/botTerminal/messages/terminalError"
+  receiveBotTerminalInput:
+    action: receive
+    title: Take a person's typing
+    summary: What the person typed, the size of their terminal, and how much they have drawn.
+    channel:
+      $ref: "#/channels/botTerminal"
+    messages:
+      - $ref: "#/channels/botTerminal/messages/terminalInput"
+      - $ref: "#/channels/botTerminal/messages/terminalResize"
+      - $ref: "#/channels/botTerminal/messages/terminalAck"
+  sendThreadStream:
+    action: send
+    title: Stream a conversation's runs
+    summary: The thread's AG-UI events, replayed and then live, with the markers between.
+    channel:
+      $ref: "#/channels/threadStream"
+    messages:
+      - $ref: "#/channels/threadStream/messages/threadReply"
+      - $ref: "#/channels/threadStream/messages/threadConnected"
+      - $ref: "#/channels/threadStream/messages/threadAgUiEvent"
+      - $ref: "#/channels/threadStream/messages/threadReplayComplete"
+      - $ref: "#/channels/threadStream/messages/threadStreamIdle"
+      - $ref: "#/channels/threadStream/messages/threadReplayFailed"
+      - $ref: "#/channels/threadStream/messages/threadExpired"
+  receiveThreadCommands:
+    action: receive
+    title: Join a thread, keep the socket alive, stop a run
+    summary: What a client sends on the gateway's socket.
+    channel:
+      $ref: "#/channels/threadStream"
+    messages:
+      - $ref: "#/channels/threadStream/messages/threadJoin"
+      - $ref: "#/channels/threadStream/messages/threadHeartbeat"
+      - $ref: "#/channels/threadStream/messages/threadStopRun"
+components:
+  securitySchemes:
+    webSession:
+      type: httpApiKey
+      in: cookie
+      name: better-auth.session_token
+      description: >-
+        The web app's server-side session, sent with the request that opens
+        the socket. Served over HTTPS the cookie is
+        __Secure-better-auth.session_token. A single-user install signs its
+        one person in without a cookie. A request from another site is
+        refused before the socket opens.
+    joinToken:
+      type: httpApiKey
+      in: query
+      name: join_token
+      description: >-
+        A join token for one thread, handed out by the REST API to a person
+        who may read that thread. It works once and for about half a minute.
+  parameters:
+    botId:
+      description: The Bot whose computer it is.
+  messages:
+    ConversationActivity:
+      name: conversationActivity
+      title: Conversation activity
+      summary: One conversation changed.
+      payload:
+        $ref: "#/components/schemas/ConversationActivity"
+    ConversationResync:
+      name: conversationResync
+      title: Resync
+      summary: >-
+        Changes may have been missed, and they cannot be sent again. Read the
+        conversations afresh.
+      payload:
+        $ref: "#/components/schemas/ConversationResync"
+    ScreenHello:
+      name: screenHello
+      title: Hello
+      summary: The first message, saying how the stream is paced.
+      payload:
+        $ref: "#/components/schemas/ScreenHello"
+    ScreenFrame:
+      name: screenFrame
+      title: Frame
+      summary: The screen as it is now, as one picture.
+      payload:
+        $ref: "#/components/schemas/ScreenFrame"
+    ScreenError:
+      name: screenError
+      title: Screen error
+      summary: The screen cannot be shown, and why.
+      payload:
+        $ref: "#/components/schemas/ScreenError"
+    ScreenInputError:
+      name: screenInputError
+      title: Input error
+      summary: The person's input was not applied, and why.
+      payload:
+        $ref: "#/components/schemas/ScreenInputError"
+    ScreenFrameReceived:
+      name: screenFrameReceived
+      title: Frame received
+      summary: >-
+        The viewer drew a frame and is ready for the next. Sent once per frame
+        when hello said frames are confirmed.
+      payload:
+        $ref: "#/components/schemas/ScreenFrameReceived"
+    ScreenMouse:
+      name: screenMouse
+      title: Mouse
+      summary: A mouse button pressed or released, or the pointer moved.
+      payload:
+        $ref: "#/components/schemas/ScreenMouse"
+    ScreenWheel:
+      name: screenWheel
+      title: Wheel
+      summary: The wheel turned.
+      payload:
+        $ref: "#/components/schemas/ScreenWheel"
+    ScreenKey:
+      name: screenKey
+      title: Key
+      summary: A key went down or came up.
+      payload:
+        $ref: "#/components/schemas/ScreenKey"
+    ScreenText:
+      name: screenText
+      title: Text
+      summary: Text to type as it is, such as a paste.
+      payload:
+        $ref: "#/components/schemas/ScreenText"
+    TerminalOutput:
+      name: terminalOutput
+      title: Terminal output
+      summary: The terminal's own bytes, in a binary frame, to write as they are.
+      contentType: application/octet-stream
+      payload:
+        type: string
+        format: binary
+    TerminalSnapshot:
+      name: terminalSnapshot
+      title: Snapshot
+      summary: Clear the terminal; the bytes that follow draw it as it is now.
+      payload:
+        $ref: "#/components/schemas/TerminalSnapshot"
+    TerminalReady:
+      name: terminalReady
+      title: Ready
+      summary: The snapshot is over and the viewer is live.
+      payload:
+        $ref: "#/components/schemas/TerminalReady"
+    TerminalError:
+      name: terminalError
+      title: Terminal error
+      summary: Something was refused or failed, and whether trying again can help.
+      payload:
+        $ref: "#/components/schemas/TerminalError"
+    TerminalInput:
+      name: terminalInput
+      title: Input
+      summary: What the person typed.
+      payload:
+        $ref: "#/components/schemas/TerminalInput"
+    TerminalResize:
+      name: terminalResize
+      title: Resize
+      summary: The size the viewer's terminal fits, which the shell takes.
+      payload:
+        $ref: "#/components/schemas/TerminalResize"
+    TerminalAck:
+      name: terminalAck
+      title: Acknowledge
+      summary: How many bytes the viewer has drawn since it last said, which paces the output.
+      payload:
+        $ref: "#/components/schemas/TerminalAck"
+    ThreadJoin:
+      name: threadJoin
+      title: Join a thread
+      summary: Ask for the thread's events, from the start or from the last one seen.
+      payload:
+        $ref: "#/components/schemas/ThreadJoinFrame"
+    ThreadReply:
+      name: threadReply
+      title: Reply
+      summary: The gateway's answer to a join, a heartbeat or a stop.
+      payload:
+        $ref: "#/components/schemas/ThreadReplyFrame"
+    ThreadHeartbeat:
+      name: threadHeartbeat
+      title: Heartbeat
+      summary: Keeps the socket open. Sent at least every 30 seconds.
+      payload:
+        $ref: "#/components/schemas/ThreadHeartbeatFrame"
+    ThreadConnected:
+      name: threadConnected
+      title: Connected
+      summary: The join was accepted; the replay follows.
+      payload:
+        $ref: "#/components/schemas/ThreadConnectedFrame"
+    ThreadAgUiEvent:
+      name: threadAgUiEvent
+      title: AG-UI event
+      summary: One event of a run, replayed or live.
+      payload:
+        $ref: "#/components/schemas/ThreadAgUiEventFrame"
+    ThreadReplayComplete:
+      name: threadReplayComplete
+      title: Replay complete
+      summary: Everything the thread already held has been sent; what follows is live.
+      payload:
+        $ref: "#/components/schemas/ThreadReplayCompleteFrame"
+    ThreadStreamIdle:
+      name: threadStreamIdle
+      title: Stream idle
+      summary: No run is in progress in the thread.
+      payload:
+        $ref: "#/components/schemas/ThreadStreamIdleFrame"
+    ThreadReplayFailed:
+      name: threadReplayFailed
+      title: Replay failed
+      summary: The thread's events could not be replayed. Read its messages over REST and join again.
+      payload:
+        $ref: "#/components/schemas/ThreadReplayFailedFrame"
+    ThreadExpired:
+      name: threadExpired
+      title: Expired
+      summary: The connection's time is up. Ask for a new join token and connect again.
+      payload:
+        $ref: "#/components/schemas/ThreadExpiredFrame"
+    ThreadStopRun:
+      name: threadStopRun
+      title: Stop a run
+      summary: Stop the run in progress, keeping what it has written.
+      payload:
+        $ref: "#/components/schemas/ThreadStopRunFrame"
+  schemas:
+    ConversationActivity:
+      type: object
+      description: >-
+        One conversation changed. Every message carries the conversation's
+        newest message; the optional members say what else this one is about.
+      required:
+        - channelId
+        - memberIds
+        - lastMessage
+        - lastMessageAt
+        - lastMessageAgentId
+      properties:
+        channelId:
+          type: string
+          description: The conversation.
+        memberIds:
+          type: array
+          description: The people this message was sent to.
+          items:
+            type: string
+        lastMessage:
+          type:
+            - string
+            - "null"
+          description: The newest message's text on one line, or null when there is none.
+        lastMessageAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the newest message was written.
+        lastMessageAgentId:
+          type:
+            - string
+            - "null"
+          description: The Bot that wrote the newest message, or null when a person did.
+        firstLine:
+          type: string
+          description: A Bot's reply, its first line as plain text. Only on a Bot's message.
+        summary:
+          type:
+            - string
+            - "null"
+          description: What the conversation is called now. Null when its name was cleared.
+        opening:
+          type: string
+          description: A person's first words, which name the conversation until it has a summary.
+        deleted:
+          type: boolean
+          const: true
+          description: The conversation was removed for everybody in it.
+        pinned:
+          type: boolean
+          description: This person pinned or unpinned the conversation.
+        busy:
+          type: boolean
+          description: A turn started (true) or ended (false) in the conversation.
+        work:
+          type: array
+          description: >-
+            Everything the conversation is waiting on right now, the whole
+            list. Sent only to the person whose work it is.
+          items:
+            $ref: "#/components/schemas/ConversationWork"
+        workAt:
+          type: string
+          description: >-
+            When work was read, in UTC to the microsecond and of fixed width,
+            so two compare as text. Messages can arrive out of order: keep the
+            list with the latest stamp.
+    ConversationWork:
+      type: object
+      description: Something a conversation is waiting on.
+      required:
+        - kind
+        - key
+        - botId
+        - botName
+        - since
+      properties:
+        kind:
+          type: string
+          enum:
+            - handoff
+            - routine
+          description: A Bot that was asked and has not answered yet, or a routine that is running.
+        key:
+          type: string
+          description: Stable for this piece of work, so two asks of one Bot are two entries.
+        botId:
+          type: string
+          description: The Bot that was asked, or the Bot the routine runs as.
+        botName:
+          type:
+            - string
+            - "null"
+          description: The Bot's name when the work started.
+        routineId:
+          type: string
+          description: The routine. Only on a routine.
+        since:
+          type: string
+          format: date-time
+          description: When the work started.
+    ConversationResync:
+      type: object
+      required:
+        - resync
+      additionalProperties: false
+      properties:
+        resync:
+          type: boolean
+          const: true
+    ScreenHello:
+      type: object
+      required:
+        - type
+        - confirmFrames
+      properties:
+        type:
+          type: string
+          const: hello
+        confirmFrames:
+          type: boolean
+          description: >-
+            When true, the next frame is sent only after the viewer says it
+            received the last.
+    ScreenFrame:
+      type: object
+      required:
+        - type
+        - data
+        - width
+        - height
+      properties:
+        type:
+          type: string
+          const: frame
+        data:
+          type: string
+          contentEncoding: base64
+          contentMediaType: image/jpeg
+          description: The picture, a JPEG in base64.
+        width:
+          type: number
+          description: The screen's width in pixels, which mouse positions are measured in.
+        height:
+          type: number
+          description: The screen's height in pixels.
+    ScreenError:
+      type: object
+      required:
+        - type
+        - error
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          type: string
+          description: Why, in words a person can read.
+    ScreenInputError:
+      type: object
+      required:
+        - type
+        - error
+      properties:
+        type:
+          type: string
+          const: input-error
+        error:
+          type: string
+          description: Why, in words a person can read.
+    ScreenFrameReceived:
+      type: object
+      required:
+        - type
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          const: frame-received
+    ScreenMouse:
+      type: object
+      required:
+        - type
+        - event
+        - x
+        - "y"
+      properties:
+        type:
+          type: string
+          const: mouse
+        event:
+          type: string
+          enum:
+            - pressed
+            - released
+            - moved
+        x:
+          type: number
+          description: Across, in the screen's pixels.
+        "y":
+          type: number
+          description: Down, in the screen's pixels.
+        button:
+          type: string
+          enum:
+            - none
+            - left
+            - right
+            - middle
+          description: The button this is about; none for a move with nothing held.
+        buttons:
+          type: integer
+          description: "Every button held, as a sum: left 1, right 2, middle 4."
+        clickCount:
+          type: integer
+          description: 1 for a click, 2 for a double click.
+        modifiers:
+          type: integer
+          description: "The modifier keys held, as a sum: Alt 1, Control 2, Meta 4, Shift 8."
+    ScreenWheel:
+      type: object
+      required:
+        - type
+        - x
+        - "y"
+        - deltaX
+        - deltaY
+      properties:
+        type:
+          type: string
+          const: wheel
+        x:
+          type: number
+        "y":
+          type: number
+        deltaX:
+          type: number
+        deltaY:
+          type: number
+        modifiers:
+          type: integer
+    ScreenKey:
+      type: object
+      required:
+        - type
+        - event
+        - key
+        - code
+      properties:
+        type:
+          type: string
+          const: key
+        event:
+          type: string
+          enum:
+            - down
+            - up
+        key:
+          type: string
+          description: The key's value, as KeyboardEvent.key has it.
+        code:
+          type: string
+          description: The physical key, as KeyboardEvent.code has it.
+        text:
+          type: string
+          description: The text the key types, when it types any.
+        windowsVirtualKeyCode:
+          type: integer
+          description: The key's legacy key code, for keys that need one.
+        modifiers:
+          type: integer
+    ScreenText:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          const: text
+        text:
+          type: string
+    TerminalSnapshot:
+      type: object
+      required:
+        - type
+        - cols
+        - rows
+      properties:
+        type:
+          type: string
+          const: snapshot
+        cols:
+          type: integer
+          description: The terminal's width in columns.
+        rows:
+          type: integer
+          description: The terminal's height in rows.
+    TerminalReady:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ready
+    TerminalError:
+      type: object
+      required:
+        - type
+        - error
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          type: string
+          description: Why, in words a person can read.
+        fatal:
+          type: boolean
+          description: True when connecting again will not help.
+    TerminalInput:
+      type: object
+      required:
+        - type
+        - data
+      properties:
+        type:
+          type: string
+          const: input
+        data:
+          type: string
+          maxLength: 65536
+          description: What the person typed or pasted.
+    TerminalResize:
+      type: object
+      required:
+        - type
+        - cols
+        - rows
+      properties:
+        type:
+          type: string
+          const: resize
+        cols:
+          type: integer
+          minimum: 1
+        rows:
+          type: integer
+          minimum: 1
+    TerminalAck:
+      type: object
+      required:
+        - type
+        - bytes
+      properties:
+        type:
+          type: string
+          const: ack
+        bytes:
+          type: integer
+          minimum: 0
+    PhoenixReference:
+      type:
+        - string
+        - "null"
+      description: >-
+        A reference the sender chose. A reply repeats the reference of the
+        message it answers; a message the gateway sends on its own has null.
+    ThreadTopic:
+      type: string
+      pattern: ^thread:.+$
+      description: The thread, as thread:{threadId}.
+    ThreadJoinFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_join\", payload]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: phx_join
+        - type: object
+          properties:
+            stream_mode:
+              type: string
+              enum:
+                - connect
+                - run
+              description: >-
+                connect, the default, replays what the thread holds and then
+                goes live; run follows one run from its start.
+            run_id:
+              type: string
+              description: The run to follow, in run mode.
+            last_seen_event_id:
+              type: string
+              description: >-
+                The id of the last event this client drew. The replay starts
+                after it.
+    ThreadHeartbeatFrame:
+      type: array
+      description: "[null, reference, \"phoenix\", \"heartbeat\", {}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - type: "null"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - type: string
+          const: phoenix
+        - type: string
+          const: heartbeat
+        - type: object
+    ThreadReplyFrame:
+      type: array
+      description: "[join reference, reference, topic, \"phx_reply\", {status, response}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - type: string
+          description: The thread's topic, or phoenix for a heartbeat's reply.
+        - type: string
+          const: phx_reply
+        - type: object
+          required:
+            - status
+            - response
+          properties:
+            status:
+              type: string
+              enum:
+                - ok
+                - error
+            response:
+              type: object
+              description: Empty on ok. On error, reason says why.
+              properties:
+                reason:
+                  type: string
+    ThreadConnectedFrame:
+      type: array
+      description: "[join reference, null, topic, \"connected\", payload]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: connected
+        - type: object
+          required:
+            - thread_id
+          properties:
+            thread_id:
+              type: string
+            user_id:
+              type: string
+              description: The person the join token was made for, as the gateway names them.
+            organization_id:
+              type: string
+              description: The gateway's own organization for this OpenBot.
+    ThreadAgUiEventFrame:
+      type: array
+      description: "[join reference, null, topic, \"ag_ui_event\", event]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: ag_ui_event
+        - $ref: "#/components/schemas/AgUiEvent"
+    AgUiEvent:
+      type: object
+      description: >-
+        One AG-UI event, with every member the AG-UI protocol gives its type
+        (see https://docs.ag-ui.com/concepts/events), plus where it belongs
+        and its id.
+      required:
+        - type
+        - thread_id
+      properties:
+        type:
+          type: string
+          description: The AG-UI event type, such as RUN_STARTED, TEXT_MESSAGE_CONTENT or RUN_FINISHED.
+        thread_id:
+          type: string
+        run_id:
+          type: string
+        organization_id:
+          type: string
+        metadata:
+          type: object
+          properties:
+            cpki_event_id:
+              type: string
+              description: >-
+                The event's id, unique in the thread and ordered. Send the
+                last one seen when joining again, and drop an id already
+                drawn.
+    ThreadControlPayload:
+      type: object
+      required:
+        - thread_id
+      properties:
+        thread_id:
+          type: string
+        organization_id:
+          type: string
+        latestEventId:
+          type:
+            - string
+            - "null"
+          description: The id of the last event sent before this marker, or null when there was none.
+        historyWindow:
+          type: object
+          description: Present when the replay was cut to the thread's most recent events.
+          properties:
+            policyVersion:
+              type: integer
+            selectedEventCount:
+              type: integer
+            completeness:
+              type: string
+    ThreadReplayCompleteFrame:
+      type: array
+      description: "[join reference, null, topic, \"replay_complete\", payload]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: replay_complete
+        - $ref: "#/components/schemas/ThreadControlPayload"
+    ThreadStreamIdleFrame:
+      type: array
+      description: "[join reference, null, topic, \"stream_idle\", payload]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: stream_idle
+        - $ref: "#/components/schemas/ThreadControlPayload"
+    ThreadReplayFailedFrame:
+      type: array
+      description: "[join reference, null, topic, \"replay_failed\", payload]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: replay_failed
+        - type: object
+          required:
+            - reason
+          properties:
+            reason:
+              type: string
+            retryable:
+              type: boolean
+            latestEventId:
+              type:
+                - string
+                - "null"
+    ThreadExpiredFrame:
+      type: array
+      description: "[join reference, null, topic, \"expired\", {reason}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: expired
+        - type: object
+          required:
+            - reason
+          properties:
+            reason:
+              type: string
+    ThreadStopRunFrame:
+      type: array
+      description: "[join reference, reference, topic, \"stop_run\", {run_id}]"
+      minItems: 5
+      maxItems: 5
+      items:
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/PhoenixReference"
+        - $ref: "#/components/schemas/ThreadTopic"
+        - type: string
+          const: stop_run
+        - type: object
+          required:
+            - run_id
+          properties:
+            run_id:
+              type: string
+              description: The run to stop.
