@@ -114,7 +114,18 @@ describe("how a Bot answers a short ask itself", () => {
 describe("how a Bot that holds delegate is told to work", () => {
   test("names the work that goes to a task, so it is handed off without being asked", () => {
     expect(DELEGATING_GUIDANCE).toContain("without waiting to be asked");
-    expect(DELEGATING_GUIDANCE).toContain("a chart with a summary");
+    // On Claude Sonnet 5.5 a chart of four figures and a sheet with a total were done in the
+    // conversation, three runs of three: "one quick read" left the size of an ask to the model.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "(a chart, a table, a sheet, a report, a plan, a document)",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "even from figures they gave you and even when you could make it in one step",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "is a task's, however small it looks",
+    );
+    expect(DELEGATING_GUIDANCE).not.toContain("one quick read");
     expect(DELEGATING_GUIDANCE).toContain("an order, a purchase");
     // The line the person reads first is written first.
     expect(DELEGATING_GUIDANCE).toContain(
