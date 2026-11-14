@@ -107,6 +107,14 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
+  /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/account-mode: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1account-mode' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/oauth-client: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1oauth-client' }
+  /api/v2/organizations/{organizationId}/app-directory: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-directory' }
+  /api/v2/organizations/{organizationId}/app-setup: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-setup' }
+  /api/v2/organizations/{organizationId}/shortened-tool-names: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shortened-tool-names' }
 components:
   securitySchemes:
     webSession:

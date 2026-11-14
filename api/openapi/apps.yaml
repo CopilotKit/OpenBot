@@ -5,7 +5,675 @@
 #
 # One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
 # api/openapi.yaml, the file every client and check reads. See api/README.md.
-paths: {}
+paths:
+  /api/v2/organizations/{organizationId}/apps:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Apps]
+      operationId: listApps
+      summary: List the apps added here
+      description: >-
+        Return one page of the apps this OpenBot has added for its Bots: the
+        ones from its catalogue, the ones added from the app directory, and
+        servers added by their address. Each app comes with the actions it
+        offers and the Bots that may use each one. Anybody signed in may read
+        them. Ordered by title, then by id. A missing cursor starts at the
+        first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [apps:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of apps.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/AppPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Apps]
+      operationId: createApp
+      summary: Add an app
+      description: >-
+        Add an app in one of two ways. With from=directory, add an entry of
+        listAppDirectory: a catalogue entry, with the instance host or vault
+        credential it needs, or an app from the wider directory. Only an
+        administrator may. With from=address, add a server by its HTTPS
+        address, and anybody signed in may. OpenBot asks the server how it is
+        reached first. It refuses an address the MCP allowlist doesn't
+        approve, a server that needs a key nobody gave, and an address already
+        added, naming that app in the problem's appId. Only an administrator
+        may give a server a key, because every Bot that uses the server uses
+        it. A server that signs each person in answers with signIn true, and
+        each person then connects their own account. Answers 201 with the app.
+        Adding a directory entry that is already added updates that app with
+        what the request names, and answers it the same way. A repeated
+        request with the same Idempotency-Key and body returns the first
+        result.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppRequest'
+            examples:
+              catalogue:
+                summary: A catalogue entry reached with a vault credential.
+                value:
+                  from: directory
+                  directoryEntryId: catalogue:exa-authenticated
+                  credentialId: 3b9a5f8e-6c1d-4e2a-9f47-1d2c3b4a5e6f
+              directory:
+                summary: An app from the wider directory.
+                value:
+                  from: directory
+                  directoryEntryId: directory:linear
+              address:
+                summary: A server added by its address.
+                value:
+                  from: address
+                  title: Acme Wiki
+                  url: https://mcp.acme.com/mcp
+      responses:
+        '201':
+          description: The app was added.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The new app's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/apps/acme-wiki
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                address:
+                  $ref: '#/components/examples/AddressAppExample'
+        '400':
+          $ref: '#/components/responses/InvalidApp'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AppAddForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AppAddConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    get:
+      tags: [Apps]
+      operationId: getApp
+      summary: Read one app
+      description: >-
+        Return one app added here, as listApps answers it. Anybody signed in
+        may read it.
+      security:
+        - webSession: []
+        - appOAuth: [apps:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The app.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                address:
+                  $ref: '#/components/examples/AddressAppExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Apps]
+      operationId: replaceApp
+      summary: Add or replace a server at a chosen id
+      description: >-
+        Add a server by its address at an id an administrator chooses, or
+        replace the server at that id. It is for pointing OpenBot at a server
+        of the organization's own, such as one reached as the signed-in person
+        through Microsoft Entra ID (entraScope). Unlike createApp, it doesn't
+        ask the server how it is reached and doesn't check the MCP allowlist.
+        The id is 2 to 40 lower-case letters, numbers and hyphens, and can't
+        be a catalogue entry's, a screen's, or one kept for apps from the
+        directory. credentialId names a vault credential (createCredential)
+        the server is reached with. An absent entraScope keeps the one the
+        server has, and null takes it away. Recorded on the audit trail.
+        Answers the server, whether it was added or replaced. Only an
+        administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceAppRequest'
+            examples:
+              signedInPerson:
+                summary: A server reached as the signed-in person.
+                value:
+                  title: HR
+                  url: https://hr.example.com/mcp
+                  entraScope: api://hr-api/.default
+              key:
+                summary: A server reached with a vault credential.
+                value:
+                  title: Acme Wiki
+                  url: https://mcp.acme.com/mcp
+                  credentialId: 3b9a5f8e-6c1d-4e2a-9f47-1d2c3b4a5e6f
+      responses:
+        '200':
+          description: The server, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                address:
+                  $ref: '#/components/examples/AddressAppExample'
+        '400':
+          $ref: '#/components/responses/InvalidAppChange'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Apps]
+      operationId: updateApp
+      summary: Change who may give an app to a Bot
+      description: >-
+        Change who may give the app to a Bot: any Bot's owner, for their own
+        Bot (any), only an administrator (admin), or null for the default for
+        the app's account. Recorded on the audit trail. When owners stop
+        deciding, the approvals to use the app's shared account that their
+        gifts made are withdrawn. What they gave stays, for an administrator
+        to keep or take back. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppRequest'
+            examples:
+              adminOnly:
+                value:
+                  ownerGrants: admin
+              default:
+                value:
+                  ownerGrants: null
+      responses:
+        '200':
+          description: The changed app.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                catalogue:
+                  $ref: '#/components/examples/CatalogueAppExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Apps]
+      operationId: deleteApp
+      summary: Remove an app
+      description: >-
+        Remove an app for everybody. Every person's connection to it is ended,
+        at the app's own service too, every Bot stops being able to use its
+        actions, and a server's key is retired. Recorded on the audit trail.
+        Removing can stop partway when the service behind the app doesn't
+        answer. The app then stays, and removing it again is safe and finishes
+        the job. Routines can't be removed. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The app was removed.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AppRemovalForbidden'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/refresh:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    post:
+      tags: [Apps]
+      operationId: refreshApp
+      summary: Ask an app what it offers now
+      description: >-
+        Ask the app what actions it offers now, replace the ones OpenBot has
+        recorded, and answer the app. Where asking needs an account, it is
+        asked with the administrator's own. An app that can't be asked still
+        answers 200, with the reason in lastError and its actions as they
+        were. Bots keep any action the app stopped offering, listed in
+        withdrawn. Recorded on the audit trail when that changes. Only an
+        administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The app, with what it offers now.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/App'
+              examples:
+                address:
+                  $ref: '#/components/examples/AddressAppExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/account-mode:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    put:
+      tags: [Apps]
+      operationId: setAppAccountMode
+      summary: Choose whose account an app acts in
+      description: >-
+        Choose whose account an app from the directory acts in: each person's
+        own (personal), or one account OpenBot holds for everybody (shared).
+        Every account the switch leaves behind is ended at the app's service
+        first. Nothing changes unless all of them ended, and the problem's
+        problems then names each account that didn't. Switching to shared
+        gives each Bot that uses the app an approval, the one in approvals or
+        its default, and makes the app ask before every action that changes
+        something. With validateOnly true nothing changes, and the answer says
+        what the switch would end and approve. Choosing the mode an app is
+        already in puts back anything that mode needs and is missing.
+        Recorded on the audit trail. Only an administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppAccountModeRequest'
+            examples:
+              preview:
+                summary: What switching to shared would do.
+                value:
+                  mode: shared
+                  validateOnly: true
+              shared:
+                summary: Switch to shared, with one Bot's approval chosen.
+                value:
+                  mode: shared
+                  approvals:
+                    agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21:
+                      audience: team
+                      outsideInput: false
+                      members: []
+      responses:
+        '200':
+          description: What the switch did, or would do.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppAccountModeChange'
+              examples:
+                preview:
+                  $ref: '#/components/examples/AppAccountModePreviewExample'
+                applied:
+                  $ref: '#/components/examples/AppAccountModeAppliedExample'
+        '400':
+          $ref: '#/components/responses/InvalidAppChange'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppAccountModeUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/oauth-client:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    put:
+      tags: [Apps]
+      operationId: setAppOAuthClient
+      summary: Set the OAuth client people sign in to an app with
+      description: >-
+        Set the OAuth client OpenBot signs people in to an app with, for a
+        catalogue app whose vendor doesn't let OpenBot register one itself.
+        Register redirectUri from getAppSetup with the vendor first. Setting
+        a client again replaces the one before. The secret is kept in the
+        vault and never answered. Recorded on the audit trail. Only an
+        administrator may.
+      security:
+        - webSession: []
+        - appOAuth: [apps:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppOAuthClientRequest'
+            examples:
+              client:
+                value:
+                  clientId: 1234567890-openbot.apps.example.com
+                  clientSecret: example-client-secret
+      responses:
+        '204':
+          description: The client was set.
+        '400':
+          $ref: '#/components/responses/InvalidAppChange'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/AppConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-directory:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Apps]
+      operationId: listAppDirectory
+      summary: List the apps that can be added
+      description: >-
+        Return one page of what can be added with createApp: the apps in
+        OpenBot's own catalogue (source catalogue), then apps from the wider
+        directory (source directory), each kind by title and then by id.
+        appId names the app an entry was added as, or is null. search narrows
+        the list to entries whose name or description holds it, ignoring case.
+        source narrows it to one kind. Anybody signed in may read the
+        catalogue. Only an administrator sees the wider directory, so anybody
+        else's list holds catalogue entries only, and asking for
+        source=directory is refused. Where no directory is set up, the list
+        holds the catalogue only and source=directory is unavailable. In the
+        personal edition the catalogue leaves out entries meant for a team,
+        unless they're already added. A missing cursor starts at the first
+        page and nextCursor null ends the list. A cursor belongs to the search
+        and source that made it, so changing either starts again without one.
+      security:
+        - webSession: []
+        - appOAuth: [apps:read]
+        - apiKey: []
+      parameters:
+        - name: search
+          in: query
+          description: Part of an entry's name or description, matched without regard to case.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
+        - name: source
+          in: query
+          description: Only the catalogue, or only the wider directory.
+          schema:
+            $ref: '#/components/schemas/AppDirectorySource'
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of what can be added.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppDirectoryPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/AppDirectoryPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AppStateConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/AppDirectoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-setup:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Apps]
+      operationId: getAppSetup
+      summary: Read how apps are set up here
+      description: >-
+        Return how apps are set up on this OpenBot: whether the app directory
+        is available and the service it comes from, the address an
+        administrator registers with an app's vendor, whether a connection
+        approves one action at a time, and whether a Bot with no key of its
+        own can still use an app's actions. Anybody signed in may read it. It
+        holds no secret.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [apps:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: How apps are set up here.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppSetup'
+              examples:
+                directory:
+                  $ref: '#/components/examples/AppSetupExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/shortened-tool-names:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Apps]
+      operationId: getShortenedToolNames
+      summary: Read the action names that were shortened
+      description: >-
+        Return every app action name that was cut to fit a model's limit of 64
+        characters, with the whole name it stands for, so a client shows a
+        step by the action's own name. Names only, and nothing about who may
+        use them. Anybody signed in may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [apps:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The shortened names.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShortenedToolNames'
+              examples:
+                one:
+                  $ref: '#/components/examples/ShortenedToolNamesExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     AppId:
@@ -62,6 +730,619 @@ components:
                 minLength: 1
                 maxLength: 320
                 pattern: \S
+    AppSource:
+      type: string
+      enum: [catalogue, address, directory]
+      description: >-
+        How the app was added: from OpenBot's own catalogue, as a server at an
+        address somebody typed, or from the wider app directory.
+    AppConnectsWith:
+      type: string
+      enum: [sign-in, key, nothing, unreadable]
+      description: >-
+        How a person connects an app from the directory: by signing in at the
+        app, by typing a key, or with nothing at all. unreadable when OpenBot
+        can't tell from what it recorded when the app was added.
+    AppOwnerGrants:
+      type: string
+      enum: [any, admin]
+      description: >-
+        Who may give the app to a Bot: any Bot's owner, for their own Bot, or
+        only an administrator.
+    AppTool:
+      type: object
+      description: One action an app offers.
+      required: [name, ref, description, effect, destructive, grantedTo]
+      properties:
+        name:
+          type: string
+          description: The action's name, as the app lists it.
+        ref:
+          type: string
+          description: The app's id and the action's name, joined by a slash. What a Bot is given.
+        description:
+          type: string
+          description: What the app says the action does.
+        effect:
+          type: string
+          enum: [read, write]
+          description: >-
+            Whether the action only reads or may change something. Anything not
+            known to be a read is a write.
+        destructive:
+          type: boolean
+          description: >-
+            Whether the app warns that the action deletes or destroys
+            something. False means the app made no such claim.
+        grantedTo:
+          type: array
+          description: The ids of the Bots that may use the action.
+          items:
+            type: string
+    AppWithdrawnGrant:
+      type: object
+      description: >-
+        An action Bots were given that the app no longer offers. No Bot can
+        use it while the app doesn't offer it, and it comes back if the app
+        offers it again.
+      required: [ref, name, grantedTo]
+      properties:
+        ref:
+          type: string
+          description: The app's id and the action's name, joined by a slash.
+        name:
+          type: string
+          description: The action's name.
+        grantedTo:
+          type: array
+          description: The ids of the Bots that were given it.
+          items:
+            type: string
+    App:
+      type: object
+      description: >-
+        An app this OpenBot has added for its Bots, with the actions it offers.
+        No secret is ever part of an app: hasCredential says whether a key or
+        client is kept for it.
+      required:
+        - id
+        - title
+        - source
+        - directoryEntryId
+        - address
+        - logo
+        - vendor
+        - summary
+        - docsUrl
+        - connectsWith
+        - hasCredential
+        - dynamicClient
+        - signIn
+        - entraScope
+        - accountMode
+        - sharedAccountConnected
+        - sharedOnly
+        - ownerGrants
+        - ownerGrantsChosen
+        - addedBy
+        - toolsRefreshedAt
+        - lastError
+        - skippedTools
+        - tools
+        - withdrawn
+      properties:
+        id:
+          type: string
+          description: >-
+            The app's id: a catalogue entry's key, the id a server was given
+            when it was added by its address, or the id an app from the
+            directory was given when it was added.
+        title:
+          type: string
+          description: The app's name, as people see it.
+        source:
+          $ref: '#/components/schemas/AppSource'
+        directoryEntryId:
+          type: [string, 'null']
+          description: >-
+            The listAppDirectory entry the app was added from, or null for a
+            server added by its address.
+        address:
+          type: [string, 'null']
+          description: >-
+            The server's address, or null for an app from the directory, which
+            OpenBot reaches through the directory's own service.
+        logo:
+          type: [string, 'null']
+          description: The address of the app's logo, where it has one.
+        vendor:
+          type: [string, 'null']
+          description: >-
+            Who makes the app, or the host a server was added at. Null for an
+            app from the directory.
+        summary:
+          type: string
+          description: What the app is for, from the catalogue. Empty for any other app.
+        docsUrl:
+          type: string
+          description: The vendor's documentation, from the catalogue. Empty for any other app.
+        connectsWith:
+          oneOf:
+            - $ref: '#/components/schemas/AppConnectsWith'
+            - type: 'null'
+          description: How a person connects an app from the directory, or null for any other app.
+        hasCredential:
+          type: boolean
+          description: Whether a key or an OAuth client is kept for the app.
+        dynamicClient:
+          type: boolean
+          description: >-
+            Whether OpenBot registers its own OAuth client with the app's
+            vendor, so an administrator has none to set (setAppOAuthClient).
+        signIn:
+          type: boolean
+          description: >-
+            Whether a server added by its address signs each person in, so each
+            person connects their own account and every action runs as them.
+        entraScope:
+          type: [string, 'null']
+          description: >-
+            The Microsoft Entra ID scope a server is reached with as the
+            signed-in person, or null when it is reached with its own key.
+        accountMode:
+          oneOf:
+            - $ref: '#/components/schemas/AppAccountMode'
+            - type: 'null'
+          description: >-
+            Whose account an app from the directory acts in: each person's own,
+            or one account OpenBot holds for everybody. Null for an app with no
+            account at all, and for any other app.
+        sharedAccountConnected:
+          type: boolean
+          description: Whether a shared app's one account is connected. False for any other app.
+        sharedOnly:
+          type: boolean
+          description: >-
+            Whether the app can only hold one shared account and never a
+            person's own, because it connects with this OpenBot's own client.
+        ownerGrants:
+          $ref: '#/components/schemas/AppOwnerGrants'
+        ownerGrantsChosen:
+          oneOf:
+            - $ref: '#/components/schemas/AppOwnerGrants'
+            - type: 'null'
+          description: >-
+            What an administrator chose for ownerGrants, or null where the
+            default for the app's account applies.
+        addedBy:
+          type: [string, 'null']
+          description: The email address of whoever added the app, where OpenBot knows it.
+        toolsRefreshedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When OpenBot last recorded what the app offers.
+        lastError:
+          type: [string, 'null']
+          description: Why OpenBot couldn't last ask the app what it offers, or null.
+        skippedTools:
+          type: array
+          description: >-
+            Actions the app listed that a model can't be offered, because of
+            their names. The rest were recorded.
+          items:
+            type: string
+        tools:
+          type: array
+          description: The actions the app offers, by name.
+          items:
+            $ref: '#/components/schemas/AppTool'
+        withdrawn:
+          type: array
+          description: Actions Bots were given that the app no longer offers. Empty for a healthy app.
+          items:
+            $ref: '#/components/schemas/AppWithdrawnGrant'
+    AppPage:
+      type: object
+      required: [apps, nextCursor]
+      properties:
+        apps:
+          type: array
+          description: By title, then by id.
+          items:
+            $ref: '#/components/schemas/App'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    AddAppFromDirectory:
+      type: object
+      additionalProperties: false
+      description: >-
+        An entry of listAppDirectory. instanceHost and credentialId are for a
+        catalogue entry only.
+      required: [from, directoryEntryId]
+      properties:
+        from:
+          type: string
+          const: directory
+        directoryEntryId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: ^(catalogue|directory):\S
+          description: The entry's id, as listAppDirectory answers it.
+        instanceHost:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: \S
+          description: >-
+            The host of the organization's own instance, for a vendor that
+            gives every customer one (perInstance). Checked against the hosts
+            that vendor uses.
+        credentialId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: >-
+            The vault credential (createCredential) the app is reached with,
+            for a catalogue entry reached with a key.
+    AddAppByAddress:
+      type: object
+      additionalProperties: false
+      description: A server added by its address.
+      required: [from, title, url]
+      properties:
+        from:
+          type: string
+          const: address
+        title:
+          type: string
+          minLength: 1
+          maxLength: 60
+          pattern: \S
+          description: What people will call the server, 1 to 60 characters once trimmed. Its id is made from it.
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: \S
+          description: >-
+            The server's public HTTPS address, with no key in it. Trimmed. An
+            address on a private network, or over plain HTTP, is refused.
+        token:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: \S
+          description: >-
+            The key the server is reached with, kept in the vault and never
+            answered. Only an administrator may give one.
+    CreateAppRequest:
+      description: An entry of the app directory, or a server by its address.
+      oneOf:
+        - $ref: '#/components/schemas/AddAppFromDirectory'
+        - $ref: '#/components/schemas/AddAppByAddress'
+      discriminator:
+        propertyName: from
+        mapping:
+          directory: '#/components/schemas/AddAppFromDirectory'
+          address: '#/components/schemas/AddAppByAddress'
+    ReplaceAppRequest:
+      type: object
+      additionalProperties: false
+      required: [title, url]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: What people will call the server. Trimmed.
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: \S
+          description: >-
+            The server's HTTPS address, with no key in it. Trimmed. An address
+            on a private network, or over plain HTTP, is refused.
+        credentialId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The vault credential (createCredential) the server is reached with.
+        entraScope:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 256
+          pattern: ^\S+$
+          description: >-
+            One Microsoft Entra ID scope, such as api://hr-api/.default, to
+            reach the server with as the signed-in person. It needs Microsoft
+            sign-in set up, and takes no credentialId. Null reaches the server
+            with its credential again; absent keeps what the server has.
+    UpdateAppRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: The changes to make. At least one.
+      properties:
+        ownerGrants:
+          oneOf:
+            - $ref: '#/components/schemas/AppOwnerGrants'
+            - type: 'null'
+          description: Who may give the app to a Bot, or null for the default for its account.
+    AppAccountMode:
+      type: string
+      enum: [personal, shared]
+      description: Each person's own account, or one account OpenBot holds for everybody.
+    AppAccountModeRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode:
+          $ref: '#/components/schemas/AppAccountMode'
+        approvals:
+          type: object
+          maxProperties: 500
+          description: >-
+            For switching to shared: the approval each Bot gets, by the Bot's
+            id. A Bot not named gets its default.
+          propertyNames:
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+          additionalProperties:
+            $ref: '#/components/schemas/SharedAccountApproval'
+        validateOnly:
+          type: boolean
+          default: false
+          description: Change nothing, and answer what the switch would do.
+    AppAccountModeChange:
+      type: object
+      required: [mode, applied, accountsEnded, bots]
+      properties:
+        mode:
+          $ref: '#/components/schemas/AppAccountMode'
+        applied:
+          type: boolean
+          description: Whether the switch was made. False for validateOnly.
+        accountsEnded:
+          type: object
+          description: The accounts the switch ended, or would end.
+          required: [holder, count]
+          properties:
+            holder:
+              type: string
+              enum: [person, deployment]
+              description: >-
+                Whose accounts they are: people's own (person), or the one
+                OpenBot holds for everybody (deployment).
+            count:
+              type: integer
+              minimum: 0
+        bots:
+          type: array
+          description: >-
+            For switching to shared: each Bot that uses the app, and the
+            approval it gets, or would get. Empty for switching to personal.
+          items:
+            type: object
+            required: [botId, approval]
+            properties:
+              botId:
+                type: string
+              approval:
+                $ref: '#/components/schemas/SharedAccountApproval'
+    AppOAuthClientRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: The client's id, as the vendor issued it. Trimmed.
+        clientSecret:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: \S
+          writeOnly: true
+          description: The client's secret. Kept in the vault and never answered. Trimmed.
+    AppDirectorySource:
+      type: string
+      enum: [catalogue, directory]
+      description: OpenBot's own catalogue, or the wider app directory.
+    CatalogueAppEntry:
+      type: object
+      description: An app in OpenBot's own catalogue.
+      required: [id, source, title, summary, appId, vendor, docsUrl, auth, perInstance, oneStep]
+      properties:
+        id:
+          type: string
+          description: The entry's id, for createApp.
+        source:
+          type: string
+          const: catalogue
+        title:
+          type: string
+        summary:
+          type: string
+          description: What the app is for.
+        appId:
+          type: [string, 'null']
+          description: The app it was added as, or null.
+        vendor:
+          type: string
+          description: Who makes the app.
+        docsUrl:
+          type: string
+          description: The vendor's documentation.
+        auth:
+          type: string
+          enum: [none, deployment-bearer, user-oauth, builtin]
+          description: >-
+            How the app is reached: needing nothing, with a key an
+            administrator gives for everybody, as each person through their
+            own sign-in, or inside OpenBot itself.
+        perInstance:
+          type: boolean
+          description: Whether the vendor gives every customer their own host (instanceHost).
+        oneStep:
+          type: boolean
+          description: >-
+            Whether connecting needs nothing typed first: no account at all, or
+            a vendor OpenBot registers itself with.
+    DirectoryAppEntry:
+      type: object
+      description: An app from the wider app directory.
+      required:
+        - id
+        - source
+        - title
+        - summary
+        - appId
+        - logo
+        - categories
+        - actionCount
+        - classifiedCount
+        - permissionCount
+        - scopedActionCount
+        - connectsWith
+      properties:
+        id:
+          type: string
+          description: The entry's id, for createApp.
+        source:
+          type: string
+          const: directory
+        title:
+          type: string
+        summary:
+          type: string
+          description: What the directory says the app does.
+        appId:
+          type: [string, 'null']
+          description: The app it was added as, or null.
+        logo:
+          type: [string, 'null']
+          description: The address of the app's logo, where it has one.
+        categories:
+          type: array
+          items:
+            type: string
+        actionCount:
+          type: integer
+          minimum: 0
+          description: How many actions the app offers. Adding it offers every one of them to Bots.
+        classifiedCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: >-
+            How many of those actions say whether they only read. 0 means none
+            do, so each is asked about like a change. Null means the directory
+            doesn't say.
+        permissionCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: >-
+            How many separate permissions the actions ask a person for. Null
+            means the directory doesn't say.
+        scopedActionCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: >-
+            How many actions ask for a permission at all. The rest work with
+            any connection. Null means the directory doesn't say.
+        connectsWith:
+          type: string
+          enum: [sign-in, key, nothing]
+          description: How a person connects the app once it is added.
+    AppDirectoryEntry:
+      description: One app that can be added, by where it comes from.
+      oneOf:
+        - $ref: '#/components/schemas/CatalogueAppEntry'
+        - $ref: '#/components/schemas/DirectoryAppEntry'
+      discriminator:
+        propertyName: source
+        mapping:
+          catalogue: '#/components/schemas/CatalogueAppEntry'
+          directory: '#/components/schemas/DirectoryAppEntry'
+    AppDirectoryPage:
+      type: object
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          description: The catalogue, then the wider directory, each by title and then by id.
+          items:
+            $ref: '#/components/schemas/AppDirectoryEntry'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    AppSetup:
+      type: object
+      description: How apps are set up on this OpenBot. Never a key.
+      required:
+        - directoryAvailable
+        - directoryProvider
+        - redirectUri
+        - authorizesPerAction
+        - botsMayCallBack
+      properties:
+        directoryAvailable:
+          type: boolean
+          description: Whether apps from the wider directory can be listed and added here.
+        directoryProvider:
+          type: [string, 'null']
+          enum: [composio, arcade, null]
+          description: >-
+            The service the app directory comes from. The screens read it to
+            open their own page for the directory and to name the setting an
+            administrator sets to turn it on. Null when this OpenBot names
+            none.
+        redirectUri:
+          type: [string, 'null']
+          description: >-
+            The address to register with a vendor for an OAuth client
+            (setAppOAuthClient), exactly as OpenBot sends it. Null when this
+            OpenBot has no public address, so nobody can sign in to an app
+            through it.
+        authorizesPerAction:
+          type: boolean
+          description: >-
+            Whether a connection is approved one action at a time, so a person
+            approves each action the first time a Bot uses it.
+        botsMayCallBack:
+          type: boolean
+          description: >-
+            Whether a Bot with no key of its own can still use an app's
+            actions. Without it, only a Bot that holds its own key can.
+    ShortenedToolNames:
+      type: object
+      required: [names]
+      properties:
+        names:
+          type: object
+          description: Each shortened name, with the whole name it stands for.
+          propertyNames:
+            maxLength: 64
+          additionalProperties:
+            type: string
   responses:
     AppNotFound:
       description: No app has that id here, or the organization does not exist.
@@ -122,3 +1403,467 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+    InvalidApp:
+      description: >-
+        A field is missing or out of bounds, the directory entry isn't one that
+        can be added, the address is refused, the server needs a key nobody
+        gave, or the server couldn't be reached or set up for signing in.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            title:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Give the server a name and an address.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            address:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Use the server's https address. OpenBot doesn't send your data over plain http.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            needsKey:
+              value:
+                type: https://open.bot/errors/app-needs-key
+                title: That app needs a key.
+                status: 400
+                detail: Acme Wiki needs a key to connect. Add the key it gave you and try again.
+                code: APP_NEEDS_KEY
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAddForbidden:
+      description: >-
+        Only an administrator may add an app from the directory or give a
+        server a key, or the MCP allowlist doesn't approve the address.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            key:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Every Bot that uses this server would use that key, so only an admin can add one. Ask an admin to add it.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            notApproved:
+              value:
+                type: https://open.bot/errors/app-not-approved
+                title: That address isn't approved.
+                status: 403
+                detail: Your admin only allows approved MCP servers, and mcp.acme.com isn't one of them. Ask an admin to approve it.
+                code: APP_NOT_APPROVED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAddConflict:
+      description: >-
+        A server at that address is already here (appId names it), the app
+        was added but couldn't be read back, OpenBot's own records of the app
+        disagree, or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            alreadyAdded:
+              value:
+                type: https://open.bot/errors/app-already-added
+                title: That app is already here.
+                status: 409
+                detail: That server is already here, as Acme Wiki.
+                code: APP_ALREADY_ADDED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            records:
+              $ref: '#/components/examples/AppRecordsConflictExample'
+            idempotency:
+              $ref: '#/components/examples/AppIdempotencyConflictExample'
+    AppConflict:
+      description: >-
+        OpenBot's own records of the app disagree, so it can't do this until
+        they're corrected, or the Idempotency-Key was used for a different
+        request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            records:
+              $ref: '#/components/examples/AppRecordsConflictExample'
+            idempotency:
+              $ref: '#/components/examples/AppIdempotencyConflictExample'
+    AppStateConflict:
+      description: >-
+        OpenBot's own records of its apps disagree, so it can't answer until
+        they're corrected.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            records:
+              $ref: '#/components/examples/AppRecordsConflictExample'
+    InvalidAppChange:
+      description: >-
+        A field is missing or out of bounds, or the change doesn't fit this
+        app: an id or address that can't be used, an app that isn't from the
+        directory or needs no account, or one that takes no OAuth client.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noAccount:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Acme Wiki needs no account, so there is nothing to share.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noOAuthClient:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: acme-wiki is not reached with an OAuth client.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            id:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A server name is lower-case letters, numbers and hyphens.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppRemovalForbidden:
+      description: >-
+        The caller is not an administrator, or the app is one every Bot always
+        has.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            alwaysOn:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Routines are always on, for every Bot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppAccountModeUnavailable:
+      description: >-
+        This OpenBot can't switch whose account an app acts in: shared
+        accounts aren't available here, or the app directory isn't set up.
+        Trying again won't help until an administrator changes something.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            sharedAccounts:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: Shared accounts are not available on this deployment.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+            directory:
+              value:
+                type: https://open.bot/errors/app-directory-unavailable
+                title: The app directory isn't available here.
+                status: 503
+                detail: Apps from the directory aren't set up on this OpenBot. Ask an admin.
+                code: APP_DIRECTORY_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    CatalogueAppExample:
+      summary: A catalogue app reached with the organization's key.
+      value:
+        id: exa-authenticated
+        title: Exa Search (API key)
+        source: catalogue
+        directoryEntryId: catalogue:exa-authenticated
+        address: https://mcp.exa.ai/mcp
+        logo: null
+        vendor: Exa
+        summary: Public-web search and page reading using this deployment's Exa API key.
+        docsUrl: https://exa.ai/docs/reference/exa-mcp
+        connectsWith: null
+        hasCredential: true
+        dynamicClient: false
+        signIn: false
+        entraScope: null
+        accountMode: null
+        sharedAccountConnected: false
+        sharedOnly: false
+        ownerGrants: admin
+        ownerGrantsChosen: admin
+        addedBy: dana.whitfield@acme.com
+        toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
+        lastError: null
+        skippedTools: []
+        tools:
+          - name: web_search_exa
+            ref: exa-authenticated/web_search_exa
+            description: Search the web and return the most relevant pages.
+            effect: read
+            destructive: false
+            grantedTo:
+              - agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        withdrawn: []
+    AddressAppExample:
+      summary: A server added by its address, which signs each person in.
+      value:
+        id: acme-wiki
+        title: Acme Wiki
+        source: address
+        directoryEntryId: null
+        address: https://mcp.acme.com/mcp
+        logo: null
+        vendor: mcp.acme.com
+        summary: ''
+        docsUrl: ''
+        connectsWith: null
+        hasCredential: true
+        dynamicClient: false
+        signIn: true
+        entraScope: null
+        accountMode: null
+        sharedAccountConnected: false
+        sharedOnly: false
+        ownerGrants: admin
+        ownerGrantsChosen: null
+        addedBy: sam.okafor@acme.com
+        toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
+        lastError: null
+        skippedTools: []
+        tools:
+          - name: search_pages
+            ref: acme-wiki/search_pages
+            description: Find wiki pages by their title or text.
+            effect: write
+            destructive: false
+            grantedTo: []
+        withdrawn: []
+    AppPageExample:
+      summary: Every app, on one page.
+      value:
+        apps:
+          - id: acme-wiki
+            title: Acme Wiki
+            source: address
+            directoryEntryId: null
+            address: https://mcp.acme.com/mcp
+            logo: null
+            vendor: mcp.acme.com
+            summary: ''
+            docsUrl: ''
+            connectsWith: null
+            hasCredential: true
+            dynamicClient: false
+            signIn: true
+            entraScope: null
+            accountMode: null
+            sharedAccountConnected: false
+            sharedOnly: false
+            ownerGrants: admin
+            ownerGrantsChosen: null
+            addedBy: sam.okafor@acme.com
+            toolsRefreshedAt: '2026-11-14T09:05:00.000Z'
+            lastError: null
+            skippedTools: []
+            tools: []
+            withdrawn: []
+          - id: exa-authenticated
+            title: Exa Search (API key)
+            source: catalogue
+            directoryEntryId: catalogue:exa-authenticated
+            address: https://mcp.exa.ai/mcp
+            logo: null
+            vendor: Exa
+            summary: Public-web search and page reading using this deployment's Exa API key.
+            docsUrl: https://exa.ai/docs/reference/exa-mcp
+            connectsWith: null
+            hasCredential: true
+            dynamicClient: false
+            signIn: false
+            entraScope: null
+            accountMode: null
+            sharedAccountConnected: false
+            sharedOnly: false
+            ownerGrants: admin
+            ownerGrantsChosen: admin
+            addedBy: dana.whitfield@acme.com
+            toolsRefreshedAt: '2026-11-14T09:00:00.000Z'
+            lastError: null
+            skippedTools: []
+            tools:
+              - name: web_search_exa
+                ref: exa-authenticated/web_search_exa
+                description: Search the web and return the most relevant pages.
+                effect: read
+                destructive: false
+                grantedTo: []
+            withdrawn: []
+        nextCursor: null
+    AppDirectoryPageExample:
+      summary: A catalogue entry already added, and an app from the directory.
+      value:
+        entries:
+          - id: catalogue:exa
+            source: catalogue
+            title: Exa Search
+            summary: Public-web search and page reading. Free rate-limited access without a key.
+            appId: exa
+            vendor: Exa
+            docsUrl: https://exa.ai/docs/reference/exa-mcp
+            auth: none
+            perInstance: false
+            oneStep: true
+          - id: directory:linear
+            source: directory
+            title: Linear
+            summary: Plan, track and ship issues and projects.
+            appId: null
+            logo: https://logos.example.com/linear.svg
+            categories: [productivity]
+            actionCount: 26
+            classifiedCount: 26
+            permissionCount: 2
+            scopedActionCount: 26
+            connectsWith: sign-in
+        nextCursor: null
+    AppSetupExample:
+      summary: An OpenBot with the app directory set up.
+      value:
+        directoryAvailable: true
+        directoryProvider: composio
+        redirectUri: https://openbot.acme.com/api/plugins/oauth/callback
+        authorizesPerAction: false
+        botsMayCallBack: true
+    ShortenedToolNamesExample:
+      summary: One action name that was too long for a model.
+      value:
+        names:
+          mcp__acme-wiki__search_pages_by_title_and_last_editor_i_a2c87460: mcp__acme-wiki__search_pages_by_title_and_last_editor_in_a_shared_space
+    AppAccountModePreviewExample:
+      summary: What switching to shared would do.
+      value:
+        mode: shared
+        applied: false
+        accountsEnded:
+          holder: person
+          count: 3
+        bots:
+          - botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            approval:
+              audience: owner
+              outsideInput: false
+              members: []
+    AppAccountModeAppliedExample:
+      summary: The switch, made.
+      value:
+        mode: shared
+        applied: true
+        accountsEnded:
+          holder: person
+          count: 3
+        bots:
+          - botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            approval:
+              audience: team
+              outsideInput: false
+              members: []
+    AppRecordsConflictExample:
+      summary: OpenBot's own records of an app disagree.
+      value:
+        type: https://open.bot/errors/conflict
+        title: The request conflicts with the current state.
+        status: 409
+        detail: "acme-wiki: the actions this app listed were not stored, so what it already had is unchanged."
+        code: CONFLICT
+        category: conflict
+        retryable: false
+        requestId: req_example
+        traceId: trace_example
+    AppIdempotencyConflictExample:
+      summary: An Idempotency-Key used for a different request.
+      value:
+        type: https://open.bot/errors/idempotency-key-conflict
+        title: That Idempotency-Key was used for a different request.
+        status: 409
+        detail: That Idempotency-Key was used for a different request. Use a new key for a new write.
+        code: IDEMPOTENCY_KEY_CONFLICT
+        category: conflict
+        retryable: false
+        requestId: req_example
+        traceId: trace_example
