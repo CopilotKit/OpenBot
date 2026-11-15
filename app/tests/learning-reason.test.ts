@@ -30,12 +30,41 @@ test("a reason that only names insights by slug is left out", () => {
   expect(proposalReason("Supported by Insight: refund-triage")).toBeNull();
 });
 
+test("a reason that names insights by underscored alias is left out whole, not cut to a fragment", () => {
+  // Learning writes an added skill's reason as "Supported by final Insights: <aliases>.", and its
+  // agent names its insights as it likes: a live run on Intelligence 0.16.0-rc.13 named them in snake
+  // case, and the dialog showed "_payment_summary_house_rules." under Why.
+  expect(
+    proposalReason(
+      "Supported by final Insights: vendor_payment_summary_house_rules.",
+    ),
+  ).toBeNull();
+  expect(
+    proposalReason(
+      "Supported by final Insights: vendor_payments_house_format.",
+    ),
+  ).toBeNull();
+  expect(
+    proposalReason(
+      "Supported by final Insights: agui_component_final_report, vendor_payments_house_format.",
+    ),
+  ).toBeNull();
+  expect(
+    proposalReason("Supported by final Insights: invoiceTotals, refund.v2."),
+  ).toBeNull();
+});
+
 test("words beside the slugs are kept, and the slugs dropped", () => {
   expect(
     proposalReason(
       "Supported by final Insights: refund-triage. Refunds were checked by hand in three conversations.",
     ),
   ).toBe("Refunds were checked by hand in three conversations.");
+  expect(
+    proposalReason(
+      "Supported by final Insights: vendor_payments_house_format. Summaries were corrected by hand.",
+    ),
+  ).toBe("Summaries were corrected by hand.");
 });
 
 test("an empty reason is left out", () => {
