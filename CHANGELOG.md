@@ -198,6 +198,9 @@ every deployment:
 
 ### Finding things
 
+- **Bots can be searched, sorted and filtered.** Search names, displayed titles and descriptions;
+  sort by any of those fields in either direction; and show your own, shared or pinned Bots.
+  Hidden Bots use the same controls, while the Needs you board stays visible.
 - **Cmd/Ctrl+K opens a command palette** anywhere signed in. It finds pages, Bots and
   conversations and opens them; it can't send, approve, run or delete anything, and it never lists
   a page you can't open. In a Bot's browser the shortcut goes to the browser.
