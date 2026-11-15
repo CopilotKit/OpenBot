@@ -489,6 +489,7 @@ components:
                 description: How many refusals by it the trail holds.
     AuditQuestion:
       type: object
+      additionalProperties: false
       required: [question]
       properties:
         question:

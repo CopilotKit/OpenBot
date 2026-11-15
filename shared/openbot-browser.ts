@@ -341,7 +341,7 @@ export type RealBrowserOpenResponse = {
 
 export type BrowserOpenResponse = {
   ok: true;
-  /** The computer id of the person's browser: the live screen streams `/api/computers/<computerId>/stream`. */
+  /** The computer id of the person's browser: the live screen is the API's `computers/<computerId>/screen` socket. */
   computerId: string;
   browser: BrowserProduct;
   window: BrowserWindow;

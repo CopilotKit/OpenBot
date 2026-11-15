@@ -14,6 +14,7 @@ import type {
   IdempotencyConflictResponse,
   InvalidRequestResponse,
   OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   ProductEvent,
   RecordProductEventHeaders,
   ServerErrorResponse,
@@ -86,6 +87,7 @@ export const getRecordProductEventMutationOptions = <
     | ForbiddenResponse
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -134,6 +136,7 @@ export type RecordProductEventMutationError =
   | ForbiddenResponse
   | OrganizationNotFoundResponse
   | IdempotencyConflictResponse
+  | PayloadTooLargeResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 export type RecordProductEventMutationVariables = {
@@ -152,6 +155,7 @@ export const useRecordProductEvent = <
     | ForbiddenResponse
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,

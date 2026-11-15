@@ -32,6 +32,7 @@ import type {
   ListRecordingsParams,
   OrganizationNotFoundResponse,
   OwnOnlyResponse,
+  PayloadTooLargeResponse,
   RecorderActivity,
   RecorderAuthorityUnavailableResponse,
   RecorderConnectCode,
@@ -42,7 +43,6 @@ import type {
   RecorderJsonOnlyResponse,
   RecorderLearning,
   RecorderOriginRefusedResponse,
-  RecorderRequestTooLargeResponse,
   RecorderSecretConflictResponse,
   RecorderSignedOutResponse,
   RecordingPage,
@@ -144,7 +144,7 @@ export const getCreateRecorderConnectCodeMutationOptions = <
     | OwnOnlyResponse
     | OrganizationNotFoundResponse
     | RecorderSecretConflictResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | TooManyRecorderConnectCodesResponse
     | ServerErrorResponse
@@ -202,7 +202,7 @@ export type CreateRecorderConnectCodeMutationError =
   | OwnOnlyResponse
   | OrganizationNotFoundResponse
   | RecorderSecretConflictResponse
-  | RecorderRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | RecorderJsonOnlyResponse
   | TooManyRecorderConnectCodesResponse
   | ServerErrorResponse
@@ -224,7 +224,7 @@ export const useCreateRecorderConnectCode = <
     | OwnOnlyResponse
     | OrganizationNotFoundResponse
     | RecorderSecretConflictResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | TooManyRecorderConnectCodesResponse
     | ServerErrorResponse
@@ -975,7 +975,7 @@ export const getExchangeRecorderConnectCodeMutationOptions = <
     | InvalidRecorderConnectCodeResponse
     | RecorderOriginRefusedResponse
     | OrganizationNotFoundResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
@@ -1029,7 +1029,7 @@ export type ExchangeRecorderConnectCodeMutationError =
   | InvalidRecorderConnectCodeResponse
   | RecorderOriginRefusedResponse
   | OrganizationNotFoundResponse
-  | RecorderRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | RecorderJsonOnlyResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
@@ -1047,7 +1047,7 @@ export const useExchangeRecorderConnectCode = <
     | InvalidRecorderConnectCodeResponse
     | RecorderOriginRefusedResponse
     | OrganizationNotFoundResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
@@ -1710,7 +1710,7 @@ export const getReportRecorderActivityMutationOptions = <
     | ForbiddenResponse
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | ServerErrorResponse
     | RecorderAuthorityUnavailableResponse
@@ -1766,7 +1766,7 @@ export type ReportRecorderActivityMutationError =
   | ForbiddenResponse
   | OrganizationNotFoundResponse
   | IdempotencyConflictResponse
-  | RecorderRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | RecorderJsonOnlyResponse
   | ServerErrorResponse
   | RecorderAuthorityUnavailableResponse
@@ -1787,7 +1787,7 @@ export const useReportRecorderActivity = <
     | ForbiddenResponse
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
-    | RecorderRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | RecorderJsonOnlyResponse
     | ServerErrorResponse
     | RecorderAuthorityUnavailableResponse
