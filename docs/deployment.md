@@ -16,8 +16,8 @@ docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql "$image"
 ```
 
-The image is published, and a deployment pulls it; this tree does not build it. What a release
-publishes is digest-pinned in its `container-images.json`, and deploying those digests rather than a
+The image is published, for `linux/amd64` and `linux/arm64`, and a deployment pulls it; this tree
+does not build it. What a release publishes is digest-pinned in its `container-images.json`, and deploying those digests rather than a
 moving tag is what [releasing.md](releasing.md) recommends.
 
 ## Checking an image's signature
@@ -49,7 +49,7 @@ a redeploy takes the audit trail with it, and the audit trail is the product.
 **Mount the parent, not `/var/lib/postgresql/data`.** On any platform whose volume is an ext4 mount,
 and that is most of them, the mount arrives holding a `lost+found` directory. `initdb` will not
 initialize into a directory that has anything in it, so mounting it directly on the data directory
-leaves the cluster uncreated — and because `api` waits on `postgres` and `migrate`, the container
+leaves the cluster uncreated, and because `api` waits on `postgres`, the container
 starts, the platform reports the deploy a success, and the URL serves a 502. Mounting the parent
 leaves `data` as an ordinary subdirectory, which is what PostgreSQL asks for. A Docker named volume
 works either way; a platform volume does not. Platforms that offer no persistent volume are the ones to
@@ -115,9 +115,17 @@ and the fix would not be available.
 | an identity provider | `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
-| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
+| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `CPK_INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted. The older `INTELLIGENCE_API_KEY` is still read |
 | `COPILOTKIT_LICENSE_TOKEN` | optional. Managed Intelligence issues none; set it for a self-hosted Intelligence, which needs the same license on its own deployment too |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
+
+**A license, or a key Intelligence accepts, is required.** The server checks before it starts. With
+`COPILOTKIT_LICENSE_TOKEN` set, the license must be valid and current; one that is not refuses to
+start and never falls back to the key. With none set, the server asks the Intelligence at
+`INTELLIGENCE_API_URL` whether it accepts the project key, waiting while that Intelligence is still
+starting, and refuses to start when the key is missing or refused, or the address never answers.
+Each refusal is one sentence that names the variable to fix. It then refuses an Intelligence older
+than 0.16.0-rc.12, which lacks operations the server calls.
 
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside
 the container, so there is nothing to share it with.
@@ -126,7 +134,7 @@ the container, so there is nothing to share it with.
 (`agent-langgraph-agui`). Leave it unset and the shipped Risk Analyst coworker is omitted rather than registered
 against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when a Bot is actually
 reachable from this container. Unset it if your `.env` still has the laptop default
-`http://localhost:4201/ag-ui`.
+`http://127.0.0.1:4201/`.
 
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
@@ -176,7 +184,12 @@ values ('<sha256 of /app/server/drizzle/<tag>.sql in the server image>', <that e
 
 The page snapshot a Bot resolves element references against lives in Postgres, so a second replica
 can answer a click the first one snapshotted. Run more than one if the platform wants it. The
-supervisor is still not in this image, so every replica shares the one browser inside it.
+supervisor is still not in this image, so each replica has the one browser inside it, shared by
+every Bot it serves.
+
+Replicas that start together take turns applying the migrations under one lock: the first applies
+what is pending and the rest find nothing left. One replica at a time does the scheduled work
+(firing routines and the staged-attachment sweep), and when it stops another takes over.
 
 ## Platform notes
 
@@ -193,8 +206,8 @@ Plain ECS on Fargate behind an ALB is the answer if you want task definitions an
 No shared-memory configuration is needed or possible.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
-and it is the only one that gives each person (or an Isolated Bot) a computer of its own, runs the routines schedule without
-something outside the container, and scales the API past a single replica. That is the Helm chart published with each release, whose
+and it is the only one that gives each person (or an Isolated Bot) a computer of its own and scales
+the API apart from the browsers. That is the Helm chart published with each release, whose
 guide (`helm show readme`) covers EKS, GKE, AKS and a plain self-hosted cluster from the same
 templates.
 
@@ -219,7 +232,7 @@ image, the compressed image fell from 884.2 MiB to 535.0 MiB on arm64 and from 8
 518.1 MiB on amd64.
 
 **A strict content-security-policy needs a hash or a nonce.** `app/index.html` runs a small inline
-script that decides the theme before the first paint. Nothing in this repo sends a CSP header, so it
+script that decides the theme before the first paint. The server sends no CSP header with the app, so it
 works as shipped; a deployment that adds one at its proxy has to allow that script explicitly, or
 `script-src` blocks it and the page renders with the wrong theme until the app boots. A `'sha256-'`
 hash of the script body is the version that survives a rebuild without a per-request nonce.

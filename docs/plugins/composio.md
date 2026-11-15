@@ -643,13 +643,14 @@ next step, drawn from the same state as the Bot's page:
 - the `show_app_access` tool, which every Bot holds and is told to call for an app it holds nothing
   for, switched off or not granted — **Request access**.
 
-The card asks `GET /api/plugins/for/:agentId/apps/:app` for the Bot that made the call when it is
+The card asks `GET /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}` for the Bot that made the call when it is
 drawn, so a card scrolled back to later shows what is true now. The one case it takes the refusal's
 word over the live state is the lost account, which the server cannot see; a connection made after
 the refusal ends that. The card is drawn in the transcript, never folded into the "Used N tools" line.
 
-`GET /api/plugins/for/:agentId/apps` lists every app the Bot holds, including a grant whose app is
-gone; `GET /api/plugins/for/:agentId/apps/:app` answers for one app by key or by name, held or not.
+`GET /api/v2/organizations/{organizationId}/bots/{botId}/apps` lists every app the Bot holds,
+including a grant whose app is gone; `.../bots/{botId}/apps/{appId}` answers for one app by key or
+by name, held or not.
 Both answer only for a Bot the person may use. Connections still lists only enabled apps, and the
 directory is never listed to anybody but an administrator: an app nobody enabled appears only where
 a Bot needs it.

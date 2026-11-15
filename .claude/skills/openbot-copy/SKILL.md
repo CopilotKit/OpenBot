@@ -1,6 +1,6 @@
 ---
 name: openbot-copy
-description: The words and the voice for every piece of text a person reads in OpenBot: screen headings and descriptions, buttons, empty states, notices, chat cards, the server's error and refusal messages that reach the browser, and OpenBot Desktop's setup window, Status window and menus. Holds the glossary (Bot, app, admin, OpenBot, and the parts of OpenBot: front end, backend, database) and the style rules. Use when writing or changing any text that is shown to a person, naming a screen, a section, a button or a state, writing an error or refusal message, or reviewing a diff that adds user-facing strings under app/src, server/src, desktop/src or desktop/src-tauri. Don't use for text written for the model (tool descriptions, standing instructions, system prompts), for code comments, or for the docs under docs/.
+description: The words and the voice for every piece of text a person reads in OpenBot: screen headings and descriptions, buttons, empty states, notices, chat cards, the server's error and refusal messages that reach the browser, and OpenBot Desktop's setup window, Status window and menus. Holds the glossary (Bot, app, admin, OpenBot, and the parts of OpenBot: front end, backend, database) and the style rules. Use when writing or changing any text that is shown to a person, naming a screen, a section, a button or a state, writing an error or refusal message, or reviewing a diff that adds user-facing strings under app/src, desktop/src or desktop/src-tauri, or the messages the API spec under api/ gives as examples. Don't use for text written for the model (tool descriptions, standing instructions, system prompts), for code comments, or for the docs under docs/.
 ---
 
 # OpenBot Copy
@@ -68,7 +68,7 @@ OpenBot instead: "The backend is starting.", "Waiting for the backend", "Couldn'
 backend. Try again." Name a feature by what it does (Automatic learning, Memory, Skills), and say
 "OpenBot proposes skills", not who inside OpenBot does. An env var an admin sets keeps its name
 (`INTELLIGENCE_API_URL`); the word on its own does not appear. Logs, comments, code and the operator
-docs under `docs/` and `charts/` are not shown to a person and may name it.
+docs under `docs/` and the Helm chart's guide are not shown to a person and may name it.
 `tests/no-intelligence-in-user-copy.test.ts` fails on a shown string that says it.
 
 **OpenBot Desktop's first screen says self-contained.** "This version of OpenBot is fully

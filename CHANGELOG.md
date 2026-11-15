@@ -202,8 +202,9 @@ every deployment:
   conversations and opens them; it can't send, approve, run or delete anything, and it never lists
   a page you can't open. In a Bot's browser the shortcut goes to the browser.
 - **Searching conversations searches all your history on the server**, by name and recent
-  messages, instead of only the conversations already loaded in the sidebar. The new
-  `GET /api/channels/search` uses the conversation list's own rules for who can see what.
+  messages, instead of only the conversations already loaded in the sidebar. The search
+  (`GET /api/v2/organizations/{organizationId}/conversations?q=...`) uses the conversation list's
+  own rules for who can see what.
 
 ### Personal edition
 
@@ -268,8 +269,7 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   with a migrations Job is still held to the guarded `pre-upgrade` one, and a chart with neither
   is still refused.
 - **The Routines page no longer warns that routines aren't running.** That warning was for a
-  deployment with no worker, which no longer exists as a state. `GET /api/routines` still answers
-  with the `sweep` record older apps read.
+  deployment with no worker, which no longer exists as a state.
 
 ### Running from source
 
@@ -294,6 +294,95 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   computer: the app's and the server's ports go to the server, and the port of an Intelligence
   gateway on this machine goes to this machine. The one computer gets it, and so does every
   computer the supervisor makes. A value in the environment or in `.env` wins.
+
+### One image runs the server and every Bot's computer
+
+- **A release publishes two OpenBot images, for amd64 and arm64**: `ghcr.io/copilotkit/openbot`
+  and `ghcr.io/copilotkit/openbot-supervisor`. The server and a Bot's computer used to have an
+  image each. They now run from the one `openbot` image, each started with its own command
+  (`/app/bin/openbot server`, `/app/bin/openbot-computer`), in `docker-compose.yml`, OpenBot
+  Desktop and the Helm chart, and the supervisor makes each computer from it. Started with no
+  command, the image is still the whole of OpenBot in one container.
+- **The first update downloads the whole image once**, about 715 MB compressed on amd64 and 740 MB
+  on arm64, where the two images before came to about 615 MB and 630 MB. None of it is shared with
+  the images an installation already has.
+- **`SERVER_IMAGE` and `COMPUTER_IMAGE` still name the image for each service.** A Compose override
+  or a registry mirror that named two different images names the one image for both.
+- **A Bot's shell is in an image that also holds the server's executable, and can do nothing with
+  it.** The computer's container is given none of the server's settings: no key, no license, no
+  database address or password.
+
+### SPIRE is gone, and two Bots are retired
+
+- **`docker-compose.yml` no longer runs SPIRE.** It issued each Bot's computer a workload identity
+  that nothing in OpenBot checked. Its three services (`spire-init`, `spire-server`,
+  `spire-agent`), their volumes and the supervisor's `SPIRE_*` settings are removed. A Compose
+  override that names any of them has to drop it.
+- **The managed Bot is the LangGraph harness, `agent-langgraph-agui`.** `agent-bot` and the
+  TypeScript `agent-langgraph` are retired, with `BOT_PORT`, `BOT_IMAGE` and `AGENT_BOT_MODEL`.
+  `scripts/start.sh` starts the harness for the team edition on port 4201 and points
+  `MANAGED_AGENT_AG_UI_URL` at it, on whichever provider `BOT_PROVIDER` names. OpenBot Desktop
+  takes the retired Bots' settings out of an updated installation's `.env`.
+
+### The server checks its license and its Intelligence before it starts
+
+- **The server starts only with a CopilotKit license or an Intelligence project key that
+  Intelligence accepts.** With `COPILOTKIT_LICENSE_TOKEN` set, the license must be valid and
+  current: one that is invalid or expired stops the server, and the key is not tried instead. With
+  none set, the server asks the Intelligence at `INTELLIGENCE_API_URL` whether it accepts
+  `CPK_INTELLIGENCE_API_KEY` (or the older `INTELLIGENCE_API_KEY`), and stops when the key is
+  missing or refused, or when that address never answers. A deployment on managed Intelligence
+  with a working key changes nothing. Each refusal is one sentence in the server's log that names
+  the variable to fix.
+- **The server refuses an Intelligence that lacks an operation it calls**, naming what is missing
+  and the oldest version that has them all (0.16.0-rc.12). It asks again for up to ten minutes
+  while Intelligence is still starting.
+
+### One API, with its spec in the repository
+
+- **OpenBot's API is described in `api/`.** `api/openapi.yaml` (OpenAPI 3.1) is the REST API, and
+  `api/asyncapi.yaml` (AsyncAPI 3.1) is the WebSocket channels. Every resource is under
+  `/api/v2/organizations/{organizationId}/`, and an installation's one organization is addressed
+  as `default`. Errors are problem details (`application/problem+json`), lists page with `cursor`
+  and `limit`, and every write takes an `Idempotency-Key` header.
+- **API keys and OAuth, for anything that is not the web app.** A signed-in person can make API
+  keys for automation (`/api/v2/organizations/default/people/me/api-keys`). A key acts as that
+  person, is sent as `Authorization: Bearer` or `x-api-key`, and works on `/api/v2` only. The
+  server also issues access tokens through OAuth 2.1 with PKCE, which work on `/api/v2` only too.
+  Both end when the person is removed.
+- **The web app calls the new addresses**, through a client generated from the spec, for Bots,
+  the audit trail, accounts, admin settings, model connections, notifications, routines,
+  conversations and approvals, and opens its sockets there. Apps, connections, a Bot's grants,
+  app access requests, components and skills are in the spec too. A reverse proxy or firewall that
+  allows OpenBot's paths one by one has to allow `/api/v2/`.
+- **The earlier `/api/...` addresses are retired as each area moves.** A script that calls one
+  has to call its `/api/v2` address, which `api/openapi.yaml` lists. Sign-in (`/api/auth`),
+  webhooks, SCIM and a Bot's tool callback keep their addresses.
+
+### Kubernetes
+
+- **The `openbot` chart is OpenBot alone, and `openbot-bundle` is the all-in-one install.** The
+  `openbot` chart (0.3.0) no longer installs CopilotKit Intelligence: it points OpenBot at one
+  that already runs, managed or self-hosted, by its two addresses and a project key, so several
+  OpenBot releases can share one Intelligence and upgrade on their own. A new chart,
+  `openbot-bundle` (0.1.0), installs OpenBot and Intelligence together on one PostgreSQL server,
+  with a database and a role for each that cannot open the other's.
+- **A release on the 0.2 chart with its bundled Intelligence is refused at upgrade to 0.3**, and
+  nothing in the cluster changes when it is, because the upgrade would delete that Intelligence
+  and its conversations. Keep the release on 0.2, or install `openbot-bundle` as a new release in
+  a namespace of its own. A 0.2 release that already pointed at an Intelligence of its own
+  (`intelligence.enabled: false`) upgrades as before.
+- **No CronJobs and no migration Job.** The server fires routines, suspends idle computers,
+  deletes unsent attachments and applies its own migrations, so an upgrade removes the three
+  CronJobs, their network policies, the `<release>-worker-secret` Secret and the migration Job.
+  The values that configured them are ignored, except `migrations.enabled: false`, which is
+  refused.
+
+### Appearance
+
+- **OpenBot follows your system's light or dark setting.** Settings > Appearance has a Theme row
+  with System, Light and Dark, in place of the Dark theme switch, and everybody starts on System.
+  The app switches when the system does, with no reload, and OpenBot Desktop's window follows it.
 
 ### OpenBot runs on CopilotKit 1.88.0
 
