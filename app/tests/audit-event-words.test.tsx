@@ -199,6 +199,8 @@ test("what happened to an organization reads in words, and none of it as blocked
     "organization.created": "Create an organization",
     "organization.renamed": "Rename an organization",
     "organization.member_invited": "Invite a person to an organization",
+    "organization.invitation_canceled":
+      "Cancel an invitation to an organization",
     "organization.member_joined": "Join an organization",
     "organization.member_removed": "Remove a person from an organization",
     "organization.member_role_changed":

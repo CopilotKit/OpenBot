@@ -412,7 +412,7 @@ paths:
         - Audit events
       operationId: listAuditEvents
       summary: List audit events
-      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
+      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -2140,7 +2140,7 @@ paths:
         - Capabilities
       operationId: stopPersonComputers
       summary: Stop a person's computers
-      description: Stop every Bot computer running for one person now, and record it on the audit trail. Their Bots start a computer again when they next need one. Only an administrator may do this.
+      description: Stop the computers of the organization's Bots that one person owns, now, and record it on the audit trail. Their Bots start a computer again when they next need one. A person's own computer is stopped only from the organization `default`. A person who is not a member of the organization is not found (PERSON_NOT_FOUND). Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth:

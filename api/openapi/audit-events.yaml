@@ -16,8 +16,9 @@ paths:
         and an event is on the trail of the organization it happened in. What
         happens to the organization itself is on its trail too:
         organization.created, organization.renamed,
-        organization.member_invited, organization.member_joined,
-        organization.member_removed and organization.member_role_changed.
+        organization.member_invited, organization.invitation_canceled,
+        organization.member_joined, organization.member_removed and
+        organization.member_role_changed.
         Each filter narrows the events, and a filter that takes
         several values separated by commas matches any of them. A value that
         names nothing in the trail matches no event rather than being refused.

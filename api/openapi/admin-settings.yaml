@@ -513,9 +513,12 @@ paths:
       operationId: stopPersonComputers
       summary: Stop a person's computers
       description: >-
-        Stop every Bot computer running for one person now, and record it on
-        the audit trail. Their Bots start a computer again when they next need
-        one. Only an administrator may do this.
+        Stop the computers of the organization's Bots that one person owns,
+        now, and record it on the audit trail. Their Bots start a computer
+        again when they next need one. A person's own computer is stopped
+        only from the organization `default`. A person who is not a member of
+        the organization is not found (PERSON_NOT_FOUND). Only an
+        administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth: [people:write]
