@@ -323,6 +323,12 @@ export const ALLOWED: Allowed[] = [
     rule: "runtime",
     why: "whether the OpenBot serves its runtime to an app's sign-in, asked once after signing in",
   },
+  {
+    file: "desktop/src-tauri/src/connected/relay.rs",
+    what: /^\/(api\/?|\.well-known\/)$/,
+    rule: "transport",
+    why: "the relay that carries the window's requests to the OpenBot it is connected to: the starts of the paths it signs in, naming no address of its own",
+  },
   // Path tables the server registers today's routes from.
   ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
     (file): Allowed => ({

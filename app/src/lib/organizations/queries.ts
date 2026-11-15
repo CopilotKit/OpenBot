@@ -7,6 +7,7 @@ import type { Organization } from "@/lib/api/generated/model";
 import { listOrganizations } from "@/lib/api/generated/organizations/organizations";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { tellDesktopTheOrganization } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
 
@@ -56,6 +57,8 @@ export async function workIn(organizationId: string): Promise<void> {
     body: { organizationId },
     fallback: SWITCH_FALLBACK,
   });
+  // Inside OpenBot Desktop connected to this OpenBot, the desktop app names it on every request.
+  await tellDesktopTheOrganization(organizationId);
 }
 
 /** Every organization the person is in, page by page, and whether they may create one. */
