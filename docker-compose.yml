@@ -512,6 +512,10 @@ services:
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Claude Code's tool search, on the Claude Agent SDK harness. Empty leaves it on, which is
+      # what a Bot holding many app tools needs. `false` is for a gateway at ANTHROPIC_BASE_URL
+      # that cannot pass the search on: every tool then goes with every request.
+      ENABLE_TOOL_SEARCH: ${ENABLE_TOOL_SEARCH:-}
       # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
       # there either way; this variable is what tells the harness to read it.
       CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
