@@ -485,6 +485,16 @@ components:
         /api/v2 only.
 
 
+        Organization. An access token carries no memory of which
+        organization the person is working in. An address under
+        `/api/v2/organizations/{organizationId}` names it. Where an address
+        names none, such as the list of the person's own organizations, an
+        app sends the header `OpenBot-Organization` with the organization's
+        id. It is checked against the person's membership on every request,
+        and an organization they are not in answers not found. With no
+        header, the app works in the person's own organization.
+
+
         Consent. The person is asked once for each app, and not again for
         scopes they already allowed it.
 

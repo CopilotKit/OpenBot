@@ -33,7 +33,7 @@ import {
   revokeApiKeyMutationOptions,
 } from "@/lib/api-keys/mutations";
 import { type ApiKey, apiKeyListQueryOptions } from "@/lib/api-keys/queries";
-import { openInSystemBrowser } from "@/lib/desktop/open-in-browser";
+import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
@@ -146,15 +146,29 @@ export function ApiKeysPage() {
  * opens this page there; anywhere else there is nothing to press, so it is only said.
  */
 function BrowserOnly() {
-  const [failed, setFailed] = useState(false);
-  const address = `${window.location.origin}/settings/api-keys`;
+  /*
+   * The address of the OpenBot this window is connected to, which is where a browser finds this
+   * page. The window's own address is the desktop app's, and means nothing to a browser.
+   */
+  const connection = useQuery({
+    ...desktopConnectionQueryOptions(),
+    enabled: desktopShell() !== null,
+  }).data;
+  const address =
+    connection?.mode === "connected"
+      ? `${connection.address}/settings/api-keys`
+      : null;
   return (
     <PageEmpty
       action={
-        desktopShell() ? (
+        address ? (
+          /*
+           * A link for a new tab: the desktop window hands a site outside it to the person's own
+           * browser and stays where it is.
+           */
           <Button
-            onClick={async () =>
-              setFailed(!(await openInSystemBrowser(address)))
+            render={
+              <a href={address} rel="noopener noreferrer" target="_blank" />
             }
             size="sm"
             variant="outline"
@@ -167,13 +181,7 @@ function BrowserOnly() {
       icon={IconKey}
       title="API keys are managed in your browser"
     >
-      {failed ? (
-        <span role="alert">
-          Couldn't open your browser. Go to {address} there.
-        </span>
-      ) : (
-        "Create API keys from OpenBot in your browser."
-      )}
+      Create API keys from OpenBot in your browser.
     </PageEmpty>
   );
 }

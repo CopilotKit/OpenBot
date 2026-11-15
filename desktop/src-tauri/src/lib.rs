@@ -4,6 +4,7 @@ pub mod ai_connection;
 pub mod app_update;
 pub mod cli_release;
 pub mod composio;
+pub mod connected;
 pub mod deployment;
 pub mod deployment_release;
 pub mod docker_config;

@@ -739,6 +739,19 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         return card.scrollHeight - card.clientHeight;
       });
       expect(overflow).toBeLessThanOrEqual(0);
+      // And with the other choice picked, OpenBot for Business: its address field and Connect.
+      await page.getByText("OpenBot for Business").click();
+      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      await page.waitForTimeout(400);
+      expect(
+        await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          return card.scrollHeight - card.clientHeight;
+        }),
+      ).toBeLessThanOrEqual(0);
+      expect(await page.getByRole("button", { name: "Connect" }).count()).toBe(
+        1,
+      );
     } finally {
       await page.close();
     }

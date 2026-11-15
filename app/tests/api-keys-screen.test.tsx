@@ -309,13 +309,16 @@ test("refused for not being signed in on the web, in a browser it says where to 
   expect(view.queryByRole("button", { name: "Open in browser" })).toBeNull();
 });
 
-test("refused in OpenBot Desktop, a button opens this page in the system browser", async () => {
-  const invoked: { command: string; args: unknown }[] = [];
+test("refused in OpenBot Desktop, a link opens this page at the OpenBot it is connected to, in the person's browser", async () => {
   (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
     transformCallback: () => 0,
-    invoke: async (command: string, args: unknown) => {
-      invoked.push({ command, args });
-      return null;
+    invoke: async (command: string) => {
+      if (command === "plugin:openbot-desktop|connection")
+        return {
+          mode: "connected",
+          address: "https://openbot.northwind.example",
+        };
+      throw `command ${command} not found`;
     },
   };
   server.use(
@@ -330,10 +333,12 @@ test("refused in OpenBot Desktop, a button opens this page in the system browser
   const view = draw();
 
   await view.findByText("Create API keys from OpenBot in your browser.");
-  fireEvent.click(view.getByRole("button", { name: "Open in browser" }));
-  await waitFor(() => expect(invoked).toHaveLength(1));
-  expect(invoked[0]).toEqual({
-    command: "plugin:opener|open_url",
-    args: { url: "http://openbot.invalid/settings/api-keys" },
-  });
+  // A link for a new tab, which the desktop window hands to the person's own browser. Its address
+  // is the OpenBot's own, never the window's, which only the desktop app can use.
+  const link = await view.findByRole("button", { name: "Open in browser" });
+  expect(link.tagName).toBe("A");
+  expect(link.getAttribute("href")).toBe(
+    "https://openbot.northwind.example/settings/api-keys",
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
 });
