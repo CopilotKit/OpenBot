@@ -67,6 +67,7 @@ import {
   turnsLeftRunning,
   turnsNoLongerAway,
 } from "@/lib/channels/turns-finished-away";
+import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
 import { useConversationActivity } from "@/lib/computers/activity";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
@@ -897,6 +898,17 @@ export function ChannelChat({
      * streamed here, so it is read: see `turns-finished-away.ts`.
      */
     const offFinishedAway = onTurnFinishedAway(channel.id, pull);
+    /*
+     * A Bot's line in this conversation that the list has no row to carry: a task's thread, kept
+     * out of the list. Read as a listed conversation's is, and not when it is this tab's own
+     * report coming back. See `said-off-the-list.ts`.
+     */
+    const offSaidOffTheList = onBotSaidOffTheList(channel.id, (line) => {
+      if (sameActivity(line, lastSeen)) return;
+      lastSeen = line;
+      if (sameActivity(selfReportedBotActivity.current, line)) return;
+      pull();
+    });
     pullHistoryRef.current = pull;
     void (async () => {
       await joinGatePromise;
@@ -912,6 +924,7 @@ export function ChannelChat({
       cancelled = true;
       unsubscribe();
       offFinishedAway();
+      offSaidOffTheList();
       pullHistoryRef.current = null;
     };
   }, [

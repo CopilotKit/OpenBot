@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { taskKeys } from "@/lib/tasks/queries";
+import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -325,6 +326,65 @@ export function refreshTaskCards(
   void queryClient.invalidateQueries({ queryKey: taskKeys.ones });
 }
 
+/**
+ * The Bot's line an event carries, when that is all it is about: null for a person's line, and for
+ * an event about a name, a pin, a deletion or what the conversation waits on, which say nothing new.
+ */
+export function botLineOf(activity: ChannelActivityEvent): BotLine | null {
+  if (
+    activity.lastMessageAgentId === null ||
+    activity.lastMessageAt === null ||
+    activity.lastMessage === null ||
+    activity.summary !== undefined ||
+    activity.opening !== undefined ||
+    activity.pinned !== undefined ||
+    activity.deleted !== undefined ||
+    activity.busy !== undefined ||
+    activity.work !== undefined
+  )
+    return null;
+  return {
+    agentId: activity.lastMessageAgentId,
+    at: activity.lastMessageAt,
+    text: activity.lastMessage,
+  };
+}
+
+/**
+ * Apply one event to the list, and say so where the list cannot.
+ *
+ * The list is paged, so the cache holds pages rather than one array. The channel is patched inside
+ * whichever page holds it and that page is re-sorted. Sorting across pages is deliberately not
+ * attempted: a channel that has just become the most recent belongs at the top of page one, and
+ * moving a row between pages would fight the cursors the next fetch uses. The page it is on stays
+ * correct, and the next refetch puts it in order.
+ *
+ * A conversation no page holds is refetched for, and when the event is a Bot's line the conversation
+ * itself is told (`said-off-the-list.ts`): a task's thread is never on a page, and is read through
+ * this alone.
+ */
+export function applyToRoster(
+  queryClient: Pick<QueryClient, "setQueryData" | "invalidateQueries">,
+  activity: ChannelActivityEvent,
+): void {
+  let listed = true;
+  queryClient.setQueryData(
+    channelKeys.list(),
+    (data: ChannelCache | undefined) => {
+      if (!data) return data;
+      const patched = applyChannelEvent(data, activity);
+      if (patched !== "unknown") return patched;
+      listed = false;
+      return data;
+    },
+  );
+  if (listed) return;
+  // An unknown channel id means the roster is stale; refetch rather than patch.
+  void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+  const line = botLineOf(activity);
+  if (line) botSaidOffTheList(activity.channelId, line);
+}
+
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
@@ -373,27 +433,7 @@ export function useChannelEvents() {
           queryKey: ["groups", activity.channelId],
         });
 
-        /*
-         * The list is paged, so the cache holds pages rather than one array.
-         *
-         * The channel is patched inside whichever page holds it and that page is re-sorted. Sorting
-         * across pages is deliberately not attempted: a channel that has just become the most recent
-         * belongs at the top of page one, and moving a row between pages would fight the cursors the
-         * next fetch uses. The page it is on stays correct, and the next refetch puts it in order.
-         */
-        queryClient.setQueryData(
-          channelKeys.list(),
-          (data: ChannelCache | undefined) => {
-            if (!data) return data;
-            const patched = applyChannelEvent(data, activity);
-            if (patched !== "unknown") return patched;
-            // An unknown channel id means the roster is stale; refetch rather than patch.
-            void queryClient.invalidateQueries({
-              queryKey: channelKeys.list(),
-            });
-            return data;
-          },
-        );
+        applyToRoster(queryClient, activity);
 
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
         noticeChannelEvent(activity, queryClient, (channelId) => {
