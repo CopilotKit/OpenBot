@@ -28,6 +28,7 @@ export * from "./network-policies/network-policies.zod";
 export * from "./notification-settings/notification-settings.zod";
 export * from "./organization-settings/organization-settings.zod";
 export * from "./people/people.zod";
+export * from "./product-events/product-events.zod";
 export * from "./reactions/reactions.zod";
 export * from "./recorder/recorder.zod";
 export * from "./reviewer-guidance/reviewer-guidance.zod";
