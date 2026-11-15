@@ -106,6 +106,47 @@ export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
 
 export const GetOrganizationSettingsResponse = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe("The directory groups people belong to, by name."),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
@@ -177,53 +218,10 @@ export const GetOrganizationSettingsResponse = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
-  .and(
-    zod.object({
-      context: zod
-        .object({
-          builtInModel: zod
-            .string()
-            .nullable()
-            .describe("The model OpenBot's own Bots run on, when one is set."),
-          directoryGroups: zod
-            .array(zod.string())
-            .describe("The directory groups people belong to, by name."),
-          apps: zod
-            .array(
-              zod.object({
-                id: zod.string(),
-                title: zod.string(),
-                url: zod.string(),
-              }),
-            )
-            .describe("The apps an allowlist can name."),
-          defaultDestinations: zod
-            .array(zod.string())
-            .describe(
-              "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
-            ),
-          scim: zod.object({
-            configured: zod.boolean(),
-            connectionId: zod.string(),
-            baseUrl: zod.string().nullable(),
-            rotating: zod
-              .boolean()
-              .describe(
-                "Whether a second token is set while the first is being replaced.",
-              ),
-          }),
-          otel: zod.object({
-            configured: zod.boolean(),
-          }),
-          actionRecordRetentionDays: zod
-            .int()
-            .describe("How many days recorded computer actions are kept."),
-        })
-        .describe(
-          "What an administrator needs to set the settings. Read only.",
-        ),
-    }),
-  );
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
+  .and(zod.unknown());
 
 /**
  * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Only an administrator may change them.
@@ -270,6 +268,48 @@ export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
 
 export const UpdateOrganizationSettingsBody = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe("The directory groups people belong to, by name."),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .optional()
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .optional()
@@ -351,6 +391,9 @@ export const UpdateOrganizationSettingsBody = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
   .describe("The settings to change. At least one; the rest stay as they are.");
 
 export const updateOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
@@ -372,6 +415,47 @@ export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
 
 export const UpdateOrganizationSettingsResponse = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe("The directory groups people belong to, by name."),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
@@ -447,53 +531,10 @@ export const UpdateOrganizationSettingsResponse = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
-  .and(
-    zod.object({
-      context: zod
-        .object({
-          builtInModel: zod
-            .string()
-            .nullable()
-            .describe("The model OpenBot's own Bots run on, when one is set."),
-          directoryGroups: zod
-            .array(zod.string())
-            .describe("The directory groups people belong to, by name."),
-          apps: zod
-            .array(
-              zod.object({
-                id: zod.string(),
-                title: zod.string(),
-                url: zod.string(),
-              }),
-            )
-            .describe("The apps an allowlist can name."),
-          defaultDestinations: zod
-            .array(zod.string())
-            .describe(
-              "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
-            ),
-          scim: zod.object({
-            configured: zod.boolean(),
-            connectionId: zod.string(),
-            baseUrl: zod.string().nullable(),
-            rotating: zod
-              .boolean()
-              .describe(
-                "Whether a second token is set while the first is being replaced.",
-              ),
-          }),
-          otel: zod.object({
-            configured: zod.boolean(),
-          }),
-          actionRecordRetentionDays: zod
-            .int()
-            .describe("How many days recorded computer actions are kept."),
-        })
-        .describe(
-          "What an administrator needs to set the settings. Read only.",
-        ),
-    }),
-  );
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
+  .and(zod.unknown());
 
 /**
  * Stop now every Bot computer idle for longer than the organization's setting allows, as the hourly sweep does. Nothing is stopped while another server is sweeping or the setting is off, and the answer says so. Only an administrator may do this.

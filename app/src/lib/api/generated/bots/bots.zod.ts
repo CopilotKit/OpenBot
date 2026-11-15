@@ -195,37 +195,37 @@ export const CreateBotHeader = zod.object({
     ),
 });
 
-export const createBotBodyOneNameMax = 80;
+export const createBotBodyNameMax = 80;
 
-export const createBotBodyOneTitleMax = 120;
+export const createBotBodyTitleMax = 120;
 
-export const createBotBodyOneRoleDescriptionMax = 1000;
+export const createBotBodyRoleDescriptionMax = 1000;
 
-export const createBotBodyOneEndpointOneMax = 0;
+export const createBotBodyEndpointOneMax = 0;
 
-export const createBotBodyOneEndpointTwoRegExp = new RegExp(
+export const createBotBodyEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
-export const createBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const createBotBodyOneInstructionsMax = 1000;
+export const createBotBodyAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
+export const createBotBodyInstructionsMax = 1000;
 
 export const CreateBotBody = zod
   .object({
     name: zod
       .string()
       .min(1)
-      .max(createBotBodyOneNameMax)
+      .max(createBotBodyNameMax)
       .describe("What the Bot is called, 1 to 80 characters once trimmed."),
     title: zod
       .string()
-      .max(createBotBodyOneTitleMax)
+      .max(createBotBodyTitleMax)
       .describe(
         "The subtitle under its name, up to 120 characters. May be empty.",
       ),
     roleDescription: zod
       .string()
       .min(1)
-      .max(createBotBodyOneRoleDescriptionMax)
+      .max(createBotBodyRoleDescriptionMax)
       .describe(
         "What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.",
       ),
@@ -234,8 +234,8 @@ export const CreateBotBody = zod
       .describe("Public Bots are shared with everybody in the organization."),
     endpoint: zod
       .union([
-        zod.string().max(createBotBodyOneEndpointOneMax),
-        zod.url().regex(createBotBodyOneEndpointTwoRegExp),
+        zod.string().max(createBotBodyEndpointOneMax),
+        zod.url().regex(createBotBodyEndpointTwoRegExp),
       ])
       .optional()
       .describe(
@@ -245,7 +245,7 @@ export const CreateBotBody = zod
       .object({
         header: zod
           .string()
-          .regex(createBotBodyOneAuthHeaderRegExp)
+          .regex(createBotBodyAuthHeaderRegExp)
           .optional()
           .describe(
             "The header it is sent in. Blank or absent means Authorization.",
@@ -265,38 +265,36 @@ export const CreateBotBody = zod
     instructions: zod
       .string()
       .min(1)
-      .max(createBotBodyOneInstructionsMax)
+      .max(createBotBodyInstructionsMax)
       .optional()
       .describe(
         "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
       ),
+    harness: zod
+      .enum([
+        "",
+        "crewai",
+        "llamaindex",
+        "agno",
+        "langgraph",
+        "google-adk",
+        "antigravity",
+        "pydantic-ai",
+        "microsoft-agent-framework",
+        "claude-agent-sdk",
+        "strands",
+        "ag2",
+        "langroid",
+        "mastra",
+      ])
+      .optional()
+      .describe(
+        'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.',
+      ),
   })
-  .and(
-    zod.object({
-      harness: zod
-        .enum([
-          "",
-          "crewai",
-          "llamaindex",
-          "agno",
-          "langgraph",
-          "google-adk",
-          "antigravity",
-          "pydantic-ai",
-          "microsoft-agent-framework",
-          "claude-agent-sdk",
-          "strands",
-          "ag2",
-          "langroid",
-          "mastra",
-        ])
-        .optional()
-        .describe(
-          'The framework an agent somebody runs themselves is built on, by its id in OpenBot\'s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.',
-        ),
-    }),
-  )
-  .describe("A new Bot.");
+  .describe(
+    "A new Bot: a Bot's fields, and the framework it is built on. One closed object, not BotFields with harness added in an allOf, because each closed part of an allOf would refuse the other's fields.",
+  );
 
 export const CreateBotResponse = zod.object({
   bot: zod

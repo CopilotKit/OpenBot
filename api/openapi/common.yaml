@@ -1115,6 +1115,27 @@ components:
     InvalidCapabilityChanges: { $ref: './admin-settings.yaml#/components/responses/InvalidCapabilityChanges' }
     NetworkPolicyNotFound: { $ref: './admin-settings.yaml#/components/responses/NetworkPolicyNotFound' }
     NoTrailToReplay: { $ref: './admin-settings.yaml#/components/responses/NoTrailToReplay' }
+    PayloadTooLarge:
+      description: >-
+        The body is larger than this address takes. Only an address that
+        limits its body answers this; the detail says how much it takes where
+        the limit is a person's to meet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tooLarge:
+              value:
+                type: https://open.bot/errors/payload-too-large
+                title: The request is too large.
+                status: 413
+                detail: That request is too large.
+                code: PAYLOAD_TOO_LARGE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:
