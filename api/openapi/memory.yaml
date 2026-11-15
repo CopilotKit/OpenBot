@@ -845,7 +845,7 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: A memory kept in the backend can be edited or forgotten, not paused.
+                detail: This memory can be edited or forgotten, but not paused.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
@@ -886,7 +886,7 @@ components:
                 type: https://open.bot/errors/memory-unavailable
                 title: Memory is unavailable.
                 status: 503
-                detail: This memory is kept in OpenBot's backend, which cannot be reached right now. Try again.
+                detail: Couldn't reach this memory just now. Try again in a moment.
                 code: MEMORY_UNAVAILABLE
                 category: dependency
                 retryable: true

@@ -2475,7 +2475,7 @@ components:
                 type: https://open.bot/errors/learning-not-enabled
                 title: Learning isn't licensed.
                 status: 403
-                detail: The backend's licence doesn't include Learning.
+                detail: Learning isn't included in your plan.
                 code: LEARNING_NOT_ENABLED
                 category: permission
                 retryable: false
@@ -2649,7 +2649,7 @@ components:
                 type: https://open.bot/errors/learning-space-not-found
                 title: Learning space not found.
                 status: 404
-                detail: This Learning container doesn't exist in the backend yet.
+                detail: This Learning space isn't set up yet.
                 code: LEARNING_CONTAINER_NOT_FOUND
                 category: not_found
                 retryable: false
@@ -2667,7 +2667,7 @@ components:
                 type: https://open.bot/errors/learning-off
                 title: Learning is off.
                 status: 409
-                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
+                detail: Learning is turned off. An admin has to turn it on.
                 code: LEARNING_OFF
                 category: conflict
                 retryable: false
@@ -2721,7 +2721,7 @@ components:
                 type: https://open.bot/errors/rate-limited
                 title: Try again shortly.
                 status: 429
-                detail: The backend is busy. Try again in a minute.
+                detail: Learning is busy. Try again in a minute.
                 code: RATE_LIMITED
                 category: rate_limit
                 retryable: true
@@ -2739,7 +2739,7 @@ components:
                 type: https://open.bot/errors/learning-unreachable
                 title: Learning didn't answer.
                 status: 502
-                detail: Couldn't reach Learning in the backend. Try again.
+                detail: Couldn't reach Learning just now. Try again in a moment.
                 code: LEARNING_UNREACHABLE
                 category: dependency
                 retryable: true
@@ -2757,7 +2757,7 @@ components:
                 type: https://open.bot/errors/learning-unavailable
                 title: Learning is unavailable.
                 status: 503
-                detail: Couldn't read your Skills from the backend just now. Try again.
+                detail: Couldn't load your skills just now. Try again in a moment.
                 code: LEARNING_UNAVAILABLE
                 category: dependency
                 retryable: true
@@ -2777,7 +2777,7 @@ components:
                 type: https://open.bot/errors/learning-proposal-not-found
                 title: Proposal not found.
                 status: 404
-                detail: The backend no longer has this skill. Refresh the list.
+                detail: This skill is gone. Refresh the list.
                 code: LEARNING_PROPOSAL_NOT_FOUND
                 category: not_found
                 retryable: false
@@ -2797,7 +2797,7 @@ components:
                 type: https://open.bot/errors/learning-insight-not-found
                 title: Insight not found.
                 status: 404
-                detail: The backend no longer has this insight. Refresh the skill.
+                detail: This insight is gone. Open the skill again.
                 code: LEARNING_INSIGHT_NOT_FOUND
                 category: not_found
                 retryable: false
@@ -2875,7 +2875,7 @@ components:
                 type: https://open.bot/errors/learning-off
                 title: Learning is off.
                 status: 409
-                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
+                detail: Learning is turned off. An admin has to turn it on.
                 code: LEARNING_OFF
                 category: conflict
                 retryable: false
@@ -2886,7 +2886,7 @@ components:
                 type: https://open.bot/errors/learning-model-not-configured
                 title: Learning has no model.
                 status: 409
-                detail: The backend has no Learning model yet. Give its Learning agent a model and key, then try again.
+                detail: Learning has no model to learn with yet. An admin has to give it one.
                 code: LEARNING_MODEL_NOT_CONFIGURED
                 category: conflict
                 retryable: false
