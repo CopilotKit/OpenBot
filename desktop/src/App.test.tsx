@@ -5639,6 +5639,160 @@ test("after the restart a first install asked for, the next launch goes back to 
   expect(installationCalls()).toEqual([]);
 });
 
+/*
+ * Seen on a clean Windows machine: the first screen started OpenBot's big downloads (about 2 GB)
+ * before the person had chosen anything, so somebody who only connects to their company's OpenBot
+ * downloaded them for nothing. With nothing of OpenBot on the computer, they start once the person
+ * chooses this computer, with Install, and Install still waits for their look at the disk.
+ */
+function earlyDownloadCalls() {
+  return invokeCalls.filter((call) => call.command === "start_early_downloads");
+}
+
+/** A computer with nothing of OpenBot on it, and nothing in the way of installing it. */
+function cleanComputer(shell: Record<string, unknown> = {}) {
+  setupRootConfiguration("/tmp/openbot-clean-computer", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+    windows_restart_pending: false,
+    start_early_downloads: null,
+    ...shell,
+  });
+}
+
+test("a clean computer's first screen downloads nothing, and connecting to an OpenBot that runs elsewhere never does", async () => {
+  const signIn = deferred<null>();
+  cleanComputer({
+    check_openbot_address: { address: ELSEWHERE },
+    connect_to_openbot: () => signIn.promise,
+  });
+  const view = await renderApp();
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  // Self-hosted is picked to begin with: that alone is not a choice of this computer.
+  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+    "checked",
+    true,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(earlyDownloadCalls()).toEqual([]);
+  // Back and forth between the two, then Business and its address.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(earlyDownloadCalls()).toEqual([]);
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("OpenBot address"),
+    `${ELSEWHERE}{Enter}`,
+  );
+  await view.findByText("Finish signing in in your browser.");
+  await act(async () => signIn.resolve(null));
+  expect(view.getByText("Opening OpenBot…")).toBeTruthy();
+  expect(earlyDownloadCalls()).toEqual([]);
+  expect(installationCalls()).toEqual([]);
+});
+
+test("on a clean computer, Install with Self-hosted chosen starts the downloads, then waits for their look at the disk before building anything", async () => {
+  const looked = deferred<unknown>();
+  const preparation = deferred<void>();
+  cleanComputer({
+    early_downloads_measured: () => looked.promise,
+    prepare_installation: () => preparation.promise,
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await waitFor(() =>
+    expect(invokeCalls.map((call) => call.command)).toContain(
+      "early_downloads_measured",
+    ),
+  );
+  expect(earlyDownloadCalls()).toEqual([
+    {
+      command: "start_early_downloads",
+      args: { root: "/tmp/openbot-clean-computer" },
+    },
+  ]);
+  // Started first, so the look at the disk is theirs: never started, it answers at once.
+  const asked = invokeCalls.map((call) => call.command);
+  expect(asked.indexOf("start_early_downloads")).toBeLessThan(
+    asked.indexOf("early_downloads_measured"),
+  );
+  expect(installationCalls()).toEqual([]);
+  await act(async () => looked.resolve({ state: "downloading", bytes: 0 }));
+  await waitFor(() =>
+    expect(installationCalls().map((call) => call.command)).toEqual([
+      "prepare_installation",
+    ]),
+  );
+  expect(earlyDownloadCalls()).toHaveLength(1);
+});
+
+test("on a clean computer, Install on a disk too full starts the downloads' look at the disk and builds nothing", async () => {
+  cleanComputer({
+    early_downloads_measured: {
+      state: "short",
+      bytes: 0,
+      free: 16_096_509_952,
+      needed: 40 * 1024 ** 3,
+      download: 1_486_517_341,
+    },
+  });
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await waitFor(() =>
+    expect(invokeCalls.map((call) => call.command)).toContain(
+      "early_downloads_measured",
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(earlyDownloadCalls()).toHaveLength(1);
+  expect(installationCalls()).toEqual([]);
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+});
+
+test("an installation already on this computer starts the downloads when the first screen shows, as it always has", async () => {
+  setupRootConfiguration("/tmp/previously-hosted-downloads", async () =>
+    previouslyHostedConfiguration("langgraph"),
+  );
+  withLocalCli({ ...readyLocal(), start_early_downloads: null });
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await waitFor(() =>
+    expect(earlyDownloadCalls()).toEqual([
+      {
+        command: "start_early_downloads",
+        args: { root: "/tmp/previously-hosted-downloads" },
+      },
+    ]),
+  );
+  expect(installationCalls()).toEqual([]);
+});
+
+test("the launch after the restart a first install asked for starts the downloads before the install goes on, as it always has", async () => {
+  // The person chose this computer with Install, and Windows needed a restart first.
+  localStorage.setItem("openbot.setup.this-computer", "chosen");
+  const preparation = deferred<void>();
+  cleanComputer({ prepare_installation: () => preparation.promise });
+  await renderApp();
+  await waitFor(() =>
+    expect(installationCalls().map((call) => call.command)).toEqual([
+      "prepare_installation",
+    ]),
+  );
+  expect(earlyDownloadCalls()).toHaveLength(1);
+  const asked = invokeCalls.map((call) => call.command);
+  expect(asked.indexOf("start_early_downloads")).toBeLessThan(
+    asked.indexOf("prepare_installation"),
+  );
+});
+
 test("Windows detection failure blocks setup and displays its diagnostic", async () => {
   setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),

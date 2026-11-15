@@ -43,14 +43,16 @@ export type Hosting = "self-hosted" | "connect";
  * way it fits the window's default size (1000×800, less a title bar) with no scrollbar. Usage data
  * is not said here: it is the last screen's choice (`UsageDataChoice`).
  *
- * The big downloads start while this screen shows with Self-hosted chosen, before Install is
- * clicked, and its line says how far they are (`EarlyDownloadsLine`). Once they are done it says
- * nothing: Install is the next step either way.
+ * The big downloads start with Install (`startDownloads`), the moment the person chooses this
+ * computer, and never before: somebody who connects to their company's OpenBot downloads nothing.
+ * Where an installation is already on this computer they start when this screen shows. Its line
+ * says how far they are (`EarlyDownloadsLine`). Once they are done it says nothing: Install is the
+ * next step either way.
  *
  * On a disk too full for OpenBot, Install waits with the line that says so, and is there once the
  * download starts by itself. On Windows F it was pressable at 15 GB free: it built OpenBot's machine,
- * then the next step stopped for space, with less free than before. An Install pressed before the
- * downloads have looked at the disk asks them first (`earlyDownloadsMeasured`).
+ * then the next step stopped for space, with less free than before. Install asks the downloads it
+ * starts for their look at the disk first (`earlyDownloadsMeasured`), and goes on only with room.
  */
 export function Welcome({
   hosting,
@@ -58,6 +60,7 @@ export function Welcome({
   onThisComputer,
   saved,
   resumes = false,
+  startDownloads,
   onInstall,
   failure,
 }: {
@@ -78,6 +81,11 @@ export function Welcome({
     problem?: Problem | null;
     reopen?: () => Promise<void>;
   };
+  /**
+   * Starts the big downloads for this computer's install, which first look at its free disk.
+   * Install calls it before it asks for that look, so the answer is theirs.
+   */
+  startDownloads?: () => Promise<void>;
   onInstall: () => void;
   /** A failure from setup on this computer, shown inside this card rather than under it. */
   failure?: ReactNode;
@@ -162,7 +170,12 @@ export function Welcome({
       {connect ? (
         <ConnectToOpenBot connecting={connecting} />
       ) : (
-        <SelfHosted onInstall={onInstall} failure={failure} resumes={resumes} />
+        <SelfHosted
+          startDownloads={startDownloads}
+          onInstall={onInstall}
+          failure={failure}
+          resumes={resumes}
+        />
       )}
     </div>
   );
@@ -170,10 +183,12 @@ export function Welcome({
 
 /** What Self-hosted asks of this computer and why, then the way on. */
 function SelfHosted({
+  startDownloads,
   onInstall,
   failure,
   resumes,
 }: {
+  startDownloads?: () => Promise<void>;
   onInstall: () => void;
   failure?: ReactNode;
   resumes: boolean;
@@ -200,24 +215,31 @@ function SelfHosted({
           </button>
         </div>
       ) : (
-        <Install onInstall={onInstall} />
+        <Install startDownloads={startDownloads} onInstall={onInstall} />
       )}
       {failure}
     </>
   );
 }
 
-/** How long setup takes, Install, and the downloads this screen started. */
-function Install({ onInstall }: { onInstall: () => void }) {
+/** How long setup takes, Install, and the downloads Install starts. */
+function Install({
+  startDownloads,
+  onInstall,
+}: {
+  startDownloads?: () => Promise<void>;
+  onInstall: () => void;
+}) {
   const downloads = useEarlyDownloads();
   const [checking, setChecking] = useState(false);
   const short = downloads?.state === "short";
-  const install = () => {
+  const install = async () => {
     setChecking(true);
-    void earlyDownloadsMeasured().then((now) => {
-      setChecking(false);
-      if (now?.state !== "short") onInstall();
-    });
+    // The person chose this computer: its downloads start now, and look at the disk first.
+    await startDownloads?.();
+    const now = await earlyDownloadsMeasured();
+    setChecking(false);
+    if (now?.state !== "short") onInstall();
   };
   return (
     <>
@@ -225,7 +247,11 @@ function Install({ onInstall }: { onInstall: () => void }) {
         Setup takes 1 to 10 minutes, depending on your internet speed.
       </p>
       <div className="row">
-        <button type="button" disabled={short || checking} onClick={install}>
+        <button
+          type="button"
+          disabled={short || checking}
+          onClick={() => void install()}
+        >
           Install
         </button>
       </div>
