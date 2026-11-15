@@ -264,7 +264,7 @@ function TeamGrantsDialog({
         <DialogBody className="mt-4 overflow-y-auto">
           {choices.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              There are no teams yet. Create one in Admin, under Teams.
+              There are no teams yet. Create one on the Teams page.
             </p>
           ) : (
             // Filled rows: a card-coloured row is invisible against a dialog.

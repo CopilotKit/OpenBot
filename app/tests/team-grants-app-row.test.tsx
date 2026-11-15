@@ -238,7 +238,7 @@ test("an app granted to no team says so, and an organization with no teams says 
   const dialog = await view.findByRole("dialog");
   expect(
     within(dialog).getByText(
-      "There are no teams yet. Create one in Admin, under Teams.",
+      "There are no teams yet. Create one on the Teams page.",
     ),
   ).toBeTruthy();
   expect(within(dialog).queryByRole("checkbox")).toBeNull();
