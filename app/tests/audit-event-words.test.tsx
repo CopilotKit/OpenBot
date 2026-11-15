@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { AUDIT_EVENT_WORDS } from "@openbot/shared/audit-words";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -190,23 +191,36 @@ test("the search box still finds a row by its stored name", async () => {
 });
 
 /**
- * What happens to an organization is on its own trail: made, renamed, a person invited, joining,
- * removed or given another role. Each reads in words, and as something that happened, never as
+ * What happens to an organization is on its own trail: made, renamed, a person invited, an
+ * invitation cancelled, joining, a member removed or given another role. Each reads in words, and as something that happened, never as
  * something OpenBot blocked.
  */
 test("what happened to an organization reads in words, and none of it as blocked", async () => {
   const ORGANIZATION_WORDS: Record<string, string> = {
     "organization.created": "Create an organization",
     "organization.renamed": "Rename an organization",
-    "organization.member_invited": "Invite a person to an organization",
-    "organization.invitation_canceled":
-      "Cancel an invitation to an organization",
+    "organization.member_invited": "Invite a person",
+    "organization.invitation_canceled": "Cancel an invitation",
     "organization.member_joined": "Join an organization",
-    "organization.member_removed": "Remove a person from an organization",
-    "organization.member_role_changed":
-      "Change a person's role in an organization",
+    "organization.member_removed": "Remove a member",
+    "organization.member_role_changed": "Change a member's role",
   };
   const types = Object.keys(ORGANIZATION_WORDS);
+  /*
+   * Short enough for Activity's What column, as the people events are: at 700px the longer words
+   * ("Change a person's role in an organization") ran to three lines. Each still differs from every
+   * other event's words, so a filter chip never names two kinds of row.
+   */
+  for (const type of types) {
+    const words = ORGANIZATION_WORDS[type] as string;
+    expect(words.length).toBeLessThanOrEqual(
+      AUDIT_EVENT_WORDS["person.role_changed"]?.length ?? 0,
+    );
+    const shared = Object.entries(AUDIT_EVENT_WORDS).filter(
+      ([other, said]) => other !== type && said === words,
+    );
+    expect(shared).toEqual([]);
+  }
   const view = await renderAs(
     "team",
     types.map((eventType, index) => ({
