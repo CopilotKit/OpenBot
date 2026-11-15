@@ -950,8 +950,12 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
     expect(page().getByText("Draft the launch post")).toBeTruthy();
-    expect(page().getByRole("heading", { name: "In progress" })).toBeTruthy();
-    expect(page().getByRole("heading", { name: "Completed" })).toBeTruthy();
+    expect(page().getByRole("heading", { name: "Working" })).toBeTruthy();
+    expect(page().getByRole("heading", { name: "Done" })).toBeTruthy();
+    // What waits on the person is on the board above, once.
+    expect(page().getAllByRole("heading", { name: "Needs you" }).length).toBe(
+      1,
+    );
   });
 
   test("Ideas shows only the centre Bot's suggestions and starts one through OpenBot", async () => {

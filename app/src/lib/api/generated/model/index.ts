@@ -1154,6 +1154,7 @@ export * from "./taskOrigin";
 export * from "./taskPage";
 export * from "./taskResponse";
 export * from "./taskStatus";
+export * from "./taskSteer";
 export * from "./teamBot";
 export * from "./teamBotAudience";
 export * from "./teamBotConsentAnswer";
