@@ -2432,6 +2432,12 @@ components:
             - 'null'
           format: date-time
           description: When the work it is doing now began. Null or absent unless it is working.
+        tryingAgainAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
         lastActivityAt:
           type: string
           format: date-time

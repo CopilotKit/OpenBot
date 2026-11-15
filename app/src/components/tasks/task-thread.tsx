@@ -97,17 +97,67 @@ const STATE: Record<
 const STOPPED = "You stopped this. Anything it had already done stays done.";
 
 /**
+ * When a working task's turn is tried again, while that is still ahead of this clock: its turn hit
+ * something that passes (a rate limit, a service that did not answer) and waits. Undefined when it
+ * is not waiting, when the time has passed, and once it is no longer working.
+ */
+function tryingAgainAt(
+  task: BotTask | undefined,
+  state: CardState,
+  now: number,
+): number | undefined {
+  if (state !== "working" || !task?.tryingAgainAt) return undefined;
+  const at = Date.parse(task.tryingAgainAt);
+  return Number.isFinite(at) && at > now ? at : undefined;
+}
+
+/**
+ * What a waiting task says in place of its last activity: the time on the person's own clock, with
+ * the day when it is not today, and no clock time for a wait of under a minute.
+ */
+function tryingAgain(at: number, now: number): ReactNode {
+  if (at - now < 60_000) return "Trying again in a moment";
+  const when = new Date(at);
+  const time = when.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const today = when.toDateString() === new Date(now).toDateString();
+  return (
+    <>
+      Waiting to try again{" "}
+      <time dateTime={when.toISOString()} title={when.toLocaleString()}>
+        {today
+          ? `at ${time}`
+          : `on ${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })} at ${time}`}
+      </time>
+    </>
+  );
+}
+
+/**
  * How long a working task has been at it, and when a task last did something, kept right while the
  * conversation stays open: a long task that says nothing is seen to be alive, or seen to have gone
  * quiet. Counted every second while it works, and every half minute otherwise.
+ *
+ * A task waiting to try again says that and when in place of its last activity, which would read
+ * as a task gone quiet. `now` is the card's clock, so the line and the card change together.
  */
-function TaskTimes({ task, state }: { task: BotTask; state: CardState }) {
+function TaskTimes({
+  task,
+  state,
+  now,
+}: {
+  task: BotTask;
+  state: CardState;
+  now: number;
+}) {
   const working = state === "working";
-  const now = useNow(working ? 1_000 : 30_000);
   const since =
     working && task.workingSince ? Date.parse(task.workingSince) : NaN;
   const at = task.lastActivityAt;
   const lead = state === "done" ? "Finished" : "Last activity";
+  const retryAt = tryingAgainAt(task, state, now);
   return (
     <>
       {Number.isFinite(since) ? (
@@ -121,7 +171,14 @@ function TaskTimes({ task, state }: { task: BotTask; state: CardState }) {
           </time>
         </span>
       ) : null}
-      {at ? (
+      {retryAt !== undefined ? (
+        <span
+          className="block font-normal text-muted-foreground"
+          data-slot="task-trying-again"
+        >
+          {tryingAgain(retryAt, now)}
+        </span>
+      ) : at ? (
         <span
           className="block font-normal text-muted-foreground"
           data-slot="task-last-activity"
@@ -202,13 +259,19 @@ export function TaskCard({
     ...taskQueryOptions(taskId ?? ""),
     enabled: Boolean(taskId),
   });
+  const state = cardState(taskId ? task.data : undefined);
+  // The card's clock, once there is a task to time: every second while it works, and every half
+  // minute otherwise.
+  const now = useNow(
+    state === "working" ? 1_000 : 30_000,
+    task.data !== undefined,
+  );
   if (refusal)
     return (
       <TaskFrame state="failed" title={title}>
         <p className="text-muted-foreground text-sm">{refusal}</p>
       </TaskFrame>
     );
-  const state = cardState(taskId ? task.data : undefined);
   /*
    * What it waits for is said once, on the needs-you line the task posts, not here as well: the
    * card says only that it needs the person, and leads into the thread.
@@ -224,7 +287,14 @@ export function TaskCard({
   return (
     <TaskFrame
       below={children}
-      times={task.data ? <TaskTimes state={state} task={task.data} /> : null}
+      times={
+        task.data ? (
+          <TaskTimes now={now} state={state} task={task.data} />
+        ) : null
+      }
+      waiting={
+        tryingAgainAt(task.data, state, now) !== undefined ? "retry" : undefined
+      }
       action={
         channelId ? (
           <OpenThread channelId={channelId} primary={state === "needs"}>
@@ -258,12 +328,15 @@ function TaskFrame({
   title,
   action,
   times,
+  waiting,
   below,
   children,
 }: {
   state: CardState;
   title: string;
   action?: ReactNode;
+  /** Set while a working task waits to try again, so the card can be found as waiting. */
+  waiting?: "retry";
   /** How long it has worked and when it last did something, after and under its state. */
   times?: ReactNode;
   /** What sits directly under the card, in the card's own column. */
@@ -278,6 +351,7 @@ function TaskFrame({
         className="w-full rounded-xl border border-border bg-card p-3 dark:border-transparent"
         data-slot="task-card"
         data-state={state}
+        data-waiting={waiting}
       >
         <div className="flex items-start gap-3">
           <StateIcon state={state} />
