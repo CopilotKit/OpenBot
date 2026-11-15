@@ -114,6 +114,8 @@
         "mobile/src/**",
         "extension/src/**",
         "!app/src/lib/api/generated/**",
+        "!mobile/src/api/generated/**",
+        "!extension/src/shared/generated/**",
         "!**/tests/**",
         "!**/*.test.ts",
         "!**/*.test.tsx"
