@@ -22,6 +22,7 @@ import { ClientError } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
+import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { searchTextEntry } from "@/lib/search-text";
@@ -147,7 +148,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * page can say so instead of letting the Bot answer as if nothing were missing. `startNew`
    * mints another fresh thread on demand for the New chat control below.
    */
-  const { threadId, history, startNew } = useBotThread(agentId);
+  const { threadId, liveThreadId, history, startNew } = useBotThread(agentId);
   /*
    * A turn that ends without an answer has to be said out loud here, because the packaged chat says
    * nothing. It reports a failed run to an `onError` prop and otherwise carries on as though the
@@ -251,6 +252,18 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
            * old id. A key that omits the thread would leave the previous conversation on screen
            * under a composer that silently posts to the new one.
            */}
+          {/*
+           * A run started elsewhere on this thread is picked up live. Live updates name the thread
+           * by its live id, which the chat is helped to hear only where that is not the id it has.
+           */}
+          {threadId && liveThreadId && liveThreadId !== threadId ? (
+            <LiveThreadUpdates
+              agentId={agentId}
+              key={`${agentId}:${threadId}`}
+              liveThreadId={liveThreadId}
+              threadId={threadId}
+            />
+          ) : null}
           {threadId ? (
             <CopilotChat
               agentId={agentId}

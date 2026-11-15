@@ -1324,6 +1324,12 @@ export const CreateConversationThreadHeader = zod.object({
 
 export const CreateConversationThreadResponse = zod.object({
   threadId: zod.string().describe("The new thread's id."),
+  liveThreadId: zod
+    .string()
+    .optional()
+    .describe(
+      "The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.",
+    ),
 });
 
 /**
@@ -1346,6 +1352,12 @@ export const GetConversationThreadResponse = zod.object({
   known: zod
     .boolean()
     .describe("Whether the thread still holds the caller's conversation."),
+  liveThreadId: zod
+    .string()
+    .optional()
+    .describe(
+      "The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.",
+    ),
 });
 
 /**
