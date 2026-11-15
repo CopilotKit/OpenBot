@@ -9,8 +9,8 @@ export const whatIfKeys = {
 };
 
 /**
- * What an action may name on this OpenBot: its Bots and their owners, its people and groups, and its
- * apps with their tools. The only values an action's chips hold, and the only ones the model may pick.
+ * What an action may name on this OpenBot: its Bots and their owners, its people, teams and directory
+ * groups, and its apps with their tools. The only values an action's chips hold, and the only ones the model may pick.
  */
 export function whatIfVocabularyQueryOptions() {
   return queryOptions({
