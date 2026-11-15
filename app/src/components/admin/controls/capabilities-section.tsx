@@ -244,13 +244,17 @@ function OverridesDialog({
             onValueChange={(value) => setChosen(String(value))}
             value={scopeKey(scope)}
           >
-            <SelectTrigger aria-label="Scope">
+            {/* As wide as the dialog, as a team is picked on every other screen: the list is as wide
+                as its trigger, and a team's name is longer than "Admins". */}
+            <SelectTrigger aria-label="Scope" className="w-full">
               <SelectValue>{scope.label}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {scopes.map((candidate) => (
+                  // A long name wraps under itself: cut short, two teams could read alike.
                   <SelectItem
+                    className="*:first:whitespace-normal"
                     key={scopeKey(candidate)}
                     value={scopeKey(candidate)}
                   >

@@ -1,6 +1,6 @@
 import { IconBuildingBank, IconUsersGroup } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useId } from "react";
+import { Fragment, type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -55,25 +55,28 @@ export function SharedApprovalFields({
         Who can use the shared account through this Bot
       </legend>
       {AUDIENCES.map((option) => (
-        <label className="flex items-center gap-2" key={option.audience}>
-          <input
-            checked={value.audience === option.audience}
-            name="shared-audience"
-            onChange={() =>
-              onChange({
-                ...value,
-                audience: option.audience,
-                members: option.audience === "people" ? value.members : [],
-              })
-            }
-            type="radio"
-          />
-          {option.label}
-        </label>
+        <Fragment key={option.audience}>
+          <label className="flex items-center gap-2">
+            <input
+              checked={value.audience === option.audience}
+              name="shared-audience"
+              onChange={() =>
+                onChange({
+                  ...value,
+                  audience: option.audience,
+                  members: option.audience === "people" ? value.members : [],
+                })
+              }
+              type="radio"
+            />
+            {option.label}
+          </label>
+          {/* Under the choice it belongs to, so the teams never read as part of the one after. */}
+          {option.audience === "people" && value.audience === "people" ? (
+            <NamedMembers onChange={onChange} value={value} />
+          ) : null}
+        </Fragment>
       ))}
-      {value.audience === "people" ? (
-        <NamedMembers onChange={onChange} value={value} />
-      ) : null}
       <label className="flex items-center gap-2">
         <input
           checked={value.outsideInput}

@@ -247,7 +247,8 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
                 )}
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>{titleOf(policy)}</ItemTitle>
+                {/* A long team name wraps, and the row is a button, whose words center unless told. */}
+                <ItemTitle className="text-left">{titleOf(policy)}</ItemTitle>
                 <ItemDescription>{summarizePolicy(policy)}</ItemDescription>
               </ItemContent>
               <ItemActions>
