@@ -152,6 +152,73 @@ function SignOutRow({ host }: { host: string }) {
   );
 }
 
+/**
+ * Settings → Computer inside an OpenBot Desktop that runs OpenBot on this computer: the way to
+ * connect to an OpenBot that runs somewhere else instead. Drawn under `ThisComputerSections`, and
+ * only by a desktop app that can connect.
+ *
+ * It stops OpenBot here, as Stop does, and the window shows setup at the choice of where OpenBot
+ * runs. This page goes with it.
+ */
+export function ConnectInsteadSection() {
+  const [open, setOpen] = useState(false);
+  const change = useMutation(changeConnectionMutationOptions());
+  const leaving = change.isPending || change.isSuccess;
+  return (
+    <PageSection title="Connection">
+      <PageRows>
+        <Item size="sm">
+          <RowMark>
+            <IconDeviceLaptop className="size-4" />
+          </RowMark>
+          <ItemContent>
+            <ItemTitle>OpenBot runs on this computer</ItemTitle>
+            <ItemDescription className="line-clamp-none">
+              You can connect to an OpenBot your company runs instead.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button onClick={() => setOpen(true)} size="sm" variant="outline">
+              Connect to an OpenBot
+            </Button>
+          </ItemActions>
+        </Item>
+      </PageRows>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect to an OpenBot instead?</DialogTitle>
+            <DialogDescription>
+              OpenBot stops on this computer and setup opens, where you type the
+              address of the OpenBot to connect to. Nothing on this computer is
+              lost, and you can come back to it later.
+            </DialogDescription>
+          </DialogHeader>
+          {change.error ? (
+            <DialogBody className="mt-4 text-sm">
+              <p className="text-destructive" role="alert">
+                Couldn't open setup. Try again.
+              </p>
+            </DialogBody>
+          ) : null}
+          <DialogFooter className="mt-4">
+            <Button onClick={() => setOpen(false)} size="sm" variant="ghost">
+              Cancel
+            </Button>
+            <Button
+              disabled={leaving}
+              onClick={() => change.mutate()}
+              size="sm"
+            >
+              {leaving ? "Stopping OpenBot…" : "Stop and open setup"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageSection>
+  );
+}
+
 function UseThisComputerRow({ host }: { host: string }) {
   const [open, setOpen] = useState(false);
   const change = useMutation(changeConnectionMutationOptions());

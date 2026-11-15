@@ -3,7 +3,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { BrowserSections } from "@/components/settings/browsers/browser-sections";
-import { ConnectionSections } from "@/components/settings/connection-sections";
+import {
+  ConnectInsteadSection,
+  ConnectionSections,
+} from "@/components/settings/connection-sections";
 import { ThisComputerSections } from "@/components/settings/this-computer-sections";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
@@ -69,7 +72,10 @@ function ComputerPage() {
       {!desktop || !connection ? null : connection.mode === "connected" ? (
         <ConnectionSections address={connection.address} />
       ) : (
-        <ThisComputerSections />
+        <>
+          <ThisComputerSections />
+          {connection.canConnect ? <ConnectInsteadSection /> : null}
+        </>
       )}
       <BrowserSections />
     </PageShell>

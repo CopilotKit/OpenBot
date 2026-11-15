@@ -129,10 +129,15 @@ export type DesktopUsageData = {
  * desktop app keeps that and the page never holds it.
  */
 export type DesktopConnection =
-  | { mode: "local"; address: null }
+  /** `canConnect`: the desktop app is one that can connect to an OpenBot elsewhere. */
+  | { mode: "local"; address: null; canConnect: boolean }
   | { mode: "connected"; address: string };
 
-const ON_THIS_COMPUTER: DesktopConnection = { mode: "local", address: null };
+const ON_THIS_COMPUTER: DesktopConnection = {
+  mode: "local",
+  address: null,
+  canConnect: false,
+};
 
 export const desktopKeys = {
   all: ["desktop"] as const,
@@ -174,7 +179,7 @@ export function desktopConnectionQueryOptions() {
         }>("connection");
         return answer?.mode === "connected" && answer.address
           ? { mode: "connected", address: answer.address }
-          : ON_THIS_COMPUTER;
+          : { mode: "local", address: null, canConnect: true };
       } catch {
         return ON_THIS_COMPUTER;
       }

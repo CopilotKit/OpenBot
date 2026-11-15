@@ -173,18 +173,42 @@ test("connected, Settings → Computer says where the app is connected and shows
   expect(header?.textContent).not.toContain("runs on this computer");
 });
 
-test("with OpenBot on this computer, the page is as it was: its services, and no Connection section", async () => {
+test("with OpenBot on this computer, its services are as they were, and the way to connect to an OpenBot instead is offered", async () => {
   const view = renderComputer("local");
   await view.findByRole("heading", { name: "App" });
   expect(view.getByText("Installed in")).toBeTruthy();
-  expect(view.queryByRole("heading", { name: "Connection" })).toBeNull();
+  expect(view.queryByText("Connected to")).toBeNull();
+  await view.findByRole("heading", { name: "Connection" });
+  expect(view.getByText("OpenBot runs on this computer")).toBeTruthy();
+});
+
+test("Connect to an OpenBot asks first, saying OpenBot stops here and nothing is lost, then asks the desktop app", async () => {
+  const view = renderComputer("local");
+  fireEvent.click(
+    await view.findByRole("button", { name: "Connect to an OpenBot" }),
+  );
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.textContent).toContain("Connect to an OpenBot instead?");
+  expect(dialog.textContent).toContain("OpenBot stops on this computer");
+  expect(dialog.textContent).toContain("Nothing on this computer is lost");
+  expect(asked).not.toContain("change_connection");
+  fireEvent.click(
+    Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent === "Stop and open setup",
+    ) as HTMLButtonElement,
+  );
+  await waitFor(() => expect(asked).toContain("change_connection"));
 });
 
 test("a desktop app from before it could connect is read as OpenBot on this computer", async () => {
   const view = renderComputer("older");
   await view.findByRole("heading", { name: "App" });
   expect(asked).toContain("connection");
+  // It cannot connect, so it is not offered.
   expect(view.queryByRole("heading", { name: "Connection" })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Connect to an OpenBot" }),
+  ).toBeNull();
 });
 
 test("Sign out asks first, then asks the desktop app to sign out", async () => {
