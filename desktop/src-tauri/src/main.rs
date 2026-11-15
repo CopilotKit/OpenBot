@@ -1189,14 +1189,23 @@ fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, why: &str) {
         let flashing = window.clone();
         // On the window's own thread, as `notice::bring_to_front` is.
         let _ = window.run_on_main_thread(move || {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetForegroundWindow, SetForegroundWindow,
+            };
             let front = come_forward(
                 || {
+                    // SAFETY: `hwnd` is this window's live handle, read just now.
                     hwnd.is_some_and(|hwnd| {
-                        use windows::Win32::Foundation::HWND;
-                        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-                        // SAFETY: `hwnd` is this window's live handle, read just now.
                         unsafe { SetForegroundWindow(HWND(hwnd as *mut core::ffi::c_void)) }
                             .as_bool()
+                    })
+                },
+                || {
+                    hwnd.is_some_and(|hwnd| {
+                        // SAFETY: no arguments; it only reads which window is in front.
+                        let front = unsafe { GetForegroundWindow() };
+                        front == HWND(hwnd as *mut core::ffi::c_void)
                     })
                 },
                 || {
@@ -1204,10 +1213,11 @@ fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, why: &str) {
                         .request_user_attention(Some(tauri::UserAttentionType::Informational));
                 },
             );
-            if front == Front::Flashed {
-                log::info!(
+            match front {
+                Front::Came => log::info!("[front] {why}: in front"),
+                Front::Flashed => log::info!(
                     "[front] {why}: Windows kept another window in front; flashed the taskbar"
-                );
+                ),
             }
         });
     }
@@ -1282,11 +1292,27 @@ enum Front {
     Flashed,
 }
 
-/// Bring the window forward with `set_foreground`, and if Windows refuses, `flash` its taskbar
-/// button. Nothing else: no key pressed or released on the person's behalf.
+/**
+Ask for the foreground with `set_foreground`, then look at whether the window is in front
+(`in_front`), and only if it is not, `flash` its taskbar button. What is in front decides, not what
+`set_foreground` answered: the person sees the window, not the answer. Nothing else: no key pressed
+or released on the person's behalf, no input attached to another thread.
+
+Windows lets a process take the foreground only when it is the foreground process, was started by
+it, received the last input event, or the foreground lock time-out has passed ("SetForegroundWindow
+function", Remarks, Microsoft Learn). After Allow in the browser, the browser is the foreground
+process and took the last input, and the request it then sends this app's loopback listener passes
+none of that on. A refusal there is Windows' rule, so the browser tab tells the person to go back
+to OpenBot (`sign_in::SIGNED_IN_PAGE`).
+*/
 #[cfg_attr(not(windows), allow(dead_code))]
-fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> Front {
-    if set_foreground() {
+fn come_forward(
+    set_foreground: impl FnOnce() -> bool,
+    in_front: impl FnOnce() -> bool,
+    flash: impl FnOnce(),
+) -> Front {
+    let _answered = set_foreground();
+    if in_front() {
         Front::Came
     } else {
         flash();
@@ -6784,11 +6810,7 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                     desktop_connected::leaves_for_browser(webview.app_handle(), destination)
                 {
                     if leaves {
-                        use tauri_plugin_opener::OpenerExt;
-                        let _ = webview
-                            .app_handle()
-                            .opener()
-                            .open_url(destination.as_str(), None::<&str>);
+                        open_in_browser(webview.app_handle(), destination);
                     }
                     return !leaves;
                 }
@@ -6808,14 +6830,22 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             if !from_openbot {
                 return true;
             }
-            use tauri_plugin_opener::OpenerExt;
-            let _ = webview
-                .app_handle()
-                .opener()
-                .open_url(destination.as_str(), None::<&str>);
+            open_in_browser(webview.app_handle(), destination);
             false
         })
         .build()
+}
+
+/// Hand `destination` to the person's default browser, and say in the log that it did, or that the
+/// browser did not open it (`outside_links::described` names it).
+fn open_in_browser<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &tauri::Url) {
+    use tauri_plugin_opener::OpenerExt;
+    let connected = desktop_connected::connected_address(app);
+    let shown = outside_links::described(destination, connected.as_deref());
+    match app.opener().open_url(destination.as_str(), None::<&str>) {
+        Ok(()) => log::info!("[window] opened {shown} in the browser"),
+        Err(error) => log::warn!("[window] the browser did not open {shown}: {error}"),
+    }
 }
 
 /**
@@ -6889,14 +6919,10 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             // Showing an OpenBot that runs elsewhere: whatever is not the relay's own page opens
             // in the browser, as a navigation to it would (`outside_links_guard`).
             match desktop_connected::leaves_for_browser(&opener, &destination) {
-                Some(true) => {
-                    use tauri_plugin_opener::OpenerExt;
-                    let _ = opener.opener().open_url(destination.as_str(), None::<&str>);
-                }
+                Some(true) => open_in_browser(&opener, &destination),
                 Some(false) => {}
-                None => outside_links::new_window(&destination, |to| {
-                    use tauri_plugin_opener::OpenerExt;
-                    let _ = opener.opener().open_url(to, None::<&str>);
+                None => outside_links::new_window(&destination, |_| {
+                    open_in_browser(&opener, &destination);
                 }),
             }
             tauri::webview::NewWindowResponse::Deny
@@ -12408,7 +12434,11 @@ fn main() {
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
-                let _ = window.eval(outside_links::PAGE);
+                // On the relay's pages only the page's own origin is OpenBot (`page_for`).
+                let _ = window.eval(outside_links::page_for(desktop_connected::is_relay_page(
+                    window.app_handle(),
+                    payload.url(),
+                )));
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
@@ -17127,27 +17157,46 @@ mod tests {
     /// "[front] the engine machine is prepared" with the browser in front.
     #[test]
     fn coming_forward_with_another_window_in_front_flashes_and_sends_no_input() {
-        let done = std::cell::RefCell::new(Vec::new());
-        let front = come_forward(
-            || {
-                done.borrow_mut().push("set foreground");
-                false
-            },
-            || done.borrow_mut().push("flash the taskbar"),
+        // What Windows answers (`SetForegroundWindow`), and which window is in front after.
+        let come = |granted: bool, in_front: bool| {
+            let done = std::cell::RefCell::new(Vec::new());
+            let front = come_forward(
+                || {
+                    done.borrow_mut().push("set foreground");
+                    granted
+                },
+                || {
+                    done.borrow_mut().push("look at what is in front");
+                    in_front
+                },
+                || done.borrow_mut().push("flash the taskbar"),
+            );
+            (front, done.into_inner())
+        };
+        // Refused, the browser still in front: the taskbar button flashes.
+        assert_eq!(
+            come(false, false),
+            (
+                Front::Flashed,
+                vec![
+                    "set foreground",
+                    "look at what is in front",
+                    "flash the taskbar"
+                ]
+            )
         );
-        assert_eq!(front, Front::Flashed);
-        assert_eq!(*done.borrow(), ["set foreground", "flash the taskbar"]);
-        // Allowed in front: nothing flashes.
-        let done = std::cell::RefCell::new(Vec::new());
-        let front = come_forward(
-            || {
-                done.borrow_mut().push("set foreground");
-                true
-            },
-            || done.borrow_mut().push("flash the taskbar"),
+        // Allowed and in front: nothing flashes.
+        assert_eq!(
+            come(true, true),
+            (
+                Front::Came,
+                vec!["set foreground", "look at what is in front"]
+            )
         );
-        assert_eq!(front, Front::Came);
-        assert_eq!(*done.borrow(), ["set foreground"]);
+        // Said yes, but another window is still in front: what is in front decides, so it flashes.
+        assert_eq!(come(true, false).0, Front::Flashed);
+        // Said no because the window was in front already: nothing to flash for.
+        assert_eq!(come(false, true).0, Front::Came);
         // On Windows nothing reaches tao's `set_focus` (its Alt press): every window comes
         // forward through `focus`, whose only `set_focus` is for the other systems. And nothing in
         // this file sends key input of its own.

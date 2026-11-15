@@ -40,11 +40,20 @@ const REFRESH_BEFORE_END: Duration = Duration::from_secs(60);
 /// that answers 401 whatever the token would use a refresh token on every request.
 const REFUSED_REFRESH_EVERY: Duration = Duration::from_secs(30);
 
-/// What the browser tab shows once the sign-in has come back.
-pub const SIGNED_IN_PAGE: &str = "You're signed in. You can close this tab and go back to OpenBot.";
-/// What it shows when the sign-in was refused or was not this app's.
+/// The browser tab's heading once the sign-in has come back.
+pub const SIGNED_IN_HEADING: &str = "You're signed in";
+/// And its sentence. Windows may keep the browser in front of the app (`come_forward` in the
+/// app), so it says where to go next.
+pub const SIGNED_IN_PAGE: &str =
+    "Go back to the OpenBot app to keep going. You can close this tab.";
+/// The heading when the sign-in was refused or was not this app's.
+pub const NOT_SIGNED_IN_HEADING: &str = "Sign-in didn't finish";
+/// And its sentence.
 pub const NOT_SIGNED_IN_PAGE: &str =
-    "Sign-in didn't finish. You can close this tab and go back to OpenBot.";
+    "Go back to the OpenBot app to try again. You can close this tab.";
+
+/// What the tab's answer allows the page to load: its own inline styles, and nothing else.
+pub const END_PAGE_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'";
 
 /// A sign-in that is waiting for the browser, so Cancel can end it.
 #[derive(Default)]
@@ -544,16 +553,16 @@ fn callback(stream: &mut TcpStream, state: &str) -> Callback {
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let parsed = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok();
     let Some(parsed) = parsed.filter(|url| method == "GET" && url.path() == CALLBACK_PATH) else {
-        page(stream, "404 Not Found", NOT_SIGNED_IN_PAGE);
+        page(stream, "404 Not Found", false);
         return Callback::NotOurs;
     };
     let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
     if query.get("state").map(String::as_str) != Some(state) {
-        page(stream, "400 Bad Request", NOT_SIGNED_IN_PAGE);
+        page(stream, "400 Bad Request", false);
         return Callback::NotOurs;
     }
     if let Some(error) = query.get("error") {
-        page(stream, "200 OK", NOT_SIGNED_IN_PAGE);
+        page(stream, "200 OK", false);
         // Only the code's own characters: it goes into the log.
         return Callback::Refused(
             error
@@ -565,27 +574,155 @@ fn callback(stream: &mut TcpStream, state: &str) -> Callback {
     }
     match query.get("code").filter(|code| !code.is_empty()) {
         Some(code) => {
-            page(stream, "200 OK", SIGNED_IN_PAGE);
+            page(stream, "200 OK", true);
             Callback::Code(code.clone())
         }
         None => {
-            page(stream, "400 Bad Request", NOT_SIGNED_IN_PAGE);
+            page(stream, "400 Bad Request", false);
             Callback::NotOurs
         }
     }
 }
 
-/// A small plain page for the browser tab.
-fn page(stream: &mut TcpStream, status: &str, sentence: &str) {
-    let body = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>OpenBot</title>\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>\
-         <body style=\"font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 28rem; \
-         padding: 0 1rem;\"><p>{sentence}</p></body></html>"
-    );
+/// The browser tab's page: signed in, or the sign-in did not finish (`end_page`).
+pub fn end_page_for(signed_in: bool) -> String {
+    if signed_in {
+        end_page(SIGNED_IN_HEADING, SIGNED_IN_PAGE)
+    } else {
+        end_page(NOT_SIGNED_IN_HEADING, NOT_SIGNED_IN_PAGE)
+    }
+}
+
+/**
+The styles of the tab's page, inline: it is served by this app from 127.0.0.1 and loads nothing.
+OpenBot's own tokens (`app/src/styles.css`, as the setup window copies them in `desktop/src/styles.css`):
+the frame's lavender ground with a card on it, its type, its 10px radius, and the orb, OpenBot's
+mark, as the setup window draws it. Light and dark follow the system, as the setup window does.
+Inter when the computer has it, the system's own face otherwise: a font is a file, and this page
+fetches none.
+*/
+const END_PAGE_STYLE: &str = r#"
+:root {
+  --background: oklch(0.983 0.003 286.4);
+  --foreground: oklch(0.108 0.015 220.9);
+  --card: oklch(1 0 0);
+  --muted-foreground: oklch(0.506 0.013 285.9);
+  --border: oklch(0.894 0.014 286.1);
+  --sidebar: oklch(0.948 0.011 286.2);
+  --radius: 0.625rem;
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.182 0.023 296.6);
+    --foreground: oklch(0.956 0.005 286.3);
+    --card: oklch(0.212 0.028 297.1);
+    --muted-foreground: oklch(0.69 0.017 285.9);
+    --border: oklch(0.28 0.035 298.6);
+    --sidebar: oklch(0.156 0.017 295.8);
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--sidebar);
+  color: var(--foreground);
+  font-family: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+main {
+  width: 100%;
+  max-width: 26rem;
+  padding: 36px 32px 32px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.orb {
+  --c1: oklch(68% 0.21 350);
+  --c2: oklch(70% 0.18 210);
+  --c3: oklch(66% 0.2 285);
+  --c4: oklch(72% 0.19 325);
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  border-radius: 50%;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  flex: none;
+  background:
+    radial-gradient(circle at 78% 22%, var(--c1), transparent 58%),
+    radial-gradient(circle at 26% 72%, var(--c3), transparent 60%),
+    radial-gradient(circle at 46% 78%, var(--c2), transparent 55%),
+    radial-gradient(circle at 62% 38%, var(--c4), transparent 62%);
+  filter: saturate(0.9);
+}
+.orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 24%, hsl(0 0% 100% / 0.32), transparent 34%),
+    radial-gradient(circle at 72% 80%, hsl(0 0% 100% / 0.07), transparent 48%);
+  mix-blend-mode: screen;
+}
+.orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px hsl(0 0% 100% / 0.16),
+    inset 0 2px 4px hsl(0 0% 100% / 0.22);
+}
+h1 {
+  margin: 0 0 8px;
+  font-size: 1.40625rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+"#;
+
+/// The tab's page: OpenBot's orb on a card, a heading, and a sentence. No script, and
+/// nothing loaded from anywhere (`END_PAGE_STYLE`, `END_PAGE_POLICY`).
+pub fn end_page(heading: &str, sentence: &str) -> String {
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <meta name=\"color-scheme\" content=\"light dark\"><title>OpenBot</title>\
+         <style>{END_PAGE_STYLE}</style></head><body><main>\
+         <div class=\"orb\" aria-hidden=\"true\"></div>\
+         <h1>{heading}</h1><p>{sentence}</p></main></body></html>"
+    )
+}
+
+/// Answer the browser tab with its page, which loads nothing (`END_PAGE_POLICY`).
+fn page(stream: &mut TcpStream, status: &str, signed_in: bool) {
+    let body = end_page_for(signed_in);
     let _ = stream.write_all(
         format!(
             "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
+             Content-Security-Policy: {END_PAGE_POLICY}\r\n\
              Cache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
@@ -637,9 +774,19 @@ mod tests {
         let scopes: Vec<&str> = asked["scope"].split(' ').collect();
         assert_eq!(scopes, metadata.scopes);
         assert!(scopes.contains(&"offline_access"));
-        // What the tab said.
+        // What the tab said, on a page that may load nothing but its own styles.
         let tab = browser.tab();
         assert!(tab.contains(SIGNED_IN_PAGE), "{tab}");
+        assert!(
+            tab.contains(&format!("<h1>{SIGNED_IN_HEADING}</h1>")),
+            "{tab}"
+        );
+        assert!(
+            tab.contains(&format!(
+                "\r\nContent-Security-Policy: {END_PAGE_POLICY}\r\n"
+            )),
+            "{tab}"
+        );
 
         // The access token is one that OpenBot honours, and only the refresh token is stored.
         let access = session.access().unwrap();
@@ -678,6 +825,49 @@ mod tests {
         // One exchange, for the real code; the forged one never reached the token endpoint.
         assert_eq!(openbot.token_requests().len(), 1);
         assert!(openbot.honours(&session.access().unwrap()));
+    }
+
+    /// The tab's two pages are OpenBot's: its orb and name on a card, in light and dark as the
+    /// system is, saying what happened and to go back to the app. Served by this app from
+    /// 127.0.0.1, so everything is inline: no script, no stylesheet, font or image from anywhere.
+    #[test]
+    fn the_tabs_pages_look_like_openbot_and_load_nothing_from_anywhere() {
+        for (signed_in, heading, sentence) in [
+            (true, SIGNED_IN_HEADING, SIGNED_IN_PAGE),
+            (false, NOT_SIGNED_IN_HEADING, NOT_SIGNED_IN_PAGE),
+        ] {
+            let html = end_page_for(signed_in);
+            assert!(html.starts_with("<!doctype html>"), "{html}");
+            assert!(html.contains(&format!("<h1>{heading}</h1>")), "{html}");
+            assert!(html.contains(&format!("<p>{sentence}</p>")), "{html}");
+            assert!(
+                sentence.contains("Go back to the OpenBot app"),
+                "{sentence}"
+            );
+            assert!(html.contains("<title>OpenBot</title>"), "{html}");
+            assert!(html.contains("class=\"orb\""), "{html}");
+            assert!(
+                html.contains("@media (prefers-color-scheme: dark)"),
+                "{html}"
+            );
+            for outside in [
+                "<script", "src=", "href=", "url(", "@import", "http:", "https:", "<link",
+            ] {
+                assert!(!html.contains(outside), "{outside} in {html}");
+            }
+        }
+        assert!(!SIGNED_IN_PAGE.contains('\u{2014}') && !NOT_SIGNED_IN_PAGE.contains('\u{2014}'));
+    }
+
+    /// Writes the tab's two pages, exactly as `page` serves them, under the build folder
+    /// (`target/end-pages`) for a look in a browser. Run on purpose: `--ignored`.
+    #[test]
+    #[ignore]
+    fn write_the_tabs_pages_for_a_look() {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/end-pages");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("signed-in.html"), end_page_for(true)).unwrap();
+        std::fs::write(folder.join("not-signed-in.html"), end_page_for(false)).unwrap();
     }
 
     #[test]

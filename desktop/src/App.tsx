@@ -377,16 +377,30 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           ? "welcome"
           : step;
   /*
-   * The first screen starts the big downloads, without a click: the person opened OpenBot's setup
-   * to install it. The native side downloads only what this computer's install will need, once per
-   * run of the app (`early_downloads.rs`).
+   * The big downloads (`early_downloads.rs`), which download only what this computer's install
+   * will need, once per run of the app, after a look at the free disk. They start once the person
+   * has chosen this computer. With nothing of OpenBot on it that is Install with Self-hosted
+   * picked, the first thing Install does: Self-hosted is picked to begin with, so the first screen
+   * alone is no choice. Seen on a clean Windows machine: they started with the first screen, and
+   * somebody who only connects to their company's OpenBot downloaded about 2 GB for nothing.
    */
-  // Not for the choice asked for from Settings: that screen starts nothing.
+  const startEarlyDownloads = useCallback(async () => {
+    if (!root.trim()) return;
+    await invoke("start_early_downloads", { root: root.trim() }).catch(
+      () => {},
+    );
+  }, [root]);
+  /*
+   * Where the person had chosen this computer already (an installation on it, or a first install
+   * whose Windows fix ended the app with a restart), the first screen starts them without a click,
+   * as it always has. Not for the choice asked for from Settings: that screen starts nothing.
+   */
   const onFirstScreen = visibleSetupStep === "welcome" && !choosing;
   useEffect(() => {
-    if (!onFirstScreen || !root.trim()) return;
-    invoke("start_early_downloads", { root: root.trim() }).catch(() => {});
-  }, [onFirstScreen, root]);
+    // Nothing of OpenBot here and nothing chosen yet (`windowsUnchecked`): Install starts them.
+    if (!onFirstScreen || windowsUnchecked.current) return;
+    void startEarlyDownloads();
+  }, [onFirstScreen, startEarlyDownloads]);
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;
@@ -1234,6 +1248,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           onConnect={() => setStep("connect_openbot")}
           onThisComputer={() => setStep("welcome")}
           saved={{ address }}
+          startDownloads={startEarlyDownloads}
           onInstall={() => void chooseThisComputer()}
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
