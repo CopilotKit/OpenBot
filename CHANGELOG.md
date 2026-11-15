@@ -350,6 +350,11 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   person, is sent as `Authorization: Bearer` or `x-api-key`, and works on `/api/v2` only. The
   server also issues access tokens through OAuth 2.1 with PKCE, which work on `/api/v2` only too.
   Both end when the person is removed.
+- **Settings has an API keys page.** Under You, a signed-in person lists their keys, creates one
+  by name and revokes one. A new key is shown once, with Copy. OpenBot on one computer for one
+  person has no sign-in and says it has no keys, and OpenBot Desktop connected to an OpenBot
+  elsewhere opens the page in your browser. The spec now lists what an app needs for OAuth: the
+  client ids, redirect addresses, endpoints and how long tokens last.
 - **The web app calls the new addresses**, through a client generated from the spec, for Bots,
   the audit trail, accounts, admin settings, model connections, notifications, routines,
   conversations and approvals, and opens its sockets there. Apps, connections, a Bot's grants,
