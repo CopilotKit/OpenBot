@@ -456,9 +456,20 @@ function initiatorKindOf(event: AuditEvent): string | undefined {
 }
 
 /**
+ * The person a row says started it, by the email the server records in `payload.by`. The row
+ * carries no name, and the page loads people only when a filter menu opens, so the email is what
+ * every row can name. Undefined when the row names nobody.
+ */
+function personOf(event: AuditEvent): string | undefined {
+  const by = event.payload?.by;
+  return typeof by === "string" && by.trim() ? by.trim() : undefined;
+}
+
+/**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
  * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
- * "OpenBot" in the personal edition's Activity, which is anybody's page.
+ * "OpenBot" in the personal edition's Activity, which is anybody's page. A person is named where
+ * the row says who ({@link personOf}), and is "A person" where it does not.
  */
 export function startedByText(
   event: AuditEvent,
@@ -479,7 +490,7 @@ export function startedByText(
     case "deployment":
       return atStart(deployment);
     default:
-      return "A person";
+      return personOf(event) ?? "A person";
   }
 }
 
@@ -899,6 +910,8 @@ export function searchTextOf(
     hostText(event),
     botText(event, nameFor),
     startedByText(event, nameFor, deployment),
+    // Who did it, by email, on any row that says so, whatever started it.
+    personOf(event) ?? "",
     decisionText(event),
     decisionText(event, false),
     // Both ways a reason is said, as for the subject above.

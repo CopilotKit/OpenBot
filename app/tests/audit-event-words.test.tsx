@@ -245,6 +245,54 @@ test("what happened to an organization reads in words, and none of it as blocked
 });
 
 /**
+ * A real-product pass read "Started by a person" on every row a person started, with nobody named,
+ * and searching the person's email found nothing. The server sends who in `payload.by`.
+ */
+test("a row a person started names them, and searching their email finds it", async () => {
+  const byPerson = (
+    id: string,
+    minute: number,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ) => ({
+    ...row(id, minute, eventType, "organization", {}, "org_2"),
+    payload,
+  });
+  const view = await renderAs("team", [
+    byPerson("p1", 30, "organization.member_invited", {
+      by: "priya@northwind.test",
+    }),
+    byPerson("p2", 29, "configuration.changed", {
+      by: "priya@northwind.test",
+      change: "skill_installed",
+    }),
+    byPerson("p3", 28, "organization.renamed", {}),
+  ]);
+  const startedBy = () =>
+    [...view.container.querySelectorAll("tbody [data-column=bot]")].map(
+      (cell) => cell.lastElementChild?.textContent,
+    );
+  expect(startedBy()).toEqual([
+    "Started by priya@northwind.test",
+    "Started by priya@northwind.test",
+    // A row that names nobody reads as it always has.
+    "Started by a person",
+  ]);
+  await userEvent
+    .setup({ document })
+    .type(
+      view.getByRole("searchbox", { name: "Search events" }),
+      "priya@northwind.test",
+    );
+  await waitFor(() =>
+    expect(whats(view.container).map((line) => line.textContent)).toEqual([
+      "Invite a person",
+      "Save a skill",
+    ]),
+  );
+});
+
+/**
  * An app's tool is named the way its page names it: Windows showed "Update imap settings" and
  * "Fetch message by thread id" in Activity while the Gmail page said "Get IMAP settings".
  */
