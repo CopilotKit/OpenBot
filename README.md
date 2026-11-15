@@ -532,6 +532,8 @@ Every OpenBot client uses one API, and its spec is in this repository under [`ap
 
 The conventions are the same everywhere. An error is a problem detail (`application/problem+json`, RFC 9457). A list pages with `cursor` and `limit`. Every write takes an `Idempotency-Key` header, and repeating a request with the same key within 24 hours does it once. The web app signs in with its session cookie; anything else sends `Authorization: Bearer` with an API key, which acts as the person who made it, or with an access token from OAuth 2.1 with PKCE. Both work on `/api/v2` only.
 
+A client is given one address, OpenBot's. An Intelligence that runs beside OpenBot is reached there too: on a laptop OpenBot's server carries the Intelligence gateway's socket on its own port, and on a cluster the Ingress or HTTPRoute sends that socket's path straight to Intelligence and everything else to OpenBot. Run from a source checkout, the app keeps the gateway's own port unless `OPENBOT_PUBLIC_URL` is set. [Configuration](docs/configuration.md#required-api-server-variables) has the settings.
+
 The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. The app's screens are moving onto it area by area, and the earlier `/api/...` addresses are retired as each area moves, so a script should call only `/api/v2`.
 
 ## Sign in
