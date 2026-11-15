@@ -17,8 +17,8 @@
  * - socket: a WebSocket, described in api/asyncapi.yaml rather than api/openapi.yaml.
  * - stored-format: an address kept inside stored data, such as a sent message's attachment, which
  *   the client resolves to the API's address before it reads it.
- * - installed-client: an address that clients already installed, which update on their own
- *   schedule, still call. Retiring one is David's call.
+ * - installed-client: an address a released client calls and cannot be moved off: the connect code
+ *   released Desktop shells, 1.0.2 and 1.0.3, ask for and hand to a Recorder.
  * - hand-built-v2: an address in the API's place, built by a client that has no generated client:
  *   Desktop's native side, which is Rust. A whole one must be an operation or a channel the API
  *   describes.
@@ -118,9 +118,9 @@ export const STAYS: { prefix: string; rule: Rule; why: string }[] = [
     why: "released Desktop shells, 1.0.2 and 1.0.3, ask it when they start a newer installation",
   },
   {
-    prefix: "/api/recorder",
+    prefix: "/api/recorder/connect-codes",
     rule: "installed-client",
-    why: "Recorders already installed, which update on their own schedule; retirement is David's call",
+    why: "released Desktop shells, 1.0.2 and 1.0.3, hand a Recorder its connect code here",
   },
   {
     prefix: "/api/attachments",
@@ -248,12 +248,12 @@ export const ALLOWED: Allowed[] = [
     rule: "stored-format",
     why: "the form a sent message keeps its attachment in; the app reads it at the API's address",
   },
-  // Clients already installed.
+  // Clients already released.
   {
     file: "shared/recorder-api.ts",
-    what: /^\/api\/recorder\//,
+    what: "/api/recorder/connect-codes",
     rule: "installed-client",
-    why: "the addresses Recorders installed before the API still call, which the server keeps answering",
+    why: "where released Desktop shells, 1.0.2 and 1.0.3, ask for the connect code they hand a Recorder",
   },
   // Desktop's native side.
   {
@@ -417,4 +417,14 @@ export const TEMPORARY: Temporary[] = [
         "OpenBot PR 1667 (memory in the API), then these screens on the generated client",
     }),
   ),
+  // The Recorder's earlier addresses: no client calls them any more (the Recorder is on its
+  // generated client), but the server's own tests still read them from this table.
+  {
+    file: "shared/recorder-api.ts",
+    what: /^\/api\/recorder\/(connections|me|recordings|learning|activity)(\/|$)/,
+    rule: "temporary",
+    why: "the Recorder's earlier addresses, which no client calls and the server's tests still read from shared/recorder-api.ts",
+    until:
+      "the server no longer reading them, then their removal from shared/recorder-api.ts",
+  },
 ];
