@@ -33,6 +33,23 @@ info:
     is not in answers exactly as one that does not exist.
 
 
+    A program of your own signs its requests in one of two ways, and both
+    work on /api/v2 only. An API key acts as the person who made it. Keys
+    start `obk_` and are sent as `Authorization: Bearer <key>` or in an
+    `x-api-key` header. To get a first key, sign in to OpenBot's web app, open
+    Settings, then API keys, and create one. The key is shown once. Only a
+    person signed in to the web app can make or delete keys: a key or an
+    app's sign-in cannot. An app that signs people in uses OAuth 2.1
+    instead, described under the appOAuth security scheme: its client ids,
+    redirect addresses, endpoints and how long tokens last.
+
+
+    An install for one person on one computer has no sign-in. It signs
+    nobody in, so it has neither OAuth nor API keys, and the operations
+    that manage keys and sessions answer 503 with the code
+    SIGN_IN_UNAVAILABLE.
+
+
     This file is the single source of truth: the clients, the server's types,
     the docs and the contract tests are all generated from it or checked
     against it. A change that breaks an existing client fails the pull request.
@@ -424,6 +441,41 @@ components:
       description: >-
         Desktop and mobile. OAuth 2.1 authorization code with PKCE
         (RFC 7636, S256 only); the access token is sent as a bearer token.
+
+
+        Clients. Three public clients are registered: `openbot-desktop-oauth`,
+        `openbot-mobile` and `openbot-cli`. A public client has no secret and
+        must use PKCE with S256. Dynamic client registration is off, so an
+        app uses one of these ids.
+
+
+        Redirect addresses. A client on the person's own computer listens on
+        a loopback address and any port:
+        `http://127.0.0.1:<any port>/callback` or
+        `http://[::1]:<any port>/callback`. `localhost` is not accepted.
+
+
+        Endpoints. The authorization server's metadata (RFC 8414) is at
+        `/.well-known/oauth-authorization-server/api/auth`. The person is
+        sent to `/api/auth/oauth2/authorize`. The code is exchanged, and a
+        token refreshed, at `/api/auth/oauth2/token`, with a form-encoded
+        body (`application/x-www-form-urlencoded`) that carries `client_id`.
+        A token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`.
+
+
+        Tokens. An access token starts `oba_` and lasts one hour. A refresh
+        token starts `obr_`, is issued only when the `offline_access` scope
+        is asked for, and rotates on every use: each refresh answers a new
+        refresh token and ends the one it was given. Access tokens work on
+        /api/v2 only.
+
+
+        Consent. The person is asked once for each app, and not again for
+        scopes they already allowed it.
+
+
+        An install for one person on one computer has no sign-in, so it has
+        no OAuth: there is nobody to authorize an app as.
       flows:
         authorizationCode:
           authorizationUrl: /api/auth/oauth2/authorize
@@ -515,7 +567,10 @@ components:
       bearerFormat: OpenBot API key
       description: >-
         Automation. An API key acts as the person who created it, inside one
-        organization.
+        organization. A key starts `obk_` and is sent as
+        `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+        only. A person makes one in the web app, signed in, under Settings,
+        then API keys (createApiKey).
     recorderConnection:
       type: http
       scheme: bearer
