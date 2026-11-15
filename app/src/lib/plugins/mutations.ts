@@ -382,6 +382,45 @@ export function confirmBrokeredConnectionMutationOptions(
   });
 }
 
+/** Every disconnect of a person's own connection, so the app's page can stop reading it. */
+export const disconnectBrokeredMutationKey = [
+  ...pluginKeys.all,
+  "disconnect",
+] as const;
+
+/** Every disconnect of one account, which ends the connection when it was the last. */
+export const disconnectBrokeredAccountMutationKey = [
+  ...pluginKeys.all,
+  "disconnect-account",
+] as const;
+
+/**
+ * A connection the person just ended: its own reads (the connection and its accounts, and what a
+ * disconnect would also end) are dropped rather than read again, since a read would ask for a
+ * connection that is gone and answer 404. A read already on its way is dropped too, not left to land
+ * in the cache. Every other plugin read is refreshed, the person's connections among them, which is
+ * how the page learns the app is not connected.
+ */
+async function forgetEndedConnection(
+  queryClient: QueryClient,
+  serverId: string,
+) {
+  const own = [pluginKeys.accounts(serverId), pluginKeys.siblings(serverId)];
+  for (const queryKey of own) {
+    await queryClient.cancelQueries({ queryKey });
+    queryClient.removeQueries({ queryKey });
+  }
+  return queryClient.invalidateQueries({
+    queryKey: pluginKeys.all,
+    predicate: (query) =>
+      !own.some(
+        (key) =>
+          JSON.stringify(query.queryKey.slice(0, key.length)) ===
+          JSON.stringify(key),
+      ),
+  });
+}
+
 /**
  * End the signed-in person's brokered connection.
  *
@@ -394,6 +433,7 @@ export function disconnectBrokeredMutationOptions(
   shared = false,
 ) {
   return mutationOptions({
+    mutationKey: disconnectBrokeredMutationKey,
     mutationFn: async (serverId: string) => {
       const headers = { "Idempotency-Key": idempotencyKey() };
       const options = { fallback: "Couldn't disconnect that account." };
@@ -401,7 +441,16 @@ export function disconnectBrokeredMutationOptions(
         ? disconnectSharedApp(ORGANIZATION_ID, serverId, headers, options)
         : disconnectApp(ORGANIZATION_ID, "me", serverId, headers, options));
     },
-    onSettled: () => invalidatePlugins(queryClient),
+    /*
+     * In `onSettled`, which a screen's own `onSuccess` and `onError` cannot shadow. A person's own
+     * connection that is gone has its reads dropped rather than read again; the app's one shared
+     * account is still there to read, not connected, so it is refreshed like the rest, as is
+     * everything after a disconnect that failed.
+     */
+    onSettled: (_result, error, serverId) =>
+      error || shared
+        ? invalidatePlugins(queryClient)
+        : forgetEndedConnection(queryClient, serverId),
   });
 }
 
@@ -434,17 +483,21 @@ export function disconnectBrokeredAccountMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
-    mutationFn: async (variables: { serverId: string; accountId: string }) => {
-      await disconnectConnectedAccount(
+    mutationKey: disconnectBrokeredAccountMutationKey,
+    mutationFn: (variables: { serverId: string; accountId: string }) =>
+      disconnectConnectedAccount(
         ORGANIZATION_ID,
         "me",
         variables.serverId,
         variables.accountId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't disconnect that account." },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
+      ),
+    // The last account ends the connection, and the server says so. `onSettled`, as above.
+    onSettled: (result, error, variables) =>
+      !error && result?.connectionEnded
+        ? forgetEndedConnection(queryClient, variables.serverId)
+        : invalidatePlugins(queryClient),
   });
 }
 
