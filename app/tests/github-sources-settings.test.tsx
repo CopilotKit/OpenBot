@@ -37,6 +37,7 @@ function serving() {
           source: "github",
           repository: "acme/web",
           createdAt: "2026-10-09T10:00:00Z",
+          webhookPath: "/api/events/github/g2",
         },
       });
     }
@@ -51,6 +52,8 @@ function serving() {
           source: "github",
           repository: "acme/app",
           createdAt: "2026-10-09T10:00:00Z",
+          // The server's own address for it, which the screen shows rather than builds from the id.
+          webhookPath: "/api/events/github/hook-g1",
         },
       ],
     });
@@ -68,11 +71,13 @@ function draw() {
   );
 }
 
-test("a connected repository shows the webhook address to paste into GitHub", async () => {
+test("a connected repository shows the webhook address the server answers, to paste into GitHub", async () => {
   serving();
   const view = draw();
   expect(await view.findByText("acme/app")).toBeTruthy();
-  expect(view.getByText(/\/api\/events\/github\/g1$/)).toBeTruthy();
+  expect(
+    view.getByText(`${window.location.origin}/api/events/github/hook-g1`),
+  ).toBeTruthy();
 });
 
 test("connecting a repository sends it with its secret", async () => {
