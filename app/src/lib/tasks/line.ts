@@ -34,6 +34,9 @@ function withoutMarks(line: string): string {
       .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
       .replace(/\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)/g, "$1")
       .replace(/\[([^\]]*)\]\[[^\]]*\]/g, "$1")
+      // A link the line was cut inside keeps its words too: the address is not something to read.
+      .replace(/\[([^\]]*)\]\([^)\s]*…?$/, "$1…")
+      .replace(/\[([^\]]*)$/, "$1")
       .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
       .replace(/<\/?[a-z][^>]*>/gi, "")
       // A heading, a quote, a list item or a task box at the start of the line.

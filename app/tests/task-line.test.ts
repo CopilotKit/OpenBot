@@ -14,6 +14,13 @@ test("a line that was the last row of a table is said as plain text, without the
   ).toBe(
     "Begins / headwaters: Columbia Lake, British Columbia, between the Canadian Rockies and Selkirk Mountains, at roughly 2,650 ft elevation.",
   );
+  expect(
+    taskLine(
+      "| Where it begins | Columbia Lake in southeastern British Columbia, Canada |",
+    ),
+  ).toBe(
+    "Where it begins: Columbia Lake in southeastern British Columbia, Canada",
+  );
   expect(taskLine("| Total length | **1,243 miles** | about 2,000 km |")).toBe(
     "Total length: 1,243 miles, about 2,000 km",
   );
@@ -30,6 +37,19 @@ test("Markdown's marks come off and the words stay", () => {
   );
   expect(taskLine("> I couldn't reach the supplier\\. Try again?")).toBe(
     "I couldn't reach the supplier. Try again?",
+  );
+});
+
+test("a line cut short inside a link keeps the link's words and drops its address", () => {
+  expect(
+    taskLine(
+      "Completed in 1990, it was selected by residents as part of a neighborhood project to transform a littered space into public art ([Seattle Municipal Archives](http://primarysources.seattle.gov/2026/02…",
+    ),
+  ).toBe(
+    "Completed in 1990, it was selected by residents as part of a neighborhood project to transform a littered space into public art (Seattle Municipal Archives…",
+  );
+  expect(taskLine("It is described in [the city's own his…")).toBe(
+    "It is described in the city's own his…",
   );
 });
 
