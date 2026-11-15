@@ -30,6 +30,7 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
+  attachmentAddress,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
   mayBeTruncatedForModel,
@@ -1138,7 +1139,10 @@ export function Composer({
         .filter((attachment) => stagedModality(attachment) === "image")
         .map((attachment) => ({
           id: attachment.id,
-          url: attachment.source.value,
+          // Where the tile loads the picture from. While it uploads that is the browser's own
+          // preview; once the server has it, the upload answers with the form a sent message
+          // stores, and the file is read from the API's address for it.
+          url: attachmentAddress(attachment.source.value),
           alt: attachment.filename,
           loading: attachment.status === "uploading",
         })),
