@@ -5,7 +5,7 @@ import { AddServerPage } from "@/components/connections/add-server-page";
 export const Route = createFileRoute("/_authed/admin/plugins/new")({
   component: () => (
     <AddServerPage
-      back={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
+      back={{ label: "Apps", linkProps: { to: "/admin/plugins" } }}
     />
   ),
 });

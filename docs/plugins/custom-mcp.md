@@ -1,8 +1,8 @@
 # Add a custom MCP server
 
-Open **Admin → Plugins → More apps → Add custom MCP server**, or use **Add MCP
+Open **Admin → Apps → More apps → Add custom MCP server**, or use **Add MCP
 server** beside the Apps heading on Browse apps. Both open `/admin/plugins/new`
-inside OpenBot, with Back and Cancel returning to Plugins. The direct address
+inside OpenBot, with Back and Cancel returning to Apps. The direct address
 `/admin/plugins/composio/add-mcp-server` also opens that page.
 
 Connections keeps its existing **Add server** action at `/connections/new`.

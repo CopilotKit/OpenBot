@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Admin → Apps and Browse apps now link to the native custom MCP registration form.
+
 **Before upgrading.** Two migrations run at start, and the database moves from
 `0088_approval_reviewer_guidance` to `0090_routine_goal_linked_by_run`. `0089_goal_ends_when_met`
 adds an `ends_when_met` column to `responsibilities`, false on every existing goal, so existing
