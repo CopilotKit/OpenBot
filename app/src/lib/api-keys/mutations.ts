@@ -3,7 +3,7 @@ import {
   createApiKey,
   deleteApiKey,
 } from "@/lib/api/generated/api-keys/api-keys";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { type ApiKey, apiKeyKeys } from "./queries";
 
@@ -40,7 +40,7 @@ export function createApiKeyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (input: ApiKeyInput): Promise<NewApiKey> =>
       createApiKey(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         input,
         { "Idempotency-Key": idempotencyKey() },
@@ -58,7 +58,7 @@ export function revokeApiKeyMutationOptions(queryClient: QueryClient) {
     mutationFn: async (apiKeyId: string): Promise<void> => {
       try {
         await deleteApiKey(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           apiKeyId,
           { "Idempotency-Key": idempotencyKey() },

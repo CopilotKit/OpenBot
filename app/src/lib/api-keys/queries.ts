@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { everyPage } from "@/lib/api/every-page";
 import { listApiKeys } from "@/lib/api/generated/api-keys/api-keys";
 import type { ApiKey as ApiKeyRecord } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /** An API key the person made, as the API lists it. Never the key itself: `start` is its first characters. */
@@ -67,7 +67,7 @@ export function apiKeyListQueryOptions() {
       try {
         const apiKeys = await everyPage<ApiKey>(async (cursor) => {
           const page = await listApiKeys(
-            ORGANIZATION_ID,
+            organizationId(),
             "me",
             { limit: 100, ...(cursor ? { cursor } : {}) },
             { signal, fallback: LOAD_FALLBACK },
