@@ -606,7 +606,7 @@ test("the first screen offers Self-hosted and OpenBot for Business, shows Cloud 
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
-  withLocalCli({});
+  withLocalCli({ "plugin:opener|open_url": null });
   const view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   // Three ways to run OpenBot. This app sets up the first and connects to the third; OpenBot Cloud
@@ -646,6 +646,17 @@ test("the first screen offers Self-hosted and OpenBot for Business, shows Cloud 
     "4 CPU cores or more",
     "40 GB of free disk space",
   ]);
+  expect(buttons(view)).toEqual(["Install"]);
+  // The one booking link, for a company with no OpenBot of its own: under the Business row, not
+  // part of it, so opening it leaves the choice where it was.
+  const demo = view.getByRole("link", { name: "Book a demo" });
+  expect(demo.getAttribute("href")).toBe("https://open.bot/business");
+  expect(demo.parentElement?.textContent).toBe(
+    "No OpenBot at your company yet? Book a demo.",
+  );
+  expect(demo.closest("label")).toBeNull();
+  await userEvent.click(demo);
+  expect([self.checked, business.checked]).toEqual([true, false]);
   expect(buttons(view)).toEqual(["Install"]);
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
@@ -729,6 +740,7 @@ async function chooseConnect(shell: Record<string, unknown> = {}) {
   withLocalCli({
     connection: THIS_COMPUTER,
     record_setup_event: null,
+    "plugin:opener|open_url": null,
     ...shell,
   });
   const view = await renderApp();
@@ -792,11 +804,18 @@ test("choosing OpenBot for Business asks for an address in place of Install, and
     "disabled",
     true,
   );
-  // The one booking link, for somebody whose company has no OpenBot yet.
-  expect(view.getByText(/Don't have one yet\?/)).toBeTruthy();
-  expect(
-    view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
-  ).toBe("https://open.bot/business");
+  // The one booking link is still there, once, under the Business row, and opening it leaves the
+  // choice where it is.
+  const demo = view.getByRole("link", { name: "Book a demo" });
+  expect(demo.getAttribute("href")).toBe("https://open.bot/business");
+  expect(demo.parentElement?.textContent).toBe(
+    "No OpenBot at your company yet? Book a demo.",
+  );
+  expect(demo.closest("label")).toBeNull();
+  await userEvent.click(demo);
+  expect(business.checked).toBe(true);
+  expect(view.getByLabelText("OpenBot address")).toBeTruthy();
+  expect(view.queryByText(/Don't have one yet\?/)).toBeNull();
   // OpenBot Cloud is still to come.
   expect(view.getByRole("radio", { name: /^OpenBot Cloud/ })).toHaveProperty(
     "disabled",
