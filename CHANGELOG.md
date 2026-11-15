@@ -34,6 +34,16 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **OpenBot Desktop can connect to an OpenBot that runs somewhere else.** At set-up, and later in
+  Settings, Computer, choose between OpenBot on this computer, as before, and an OpenBot at an
+  address you type, such as your company's. Connected, nothing is installed or started on this
+  computer and no CopilotKit account is asked for: you sign in to that OpenBot in your browser, and
+  the app keeps the sign-in in Keychain or Windows Credential Manager, never in a file. Settings
+  shows where the app is connected, with Sign out and a way back to OpenBot on this computer,
+  which loses nothing. Starting, stopping and updating OpenBot's services, model keys and local
+  folders for Bots belong to OpenBot on this computer and are not shown while connected. It needs
+  an OpenBot whose server honours an app's sign-in for its screens; an earlier one is refused with
+  a sentence saying so.
 - **OpenBot Desktop is one address.** With CopilotKit Intelligence on the same machine, the app
   used to open a second connection, straight to Intelligence's gateway on a port of its own. It now
   opens everything on OpenBot's own address: the server carries that socket
