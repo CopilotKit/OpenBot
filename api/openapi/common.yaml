@@ -72,6 +72,7 @@ tags:
   - { name: Goals, description: "A person's goals: an outcome a Bot works toward, run on request, on a routine's schedule or when an outside event arrives through one of the goal's triggers." }
   - { name: Follow-ups, description: "Work a Bot scheduled for itself to come back to later in a conversation." }
   - { name: Organizations, description: "The organizations the caller is a member of, and each one's members. An organization keeps its own Bots and conversations, apart from every other's." }
+  - { name: Teams, description: "An organization's teams: named groups of its members, and each team's people. What is granted to a team is its people's to use, and nobody else's in the organization. A team is made here or kept in step with a group of the company's directory." }
   - { name: Approvals, description: "What a person's Bots are waiting on them for: the actions that ask before they run, the questions a Bot asked, and what the person set for themselves about asking (their preferences, their own rules, and what they allowed for one conversation). Each person's are theirs alone." }
   - { name: Approval rules, description: "The organization's approval rules: which actions every member's Bots take without asking, ask a person about first, or hand to the person. An administrator can describe rules in English, test them against what Bots already did, and save several as one change." }
   - { name: Reviewer guidance, description: "What an administrator tells auto-review, in plain English: what to ask about and what is routine for the organization. Checked by an independent reading before it is saved, and never able to switch built-in safety off." }
@@ -257,6 +258,10 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1follow-ups~1{followUpId}~1cancel' }
   /api/v2/people/me/organizations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1organizations' }
   /api/v2/organizations/{organizationId}/members: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members' }
+  /api/v2/organizations/{organizationId}/teams: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members/{memberId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members~1{memberId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
   /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
