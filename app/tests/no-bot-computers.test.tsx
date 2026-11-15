@@ -18,8 +18,10 @@ import { act, cleanup, render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { SavedLogins } from "@/components/vault/saved-logins";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { Route as AdminComputersRoute } from "@/routes/_authed/admin/computers";
 import { ME_PATH, meResponse } from "./accounts-api";
 import {
@@ -222,10 +224,10 @@ function serve({
   };
 }
 
-function draw(ui: ReactElement) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+function draw(
+  ui: ReactElement,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => ui }),
@@ -410,6 +412,55 @@ describe("the Computer beside a conversation", () => {
     expect(view.queryByText("No computers for Bots")).toBeNull();
     expect(server.aboutComputers()).toContain(
       `GET ${COMPUTERS_PATH}/${BOT}/screenshot`,
+    );
+  });
+});
+
+/*
+ * Every open conversation looks, once a second, for a browser task of its Bot's that was left
+ * waiting on the person, by reading who has control of the Bot's computer. Where there are no
+ * computers that read is refused every second for as long as the conversation is open. (The whole
+ * conversation is drawn in no-bot-computers-conversation.test.tsx.)
+ */
+describe("a conversation's check for a paused browser task", () => {
+  const quiet = { messages: [], isRunning: false, setMessages: () => {} };
+  const notice = (
+    <HandoffResumeNotice agent={quiet} botId={BOT} ready run={async () => {}} />
+  );
+
+  test("reads no control where there are no computers for Bots", async () => {
+    const server = serve({ computers: false });
+    // As in the app, where the deployment was read long before a conversation opened.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    await client.fetchQuery(deploymentCapabilitiesQueryOptions());
+    draw(notice, client);
+
+    // Two of its seconds.
+    await settle(2300);
+    expect(server.aboutComputers()).toEqual([]);
+    expect(server.asked).toContain(`GET ${DEPLOYMENT_PATH}`);
+  });
+
+  test("reads control every second where there are computers, as before", async () => {
+    const server = serve({ computers: true });
+    draw(notice);
+
+    await settle(2300);
+    const reads = server
+      .aboutComputers()
+      .filter((request) => request === `GET ${COMPUTERS_PATH}/${BOT}/control`);
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("reads control as before when the deployment could not be read", async () => {
+    const server = serve({ computers: true, deployment: "failed" });
+    draw(notice);
+
+    await settle(1300);
+    expect(server.aboutComputers()).toContain(
+      `GET ${COMPUTERS_PATH}/${BOT}/control`,
     );
   });
 });
