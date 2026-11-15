@@ -88,9 +88,9 @@ beforeEach(() => {
         sent.push({ path: request.path, method: request.method, body });
         if (failWrite)
           return problem(
-            503,
+            500,
             "Your Learning settings could not be saved.",
-            "LEARNING_UNAVAILABLE",
+            "INTERNAL_ERROR",
           );
         if (request.path === ME.settings) {
           answer = { ...answer, mode: body.mode as Answer["mode"] };

@@ -151,7 +151,9 @@ test("evidence that can't be read is null for that insight alone, and the propos
   const detail = await assembleProposal(proposal(2), {
     evidence: async (insightId) => {
       if (insightId === testId("i0"))
-        throw new Error("The backend no longer has this insight.");
+        throw new Error(
+          "The backend no longer has this insight. Refresh the skill.",
+        );
       return { evidence: [conversation("Can I get a refund?")] };
     },
   });

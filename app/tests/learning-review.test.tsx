@@ -85,6 +85,8 @@ let recordingTitles: { id: string; title: string | null }[] = [];
 let detailOperation: LearningProposal["operation"] = "add";
 /** While set, reading the review answers 429, as the backend does when the shared project key is over its limit. */
 let busy = false;
+/** What the server says when it can't reach Learning (LEARNING_UNREACHABLE). */
+const UNREACHABLE = "Couldn't reach Learning in the backend. Try again.";
 const posts: string[] = [];
 const patches: { url: string; body: unknown }[] = [];
 
@@ -276,7 +278,7 @@ function refuseLearnNow(container: string) {
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       if (String(path) === startedIn(container) && init?.method === "POST") {
         posts.push(String(path));
-        return problem(502, "Nope", "LEARNING_UNREACHABLE");
+        return problem(502, UNREACHABLE, "LEARNING_UNREACHABLE");
       }
       return ok(path, init);
     },
@@ -459,7 +461,7 @@ test("Learn now starts every source in the group even when one fails", async () 
   await waitFor(() =>
     expect(posts).toEqual([startedIn("bot-a"), startedIn("bot-b")]),
   );
-  expect((await view.findByRole("alert")).textContent).toBe("Nope");
+  expect((await view.findByRole("alert")).textContent).toBe(UNREACHABLE);
 });
 
 test("with admins approving, there is no Learn now", async () => {
@@ -639,11 +641,11 @@ test("a Learn now failure in one group does not show in another", async () => {
   const view = draw();
   const buttons = await view.findAllByRole("button", { name: "Learn now" });
   fireEvent.click(buttons[0] as HTMLElement);
-  expect((await view.findByRole("alert")).textContent).toBe("Nope");
+  expect((await view.findByRole("alert")).textContent).toBe(UNREACHABLE);
   fireEvent.click(view.getAllByRole("button", { name: "Learn now" })[1]!);
   await view.findByRole("button", { name: "Learning in progress…" });
   // Group b's start does not wipe or borrow group a's failure, and a's button comes back.
-  expect(view.getByRole("alert").textContent).toBe("Nope");
+  expect(view.getByRole("alert").textContent).toBe(UNREACHABLE);
   expect(view.getAllByRole("button", { name: "Learn now" })).toHaveLength(1);
 });
 

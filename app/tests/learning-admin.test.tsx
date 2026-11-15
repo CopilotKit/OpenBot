@@ -48,6 +48,12 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/** What the server says when it can't reach Learning (LEARNING_UNREACHABLE). */
+const UNREACHABLE = "Couldn't reach Learning in the backend. Try again.";
+/** What the server says when Learning couldn't read the skills (LEARNING_UNAVAILABLE). */
+const UNAVAILABLE =
+  "Couldn't read your Skills from the backend just now. Try again.";
+
 function page() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -97,11 +103,7 @@ test("an administrator excludes a Bot and saves without losing the default or pa
       }
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return problem(
-        502,
-        "Learning in the backend is unavailable.",
-        "LEARNING_UNREACHABLE",
-      );
+      return problem(502, UNREACHABLE, "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -128,9 +130,9 @@ test("an unavailable settings store shows an error instead of an editable empty 
   global.fetch = Object.assign(
     async () =>
       problem(
-        503,
+        500,
         "Learning settings could not be accessed.",
-        "LEARNING_UNAVAILABLE",
+        "INTERNAL_ERROR",
       ),
     { preconnect: originalFetch.preconnect },
   );
@@ -171,7 +173,7 @@ test("active and hidden Bots both have participation controls", async () => {
         hidden: [bot("hidden-bot")],
       });
       if (bots) return bots;
-      return problem(502, "Unavailable", "LEARNING_UNREACHABLE");
+      return problem(502, UNREACHABLE, "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -218,7 +220,7 @@ function serve(
         return configuration(settings, automatic);
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return problem(502, "unavailable", "LEARNING_UNREACHABLE");
+      return problem(502, UNREACHABLE, "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -309,7 +311,7 @@ test("a missing container shows exactly what to run, and a Create button only wh
         );
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return problem(502, "unavailable", "LEARNING_UNREACHABLE");
+      return problem(502, UNREACHABLE, "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -818,14 +820,14 @@ describe("reviewing proposed skills", () => {
     const posts = serveLearning();
     override((request) =>
       request.path === DANA.learnedSkill("quote-follow-up")
-        ? problem(503, "Couldn't read this skill.", "LEARNING_UNAVAILABLE")
+        ? problem(503, UNAVAILABLE, "LEARNING_UNAVAILABLE")
         : undefined,
     );
     const view = shared();
     fireEvent.click(
       await view.findByRole("button", { name: /Quote follow up/ }),
     );
-    await view.findByText("Couldn't read this skill.");
+    await view.findByText(UNAVAILABLE);
     expect(
       (
         view.getByRole("button", {
@@ -886,14 +888,14 @@ describe("reviewing proposed skills", () => {
     serveLearning();
     override((request) =>
       request.path === `${LEARNING.proposal(PROPOSAL)}/approve`
-        ? problem(502, "Couldn't publish this skill.", "LEARNING_UNREACHABLE")
+        ? problem(502, UNREACHABLE, "LEARNING_UNREACHABLE")
         : undefined,
     );
     const view = shared();
     fireEvent.click(await view.findByRole("button", { name: /Refund triage/ }));
     await view.findByText("Read the order date from the conversation.");
     fireEvent.click(view.getByRole("button", { name: "Approve and publish" }));
-    await view.findByText("Couldn't publish this skill.");
+    await view.findByText(UNREACHABLE);
     expect(
       view.queryByRole("button", { name: "Approve and publish" }),
     ).not.toBeNull();
@@ -918,7 +920,7 @@ describe("reviewing proposed skills", () => {
     serveLearning();
     override((request) =>
       request.path === `${DANA.proposal(PERSON_PROPOSAL)}/approve`
-        ? problem(502, "Couldn't publish this skill.", "LEARNING_UNREACHABLE")
+        ? problem(502, UNREACHABLE, "LEARNING_UNREACHABLE")
         : undefined,
     );
     const view = shared();
@@ -927,7 +929,7 @@ describe("reviewing proposed skills", () => {
     );
     await view.findByText("Read the order date from the conversation.");
     fireEvent.click(view.getByRole("button", { name: "Approve and publish" }));
-    await view.findByText("Couldn't publish this skill.");
+    await view.findByText(UNREACHABLE);
     expect(
       view.queryByRole("button", { name: "Approve and publish" }),
     ).not.toBeNull();
@@ -938,9 +940,9 @@ describe("reviewing proposed skills", () => {
     override((request) =>
       request.path === LEARNING.settings
         ? problem(
-            503,
+            500,
             "Learning settings could not be accessed.",
-            "LEARNING_UNAVAILABLE",
+            "INTERNAL_ERROR",
           )
         : request.path === LEARNING.sharingRequests
           ? listPage(
