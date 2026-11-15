@@ -37,6 +37,14 @@ import {
 } from "./approvals-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+  CHECK_COMPONENT,
+  checkResponse,
+} from "./components-api";
 
 /**
  * A step: the tool calls a Bot asks for in one response. Claude asks for several at once by default,
@@ -279,7 +287,11 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`))
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      )
         return NativeResponse.json({ botId: bot, state: "ready" });
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
@@ -297,18 +309,14 @@ beforeAll(() => {
         )
       )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/components/catalogue")
-        return NativeResponse.json({ added: [] });
+      if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
       // The Bot holds the chart, the table and the approval card.
-      if (url.pathname === `/api/components/for-agent/${bot}`)
-        return NativeResponse.json({
-          components: GALLERY.map(({ name, description }) => ({
-            name,
-            description,
-          })),
-        });
-      if (/^\/api\/components\/[^/]+\/decision$/.test(url.pathname))
-        return NativeResponse.json({ allowed: true });
+      if (url.pathname === botComponentsPath(bot))
+        return botComponentsResponse(
+          GALLERY.map(({ name, description }) => ({ name, description })),
+        );
+      if (CHECK_COMPONENT.test(url.pathname))
+        return checkResponse({ allowed: true });
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },
     { preconnect: () => undefined },

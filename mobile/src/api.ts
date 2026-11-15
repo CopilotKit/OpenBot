@@ -311,7 +311,7 @@ export type GrantedPlugins = {
   skills: { slug: string; title: string; summary: string }[];
 };
 export type SkillSummary = { slug: string; title: string; summary: string };
-/** Who drives a Bot's computer, as `GET /api/computers/:botId/control` answers. */
+/** Who drives a Bot's computer: the API's ComputerControl, as `GET .../computers/{botId}/control` answers. */
 export type ControlState = {
   holder: "bot" | "human";
   requested: boolean;
@@ -320,6 +320,7 @@ export type ControlState = {
   request?: { id: string; status: string; reason: string };
   secretWanted?: string;
 };
+/** One frame of a Bot's screen: the API's ComputerFrame. */
 export type Screenshot = {
   base64: string;
   width: number;

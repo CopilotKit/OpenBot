@@ -118,14 +118,20 @@ export function joinedLearningContainer(
     ? learning.containerId
     : null;
 }
-/** `GET /api/recorder/learning`: the person's own Learning space, which every recording they make joins. */
+/** `getRecorderLearning`: the person's own Learning space, which every recording they make joins. */
 export type RecorderLearningResponse = { learning: LearningSpaceState };
 export type TrajectoryGrant = {
   joinToken: string;
   realtime: { clientUrl: string; topic: string };
 };
+/**
+ * A refusal as the Recorder reads it: the API's problem details (RFC 9457). `detail` is the sentence a person reads,
+ * `code` the refusal's stable name (`RECORDER_SIGNED_OUT`, `RECORDER_AUTHORITY_UNAVAILABLE`), and `reason` why a
+ * connection ended, on a sign-out. The capture pass's gate answers `error` in place of `detail`; both are read.
+ */
 export type RecorderErrorBody = {
-  error: string;
+  detail?: string;
+  error?: string;
   code?: string;
   reason?: "revoked" | "removed" | "organization";
 };
@@ -207,6 +213,31 @@ export function isAllowedGatewayUrl(
 }
 
 const id = (value: string) => encodeURIComponent(value);
+
+/** The organization every request is in: an install has one, and the API addresses it as `default`. */
+const RECORDER_ORGANIZATION = "/api/v2/organizations/default";
+/**
+ * Where the Recorder reaches OpenBot's API (api/openapi.yaml, the Recorder tag), each signed with its connection token
+ * except the exchange, whose connect code is the credential. Every write carries an `Idempotency-Key`.
+ */
+export const recorderApiPaths = {
+  /** POST `{ code, label, installId }`: exchanges a connect code for a connection (`ExchangeResponse`). */
+  connections: `${RECORDER_ORGANIZATION}/recorder-connections`,
+  /** DELETE: the Recorder's own Disconnect. */
+  currentConnection: `${RECORDER_ORGANIZATION}/recorder-connections/current`,
+  /** GET `RecorderMe`. */
+  me: `${RECORDER_ORGANIZATION}/recorder/me`,
+  /** GET `RecorderLearningResponse`. */
+  learning: `${RECORDER_ORGANIZATION}/recorder/learning`,
+  /** POST `RecorderActivity`: what this browser's Recorder is doing now (the red dot). */
+  activity: `${RECORDER_ORGANIZATION}/recorder/activity`,
+} as const;
+
+/**
+ * The addresses a Recorder installed before the API's reached OpenBot at, which OpenBot keeps answering for it, and
+ * the capture pass (`trajectoryConnect`), which is the runtime's. Nothing new calls the `/api/recorder` ones: the
+ * Recorder uses {@link recorderApiPaths}, and OpenBot's own screens the generated API client.
+ */
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",
   connections: "/api/recorder/connections",

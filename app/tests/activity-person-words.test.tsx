@@ -15,7 +15,7 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
-import { pluginKeys } from "@/lib/plugins/queries";
+import { type Skill, skillKeys } from "@/lib/skills/queries";
 import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
@@ -107,8 +107,8 @@ const ROWS = [
   }),
 ];
 
-/** The skills as the Skills page lists them, each with its own title. */
-const SKILLS = [
+/** The skills as the skills list answers them, each with its own title. */
+const SKILLS: Skill[] = [
   { slug: "skill-creator", title: "Write a skill" },
   { slug: "bot-creator", title: "Make a coworker" },
   { slug: "research-public-web", title: "Research the public web" },
@@ -119,8 +119,6 @@ const SKILLS = [
   ownerUserId: "dev",
   summary: "",
   instructions: "",
-  origin: "bundled",
-  installedBy: null,
   grantedTo: [BOT],
   tools: [],
 }));
@@ -142,11 +140,7 @@ async function renderAs(edition: "team" | "personal") {
     edition === "personal" ? withoutOpenBotWorking("") : "",
     { events: ROWS },
   );
-  queryClient.setQueryData(pluginKeys.page(), {
-    catalogue: [],
-    servers: [],
-    skills: SKILLS,
-  });
+  queryClient.setQueryData(skillKeys.list(), SKILLS);
   queryClient.setQueryData(agentKeys.list(false), [
     { id: BOT, name: "Tide Pal" },
   ]);

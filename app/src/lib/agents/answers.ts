@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { describeBot, describeBots, describeGrantableSkills } from "./proposal";
 import { agentListQueryOptions } from "./queries";
 
@@ -44,6 +44,7 @@ export async function answerReadBot(
 export async function answerListBotSkills(
   client: QueryClient,
 ): Promise<string> {
-  const page = await client.ensureQueryData(pluginsPageQueryOptions());
-  return describeGrantableSkills(page.skills);
+  return describeGrantableSkills(
+    await client.ensureQueryData(skillListQueryOptions()),
+  );
 }

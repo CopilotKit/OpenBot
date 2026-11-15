@@ -24,6 +24,7 @@ import {
   RoutineDetailMissing,
   useDeletedHere,
 } from "@/components/routines/routine-detail-missing";
+import { useRoutineRuns } from "@/components/routines/use-routine-runs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -57,7 +58,6 @@ import {
 import {
   type RoutineRecord,
   type RoutineRunRecord,
-  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -159,7 +159,7 @@ const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
  * status. Polled with the routine's runs read, so the one Run now started appears without a reload.
  */
 function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (

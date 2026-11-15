@@ -13,6 +13,7 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { SKILLS_PATH, skillsResponse } from "./skills-api";
 
 /**
  * A Bot's Skills and access page. A person may put their own skill on a Bot they own, and only
@@ -111,6 +112,18 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
             instructions: "",
           })),
       });
+    }
+    if (new URL(url, "http://127.0.0.1").pathname === SKILLS_PATH) {
+      return skillsResponse(
+        all.map(({ slug, owner, title }) => ({
+          slug,
+          title,
+          summary: `${slug} summary`,
+          instructions: "",
+          ownerUserId: owner,
+          grantedTo: held.has(slug) ? ["expenses"] : [],
+        })),
+      );
     }
     if (url.endsWith("/api/plugins")) {
       return Response.json({
@@ -224,7 +237,7 @@ test("your skills failing to load says so, not that you have none", async () => 
   serving();
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input).endsWith("/api/plugins")
+    new URL(String(input), "http://127.0.0.1").pathname === SKILLS_PATH
       ? new Response(null, { status: 500 })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);

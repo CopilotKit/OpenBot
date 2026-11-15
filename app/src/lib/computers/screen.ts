@@ -1,4 +1,10 @@
-import { tryClient } from "@/lib/client";
+import {
+  getComputerPageFrame,
+  getComputerScreenshot,
+  wakeComputer,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import type { ComputerState } from "./queries";
 
 /**
@@ -49,19 +55,19 @@ export async function readScreenshot(
 ): Promise<ScreenshotRead> {
   const unavailable = "The screen is not available right now.";
   try {
-    const response = await tryClient(`/api/computers/${computerId}/screenshot`);
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      return { error: body?.error ?? unavailable };
-    }
-    const body = (await response.json().catch(() => null)) as unknown;
+    const body: unknown = await getComputerScreenshot(
+      ORGANIZATION_ID,
+      computerId,
+      { fallback: unavailable },
+    );
     const notReady = notReadyOf(body);
     if (notReady) return { notReady };
     return parseScreenshot(body);
-  } catch {
-    return { error: unavailable };
+  } catch (error) {
+    // The server's own sentence when it said why; otherwise the screen is simply not there.
+    return {
+      error: error instanceof ClientError ? error.message : unavailable,
+    };
   }
 }
 
@@ -80,14 +86,11 @@ export async function startComputer(
   computerId: string,
 ): Promise<ComputerState | null> {
   try {
-    const response = await tryClient(
-      `/api/computers/${encodeURIComponent(computerId)}/wake`,
-      { method: "POST" },
+    const body: { state?: unknown } = await wakeComputer(
+      ORGANIZATION_ID,
+      computerId,
+      { "Idempotency-Key": idempotencyKey() },
     );
-    if (!response.ok) return null;
-    const body = (await response.json().catch(() => null)) as {
-      state?: unknown;
-    } | null;
     return COMPUTER_STATES.includes(body?.state as ComputerState)
       ? (body?.state as ComputerState)
       : null;
@@ -161,11 +164,11 @@ export async function readPageFrame(
   toolCallId: string,
 ): Promise<PageFrame | null> {
   try {
-    const response = await tryClient(
-      `/api/computers/${computerId}/page-frame/${encodeURIComponent(toolCallId)}`,
+    const body: unknown = await getComputerPageFrame(
+      ORGANIZATION_ID,
+      computerId,
+      toolCallId,
     );
-    if (!response.ok) return null;
-    const body = (await response.json().catch(() => null)) as unknown;
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const frame = (body as { frame?: unknown }).frame;
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) {

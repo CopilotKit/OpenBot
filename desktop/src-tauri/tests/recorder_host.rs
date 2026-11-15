@@ -497,7 +497,15 @@ fn the_test_app_address_reaches_only_a_debug_binary() {
         );
         let seen = app.join().unwrap();
         assert_eq!(seen[0].line, "GET /api/capabilities HTTP/1.1");
-        assert_eq!(seen[1].line, "POST /api/recorder/connect-codes HTTP/1.1");
+        assert_eq!(
+            seen[1].line,
+            "POST /api/v2/organizations/default/people/me/recorder-connect-codes HTTP/1.1"
+        );
+        assert!(
+            seen[1].head.to_lowercase().contains("idempotency-key: "),
+            "{}",
+            seen[1].head
+        );
         assert!(
             !seen[1].head.to_lowercase().contains("cookie:"),
             "{}",

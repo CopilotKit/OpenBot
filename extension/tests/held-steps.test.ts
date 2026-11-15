@@ -91,7 +91,7 @@ async function until(check: () => boolean | Promise<boolean>, label: string) {
 let gateway: FakeGateway;
 function route(request: Request): Response | null {
   const path = new URL(request.url).pathname;
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     return Response.json({ error: "Not found." }, { status: 404 });
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
   if (!pass || request.method !== "POST") return null;

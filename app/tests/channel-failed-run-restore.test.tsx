@@ -15,6 +15,7 @@ import {
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A conversation whose last run failed still says so after a reload.
@@ -208,8 +209,8 @@ beforeAll(() => {
             canManage: true,
           },
         });
-      if (url.pathname === "/api/components/for-agent/failed-run-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("failed-run-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

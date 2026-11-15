@@ -3,8 +3,11 @@ import {
   getBoundaries,
   replayBoundaries,
 } from "@/lib/api/generated/boundaries/boundaries";
+import {
+  getComputer,
+  listComputers,
+} from "@/lib/api/generated/computers/computers";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
-import { client } from "@/lib/client";
 
 /**
  * One computer as Admin sees it: a person's, or an isolated Bot's.
@@ -92,31 +95,38 @@ export const computerKeys = {
 export function computerStatusQueryOptions(botId: string) {
   return queryOptions({
     queryKey: computerKeys.status(botId),
-    queryFn: (): Promise<ComputerStatus> =>
-      client(`/api/computers/${encodeURIComponent(botId)}/status`, {
+    queryFn: ({ signal }): Promise<ComputerStatus> =>
+      getComputer(ORGANIZATION_ID, botId, {
+        signal,
         fallback: "Couldn't check the computer.",
-      }).then((response) => response.json()),
+      }),
   });
 }
 
 /**
- * The deployment-wide fleet route.
+ * Every computer in the organization, and how they are separated.
  *
- * Not a Bot id in a member route, which is what this used to be. That placeholder stopped working
- * when the server began checking whether the caller may act as the Bot in the path: a placeholder
- * is not a Bot, so the list 404d and this screen showed nothing at all.
+ * The API pages the list; this screen shows all of it, so every page is read, in the list's own
+ * order (whose computer it is, then by Bot).
  */
-const FLEET_PATH = "/api/computers/fleet";
-
-/** No envelope key: the body carries both the list and the isolation mode. */
 export function computerFleetQueryOptions() {
   return queryOptions({
     queryKey: computerKeys.fleet(),
-    queryFn: async (): Promise<ComputerFleet> => {
-      const response = await client(FLEET_PATH, {
-        fallback: "The computers could not be listed.",
-      });
-      return response.json();
+    queryFn: async ({ signal }): Promise<ComputerFleet> => {
+      const computers: ComputerProfile[] = [];
+      let isolation: ComputerIsolation | undefined;
+      let cursor: string | undefined;
+      do {
+        const page = await listComputers(
+          ORGANIZATION_ID,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: "The computers could not be listed." },
+        );
+        computers.push(...page.computers);
+        isolation = page.isolation;
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return { computers, ...(isolation ? { isolation } : {}) };
     },
   });
 }
