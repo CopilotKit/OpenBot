@@ -1943,6 +1943,7 @@ components:
           description: Whether the caller has it pinned, when that was changed.
     ConversationActivity:
       type: object
+      additionalProperties: false
       required:
         - text
         - botId
@@ -1967,6 +1968,7 @@ components:
           description: When it was said.
     ConversationBusy:
       type: object
+      additionalProperties: false
       required:
         - busy
       properties:
@@ -2018,6 +2020,7 @@ components:
           description: Where the caller saw or copied it.
     RouteMessageRequest:
       type: object
+      additionalProperties: false
       required:
         - text
       properties:
@@ -2528,6 +2531,7 @@ components:
           description: How a call connects.
     VoiceCallRequest:
       type: object
+      additionalProperties: false
       properties:
         sdp:
           type: string
@@ -2562,6 +2566,7 @@ components:
           additionalProperties: true
     VoiceTranscriptEntry:
       type: object
+      additionalProperties: false
       required:
         - id
         - role
@@ -2585,6 +2590,7 @@ components:
           pattern: \S
     VoiceSessionInput:
       type: object
+      additionalProperties: false
       required:
         - id
         - anchorMessageId

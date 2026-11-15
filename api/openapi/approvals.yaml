@@ -3005,6 +3005,7 @@ components:
             where every change asks first whatever the person's rules say.
     ComputerStepConversation:
       type: object
+      additionalProperties: false
       description: >-
         The conversation a computer step was called in, as the client holds
         it: an AG-UI run input, with the call the step answers. The messages

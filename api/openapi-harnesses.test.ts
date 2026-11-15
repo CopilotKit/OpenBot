@@ -18,13 +18,11 @@ test("the spec's harness enum is exactly the frameworks the server accepts", () 
     components: {
       schemas: Record<
         string,
-        { allOf?: { properties?: Record<string, { enum?: string[] }> }[] }
+        { properties?: Record<string, { enum?: string[] }> }
       >;
     };
   };
-  const harness = spec.components.schemas.CreateBotRequest?.allOf
-    ?.map((part) => part.properties?.harness)
-    .find(Boolean);
+  const harness = spec.components.schemas.CreateBotRequest?.properties?.harness;
   const accepted = HARNESSES.filter((entry) => declaredHarness(entry.id)).map(
     (entry) => entry.id,
   );
