@@ -1,6 +1,11 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { updatePerson } from "@/lib/api/generated/people/people";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import {
+  desktopConnectionQueryOptions,
+  invokeDesktop,
+} from "@/lib/desktop/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { clearSkin } from "@/skins/store";
 import { authClient } from "./client";
 import { authKeys } from "./queries";
@@ -18,6 +23,33 @@ async function signOut() {
 }
 
 /**
+ * Whether this page is inside an OpenBot Desktop connected to an OpenBot that runs somewhere else.
+ * There the desktop app holds the sign-in and the page holds none, so the desktop app is what signs
+ * out, and it shows its own setup afterwards.
+ */
+export async function connectedThroughDesktop(
+  queryClient: QueryClient,
+): Promise<boolean> {
+  if (desktopShell() === null) return false;
+  const connection = await queryClient.ensureQueryData(
+    desktopConnectionQueryOptions(),
+  );
+  return connection.mode === "connected";
+}
+
+/** Ask the desktop app to sign out of the OpenBot it is connected to. */
+export async function signOutThroughDesktop() {
+  try {
+    await invokeDesktop("sign_out");
+  } catch {
+    throw new Error(SIGN_OUT_UNFINISHED);
+  }
+}
+
+/** How a sign-out ended: `leaving` when the desktop app is taking the window back to its setup. */
+export type SignedOut = { leaving: boolean };
+
+/**
  * Every way out of OpenBot signs out through here, the skins' own menus included.
  *
  * The skin is the account's, and this browser only caches it to paint before the preferences load.
@@ -26,7 +58,14 @@ async function signOut() {
  */
 export function signOutMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: signOut,
+    mutationFn: async (): Promise<SignedOut> => {
+      if (await connectedThroughDesktop(queryClient)) {
+        await signOutThroughDesktop();
+        return { leaving: true };
+      }
+      await signOut();
+      return { leaving: false };
+    },
     onSuccess: () => {
       clearSkin();
       queryClient.removeQueries({ queryKey: authKeys.all });
