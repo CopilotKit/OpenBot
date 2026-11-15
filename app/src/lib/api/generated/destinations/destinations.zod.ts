@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where a person's Bots reach them
  */
 

@@ -144,7 +144,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     items: [
       {
         title: team.credentialsLabel,
-        description: "Manage this deployment’s keys and tokens.",
+        description: "Manage this organization’s keys and tokens.",
         icon: VAULT.icon,
         linkOptions: team.credentials(),
       },

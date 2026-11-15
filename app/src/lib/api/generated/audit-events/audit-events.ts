@@ -84,7 +84,7 @@ export const getListAuditEventsUrl = (
 };
 
 /**
- * Return one page of the audit trail, newest first, narrowed by the filters given. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator may read the trail.
+ * Return one page of the organization's audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.
  * @summary List audit events
  */
 export const listAuditEvents = async (
@@ -325,7 +325,7 @@ export const getExportAuditEventsUrl = (
 };
 
 /**
- * Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator may export the trail.
+ * Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator of the organization may export its trail.
  * @summary Export audit events as CSV
  */
 export const exportAuditEvents = async (

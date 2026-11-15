@@ -995,7 +995,7 @@ export const getGetPersonCapabilitiesUrl = (
 };
 
 /**
- * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator reads anybody's. enforced is false where the deployment keeps no switches and every default applies.
+ * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator of the organization reads any member's. enforced is false where this OpenBot keeps no switches and every default applies.
  * @summary Read what a person may do
  */
 export const getPersonCapabilities = async (

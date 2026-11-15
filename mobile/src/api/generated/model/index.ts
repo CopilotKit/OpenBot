@@ -371,6 +371,7 @@ export * from "./noBotToAnswerResponse";
 export * from "./noSpeechResponse";
 export * from "./noTrailToReplayResponse";
 export * from "./organization";
+export * from "./organizationComputerNotFoundResponse";
 export * from "./organizationConflictResponse";
 export * from "./organizationMember";
 export * from "./organizationMemberConflictResponse";

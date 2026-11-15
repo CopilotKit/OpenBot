@@ -320,7 +320,7 @@ export const getGetCheckInUsageUrl = (
 };
 
 /**
- * Return, per Bot, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the daily limit in force. Counts only: no item's title, source or person. Only an administrator may read it.
+ * Return, per Bot in the organization, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the organization's daily limit in force. Counts only: no item's title, source or person. Only an administrator of the organization may read it.
  * @summary Read how check-ins are going
  */
 export const getCheckInUsage = async (

@@ -198,7 +198,7 @@ To rotate the secret, do one of these:
   every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
   created later carries it.
 - **Turn the app off and on again.** Set the new values, restart, then on the app's page under Apps
-  turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
+  turn **Enable for this organization** off and back on. Turning it off deletes the config at Composio
   and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
   with the new client. Then make the app shared, connect the team account and grant it to Bots again.
 

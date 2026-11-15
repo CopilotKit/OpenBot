@@ -263,6 +263,8 @@ export function PluginPage({
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Whose vault a secret saved here goes into: each organization has its own.
+  const vaultOwner = personal ? "OpenBot" : "this organization";
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
   const alwaysOn = key === ALWAYS_ON_APP;
   const queryClient = useQueryClient();
@@ -729,7 +731,7 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : "Enable for this deployment"}
+                  {personal ? "Turned on" : "Enable for this organization"}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
@@ -744,7 +746,7 @@ export function PluginPage({
                   aria-label={
                     personal
                       ? `Turn ${title} on or off`
-                      : `Enable ${title} for this deployment`
+                      : `Enable ${title} for this organization`
                   }
                   checked={server !== undefined}
                   onCheckedChange={(next) => {
@@ -775,8 +777,8 @@ export function PluginPage({
                   <ItemDescription>
                     {server.accountMode === "shared"
                       ? server.sharedOnly
-                        ? "One shared account for everyone. It signs in with this deployment's own client, so it can't be made personal."
-                        : "One shared account for everyone."
+                        ? "One shared account for everyone in this organization. It signs in with this deployment's own client, so it can't be made personal."
+                        : "One shared account for everyone in this organization."
                       : server.sharedOnly
                         ? "It signs in with this deployment's own client, so only a shared account can connect it."
                         : "Each person connects their own."}
@@ -888,7 +890,7 @@ export function PluginPage({
                       ? `${title} answers without an account, so ${personal ? "your Bots use" : "Bots use"} it as it is. Add a key only if ${title} gives you one.`
                       : personal
                         ? `What OpenBot sends to ${title}. Your Bots all use it.`
-                        : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                        : "What OpenBot sends to the vendor. One credential for everybody in this organization."
           }
           title="Connection"
         >
@@ -1555,10 +1557,10 @@ export function PluginPage({
             </DialogTitle>
             <DialogDescription>
               {dialog === "client"
-                ? `From the vendor's console. The secret is saved in ${paths.deploymentName}'s vault and never shown again.`
+                ? `From the vendor's console. The secret is saved in ${vaultOwner}'s vault and never shown again.`
                 : dialog === "instance"
                   ? "Your own hostname with this vendor. It is checked against the vendor's pattern before it is saved."
-                  : `Saved in ${paths.deploymentName}'s vault and never shown again.`}
+                  : `Saved in ${vaultOwner}'s vault and never shown again.`}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

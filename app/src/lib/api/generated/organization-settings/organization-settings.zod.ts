@@ -74,7 +74,7 @@ export const GetDeploymentResponse = zod
   .describe("What this OpenBot offers and how people sign in to it.");
 
 /**
- * Return the settings an administrator sets for everybody: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 
@@ -114,7 +114,9 @@ export const GetOrganizationSettingsResponse = zod
           .describe("The model OpenBot's own Bots run on, when one is set."),
         directoryGroups: zod
           .array(zod.string())
-          .describe("The directory groups people belong to, by name."),
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
         apps: zod
           .array(
             zod.object({
@@ -150,7 +152,7 @@ export const GetOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -224,7 +226,7 @@ export const GetOrganizationSettingsResponse = zod
   .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Only an administrator may change them.
+ * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
  * @summary Change the organization's settings
  */
 
@@ -276,7 +278,9 @@ export const UpdateOrganizationSettingsBody = zod
           .describe("The model OpenBot's own Bots run on, when one is set."),
         directoryGroups: zod
           .array(zod.string())
-          .describe("The directory groups people belong to, by name."),
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
         apps: zod
           .array(
             zod.object({
@@ -314,7 +318,7 @@ export const UpdateOrganizationSettingsBody = zod
       .boolean()
       .optional()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -423,7 +427,9 @@ export const UpdateOrganizationSettingsResponse = zod
           .describe("The model OpenBot's own Bots run on, when one is set."),
         directoryGroups: zod
           .array(zod.string())
-          .describe("The directory groups people belong to, by name."),
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
         apps: zod
           .array(
             zod.object({
@@ -459,7 +465,7 @@ export const UpdateOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -573,7 +579,7 @@ export const StopInactiveComputersResponse = zod.object({
 });
 
 /**
- * Return which models Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator may read it.
+ * Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
  * @summary Read which models Bots ran on
  */
 
@@ -626,7 +632,7 @@ export const GetModelUsageResponse = zod.object({
 });
 
 /**
- * Return one page of the actions recorded on Bot computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator may read them. A missing cursor starts at the newest and nextCursor null ends the list.
+ * Return one page of the actions recorded on the organization's Bots' computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator of the organization may read them. A missing cursor starts at the newest and nextCursor null ends the list.
  * @summary List recorded computer actions
  */
 

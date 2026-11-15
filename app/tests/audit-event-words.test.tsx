@@ -48,7 +48,10 @@ function row(
     eventType,
     targetType,
     targetId,
-    payload: { bot: "personal-assistant", ...payload },
+    payload: { bot: "personal-assistant", ...payload } as Record<
+      string,
+      unknown
+    >,
     createdAt: `2026-11-07T11:${String(minute).padStart(2, "0")}:00Z`,
   };
 }
@@ -184,6 +187,45 @@ test("the search box still finds a row by its stored name", async () => {
       "Search the web",
     ]),
   );
+});
+
+/**
+ * What happens to an organization is on its own trail: made, renamed, a person invited, joining,
+ * removed or given another role. Each reads in words, and as something that happened, never as
+ * something OpenBot blocked.
+ */
+test("what happened to an organization reads in words, and none of it as blocked", async () => {
+  const ORGANIZATION_WORDS: Record<string, string> = {
+    "organization.created": "Create an organization",
+    "organization.renamed": "Rename an organization",
+    "organization.member_invited": "Invite a person to an organization",
+    "organization.member_joined": "Join an organization",
+    "organization.member_removed": "Remove a person from an organization",
+    "organization.member_role_changed":
+      "Change a person's role in an organization",
+  };
+  const types = Object.keys(ORGANIZATION_WORDS);
+  const view = await renderAs(
+    "team",
+    types.map((eventType, index) => ({
+      ...row(`o${index}`, 40 - index, eventType, "organization", {}, "org_2"),
+      payload: {},
+    })),
+  );
+  const lines = whats(view.container);
+  expect(lines.map((line) => line.textContent)).toEqual(
+    types.map((type) => ORGANIZATION_WORDS[type]),
+  );
+  // Admin still finds each row's stored name on hover.
+  expect(lines.map((line) => line.getAttribute("title"))).toEqual(types);
+  const decisions = [
+    ...view.container.querySelectorAll("tbody [data-column=decision]"),
+  ].map((cell) => cell.textContent);
+  expect(decisions).toHaveLength(types.length);
+  for (const decision of decisions) {
+    expect(decision).not.toContain("Blocked");
+    expect(decision).not.toContain("Did not happen");
+  }
 });
 
 /**

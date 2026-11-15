@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the skills the caller can see: the organization's and their own. An admin sees everybody's. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: the organization's and their own. An admin of the organization sees every member's. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 

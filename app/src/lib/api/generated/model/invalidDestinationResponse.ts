@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
+ * The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, the phone is connected to another person, or the Slack account, Teams account or phone is connected in another organization.
  */
 export type InvalidDestinationResponse = Problem;

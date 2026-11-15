@@ -664,7 +664,7 @@ export const getDeleteCurrentRecorderConnectionUrl = (
 };
 
 /**
- * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else.
+ * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the call acts in the connection's organization.
  * @summary Disconnect this browser's Recorder
  */
 export const deleteCurrentRecorderConnection = async (
@@ -685,7 +685,7 @@ export const getGetRecorderIdentityUrl = (organizationId: string) => {
 };
 
 /**
- * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. A connection that has ended is refused as signed out, with why.
+ * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization. A connection that has ended is refused as signed out, with why.
  * @summary Read who a Recorder is connected as
  */
 export const getRecorderIdentity = async (
@@ -706,7 +706,7 @@ export const getGetRecorderLearningUrl = (organizationId: string) => {
 };
 
 /**
- * Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else.
+ * Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization.
  * @summary Read where a Recorder's recordings are learned from
  */
 export const getRecorderLearning = async (
@@ -727,7 +727,7 @@ export const getReportRecorderActivityUrl = (organizationId: string) => {
 };
 
 /**
- * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else.
+ * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the report is kept in the connection's organization.
  * @summary Say what a Recorder is doing now
  */
 export const reportRecorderActivity = async (
