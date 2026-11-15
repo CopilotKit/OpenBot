@@ -3287,7 +3287,7 @@ paths:
         '409':
           $ref: '#/components/responses/AttachmentConflict'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '500':
@@ -3342,8 +3342,6 @@ paths:
           $ref: '#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3443,8 +3441,6 @@ paths:
           $ref: '#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3922,7 +3918,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '422':
@@ -14657,7 +14653,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -14724,7 +14720,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -14793,7 +14789,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -14867,7 +14863,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15079,7 +15075,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15146,7 +15142,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15215,7 +15211,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -15289,7 +15285,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15923,7 +15919,7 @@ paths:
         '409':
           $ref: '#/components/responses/RecorderSecretConflict'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '429':
@@ -16099,7 +16095,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '500':
@@ -16253,7 +16249,7 @@ paths:
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '500':
@@ -16300,6 +16296,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -33860,6 +33858,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    PayloadTooLarge:
+      description: The body is larger than this address takes. Only an address that limits its body answers this; the detail says how much it takes where the limit is a person's to meet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tooLarge:
+              value:
+                type: https://open.bot/errors/payload-too-large
+                title: The request is too large.
+                status: 413
+                detail: That request is too large.
+                code: PAYLOAD_TOO_LARGE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:
@@ -34247,24 +34263,6 @@ components:
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    UploadTooLarge:
-      description: The file or the request is larger than OpenBot takes.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: Recordings must be smaller than 10 MiB.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
@@ -36733,24 +36731,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    BrowserRequestTooLarge:
-      description: The body is larger than a browser request may be.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: That request is too large.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
     BrowserRequestNotJson:
       description: The body was not sent as JSON.
       content:
@@ -37023,24 +37003,6 @@ components:
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    RecorderRequestTooLarge:
-      description: The body is larger than these small requests may be (2 KB).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            large:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: That request is too large.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example

@@ -822,7 +822,7 @@ paths:
         '409':
           $ref: '#/components/responses/AttachmentConflict'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '500':
@@ -881,8 +881,6 @@ paths:
           $ref: './common.yaml#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -989,8 +987,6 @@ paths:
           $ref: './common.yaml#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1491,7 +1487,7 @@ paths:
         '404':
           $ref: './common.yaml#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '422':
@@ -1553,6 +1549,8 @@ paths:
           $ref: './common.yaml#/components/responses/OrganizationNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         default:
@@ -2920,24 +2918,6 @@ components:
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    UploadTooLarge:
-      description: The file or the request is larger than OpenBot takes.
-      content:
-        application/problem+json:
-          schema:
-            $ref: './common.yaml#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: Recordings must be smaller than 10 MiB.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example

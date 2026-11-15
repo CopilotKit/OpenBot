@@ -31,7 +31,6 @@ import type {
   TooManyRequestsResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
-  UploadTooLargeResponse,
   VoiceCallRequest,
   VoiceConfiguration,
   VoiceConnection,
@@ -129,7 +128,6 @@ export const getStartVoiceCallMutationOptions = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse
-    | UploadTooLargeResponse
     | TooManyRequestsResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -186,7 +184,6 @@ export type StartVoiceCallMutationError =
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | ConversationConflictResponse
-  | UploadTooLargeResponse
   | TooManyRequestsResponse
   | ServerErrorResponse
   | ServiceUnavailableResponse
@@ -208,7 +205,6 @@ export const useStartVoiceCall = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse
-    | UploadTooLargeResponse
     | TooManyRequestsResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -561,7 +557,6 @@ export const getSaveVoiceSessionMutationOptions = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse
-    | UploadTooLargeResponse
     | TooManyRequestsResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -618,7 +613,6 @@ export type SaveVoiceSessionMutationError =
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | ConversationConflictResponse
-  | UploadTooLargeResponse
   | TooManyRequestsResponse
   | ServerErrorResponse
   | ServiceUnavailableResponse
@@ -640,7 +634,6 @@ export const useSaveVoiceSession = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | ConversationConflictResponse
-    | UploadTooLargeResponse
     | TooManyRequestsResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse

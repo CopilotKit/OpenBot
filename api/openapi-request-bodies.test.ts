@@ -116,3 +116,29 @@ test("every object in a request body says whether it takes keys it doesn't name"
   );
   expect(found).toEqual([]);
 });
+
+/*
+ * A body that is too large is answered with one problem everywhere, so a client reads it one way.
+ * Only an operation that takes a body can be sent too large a one. Which operations limit their
+ * body is the server's to say: the server checks that the operations documenting 413 are exactly
+ * the ones it limits.
+ */
+test("a 413 is the shared problem, on an operation that takes a body", () => {
+  const found = Object.entries(spec.paths).flatMap(([path, item]) =>
+    METHODS.flatMap((method) => {
+      const operation = item[method];
+      const tooLarge = (operation?.responses as Record<string, Schema>)?.[
+        "413"
+      ];
+      if (!operation || !tooLarge) return [];
+      const name = `${String(operation.operationId)} (${method.toUpperCase()} ${path})`;
+      return [
+        ...(tooLarge.$ref === "#/components/responses/PayloadTooLarge"
+          ? []
+          : [`${name}: 413 is ${String(tooLarge.$ref)}, not PayloadTooLarge`]),
+        ...(operation.requestBody ? [] : [`${name}: 413 with no body`]),
+      ];
+    }),
+  );
+  expect(found).toEqual([]);
+});

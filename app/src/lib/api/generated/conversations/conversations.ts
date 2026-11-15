@@ -57,6 +57,7 @@ import type {
   NoBotToAnswerResponse,
   NoSpeechResponse,
   OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   RecordConversationActivityHeaders,
   RemoveConversationMemberHeaders,
   RouteConversationMessageHeaders,
@@ -78,7 +79,6 @@ import type {
   UpdateConversationRequest,
   UpdatedConversation,
   UploadConversationAttachmentHeaders,
-  UploadTooLargeResponse,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -2930,7 +2930,7 @@ export const getUploadConversationAttachmentMutationOptions = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | AttachmentConflictResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -2987,7 +2987,7 @@ export type UploadConversationAttachmentMutationError =
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | AttachmentConflictResponse
-  | UploadTooLargeResponse
+  | PayloadTooLargeResponse
   | UnsupportedFileResponse
   | ServerErrorResponse
   | ServiceUnavailableResponse
@@ -3009,7 +3009,7 @@ export const useUploadConversationAttachment = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | AttachmentConflictResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -3857,7 +3857,7 @@ export const getCreateTranscriptionMutationOptions = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | NoSpeechResponse
     | TooManyRequestsResponse
@@ -3909,7 +3909,7 @@ export type CreateTranscriptionMutationError =
   | UnauthenticatedResponse
   | ForbiddenResponse
   | OrganizationNotFoundResponse
-  | UploadTooLargeResponse
+  | PayloadTooLargeResponse
   | UnsupportedFileResponse
   | NoSpeechResponse
   | TooManyRequestsResponse
@@ -3931,7 +3931,7 @@ export const useCreateTranscription = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | NoSpeechResponse
     | TooManyRequestsResponse
