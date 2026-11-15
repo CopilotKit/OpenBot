@@ -1629,6 +1629,7 @@ components:
       description: >-
         A key the Bot's address sits behind. Write-only: stored encrypted and
         never returned. A blank value sets no key.
+      additionalProperties: false
       required: [value]
       properties:
         header:
@@ -1639,88 +1640,118 @@ components:
           type: string
           writeOnly: true
           description: The header's value.
+    BotName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: What the Bot is called, 1 to 80 characters once trimmed.
+    BotTitle:
+      type: string
+      maxLength: 120
+      description: The subtitle under its name, up to 120 characters. May be empty.
+    BotRoleDescription:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint
+        runs on these words.
+    BotEndpoint:
+      type: string
+      description: >-
+        The AG-UI address it runs at: empty, or an absolute http or https
+        address, the only kinds the server has ever taken. Empty or absent on
+        create means it runs inside OpenBot; empty or absent on a change leaves
+        it as it is. An address that fits can still be refused: the server
+        refuses one this deployment may not reach, such as a private network
+        address on a deployment that keeps Bots off it.
+      anyOf:
+        - type: string
+          maxLength: 0
+        - type: string
+          format: uri
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+    BotIsolated:
+      type: boolean
+      description: >-
+        Whether it gets a computer of its own. Absent leaves it as it is. True
+        needs the owner's Isolated Bots switch.
+    BotInstructions:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        New instructions for the starter Bot, 1 to 1000 characters once
+        trimmed. Absent leaves them as they are; every other Bot ignores them.
     BotFields:
       type: object
+      additionalProperties: false
       required: [name, title, roleDescription, visibility]
       properties:
         name:
-          type: string
-          minLength: 1
-          maxLength: 80
-          description: What the Bot is called, 1 to 80 characters once trimmed.
+          $ref: '#/components/schemas/BotName'
         title:
-          type: string
-          maxLength: 120
-          description: The subtitle under its name, up to 120 characters. May be empty.
+          $ref: '#/components/schemas/BotTitle'
         roleDescription:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: >-
-            What it does, 1 to 1000 characters once trimmed. A Bot with no
-            endpoint runs on these words.
+          $ref: '#/components/schemas/BotRoleDescription'
         visibility:
           $ref: '#/components/schemas/BotVisibility'
         endpoint:
-          type: string
-          description: >-
-            The AG-UI address it runs at: empty, or an absolute http or https
-            address, the only kinds the server has ever taken. Empty or absent
-            on create means it runs inside OpenBot; empty or absent on a
-            change leaves it as it is. An address that fits can still be
-            refused: the server refuses one this deployment may not reach,
-            such as a private network address on a deployment that keeps Bots
-            off it.
-          anyOf:
-            - type: string
-              maxLength: 0
-            - type: string
-              format: uri
-              pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+          $ref: '#/components/schemas/BotEndpoint'
         auth:
           $ref: '#/components/schemas/BotKey'
         isolated:
-          type: boolean
-          description: >-
-            Whether it gets a computer of its own. Absent leaves it as it is.
-            True needs the owner's Isolated Bots switch.
+          $ref: '#/components/schemas/BotIsolated'
         instructions:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: >-
-            New instructions for the starter Bot, 1 to 1000 characters once
-            trimmed. Absent leaves them as they are; every other Bot ignores
-            them.
+          $ref: '#/components/schemas/BotInstructions'
     CreateBotRequest:
-      description: A new Bot.
-      allOf:
-        - $ref: '#/components/schemas/BotFields'
-        - type: object
-          properties:
-            harness:
-              type: string
-              description: >-
-                The framework an agent somebody runs themselves is built on,
-                by its id in OpenBot's harness list (shared/harnesses.json),
-                which the server checks every create against. Empty means none
-                was named, as for an agent somebody already runs. "byo-url" is
-                not one: it names no framework. Kept only with an endpoint.
-              enum:
-                - ''
-                - crewai
-                - llamaindex
-                - agno
-                - langgraph
-                - google-adk
-                - antigravity
-                - pydantic-ai
-                - microsoft-agent-framework
-                - claude-agent-sdk
-                - strands
-                - ag2
-                - langroid
-                - mastra
+      description: >-
+        A new Bot: a Bot's fields, and the framework it is built on. One closed
+        object, not BotFields with harness added in an allOf, because each
+        closed part of an allOf would refuse the other's fields.
+      type: object
+      additionalProperties: false
+      required: [name, title, roleDescription, visibility]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotName'
+        title:
+          $ref: '#/components/schemas/BotTitle'
+        roleDescription:
+          $ref: '#/components/schemas/BotRoleDescription'
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          $ref: '#/components/schemas/BotIsolated'
+        instructions:
+          $ref: '#/components/schemas/BotInstructions'
+        harness:
+          type: string
+          description: >-
+            The framework an agent somebody runs themselves is built on, by
+            its id in OpenBot's harness list (shared/harnesses.json), which
+            the server checks every create against. Empty means none was
+            named, as for an agent somebody already runs. "byo-url" is not
+            one: it names no framework. Kept only with an endpoint.
+          enum:
+            - ''
+            - crewai
+            - llamaindex
+            - agno
+            - langgraph
+            - google-adk
+            - antigravity
+            - pydantic-ai
+            - microsoft-agent-framework
+            - claude-agent-sdk
+            - strands
+            - ag2
+            - langroid
+            - mastra
     UpdateBotRequest:
       description: A Bot's fields after the change.
       allOf:

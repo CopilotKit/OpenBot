@@ -337,9 +337,9 @@ export type OrganizationNotFoundResponse = Problem;
 export type RecorderSecretConflictResponse = Problem;
 
 /**
- * The body is larger than these small requests may be (2 KB).
+ * The body is larger than this address takes. Only an address that limits its body answers this; the detail says how much it takes where the limit is a person's to meet.
  */
-export type RecorderRequestTooLargeResponse = Problem;
+export type PayloadTooLargeResponse = Problem;
 
 /**
  * The body was not sent as application/json, which a cross-site form cannot send.

@@ -3287,7 +3287,7 @@ paths:
         '409':
           $ref: '#/components/responses/AttachmentConflict'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '500':
@@ -3342,8 +3342,6 @@ paths:
           $ref: '#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3443,8 +3441,6 @@ paths:
           $ref: '#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3922,7 +3918,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '422':
@@ -14657,7 +14653,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -14724,7 +14720,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -14793,7 +14789,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -14867,7 +14863,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15079,7 +15075,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15146,7 +15142,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15215,7 +15211,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -15289,7 +15285,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -15923,7 +15919,7 @@ paths:
         '409':
           $ref: '#/components/responses/RecorderSecretConflict'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '429':
@@ -16099,7 +16095,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '500':
@@ -16253,7 +16249,7 @@ paths:
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
-          $ref: '#/components/responses/RecorderRequestTooLarge'
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/RecorderJsonOnly'
         '500':
@@ -16300,6 +16296,8 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -19284,6 +19282,7 @@ components:
     BotKey:
       type: object
       description: 'A key the Bot''s address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.'
+      additionalProperties: false
       required:
         - value
       properties:
@@ -19297,6 +19296,7 @@ components:
           description: The header's value.
     BotFields:
       type: object
+      additionalProperties: false
       required:
         - name
         - title
@@ -19304,64 +19304,65 @@ components:
         - visibility
       properties:
         name:
-          type: string
-          minLength: 1
-          maxLength: 80
-          description: What the Bot is called, 1 to 80 characters once trimmed.
+          $ref: '#/components/schemas/BotName'
         title:
-          type: string
-          maxLength: 120
-          description: The subtitle under its name, up to 120 characters. May be empty.
+          $ref: '#/components/schemas/BotTitle'
         roleDescription:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.
+          $ref: '#/components/schemas/BotRoleDescription'
         visibility:
           $ref: '#/components/schemas/BotVisibility'
         endpoint:
-          type: string
-          description: 'The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it.'
-          anyOf:
-            - type: string
-              maxLength: 0
-            - type: string
-              format: uri
-              pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+          $ref: '#/components/schemas/BotEndpoint'
         auth:
           $ref: '#/components/schemas/BotKey'
         isolated:
-          type: boolean
-          description: Whether it gets a computer of its own. Absent leaves it as it is. True needs the owner's Isolated Bots switch.
+          $ref: '#/components/schemas/BotIsolated'
         instructions:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+          $ref: '#/components/schemas/BotInstructions'
     CreateBotRequest:
-      description: A new Bot.
-      allOf:
-        - $ref: '#/components/schemas/BotFields'
-        - type: object
-          properties:
-            harness:
-              type: string
-              description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.'
-              enum:
-                - ''
-                - crewai
-                - llamaindex
-                - agno
-                - langgraph
-                - google-adk
-                - antigravity
-                - pydantic-ai
-                - microsoft-agent-framework
-                - claude-agent-sdk
-                - strands
-                - ag2
-                - langroid
-                - mastra
+      description: 'A new Bot: a Bot''s fields, and the framework it is built on. One closed object, not BotFields with harness added in an allOf, because each closed part of an allOf would refuse the other''s fields.'
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - title
+        - roleDescription
+        - visibility
+      properties:
+        name:
+          $ref: '#/components/schemas/BotName'
+        title:
+          $ref: '#/components/schemas/BotTitle'
+        roleDescription:
+          $ref: '#/components/schemas/BotRoleDescription'
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          $ref: '#/components/schemas/BotIsolated'
+        instructions:
+          $ref: '#/components/schemas/BotInstructions'
+        harness:
+          type: string
+          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.'
+          enum:
+            - ''
+            - crewai
+            - llamaindex
+            - agno
+            - langgraph
+            - google-adk
+            - antigravity
+            - pydantic-ai
+            - microsoft-agent-framework
+            - claude-agent-sdk
+            - strands
+            - ag2
+            - langroid
+            - mastra
     UpdateBotRequest:
       description: A Bot's fields after the change.
       allOf:
@@ -19556,6 +19557,7 @@ components:
                 description: How many refusals by it the trail holds.
     AuditQuestion:
       type: object
+      additionalProperties: false
       required:
         - question
       properties:
@@ -20398,7 +20400,12 @@ components:
       pattern: ^[^\x00]*\S[^\x00]*$
     OrganizationSettingValues:
       type: object
+      description: 'The organization''s settings. Context is read only: it comes back with the settings and is never sent.'
+      additionalProperties: false
       properties:
+        context:
+          $ref: '#/components/schemas/OrganizationSettingsContext'
+          readOnly: true
         ssoRequired:
           type: boolean
           description: Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.
@@ -20456,8 +20463,7 @@ components:
     OrganizationSettings:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
-        - type: object
-          required:
+        - required:
             - ssoRequired
             - actionRecording
             - inactiveComputerDays
@@ -20467,9 +20473,6 @@ components:
             - proactiveDailyRuns
             - modelSelection
             - context
-          properties:
-            context:
-              $ref: '#/components/schemas/OrganizationSettingsContext'
     OrganizationSettingsContext:
       type: object
       readOnly: true
@@ -21850,6 +21853,37 @@ components:
                 minLength: 1
                 maxLength: 320
                 pattern: \S
+    BotName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: What the Bot is called, 1 to 80 characters once trimmed.
+    BotTitle:
+      type: string
+      maxLength: 120
+      description: The subtitle under its name, up to 120 characters. May be empty.
+    BotRoleDescription:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint runs on these words.
+    BotEndpoint:
+      type: string
+      description: 'The AG-UI address it runs at: empty, or an absolute http or https address, the only kinds the server has ever taken. Empty or absent on create means it runs inside OpenBot; empty or absent on a change leaves it as it is. An address that fits can still be refused: the server refuses one this deployment may not reach, such as a private network address on a deployment that keeps Bots off it.'
+      anyOf:
+        - type: string
+          maxLength: 0
+        - type: string
+          format: uri
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+    BotIsolated:
+      type: boolean
+      description: Whether it gets a computer of its own. Absent leaves it as it is. True needs the owner's Isolated Bots switch.
+    BotInstructions:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
     ConversationWork:
       type: object
       description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
@@ -22060,6 +22094,7 @@ components:
           $ref: '#/components/schemas/Conversation'
     RouteMessageRequest:
       type: object
+      additionalProperties: false
       required:
         - text
       properties:
@@ -22139,6 +22174,7 @@ components:
           description: Whether the caller has it pinned, when that was changed.
     ConversationActivity:
       type: object
+      additionalProperties: false
       required:
         - text
         - botId
@@ -22163,6 +22199,7 @@ components:
           description: When it was said.
     ConversationBusy:
       type: object
+      additionalProperties: false
       required:
         - busy
       properties:
@@ -22394,6 +22431,7 @@ components:
           minimum: 0
     VoiceCallRequest:
       type: object
+      additionalProperties: false
       properties:
         sdp:
           type: string
@@ -22426,6 +22464,7 @@ components:
           additionalProperties: true
     VoiceTranscriptEntry:
       type: object
+      additionalProperties: false
       required:
         - id
         - role
@@ -22515,6 +22554,7 @@ components:
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     VoiceSessionInput:
       type: object
+      additionalProperties: false
       required:
         - id
         - anchorMessageId
@@ -27598,6 +27638,7 @@ components:
           description: True for the conversation of a task started from a check-in, where every change asks first whatever the person's rules say.
     ComputerStepConversation:
       type: object
+      additionalProperties: false
       description: 'The conversation a computer step was called in, as the client holds it: an AG-UI run input, with the call the step answers. The messages are AG-UI''s own, so each one is an open object here and is checked as AG-UI checks it.'
       required:
         - runId
@@ -33817,6 +33858,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    PayloadTooLarge:
+      description: The body is larger than this address takes. Only an address that limits its body answers this; the detail says how much it takes where the limit is a person's to meet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tooLarge:
+              value:
+                type: https://open.bot/errors/payload-too-large
+                title: The request is too large.
+                status: 413
+                detail: That request is too large.
+                code: PAYLOAD_TOO_LARGE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:
@@ -34204,24 +34263,6 @@ components:
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    UploadTooLarge:
-      description: The file or the request is larger than OpenBot takes.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: Recordings must be smaller than 10 MiB.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
@@ -36690,24 +36731,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    BrowserRequestTooLarge:
-      description: The body is larger than a browser request may be.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: That request is too large.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
     BrowserRequestNotJson:
       description: The body was not sent as JSON.
       content:
@@ -36980,24 +37003,6 @@ components:
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    RecorderRequestTooLarge:
-      description: The body is larger than these small requests may be (2 KB).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          examples:
-            large:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: That request is too large.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
