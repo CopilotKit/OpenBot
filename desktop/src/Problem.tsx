@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 
 /**
@@ -21,6 +21,11 @@ export type Problem = {
   leftover_containers?: string[] | null;
   /** Only a Windows restart fixes this: the window offers one instead of Try again. */
   restart_windows?: boolean | null;
+  /**
+   * Which thing went wrong while connecting to an OpenBot that runs elsewhere. The window reads it
+   * only to choose what to offer next (`ConnectToOpenBot`); the sentence is still `said`.
+   */
+  kind?: string | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
@@ -158,13 +163,16 @@ export function TroubleshootingLogs({
 /**
  * `onRetry`, where the screen has no other way to run what failed again: Try again, in the card.
  * The install behind the account step had none, and its failure sat there with nothing to press.
+ * `children`, where the way on is something other than Try again: it takes that button's place.
  */
 export function Failure({
   problem,
   onRetry,
+  children,
 }: {
   problem: Problem;
   onRetry?: () => void;
+  children?: ReactNode;
 }) {
   return (
     <div className="blocker" role="alert">
@@ -177,6 +185,7 @@ export function Failure({
           </button>
         </div>
       )}
+      {children && <div className="row">{children}</div>}
       {/* The real output, kept but not the headline. Whoever is debugging opens this; the person
           reading the sentence above never has to. */}
       {problem.detail && (

@@ -113,7 +113,139 @@ export function App() {
   return <Setup />;
 }
 
+/** Where OpenBot runs, as the shell has it saved (`connection`). */
+type Connection = {
+  mode: "local" | "connected";
+  address: string | null;
+  /** A sign-in for that address is kept on this computer. */
+  signedIn: boolean;
+};
+
+/** Said once by the shell when it put this window back: why, or `choose` to pick again. */
+type ConnectionNotice = { kind: string; message: string | null };
+
+type Launch =
+  | { at: "asking" }
+  /** OpenBot on this computer: setup as it has always been. */
+  | { at: "local"; address: string }
+  /** Signed in to an OpenBot that runs elsewhere, which the shell is opening. */
+  | { at: "opening" }
+  /** The first screen with that OpenBot's address, to sign in to it again or choose otherwise. */
+  | {
+      at: "connect";
+      address: string;
+      problem: Problem | null;
+      reopen: boolean;
+    };
+
+/**
+ * Asks where OpenBot runs before anything else. On this computer, setup carries on exactly as it
+ * did (`LocalSetup`). Connected to an OpenBot that runs elsewhere, none of that is mounted, so
+ * nothing about an install on this computer is asked for, downloaded or started: the shell opens
+ * that OpenBot, or the first screen shows its address to sign in to again.
+ *
+ * A shell from before this choice does not know `connection`: that is OpenBot on this computer.
+ */
 function Setup() {
+  const [launch, setLaunch] = useState<Launch>({ at: "asking" });
+  // Asked once, the development double mount included: the shell answers its notice only once.
+  const asked = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    if (!asked.current) {
+      asked.current = true;
+      void (async () => {
+        const found = await invoke<Connection>("connection").catch(() => null);
+        if (!alive.current) return;
+        const address = found?.address ?? "";
+        if (found?.mode !== "connected") {
+          setLaunch({ at: "local", address });
+          return;
+        }
+        if (found.signedIn) {
+          setLaunch({ at: "opening" });
+          try {
+            await invoke("show_connected");
+          } catch (error) {
+            if (alive.current)
+              setLaunch({
+                at: "connect",
+                address,
+                problem: asProblem(error),
+                reopen: true,
+              });
+          }
+          return;
+        }
+        const notice = await invoke<ConnectionNotice | null>(
+          "take_connection_notice",
+        ).catch(() => null);
+        if (!alive.current) return;
+        setLaunch({
+          at: "connect",
+          address,
+          // `choose` is the person asking to pick again from Settings: nothing went wrong.
+          problem: notice?.message
+            ? { said: notice.message, kind: notice.kind }
+            : null,
+          reopen: false,
+        });
+      })();
+    }
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const connecting = launch.at === "connect";
+  useEffect(() => {
+    if (connecting)
+      recordSetupEvent({ kind: "step_viewed", step: "connect_openbot" });
+  }, [connecting]);
+
+  if (launch.at === "local") return <LocalSetup address={launch.address} />;
+  if (launch.at === "connect") {
+    const { address } = launch;
+    return (
+      <main>
+        <Welcome
+          hosting="connect"
+          onConnect={() => {}}
+          // The saved choice goes back to this computer, then setup carries on as a first run.
+          onThisComputer={async () => {
+            await invoke("use_this_computer");
+            setLaunch({ at: "local", address });
+          }}
+          saved={{
+            address,
+            problem: launch.problem,
+            reopen: launch.reopen
+              ? () => invoke<void>("show_connected")
+              : undefined,
+          }}
+          onInstall={() => {}}
+        />
+      </main>
+    );
+  }
+  return (
+    <main>
+      <div className="sheet connection-sheet">
+        <h1>Getting OpenBot ready</h1>
+        {launch.at === "opening" ? (
+          <StatusLine>Opening OpenBot…</StatusLine>
+        ) : (
+          <p className="lede" role="status">
+            Checking your saved setup…
+          </p>
+        )}
+      </div>
+    </main>
+  );
+}
+
+/** Setup of OpenBot on this computer. `address`: an OpenBot connected to before, if any. */
+function LocalSetup({ address }: { address: string }) {
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
   const [restartPending, setRestartPending] = useState(false);
@@ -937,10 +1069,15 @@ function Setup() {
    * Skipped entirely when a stack is already up: somebody returning to a running OpenBot is not
    * setting one up.
    */
-  if (!running && step === "welcome") {
+  if (!running && (step === "welcome" || step === "connect_openbot")) {
     return (
       <main>
         <Welcome
+          // The same screen with the other choice picked: an OpenBot that runs elsewhere.
+          hosting={step === "welcome" ? "self-hosted" : "connect"}
+          onConnect={() => setStep("connect_openbot")}
+          onThisComputer={() => setStep("welcome")}
+          saved={{ address }}
           onInstall={() => {
             // The default Bot, recorded as a choice of it would be.
             recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
