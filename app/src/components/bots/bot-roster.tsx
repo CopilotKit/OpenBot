@@ -1,7 +1,19 @@
-import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import {
+  IconBolt,
+  IconChevronDown,
+  IconChevronRight,
+  IconPlus,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import {
+  type ComponentProps,
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react";
 import { RosterTagEditor } from "@/components/bots/roster-tags";
 import { readBotTags, rosterTagKey } from "@/lib/agents/roster-tags";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -42,9 +54,21 @@ import {
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
-/** Native selects keep these compact, wrapping controls keyboard accessible on small screens. */
-const ROSTER_SELECT_CLASS =
-  "h-9 max-w-full rounded-lg border border-input bg-card px-2.5 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring md:text-sm";
+/** Keep the native picker and keyboard behavior, with a caret inset consistently in either direction. */
+function RosterSelect(props: Omit<ComponentProps<"select">, "className">) {
+  return (
+    <span className="relative block">
+      <select
+        {...props}
+        className="h-9 w-full max-w-full appearance-none rounded-lg border border-input bg-card ps-2.5 pe-9 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring md:text-sm"
+      />
+      <IconChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute end-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+      />
+    </span>
+  );
+}
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -191,10 +215,9 @@ export function BotRoster() {
             htmlFor={`${controlId}-scope`}
           >
             Show Bots
-            <select
+            <RosterSelect
               id={`${controlId}-scope`}
               name="scope"
-              className={ROSTER_SELECT_CLASS}
               value={filters.scope}
               onChange={(event) =>
                 setFilters({
@@ -209,17 +232,16 @@ export function BotRoster() {
                 {personal ? "Included with OpenBot" : "Shared with you"}
               </option>
               <option value="pinned">Pinned</option>
-            </select>
+            </RosterSelect>
           </label>
           <label
             className="flex flex-col gap-1 text-sm"
             htmlFor={`${controlId}-sort`}
           >
             Sort Bots
-            <select
+            <RosterSelect
               id={`${controlId}-sort`}
               name="sort"
-              className={ROSTER_SELECT_CLASS}
               value={filters.sort}
               onChange={(event) =>
                 setFilters({
@@ -235,7 +257,7 @@ export function BotRoster() {
               <option value="title-desc">Title: Z–A</option>
               <option value="description-asc">Description: A–Z</option>
               <option value="description-desc">Description: Z–A</option>
-            </select>
+            </RosterSelect>
           </label>
           {userId ? (
             <label
@@ -243,10 +265,9 @@ export function BotRoster() {
               htmlFor={`${controlId}-tag`}
             >
               Filter by tag
-              <select
+              <RosterSelect
                 id={`${controlId}-tag`}
                 name="tag"
-                className={ROSTER_SELECT_CLASS}
                 value={tagFilter}
                 onChange={(event) => setTagFilter(event.target.value)}
               >
@@ -262,7 +283,7 @@ export function BotRoster() {
                 {tagFilter.startsWith("tag:") && !tagChoices.has(tagFilter) ? (
                   <option value={tagFilter}>Tag: {tagFilter.slice(4)}</option>
                 ) : null}
-              </select>
+              </RosterSelect>
             </label>
           ) : null}
           {filtering || filters.sort !== "default" ? (
