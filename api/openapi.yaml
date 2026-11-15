@@ -19483,7 +19483,7 @@ components:
       name: group
       in: path
       required: true
-      description: A directory group, by the name the identity provider gives it, or * for everybody.
+      description: 'A directory group, by the name the identity provider gives it, or * for everybody. A team is written team: followed by the team''s id, as in team:Tm4Qx8LpV2nWc7RbY1sKd0Ze.'
       schema:
         type: string
         minLength: 1
@@ -30870,6 +30870,11 @@ components:
           description: The directory groups it is published to.
           items:
             type: string
+        teams:
+          type: array
+          description: The teams it is published to, by each team's id.
+          items:
+            type: string
         assignedGroups:
           type: array
           description: The directory groups an administrator assigned it to; * is everybody.
@@ -30921,6 +30926,15 @@ components:
           items:
             type: string
             maxLength: 200
+        teams:
+          type: array
+          maxItems: 100
+          description: With people, the teams to publish to, by each team's id. Every one must be a team of this organization. The people in a team, and in the teams under it, can use the Bot, and nobody else in the organization can.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     PublishedTeamBot:
       type: object
       required:

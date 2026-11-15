@@ -81,6 +81,10 @@ export const ListTeamBotsResponse = zod.object({
           .array(zod.string())
           .optional()
           .describe("The directory groups it is published to."),
+        teams: zod
+          .array(zod.string())
+          .optional()
+          .describe("The teams it is published to, by each team's id."),
         assignedGroups: zod
           .array(zod.string())
           .optional()
@@ -155,6 +159,10 @@ export const GetTeamBotResponse = zod.object({
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
+      teams: zod
+        .array(zod.string())
+        .optional()
+        .describe("The teams it is published to, by each team's id."),
       assignedGroups: zod
         .array(zod.string())
         .optional()
@@ -208,6 +216,11 @@ export const publishTeamBotBodyGroupsItemMax = 200;
 
 export const publishTeamBotBodyGroupsMax = 100;
 
+export const publishTeamBotBodyTeamsItemMax = 200;
+
+export const publishTeamBotBodyTeamsItemRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const publishTeamBotBodyTeamsMax = 100;
+
 export const PublishTeamBotBody = zod.object({
   audience: zod
     .enum(["team", "people"])
@@ -226,6 +239,19 @@ export const PublishTeamBotBody = zod.object({
     .max(publishTeamBotBodyGroupsMax)
     .optional()
     .describe("With people, the directory groups to publish to."),
+  teams: zod
+    .array(
+      zod
+        .string()
+        .min(1)
+        .max(publishTeamBotBodyTeamsItemMax)
+        .regex(publishTeamBotBodyTeamsItemRegExp),
+    )
+    .max(publishTeamBotBodyTeamsMax)
+    .optional()
+    .describe(
+      "With people, the teams to publish to, by each team's id. Every one must be a team of this organization. The people in a team, and in the teams under it, can use the Bot, and nobody else in the organization can.",
+    ),
 });
 
 export const PublishTeamBotResponse = zod.object({
@@ -260,6 +286,10 @@ export const PublishTeamBotResponse = zod.object({
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
+      teams: zod
+        .array(zod.string())
+        .optional()
+        .describe("The teams it is published to, by each team's id."),
       assignedGroups: zod
         .array(zod.string())
         .optional()
@@ -353,7 +383,7 @@ export const AssignTeamBotParams = zod.object({
     .max(assignTeamBotPathGroupMax)
     .regex(assignTeamBotPathGroupRegExp)
     .describe(
-      "A directory group, by the name the identity provider gives it, or * for everybody.",
+      "A directory group, by the name the identity provider gives it, or * for everybody. A team is written team: followed by the team's id, as in team:Tm4Qx8LpV2nWc7RbY1sKd0Ze.",
     ),
 });
 
@@ -401,6 +431,10 @@ export const AssignTeamBotResponse = zod.object({
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
+      teams: zod
+        .array(zod.string())
+        .optional()
+        .describe("The teams it is published to, by each team's id."),
       assignedGroups: zod
         .array(zod.string())
         .optional()
@@ -459,7 +493,7 @@ export const UnassignTeamBotParams = zod.object({
     .max(unassignTeamBotPathGroupMax)
     .regex(unassignTeamBotPathGroupRegExp)
     .describe(
-      "A directory group, by the name the identity provider gives it, or * for everybody.",
+      "A directory group, by the name the identity provider gives it, or * for everybody. A team is written team: followed by the team's id, as in team:Tm4Qx8LpV2nWc7RbY1sKd0Ze.",
     ),
 });
 
