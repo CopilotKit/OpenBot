@@ -69,6 +69,7 @@ export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
+  organizationSpace: ["learning", "organization-space"] as const,
   personal: ["learning", "personal"] as const,
   review: ["learning", "review"] as const,
   peopleProposals: ["learning", "people-proposals"] as const,
@@ -156,6 +157,19 @@ export function autoAssignState(
         : {}),
     };
   return { state: automatic.state };
+}
+
+/**
+ * The id of the container OpenBot keeps for this organization alone, or null where it keeps none and the default is
+ * whichever container is assigned or chosen. Never drawn: lib/learning/display.ts names a container from it.
+ */
+export function learningOrganizationSpaceQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.organizationSpace,
+    retry: false,
+    queryFn: async ({ signal }): Promise<string | null> =>
+      (await readLearningConfiguration(signal)).organizationSpaceId ?? null,
+  });
 }
 
 /** Why no container was assigned automatically, or `null` when the server has nothing to say. */

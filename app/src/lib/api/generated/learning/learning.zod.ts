@@ -33,6 +33,10 @@ export const getLearningSettingsResponseAutomaticOneContainerIdMax = 64;
 
 export const getLearningSettingsResponseAutomaticOneContainerIdRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
+export const getLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
+
+export const getLearningSettingsResponseOrganizationSpaceIdOneRegExp =
+  new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
 export const GetLearningSettingsResponse = zod.object({
   settings: zod.object({
@@ -156,6 +160,20 @@ export const GetLearningSettingsResponse = zod.object({
       zod.null(),
     ])
     .describe("Null where OpenBot never assigns a space by itself."),
+  organizationSpaceId: zod
+    .union([
+      zod
+        .string()
+        .min(1)
+        .max(getLearningSettingsResponseOrganizationSpaceIdOneMax)
+        .regex(getLearningSettingsResponseOrganizationSpaceIdOneRegExp)
+        .describe("A Learning space's id in the backend (its container)."),
+      zod.null(),
+    ])
+    .optional()
+    .describe(
+      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's is named after it: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
+    ),
 });
 
 /**
@@ -271,6 +289,10 @@ export const updateLearningSettingsResponseSettingsBotsOneRevisionMax = 128;
 export const updateLearningSettingsResponseAutomaticOneContainerIdMax = 64;
 
 export const updateLearningSettingsResponseAutomaticOneContainerIdRegExp =
+  new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
+export const updateLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
+
+export const updateLearningSettingsResponseOrganizationSpaceIdOneRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
 export const UpdateLearningSettingsResponse = zod.object({
@@ -397,6 +419,20 @@ export const UpdateLearningSettingsResponse = zod.object({
       zod.null(),
     ])
     .describe("Null where OpenBot never assigns a space by itself."),
+  organizationSpaceId: zod
+    .union([
+      zod
+        .string()
+        .min(1)
+        .max(updateLearningSettingsResponseOrganizationSpaceIdOneMax)
+        .regex(updateLearningSettingsResponseOrganizationSpaceIdOneRegExp)
+        .describe("A Learning space's id in the backend (its container)."),
+      zod.null(),
+    ])
+    .optional()
+    .describe(
+      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's is named after it: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
+    ),
 });
 
 /**

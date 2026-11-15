@@ -32354,6 +32354,11 @@ components:
           oneOf:
             - $ref: '#/components/schemas/LearningAutomatic'
             - type: 'null'
+        organizationSpaceId:
+          description: 'The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization''s is named after it: this id, a hyphen, then a name of the administrator''s choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.'
+          oneOf:
+            - $ref: '#/components/schemas/LearningSpaceId'
+            - type: 'null'
     UpdateLearningSettingsRequest:
       type: object
       additionalProperties: false

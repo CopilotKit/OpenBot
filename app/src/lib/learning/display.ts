@@ -104,3 +104,54 @@ export function proposalReason(reason: string): string | null {
   const words = reason.replace(INSIGHT_SLUGS, "").replace(/\s+/g, " ").trim();
   return words === "" ? null : words;
 }
+
+/*
+ * A Learning container, as an admin reads and names it.
+ *
+ * Where OpenBot keeps a container for an organization alone, the server names it with an id that says nothing to a
+ * person (`organizationSpaceId`, api/openapi/learning.yaml), and every other container of the organization's is that
+ * id, a hyphen, then a name its admin chose. That id is never drawn: the organization's own container is named for
+ * the organization, and another by the admin's name alone. Where the server names no such container (`own` is null),
+ * an id is what an admin typed and reads as it is.
+ */
+
+/** An id the server derived for an organization's or a person's container. It says nothing to a person. */
+const DERIVED_CONTAINER = /^(?:org|user)-[0-9a-f]{32}(?:-|$)/;
+
+/** The name an admin gave a container, which is what its field holds. Empty for the organization's own. */
+export function containerName(own: string | null, containerId: string): string {
+  if (own === null) return containerId;
+  if (containerId === own) return "";
+  if (containerId.startsWith(`${own}-`))
+    return containerId.slice(own.length + 1);
+  // Not this organization's, which the server never sends it. A derived id is still never drawn.
+  return DERIVED_CONTAINER.test(containerId) ? "" : containerId;
+}
+
+/** The id the server keeps for the name an admin typed. No name is the organization's own container. */
+export function containerIdFor(own: string | null, name: string): string {
+  if (own === null) return name;
+  return name === "" ? own : `${own}-${name}`;
+}
+
+/** The longest name an admin can give a container, so that its id stays within the server's 64 characters. */
+export function containerNameLimit(own: string | null): number {
+  return own === null ? 64 : 64 - own.length - 1;
+}
+
+/** Which container a page is showing, in words. `organization` is the name of the one the person works in. */
+export function containerTitle(
+  container: { id: string; name: string },
+  own: string | null,
+  organization: string | undefined,
+): string {
+  if (own === null) return `${container.name} (${container.id})`;
+  const name = containerName(own, container.id);
+  if (name === "")
+    return organization
+      ? `Default container for ${organization}`
+      : "This organization's default container";
+  return organization
+    ? `The "${name}" container for ${organization}`
+    : `The "${name}" container`;
+}
