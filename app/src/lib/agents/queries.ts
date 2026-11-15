@@ -98,6 +98,22 @@ export function agentQueryOptions(agentId: string) {
   });
 }
 
+/**
+ * Whether a Bot is, right now, not one this person can use: the read of it answers "not found".
+ *
+ * A verdict about this moment, asked when a message to the Bot was refused, so it is not cached and
+ * it fails closed: only the API's own 404 says the Bot is gone. A read that could not be made, or a
+ * server that broke, says nothing about the Bot, and answers false.
+ */
+export async function botNoLongerUsable(agentId: string): Promise<boolean> {
+  try {
+    await getBot(organizationId(), agentId);
+    return false;
+  } catch (error) {
+    return error instanceof ClientError && error.status === 404;
+  }
+}
+
 export function agentHandoffQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.handoff(agentId),
