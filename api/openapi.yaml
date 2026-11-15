@@ -16774,6 +16774,8 @@ paths:
           $ref: '#/components/responses/SharingRequestNotFound'
         '409':
           $ref: '#/components/responses/SharingRequestChanged'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -16830,6 +16832,8 @@ paths:
           $ref: '#/components/responses/SharingRequestNotFound'
         '409':
           $ref: '#/components/responses/SharingRequestChanged'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
