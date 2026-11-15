@@ -54,10 +54,17 @@ export function Welcome({
   onConnect,
   onThisComputer,
   saved,
+  resumes = false,
   onInstall,
   failure,
 }: {
   hosting: Hosting;
+  /**
+   * OpenBot is already set up on this computer, and the person asked from Settings to choose where
+   * it runs. Self-hosted's way on is Continue, which goes on with that setup; there is nothing to
+   * install or download first.
+   */
+  resumes?: boolean;
   /** OpenBot for Business was picked. */
   onConnect: () => void;
   /** Self-hosted was picked again. May fail, when a saved connection has to be switched first. */
@@ -146,30 +153,22 @@ export function Welcome({
       {connect ? (
         <ConnectToOpenBot connecting={connecting} />
       ) : (
-        <SelfHosted onInstall={onInstall} failure={failure} />
+        <SelfHosted onInstall={onInstall} failure={failure} resumes={resumes} />
       )}
     </div>
   );
 }
 
-/** What Self-hosted asks of this computer and why, how long setup takes, and Install. */
+/** What Self-hosted asks of this computer and why, then the way on. */
 function SelfHosted({
   onInstall,
   failure,
+  resumes,
 }: {
   onInstall: () => void;
   failure?: ReactNode;
+  resumes: boolean;
 }) {
-  const downloads = useEarlyDownloads();
-  const [checking, setChecking] = useState(false);
-  const short = downloads?.state === "short";
-  const install = () => {
-    setChecking(true);
-    void earlyDownloadsMeasured().then((now) => {
-      setChecking(false);
-      if (now?.state !== "short") onInstall();
-    });
-  };
   return (
     <>
       <section className="needs" aria-labelledby="needs-heading">
@@ -185,6 +184,34 @@ function SelfHosted({
           ))}
         </ul>
       </section>
+      {resumes ? (
+        <div className="row">
+          <button type="button" onClick={onInstall}>
+            Continue
+          </button>
+        </div>
+      ) : (
+        <Install onInstall={onInstall} />
+      )}
+      {failure}
+    </>
+  );
+}
+
+/** How long setup takes, Install, and the downloads this screen started. */
+function Install({ onInstall }: { onInstall: () => void }) {
+  const downloads = useEarlyDownloads();
+  const [checking, setChecking] = useState(false);
+  const short = downloads?.state === "short";
+  const install = () => {
+    setChecking(true);
+    void earlyDownloadsMeasured().then((now) => {
+      setChecking(false);
+      if (now?.state !== "short") onInstall();
+    });
+  };
+  return (
+    <>
       <p className="lede">
         Setup takes 1 to 10 minutes, depending on your internet speed.
       </p>
@@ -194,7 +221,6 @@ function SelfHosted({
         </button>
       </div>
       <EarlyDownloadsLine firstScreen />
-      {failure}
     </>
   );
 }

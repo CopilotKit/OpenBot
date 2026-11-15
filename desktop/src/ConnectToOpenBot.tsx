@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
-import { asProblem, Failure, type Problem } from "./Problem";
+import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
 /** OpenBot's one booking link. */
@@ -33,11 +33,6 @@ function offerFor(kind: string | null | undefined): Offer {
     default:
       return "retry";
   }
-}
-
-/** Nothing failed: the sign-in stopped or ended, and signing in again is all there is to do. */
-function isNotice(kind: string | null | undefined) {
-  return kind === "sign-in-cancelled" || kind === "session-ended";
 }
 
 /** The typed address as a link the browser can open. The shell takes no scheme as https too. */
@@ -263,9 +258,7 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
             You'll sign in to it in your browser. Nothing is installed on this
             computer.
           </p>
-          {trouble && !underField && (
-            <Trouble trouble={trouble} address={address} />
-          )}
+          {trouble && !underField && <Trouble trouble={trouble} />}
           <div className="row">
             <button
               type="submit"
@@ -278,6 +271,14 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
                   ? "Try again"
                   : "Connect"}
             </button>
+            {trouble?.offer === "browser" && address.trim() && (
+              <ExternalLink
+                className="button-link"
+                href={browserAddress(address)}
+              >
+                Open in browser
+              </ExternalLink>
+            )}
           </div>
           {phase === "checking" && (
             <StatusLine>Checking the address…</StatusLine>
@@ -300,23 +301,16 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
   );
 }
 
-/** The sentence, in the card: a notice when nothing failed, the window's failure when it did. */
-function Trouble({ trouble, address }: { trouble: Trouble; address: string }) {
-  const { problem, offer } = trouble;
-  if (isNotice(problem.kind)) {
-    return (
-      <div className="local-alert needs" role="alert">
-        <p>{problem.said}</p>
-      </div>
-    );
-  }
+/**
+ * The sentence, in a calm notice: the card that waits on the person. A connection that didn't work
+ * is not a failed install, so it is not drawn as one: no failure heading and no troubleshooting
+ * logs, which are about OpenBot on this computer. The way on is the screen's button, or the link
+ * beside it when that OpenBot can only be opened in the browser.
+ */
+function Trouble({ trouble }: { trouble: Trouble }) {
   return (
-    <Failure problem={problem}>
-      {offer === "browser" && address.trim() && (
-        <ExternalLink className="button-link" href={browserAddress(address)}>
-          Open in browser
-        </ExternalLink>
-      )}
-    </Failure>
+    <div className="local-alert needs" role="alert">
+      <p>{trouble.problem.said}</p>
+    </div>
   );
 }

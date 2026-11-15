@@ -799,17 +799,16 @@ fieldset.picker.hosting .tile.held:active {
   margin-top: 8px;
 }
 
-/* A sign-in that stopped or ended: the card that waits on the person, with the sentence in ink. */
+/*
+ * A connection that didn't work, or a sign-in that stopped or ended: the card that waits on the
+ * person, with the shell's sentence in ink. Not the failure card: nothing on this computer failed.
+ */
 .connect-to-openbot .local-alert {
   margin: 16px 0 0;
 }
 
 .connect-to-openbot .local-alert p {
   color: var(--text-primary);
-}
-
-.connect-to-openbot .blocker p,
-.connect-to-openbot .local-alert p {
   overflow-wrap: anywhere;
 }
 

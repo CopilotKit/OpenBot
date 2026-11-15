@@ -893,7 +893,15 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
       await userEvent.type(field, "x");
       expect(view.queryByRole("alert")).toBeNull();
       expect(field.getAttribute("aria-invalid")).toBeNull();
-    } else if (offer === "Open in browser") {
+      return;
+    }
+    // A connection that didn't work is not a failed install: a calm notice with the sentence,
+    // not the failure card with its heading and troubleshooting logs.
+    expect(alert.classList.contains("blocker")).toBe(false);
+    expect(view.queryByText("That didn’t finish")).toBeNull();
+    expect(view.queryByRole("button", { name: "Copy logs" })).toBeNull();
+    expect(view.queryByRole("link", { name: "Get setup help" })).toBeNull();
+    if (offer === "Open in browser") {
       const link = view.getByRole("link", { name: "Open in browser" });
       expect(link.getAttribute("href")).toBe(ELSEWHERE);
       await userEvent.click(link);
@@ -904,6 +912,7 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
       expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
     } else {
       // One way on, and it says what it does.
+      expect(alert.textContent).toBe(said);
       expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
       await userEvent.click(view.getByRole("button", { name: offer }));
       await waitFor(() => expect(at === "check" ? checks : signIns).toBe(2));
@@ -1032,6 +1041,72 @@ test("asked from Settings to choose where OpenBot runs, the first screen opens o
   const commands = asked().map((call) => call.command);
   expect(commands.indexOf("use_this_computer")).toBe(2);
   expect(commands).toContain("already_configured");
+});
+
+/*
+ * Settings' choice of where OpenBot runs, for a person who already runs it on this computer: the
+ * shell stops OpenBot, puts setup back and says `choose` once. The first screen shows in place of
+ * the start that a relaunch does by itself, and nothing starts until the person continues.
+ */
+test("asked from Settings on an install on this computer, the first screen shows the choice and starts nothing until Continue, which starts it as a relaunch does", async () => {
+  setupConnectedLocalStack(
+    "/tmp/choose-on-this-computer",
+    localStatus("ready", "valid"),
+  );
+  let notices = 0;
+  withLocalCli({
+    connection: { mode: "local", address: ELSEWHERE, signedIn: false },
+    take_connection_notice: () => {
+      notices += 1;
+      return notices === 1 ? { kind: "choose", message: null } : null;
+    },
+    record_setup_event: null,
+  });
+  const view = await renderApp();
+  expect(
+    await view.findByRole("heading", { name: "Set up OpenBot" }),
+  ).toBeTruthy();
+  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+    "checked",
+    true,
+  );
+  // OpenBot is already installed here: the way on is Continue, not Install.
+  expect(buttons(view)).toEqual(["Continue"]);
+  expect(view.queryByText(/Setup takes/)).toBeNull();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const started = () =>
+    invokeCalls
+      .map((call) => call.command)
+      .filter((command) =>
+        [
+          "run_local_eval",
+          "set_up_local_eval",
+          "connect_local_eval",
+          "start_stack",
+          "show_openbot",
+          "prepare_installation",
+          "start_early_downloads",
+          "use_this_computer",
+        ].includes(command),
+      );
+  expect(started()).toEqual([]);
+  // The other choice, with the address connected to before, and back.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  expect(
+    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+  ).toBe(ELSEWHERE);
+  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  expect(started()).toEqual([]);
+  // Continue: today's relaunch, which starts the saved installation and opens OpenBot.
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(started()).toEqual(["run_local_eval", "start_stack", "show_openbot"]);
+  expect(getStartStackPayload()).toMatchObject({
+    root: "/tmp/choose-on-this-computer",
+    ...LOCAL_ADDRESSES,
+  });
 });
 
 test("a saved sign-in that can't open OpenBot says why on the connect screen, and Try again opens it without signing in again", async () => {
