@@ -26,8 +26,8 @@ function UserAvatar() {
  * `internal-<commit>` reads whole, as a release's `v1.0.2` always did, and the name is what gets
  * cut short when the sidebar is narrow. account-version-layout.test.tsx measures it in a browser.
  *
- * Somebody with more than one organization, or who may create one, reads the one they are working
- * in under their name, since the menu this opens is where they change it. Nobody else has that line.
+ * Where OpenBot lists the person's organizations, they read the one they are working in under their
+ * name, since the menu this opens is where they change it. Nobody else has that line.
  */
 export function AccountLabel() {
   const { data: currentUser } = useQuery(currentUserQueryOptions());

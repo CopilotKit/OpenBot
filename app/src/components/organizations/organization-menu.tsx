@@ -1,4 +1,11 @@
-import { IconBuilding, IconPlus } from "@tabler/icons-react";
+import {
+  IconBuilding,
+  IconMail,
+  IconPlus,
+  IconSettings,
+  IconUserCircle,
+} from "@tabler/icons-react";
+import { Link } from "@tanstack/react-router";
 import {
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -12,19 +19,23 @@ import { cn } from "@/lib/utils";
 
 /**
  * The person's organizations at the top of the account menu: the one they are working in checked,
- * the others one click away, and New organization for somebody who may create one.
+ * the others one click away, its settings, the invitations waiting for their answer, and New
+ * organization for somebody who may create one.
  *
- * Drawn only when there is something to switch to or create (`useOrganizationChoices`), so for
+ * Drawn only where OpenBot lists the person's organizations (`useOrganizationChoices`), so for
  * everybody else the menu is the one it always was. The rows take the menu's own item spacing from
  * `itemClassName`, and a long name is cut short where the menu is as narrow as the sidebar.
  */
 export function OrganizationMenuItems({
   choices,
+  invitationsWaiting,
   itemClassName,
   onNew,
   switching,
 }: {
   choices: OwnOrganizations;
+  /** How many invitations wait for the person's answer. The entry is drawn only when some do. */
+  invitationsWaiting: number;
   itemClassName: string;
   /** Open the New organization dialog, which lives outside the menu so it outlasts it. */
   onNew: () => void;
@@ -53,11 +64,39 @@ export function OrganizationMenuItems({
               key={organization.id}
               value={organization.id}
             >
-              <IconBuilding />
+              {/* The person's own organization carries a person's mark; one they share, a building. */}
+              {organization.personal ? <IconUserCircle /> : <IconBuilding />}
               <span className="min-w-0 truncate">{organization.name}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {choices.organizations.length > 0 ? (
+          <DropdownMenuItem
+            className={itemClassName}
+            nativeButton={false}
+            render={<Link to="/settings/organization" />}
+          >
+            <IconSettings />
+            Organization settings
+          </DropdownMenuItem>
+        ) : null}
+        {invitationsWaiting > 0 ? (
+          <DropdownMenuItem
+            className={itemClassName}
+            nativeButton={false}
+            render={<Link to="/invitations" />}
+          >
+            <IconMail />
+            Invitations
+            <span
+              className="ml-auto pl-3 text-muted-foreground text-xs tabular-nums"
+              data-slot="invitations-waiting"
+            >
+              <span aria-hidden="true">{invitationsWaiting}</span>
+              <span className="sr-only">, {invitationsWaiting} waiting</span>
+            </span>
+          </DropdownMenuItem>
+        ) : null}
         {choices.canCreate ? (
           <DropdownMenuItem className={itemClassName} onClick={onNew}>
             <IconPlus />

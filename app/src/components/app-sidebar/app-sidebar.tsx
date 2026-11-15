@@ -49,7 +49,10 @@ import {
   type NavigationLink,
   useNavigationItems,
 } from "@/lib/navigation";
-import { useOrganizationChoices } from "@/lib/organizations/queries";
+import {
+  useOrganizationChoices,
+  useWaitingInvitationCount,
+} from "@/lib/organizations/queries";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
@@ -381,8 +384,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
-  // Somebody with nothing to switch to or create has no organizations in the menu at all.
+  // Where OpenBot lists no organizations, the menu has none at all.
   const organizationChoices = useOrganizationChoices();
+  const invitationsWaiting = useWaitingInvitationCount();
   const switchOrganization = useSwitchOrganization();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
@@ -572,6 +576,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 {organizationChoices ? (
                   <OrganizationMenuItems
                     choices={organizationChoices}
+                    invitationsWaiting={invitationsWaiting}
                     itemClassName={userMenuItemClassName}
                     onNew={() => {
                       // A narrow window's sheet would wait behind the dialog.

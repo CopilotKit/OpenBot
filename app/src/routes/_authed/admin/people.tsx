@@ -17,6 +17,14 @@ import {
 } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -71,6 +79,11 @@ function describe(person: Person): string {
   return `${providers || "no provider"} · ${when}`;
 }
 
+/** What a person is called: their name, or their address when they have not given one. */
+function nameOf(person: Person): string {
+  return person.name?.trim() || person.email;
+}
+
 function PeoplePage() {
   const [search, setSearch] = useState("");
   /*
@@ -90,6 +103,9 @@ function PeoplePage() {
   const setAccess = useMutation(setPersonAccessMutationOptions(queryClient));
   // Offboarding: stops this person's Bots' computers, keeping their disks. Access is unchanged.
   const terminate = useMutation(terminateMemberComputersMutationOptions());
+  // Kept while its dialog closes, so the question does not lose its name on the way out.
+  const [removing, setRemoving] = useState<Person | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -163,7 +179,7 @@ function PeoplePage() {
                       )}
                     </ItemMedia>
                     <ItemContent>
-                      <ItemTitle>{person.name ?? person.email}</ItemTitle>
+                      <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription>
                         {person.name ? `${person.email} · ` : ""}
                         {describe(person)}
@@ -184,13 +200,20 @@ function PeoplePage() {
                         Stop computers
                       </Button>
                       <Button
+                        aria-label={`${person.revoked ? "Restore" : "Remove"} ${nameOf(person)}`}
                         disabled={busy || isSelf || person.configuredAdmin}
-                        onClick={() =>
-                          setAccess.mutate({
-                            userId: person.id,
-                            revoked: !person.revoked,
-                          })
-                        }
+                        onClick={() => {
+                          // Removing is asked about first. Restoring ends nothing, so it applies at once.
+                          if (person.revoked) {
+                            setAccess.mutate({
+                              userId: person.id,
+                              revoked: false,
+                            });
+                            return;
+                          }
+                          setRemoving(person);
+                          setRemoveOpen(true);
+                        }}
                         size="sm"
                         variant={person.revoked ? "outline" : "destructive"}
                       >
@@ -231,8 +254,81 @@ function PeoplePage() {
             {people.isFetchingNextPage ? "Loading…" : "Show more"}
           </Button>
         ) : null}
+        {removing ? (
+          <RemovePersonDialog
+            onOpenChange={setRemoveOpen}
+            open={removeOpen}
+            person={removing}
+          />
+        ) : null}
       </PageSection>
     </PageShell>
+  );
+}
+
+/**
+ * Asks before removing somebody's access, naming them and saying what ends, and then removes it.
+ * A refusal stays in the dialog.
+ */
+function RemovePersonDialog({
+  onOpenChange,
+  open,
+  person,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  person: Person;
+}) {
+  const remove = useMutation(setPersonAccessMutationOptions(queryClient));
+  const { reset } = remove;
+  // A refusal from a previous attempt is not news about this one.
+  useEffect(() => {
+    if (open) reset();
+  }, [open, reset]);
+
+  const confirm = async () => {
+    try {
+      await remove.mutateAsync({ userId: person.id, revoked: true });
+    } catch {
+      // The error is on the mutation and drawn below; staying open says "not done".
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Remove {nameOf(person)} from OpenBot?</DialogTitle>
+          <DialogDescription>
+            They're signed out everywhere and can't sign in again. Their API
+            keys, app sign-ins and connected credentials stop working. They keep
+            their record and history, and Restore lets them sign in again.
+          </DialogDescription>
+        </DialogHeader>
+        {remove.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {remove.error.message}
+          </p>
+        ) : null}
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            disabled={remove.isPending}
+            onClick={() => {
+              void confirm();
+            }}
+            size="sm"
+            variant="destructive"
+          >
+            {remove.isPending ? "Removing…" : "Remove"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

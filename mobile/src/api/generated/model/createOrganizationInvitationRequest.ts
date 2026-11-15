@@ -3,9 +3,9 @@
  */
 import type { AssignableRole } from "./assignableRole";
 
-export interface AddOrganizationMemberRequest {
+export interface CreateOrganizationInvitationRequest {
   /**
-   * The address of somebody who already has an account here.
+   * The address of the person to invite.
    * @minLength 3
    * @maxLength 320
    * @pattern ^[^\s\x00]+@[^\s\x00]+$

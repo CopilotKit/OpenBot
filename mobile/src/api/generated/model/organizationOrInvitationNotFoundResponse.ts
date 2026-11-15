@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * They are already a member. Or the Idempotency-Key was used for a different request.
+ * The organization does not exist or is not visible to the caller, or it has no such invitation.
  */
-export type OrganizationMemberConflictResponse = Problem;
+export type OrganizationOrInvitationNotFoundResponse = Problem;

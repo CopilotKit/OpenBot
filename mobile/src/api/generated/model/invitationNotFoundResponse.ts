@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The organization does not exist or is not visible to the caller, or nobody here has that address.
+ * There is no such invitation, or it was sent to another address.
  */
-export type OrganizationOrPersonNotFoundResponse = Problem;
+export type InvitationNotFoundResponse = Problem;

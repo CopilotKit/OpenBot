@@ -1,6 +1,7 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBuilding,
   IconLayoutGrid,
   IconListCheck,
   IconSettings,
@@ -23,6 +24,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
 
@@ -53,12 +55,14 @@ type SettingsSidebarItem = {
   linkOptions: LinkOptions;
   title: string;
   setup?: boolean;
+  /** Shown only where OpenBot lists the person's organizations, which is never the personal edition. */
+  organization?: boolean;
 };
 
 /**
  * Settings, for every Bot at once (`docs/how-openbot-works.md`), in three groups:
  *
- * - You: your account, where updates reach you, and your Vault.
+ * - You: your account, where updates reach you, your Vault, and the organization you work in.
  * - Every Bot: what is set once for all of them, in the fixed order of `lib/primitives.ts`.
  *   Conversations is not here: it is where work happens, not something to set. Routines, Memory,
  *   Skills and Apps (Connections) are things you make and come back to, so they are in the main
@@ -90,6 +94,14 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: VAULT.label,
     icon: VAULT.icon,
     linkOptions: { to: "/settings/vault" },
+  },
+  {
+    /* The organization the person is working in: its name, its members and its invitations. */
+    group: "you",
+    title: "Organization",
+    icon: IconBuilding,
+    organization: true,
+    linkOptions: { to: "/settings/organization" },
   },
   {
     /* The computer Bots work on, folders, what OpenBot runs here, and your Recorder browsers. */
@@ -134,7 +146,9 @@ export function settingsSidebarItems(
   edition: "team" | "personal",
 ): SettingsSidebarItem[] {
   return SETTINGS_SIDEBAR_ITEMS.filter(
-    (item) => !item.personalOnly || edition === "personal",
+    (item) =>
+      (!item.personalOnly || edition === "personal") &&
+      (!item.organization || edition === "team"),
   );
 }
 
@@ -159,8 +173,11 @@ export function SettingsSidebar({
           (row) => row.status === "needs_setup" && row.fix !== null,
         ).length
       : 0;
+  const hasOrganization =
+    (useOrganizationChoices()?.organizations.length ?? 0) > 0;
   const items = settingsSidebarItems(capabilities?.edition ?? "team").filter(
-    (option) => !option.setup || canSetUp,
+    (option) =>
+      (!option.setup || canSetUp) && (!option.organization || hasOrganization),
   );
   return (
     <Sidebar variant="inset" {...props}>

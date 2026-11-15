@@ -6,4 +6,4 @@ import type { Problem } from "./problem";
 /**
  * The address or the role is missing or malformed, or the Idempotency-Key is.
  */
-export type InvalidOrganizationMemberResponse = Problem;
+export type InvalidOrganizationInvitationResponse = Problem;

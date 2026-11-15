@@ -14,11 +14,18 @@ import { parse } from "yaml";
 
 const ORGANIZATION_PREFIX = "/api/v2/organizations/{organizationId}/";
 /**
- * The one address outside an organization: the organizations the caller is a member of, and
- * creating one. A person has to be able to ask which organizations they are in before they can
- * name one, so this cannot sit under an organization's address.
+ * The addresses outside an organization. The organizations the caller is a member of, and
+ * creating one: a person has to be able to ask which organizations they are in before they can
+ * name one. And the invitations sent to the caller: they answer one before they are a member of
+ * the organization it is for, so neither can sit under an organization's address.
  */
-const OUTSIDE_AN_ORGANIZATION = ["/api/v2/people/me/organizations"];
+const OUTSIDE_AN_ORGANIZATION = [
+  "/api/v2/people/me/organizations",
+  "/api/v2/people/me/invitations",
+  "/api/v2/people/me/invitations/{invitationId}",
+  "/api/v2/people/me/invitations/{invitationId}/accept",
+  "/api/v2/people/me/invitations/{invitationId}/decline",
+];
 const WRITE_METHODS = ["post", "put", "patch", "delete"];
 const METHODS = ["get", "head", "options", "trace", ...WRITE_METHODS];
 const PROBLEM_JSON = "application/problem+json";

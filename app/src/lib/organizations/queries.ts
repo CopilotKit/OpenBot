@@ -3,8 +3,20 @@ import {
   queryOptions,
   useQuery,
 } from "@tanstack/react-query";
-import type { Organization } from "@/lib/api/generated/model";
-import { listOrganizations } from "@/lib/api/generated/organizations/organizations";
+import { everyPage } from "@/lib/api/every-page";
+import type {
+  Invitation,
+  Organization,
+  OrganizationInvitation,
+  OrganizationMember,
+} from "@/lib/api/generated/model";
+import {
+  getInvitation,
+  listInvitations,
+  listOrganizationInvitations,
+  listOrganizationMembers,
+  listOrganizations,
+} from "@/lib/api/generated/organizations/organizations";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
@@ -23,9 +35,29 @@ export type OwnOrganizations = {
   currentId: string;
 };
 
+/** One member of an organization, with the server's verdict: their role in it. */
+export type OrganizationMemberSummary = OrganizationMember;
+
+/** An invitation an organization sent, as its admins see it. `status` is the server's verdict. */
+export type SentInvitation = OrganizationInvitation;
+
+/** An invitation as the person it was sent to sees it. `status` is the server's verdict. */
+export type ReceivedInvitation = Invitation;
+
+/*
+ * The same in every organization (query-client.ts), so a key about one organization names it: the
+ * members of one are never drawn as another's.
+ */
 export const organizationKeys = {
   all: ["organizations"] as const,
   mine: () => ["organizations", "mine"] as const,
+  members: (organizationId: string) =>
+    ["organizations", "members", organizationId] as const,
+  sentInvitations: (organizationId: string) =>
+    ["organizations", "sent-invitations", organizationId] as const,
+  invitations: () => ["organizations", "invitations"] as const,
+  invitation: (invitationId: string) =>
+    ["organizations", "invitations", invitationId] as const,
 };
 
 /**
@@ -219,16 +251,19 @@ export function useCurrentOrganizationName(): string | undefined {
     ?.name;
 }
 
-/** Whether there is anything to switch to or create: otherwise the account menu is as it always was. */
+/**
+ * Whether the person has an organization to show: one to switch to, to open the settings of, or to
+ * create. An OpenBot that lists none has none, and its account menu is as it always was.
+ */
 export function offersOrganizations(
   mine: OwnOrganizations | null | undefined,
 ): mine is OwnOrganizations {
-  return !!mine && (mine.organizations.length > 1 || mine.canCreate);
+  return !!mine && (mine.organizations.length > 0 || mine.canCreate);
 }
 
 /**
- * The person's organizations for the account menu, or undefined when there is nothing to switch to
- * or create. The personal edition has one person and one organization, so it never asks.
+ * The person's organizations for the account menu and the organization screens, or undefined when
+ * OpenBot lists none. The personal edition has one person and one organization, so it never asks.
  */
 export function useOrganizationChoices(): OwnOrganizations | undefined {
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
@@ -239,4 +274,114 @@ export function useOrganizationChoices(): OwnOrganizations | undefined {
   return capabilities.data?.edition === "team" && offersOrganizations(mine.data)
     ? mine.data
     : undefined;
+}
+
+const MEMBERS_FALLBACK = "Couldn't load the members. Reload the page.";
+const SENT_INVITATIONS_FALLBACK =
+  "Couldn't load the invitations. Reload the page.";
+const INVITATIONS_FALLBACK = "Couldn't load your invitations. Reload the page.";
+const INVITATION_FALLBACK = "Couldn't load that invitation. Reload the page.";
+
+/** Every member of an organization, in the order they joined. Any member can read it. */
+export function organizationMembersQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.members(organizationId),
+    queryFn: ({ signal }): Promise<OrganizationMemberSummary[]> =>
+      everyPage(async (cursor) => {
+        const page = await listOrganizationMembers(
+          organizationId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: MEMBERS_FALLBACK },
+        );
+        return { items: page.members, nextCursor: page.nextCursor };
+      }),
+  });
+}
+
+/**
+ * Every invitation an organization sent that is still waiting, expired or was declined, the newest
+ * first. Only its owner and admins can read it; anybody else is refused in the server's sentence.
+ */
+export function sentInvitationsQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.sentInvitations(organizationId),
+    queryFn: ({ signal }): Promise<SentInvitation[]> =>
+      everyPage(async (cursor) => {
+        const page = await listOrganizationInvitations(
+          organizationId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: SENT_INVITATIONS_FALLBACK },
+        );
+        return { items: page.invitations, nextCursor: page.nextCursor };
+      }),
+  });
+}
+
+/**
+ * Every invitation sent to the person's address that they have not answered, the newest first. One
+ * that ran out of time is listed as expired.
+ */
+export function receivedInvitationsQueryOptions() {
+  return queryOptions({
+    queryKey: organizationKeys.invitations(),
+    queryFn: async ({ signal }): Promise<ReceivedInvitation[]> => {
+      try {
+        return await everyPage(async (cursor) => {
+          const page = await listInvitations(
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            { signal, fallback: INVITATIONS_FALLBACK },
+          );
+          return { items: page.invitations, nextCursor: page.nextCursor };
+        });
+      } catch (error) {
+        // An OpenBot that keeps one organization has no invitations to list, as it has no list of them.
+        if (error instanceof ClientError && error.status === 404) return [];
+        throw error;
+      }
+    },
+    staleTime: 60_000,
+    // Somebody invited while OpenBot was open sees it when they come back to the window.
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * One invitation sent to the person's address, in whatever state it is in, for the page its link
+ * opens. Null when there is none: it does not exist, or it was sent to another address.
+ */
+export function receivedInvitationQueryOptions(invitationId: string) {
+  return queryOptions({
+    queryKey: organizationKeys.invitation(invitationId),
+    queryFn: async ({ signal }): Promise<ReceivedInvitation | null> => {
+      try {
+        return (
+          await getInvitation(invitationId, {
+            signal,
+            fallback: INVITATION_FALLBACK,
+          })
+        ).invitation;
+      } catch (error) {
+        // Not found is an answer, which the page says in words.
+        if (error instanceof ClientError && error.status === 404) return null;
+        throw error;
+      }
+    },
+  });
+}
+
+/**
+ * How many invitations are waiting for the person's answer, for the account menu. Zero where
+ * OpenBot lists no organizations, which never asks.
+ */
+export function useWaitingInvitationCount(): number {
+  const offered = useOrganizationChoices() !== undefined;
+  const invitations = useQuery({
+    ...receivedInvitationsQueryOptions(),
+    enabled: offered,
+  });
+  if (!offered) return 0;
+  return (
+    invitations.data?.filter((invitation) => invitation.status === "pending")
+      .length ?? 0
+  );
 }
