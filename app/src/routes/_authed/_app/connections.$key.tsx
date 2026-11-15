@@ -45,6 +45,7 @@ import {
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -158,6 +159,7 @@ function RouteComponent() {
     if (connect === undefined) return;
     navigate({ search: ({ connect: _c, ...rest }) => rest, replace: true });
   }, [connect, navigate]);
+  useDropBrokerReturn();
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
