@@ -77,6 +77,11 @@ const PARTICIPATION = [
   { value: "exclude", label: "Leave out of Learning" },
   { value: "container", label: "Use a specific container" },
 ];
+/**
+ * The picker's choice for the deployment default rather than a Bot. Not empty, which the picker
+ * draws as nothing chosen, and never a Bot's id, which always has a character other than a space.
+ */
+const DEPLOYMENT_DEFAULT = " ";
 
 /** What automatic assignment found, in words, or nothing when there is nothing to say. */
 function automaticMessage(
@@ -256,16 +261,18 @@ export function LearningPage() {
         description="Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same project. Until you save here, OpenBot uses that project's openbot container."
       >
         {settingsQuery.isPending && (
-          <p role="status">Loading Learning settings…</p>
+          <p role="status" className="mt-4">
+            Loading Learning settings…
+          </p>
         )}
         {settingsQuery.error && (
-          <p role="alert" className="text-destructive">
+          <p role="alert" className="mt-4 text-destructive">
             {settingsQuery.error.message}
           </p>
         )}
         {settings && (
           <form
-            className="grid gap-5"
+            className="mt-4 grid gap-5"
             onSubmit={(event) => {
               event.preventDefault();
               save.mutate(settings);
@@ -402,17 +409,20 @@ export function LearningPage() {
         title="Review and publish"
         description="OpenBot studies finished conversations and proposes skills. Review and publish them below. Bots only use published skills."
       >
-        <div className="grid gap-4">
+        <div className="mt-4 grid gap-4">
           <label className="grid gap-2 text-sm" htmlFor={`${formId}-shown`}>
             Show the container for
-            {/* "" is the deployment default: a Bot's id is never empty. */}
             <Select
               items={[
-                { value: "", label: "Deployment default" },
+                { value: DEPLOYMENT_DEFAULT, label: "Deployment default" },
                 ...botIds.map((id) => ({ value: id, label: nameFor(id) })),
               ]}
-              value={selected}
-              onValueChange={(value) => setSelected(value ?? "")}
+              value={selected || DEPLOYMENT_DEFAULT}
+              onValueChange={(value) =>
+                setSelected(
+                  value === DEPLOYMENT_DEFAULT || value === null ? "" : value,
+                )
+              }
             >
               <SelectTrigger
                 aria-label="Show the container for"
@@ -422,7 +432,9 @@ export function LearningPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Deployment default</SelectItem>
+                <SelectItem value={DEPLOYMENT_DEFAULT}>
+                  Deployment default
+                </SelectItem>
                 {botIds.map((id) => (
                   <SelectItem key={id} value={id}>
                     {nameFor(id)}

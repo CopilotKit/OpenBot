@@ -210,6 +210,16 @@ test("Automatic learning draws OpenBot's own controls, not the browser's", async
   expect(view.container.querySelector("select")).toBeNull();
 });
 
+// Seen in Chromium and WebKit: the picker took an empty value for nothing chosen, so the default drew as a grey hint.
+test("the container picker shows the deployment default as chosen, not as an empty picker", async () => {
+  serve({ enabled: true, defaultTarget: { containerId: "openbot" } }, null);
+  const view = page();
+  await view.findByRole("checkbox", { name: /Turn on automatic learning/ });
+  const shown = view.getByRole("combobox", { name: "Show the container for" });
+  expect(shown.textContent).toContain("Deployment default");
+  expect(shown.hasAttribute("data-placeholder")).toBe(false);
+});
+
 function serve(
   settings: Record<string, unknown>,
   automatic: Record<string, unknown> | null,
