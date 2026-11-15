@@ -90,11 +90,13 @@ export function readableSkillBody(markdown: string): string {
 }
 
 /**
- * The line Learning gives a skill it reduced from its final insights: "Supported by final Insights: <slug>, <slug>.".
- * The slugs name insights the proposal's Learned from already shows in full.
+ * The line Learning gives a skill it reduced from its final insights: "Supported by final Insights: <alias>, <alias>.".
+ * The aliases name insights the proposal's Learned from already shows in full. The Learning agent picks each alias
+ * itself, in any case and with any separator ("refund-triage", "vendor_payments_house_format", "refundV2"), so an
+ * alias is everything up to the next space or comma, its closing full stop included.
  */
 const INSIGHT_SLUGS =
-  /Supported by (?:final )?Insights?:\s*[a-z0-9]+(?:-[a-z0-9]+)*(?:\s*,\s*[a-z0-9]+(?:-[a-z0-9]+)*)*\.?/gi;
+  /Supported by (?:final )?Insights?:\s*[^\s,]+(?:\s*,\s*[^\s,]+)*\.?/gi;
 
 /**
  * Why Learning proposes a skill, as a person reads it: the words Learning wrote, without a line that only names
