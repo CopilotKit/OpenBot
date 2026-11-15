@@ -22,6 +22,8 @@
  * - hand-built-v2: an address in the API's place, built by a client that has no generated client.
  *   Desktop's native side is Rust; mobile and the Recorder move onto generated clients of their own.
  *   A whole one must be an operation or a channel the API describes.
+ * - server-routes: a path table in shared/ that the server registers today's routes from, which no
+ *   client calls. It goes when those addresses are retired.
  * - third-party: another service's address, not OpenBot's server.
  * - transport: the code that sends every request (the generated client's own transport, a client's
  *   one request function, the app's server forwarding `/api`), naming no address of its own.
@@ -39,6 +41,7 @@ export const RULES = [
   "stored-format",
   "installed-client",
   "hand-built-v2",
+  "server-routes",
   "third-party",
   "transport",
   "temporary",
@@ -295,6 +298,31 @@ export const ALLOWED: Allowed[] = [
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
   },
+  // Addresses of the API that mobile and the Recorder build by hand. A whole one must be an
+  // operation or a channel the API describes; generated clients of their own replace these.
+  ...[
+    "mobile/src/api.ts",
+    "mobile/src/notifications.ts",
+    "mobile/app/computer.tsx",
+    "mobile/app/plugins.tsx",
+    "shared/recorder-api.ts",
+  ].map(
+    (file): Allowed => ({
+      file,
+      what: /^\/api\/v2\/organizations\/default(\/|$)(?!.*\/screen$)/,
+      rule: "hand-built-v2",
+      why: "addresses of the API that mobile and the Recorder build by hand until each has a generated client of its own",
+    }),
+  ),
+  // Path tables the server registers today's routes from.
+  ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
+    (file): Allowed => ({
+      file,
+      what: /^\/api\/(computers\/\{\}\/)?browser(\/|$)/,
+      rule: "server-routes",
+      why: "today's browser addresses, which the server registers from here and no client calls since the browsers moved onto the generated client",
+    }),
+  ),
   {
     file: "desktop/src-tauri/src/provider_oauth.rs",
     what: /^\/api\/oauth\/(device_authorization|token)$/,
@@ -364,20 +392,24 @@ export const ALLOWED: Allowed[] = [
  * entry here; the test then fails if the call is still made by hand.
  */
 export const TEMPORARY: Temporary[] = [
+  // Product events: the spec and the server in OpenBot PR 1656, the screens after it.
   {
     file: "app/src/lib/product-telemetry.ts",
     what: "/api/telemetry/product-events",
     rule: "temporary",
     why: "a product event, sent by hand",
-    until: "the app sends it through recordProductEvent",
+    until:
+      "OpenBot PR 1656 (recordProductEvent), then the app sending it through the generated client",
   },
   {
     file: "app/src/components/settings/github-sources.tsx",
     what: "/api/events/github/",
     rule: "temporary",
     why: "a GitHub source's webhook address, built on screen",
-    until: "the screen shows the webhookPath every read now answers",
+    until:
+      "OpenBot PR 1656 (webhookPath on every read), then the screen showing it",
   },
+  // Learning and memory: the spec in OpenBot PR 1667, the screens after it.
   ...[
     "app/src/lib/learning/queries.ts",
     "app/src/lib/learning/mutations.ts",
@@ -387,7 +419,8 @@ export const TEMPORARY: Temporary[] = [
       what: /^\/api\/(admin|settings)\/learning(\/|\?|\{|$)/,
       rule: "temporary",
       why: "Learning's screens, at today's addresses",
-      until: "Learning in the API, and its screens on the generated client",
+      until:
+        "OpenBot PR 1667 (Learning in the API), then its screens on the generated client",
     }),
   ),
   ...["app/src/lib/memory.ts", "mobile/app/memory.tsx"].map(
@@ -396,53 +429,8 @@ export const TEMPORARY: Temporary[] = [
       what: /^\/api\/memory(\/|$)/,
       rule: "temporary",
       why: "memory, at today's addresses",
-      until: "memory in the API, and this screen on the generated client",
-    }),
-  ),
-  ...[
-    "app/src/lib/plugins/queries.ts",
-    "app/src/lib/plugins/grants.ts",
-    "app/src/lib/plugins/mutations.ts",
-    "app/src/lib/plugins/tool-names.ts",
-    "app/src/lib/app-access/queries.ts",
-    "app/src/lib/app-access/mutations.ts",
-    "app/src/lib/app-grants/queries.ts",
-    "app/src/lib/app-grants/mutations.ts",
-    "app/src/lib/app-grants/translate.ts",
-    "app/src/lib/agents/mutations.ts",
-    "mobile/app/plugins.tsx",
-  ].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/plugins(\/|\?|$)/,
-      rule: "temporary",
-      why: "apps, connections and Bot grants, at today's addresses",
       until:
-        "OpenBot PR 1649 (apps, connections and Bot grants on the generated client), and the last read of GET /api/plugins",
-    }),
-  ),
-  ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/(computers\/\{\}\/)?browser(\/|$)/,
-      rule: "temporary",
-      why: "today's browser addresses, which no client calls since the browsers moved onto the generated client",
-      until: "those addresses are retired",
-    }),
-  ),
-  ...[
-    "mobile/src/api.ts",
-    "mobile/src/notifications.ts",
-    "mobile/app/computer.tsx",
-    "mobile/app/plugins.tsx",
-    "shared/recorder-api.ts",
-  ].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/v2\/organizations\/default(\/|$)(?!.*\/screen$)/,
-      rule: "temporary",
-      why: "addresses of the API, built by hand",
-      until: "mobile and the Recorder on generated clients of their own",
+        "OpenBot PR 1667 (memory in the API), then these screens on the generated client",
     }),
   ),
 ];

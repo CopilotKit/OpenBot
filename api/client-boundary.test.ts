@@ -313,8 +313,11 @@ test("every entry follows a named rule, and says why", () => {
   expect(ALLOWED.filter((entry) => entry.rule === "temporary")).toEqual([]);
 });
 
-/** Rules whose addresses are not the server's own, or name none. */
-const NOT_THE_SERVERS: Rule[] = ["transport", "third-party"];
+/**
+ * Rules whose addresses no client calls as the server's own: another service's, none at all, or the
+ * server's own route table.
+ */
+const NOT_THE_SERVERS: Rule[] = ["transport", "third-party", "server-routes"];
 
 test("an address allowed for good is one that stays outside the API", () => {
   const outside = hits()
