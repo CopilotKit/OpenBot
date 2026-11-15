@@ -382,23 +382,6 @@ export const ALLOWED: Allowed[] = [
  * entry here; the test then fails if the call is still made by hand.
  */
 export const TEMPORARY: Temporary[] = [
-  // Product events: the spec and the server in OpenBot PR 1656, the screens after it.
-  {
-    file: "app/src/lib/product-telemetry.ts",
-    what: "/api/telemetry/product-events",
-    rule: "temporary",
-    why: "a product event, sent by hand",
-    until:
-      "OpenBot PR 1656 (recordProductEvent), then the app sending it through the generated client",
-  },
-  {
-    file: "app/src/components/settings/github-sources.tsx",
-    what: "/api/events/github/",
-    rule: "temporary",
-    why: "a GitHub source's webhook address, built on screen",
-    until:
-      "OpenBot PR 1656 (webhookPath on every read), then the screen showing it",
-  },
   // Learning and memory: the spec in OpenBot PR 1667, the screens after it.
   ...[
     "app/src/lib/learning/queries.ts",
