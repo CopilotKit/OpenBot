@@ -1061,7 +1061,7 @@ export const GetPersonLearningSettingsResponse = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   sharingAllowed: zod
     .boolean()
@@ -1153,7 +1153,7 @@ export const UpdatePersonLearningSettingsBody = zod.object({
     .enum(["closed", "open", "choose"])
     .optional()
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod
     .boolean()
@@ -1165,7 +1165,7 @@ export const UpdatePersonLearningSettingsResponse = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod.boolean().nullable(),
 });
