@@ -100,6 +100,7 @@ type Task = {
     | "ready_for_review";
   failure: string | null;
   failedAt: string | null;
+  stoppedAt?: string | null;
   next: string | null;
   resolvedAt: string | null;
   createdAt: string;
@@ -486,6 +487,59 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
   await waitFor(() =>
     expect(bots.queryByRole("heading", { name: "Done" })).toBeNull(),
   );
+});
+
+test("a task the person stopped reads Stopped on the board, in its card's words, and can be tried again", async () => {
+  tasks = [
+    task({
+      id: "s",
+      title: "Chase the supplier",
+      status: "failed",
+      failure: "you stopped it",
+      failedAt: now,
+      stoppedAt: now,
+    }),
+    task({
+      id: "f",
+      title: "File the expense report",
+      status: "failed",
+      failure: "Gmail stopped answering",
+      failedAt: now,
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  // The Bots page and the Bot's own page draw the same board.
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    const stopped = within(
+      (await surface.findByText("Chase the supplier")).closest(
+        "[data-slot=item]",
+      ) as HTMLElement,
+    );
+    expect(stopped.getByText("Stopped")).toBeTruthy();
+    expect(
+      stopped.getByText(
+        "You stopped this. Anything it had already done stays done.",
+      ),
+    ).toBeTruthy();
+    expect(stopped.queryByText("Failed")).toBeNull();
+    expect(stopped.queryByText(/Couldn't finish/)).toBeNull();
+    expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    // One that couldn't finish on its own still says so.
+    const failed = within(
+      surface
+        .getByText("File the expense report")
+        .closest("[data-slot=item]") as HTMLElement,
+    );
+    expect(failed.getByText("Failed")).toBeTruthy();
+    expect(
+      failed.getByText("Couldn't finish: Gmail stopped answering."),
+    ).toBeTruthy();
+    expect(failed.queryByText("Stopped")).toBeNull();
+    expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
+  }
 });
 
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {

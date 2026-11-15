@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import { BotActivitySections } from "@/components/bot-profile/activity";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
 import { activityResponse, answerBotsList, botOperationPath } from "./bots-api";
@@ -284,4 +284,36 @@ test("a group with nothing in it is not drawn, and a Bot with nothing says so on
   await none.findByText("No activity yet");
   for (const name of ["Needs you", "Working", "Done", "Failed", "Recurring"])
     expect(none.queryByRole("heading", { name })).toBeNull();
+});
+
+test("a task the person stopped reads Stopped on its row, in its card's words, and can be tried again", async () => {
+  const view = draw({}, [
+    task("stopped", "failed", { failure: "you stopped it", stoppedAt: NOW }),
+    task("failed", "failed"),
+  ]);
+  const stopped = within(
+    (await view.findByText("Task stopped")).closest(
+      "[data-slot=item]",
+    ) as HTMLElement,
+  );
+  expect(stopped.getByText(/^Stopped · /)).toBeTruthy();
+  expect(
+    stopped.getByText(
+      "You stopped this. Anything it had already done stays done.",
+    ),
+  ).toBeTruthy();
+  expect(stopped.queryByText(/^Failed · /)).toBeNull();
+  expect(stopped.queryByText(/Couldn't finish/)).toBeNull();
+  expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+  // One that couldn't finish on its own still says so.
+  const failed = within(
+    view.getByText("Task failed").closest("[data-slot=item]") as HTMLElement,
+  );
+  expect(failed.getByText(/^Failed · /)).toBeTruthy();
+  expect(
+    failed.getByText("Couldn't finish: a service didn't answer."),
+  ).toBeTruthy();
+  expect(failed.queryByText(/^Stopped · /)).toBeNull();
+  expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
 });

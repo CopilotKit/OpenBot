@@ -25,7 +25,10 @@ import {
 } from "@/lib/tasks/mutations";
 import {
   couldNotFinish,
+  stoppedByYou,
   TASK_STATUS_LABEL,
+  TASK_STOPPED,
+  TASK_STOPPED_LABEL,
   type TaskStatus,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
@@ -51,10 +54,27 @@ const DOT: Partial<Record<TaskStatus, string>> = {
 };
 
 /**
- * What a task needs next, after its status: why it couldn't finish, or the last thing its Bot said.
- * Before the Bot has said anything, a working task has just started.
+ * Whether the row reads Stopped: the person stopped the task and it has not carried on since. Read
+ * off the live status, so a stopped task whose conversation is running a turn again reads Working.
  */
-function nextLine({ task, status }: ListedTask): string | null {
+function stopped({ task, status }: ListedTask): boolean {
+  return status === "failed" && stoppedByYou(task);
+}
+
+/** The task's status in a word or two. One the person stopped reads Stopped, as its card does. */
+function statusLabel(listed: ListedTask): string {
+  return stopped(listed)
+    ? TASK_STOPPED_LABEL
+    : TASK_STATUS_LABEL[listed.status];
+}
+
+/**
+ * What a task needs next, after its status: why it couldn't finish, that the person stopped it, or
+ * the last thing its Bot said. Before the Bot has said anything, a working task has just started.
+ */
+function nextLine(listed: ListedTask): string | null {
+  const { task, status } = listed;
+  if (stopped(listed)) return TASK_STOPPED;
   if (status === "failed") return couldNotFinish(task.failure);
   const said = task.next?.trim();
   if (said) return said;
@@ -116,7 +136,7 @@ export function TaskRow({
       <ItemContent>
         <ItemTitle className="line-clamp-none">{task.title}</ItemTitle>
         <ItemDescription>
-          {[TASK_STATUS_LABEL[status], botName, relativeTime(task.updatedAt)]
+          {[statusLabel(listed), botName, relativeTime(task.updatedAt)]
             .filter(Boolean)
             .join(" · ")}
         </ItemDescription>
@@ -245,7 +265,7 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
       detail={nextLine(listed)}
       icon={<Icon />}
       meta={[
-        <span key="status">{TASK_STATUS_LABEL[status]}</span>,
+        <span key="status">{statusLabel(listed)}</span>,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">
