@@ -135,6 +135,30 @@ pub fn is_relay_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::
     relay_origin(app).is_some_and(|origin| origin == url.origin().ascii_serialization())
 }
 
+/**
+Where a navigation or a new window asked for from the main window goes, while the window shows an
+OpenBot through the relay: true for the person's browser, false for the window itself. None while
+no relay is showing, and then the rule for an OpenBot on this computer decides, as it always has.
+
+The relay's own origin is OpenBot in the window, and stays. So do the setup page, the frames
+OpenBot's pages embed, and anything that is not `http` or `https`. Every other address is outside,
+whatever its host: the OpenBot the app is connected to has pages meant for the person's own browser,
+where they hold a session of their own, and its address can be on this computer (`127.0.0.1` behind
+a port forward). By its host alone that address looked like part of the window, and would have
+loaded there with no sign-in at all.
+*/
+pub fn leaves_for_browser<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    destination: &tauri::Url,
+) -> Option<bool> {
+    let relay = relay_origin(app)?;
+    let stays = !matches!(destination.scheme(), "http" | "https")
+        || destination.origin().ascii_serialization() == relay
+        || crate::on_setup_page(app, destination)
+        || crate::outside_links::loads_in_a_frame(destination);
+    Some(!stays)
+}
+
 /// Refuse something that is about this computer's own OpenBot, while connected to another.
 pub fn nothing_here<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     if is_connected(app) {

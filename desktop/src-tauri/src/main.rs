@@ -6776,6 +6776,23 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                 log::info!("[window] kept the page; a dropped file does not replace it");
                 return false;
             }
+            // Showing an OpenBot that runs elsewhere, through the relay: only the relay's own pages
+            // are OpenBot in this window. Everything else is the browser's, the address the app is
+            // connected to included, whatever its host (`desktop_connected::leaves_for_browser`).
+            if webview.label() == "main" {
+                if let Some(leaves) =
+                    desktop_connected::leaves_for_browser(webview.app_handle(), destination)
+                {
+                    if leaves {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = webview
+                            .app_handle()
+                            .opener()
+                            .open_url(destination.as_str(), None::<&str>);
+                    }
+                    return !leaves;
+                }
+            }
             if webview.label() != "main"
                 || !outside_links::leaves(destination)
                 || outside_links::loads_in_a_frame(destination)
@@ -6869,10 +6886,19 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     let building = std::time::Instant::now();
     let window = builder
         .on_new_window(move |destination, _features| {
-            outside_links::new_window(&destination, |to| {
-                use tauri_plugin_opener::OpenerExt;
-                let _ = opener.opener().open_url(to, None::<&str>);
-            });
+            // Showing an OpenBot that runs elsewhere: whatever is not the relay's own page opens
+            // in the browser, as a navigation to it would (`outside_links_guard`).
+            match desktop_connected::leaves_for_browser(&opener, &destination) {
+                Some(true) => {
+                    use tauri_plugin_opener::OpenerExt;
+                    let _ = opener.opener().open_url(destination.as_str(), None::<&str>);
+                }
+                Some(false) => {}
+                None => outside_links::new_window(&destination, |to| {
+                    use tauri_plugin_opener::OpenerExt;
+                    let _ = opener.opener().open_url(to, None::<&str>);
+                }),
+            }
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;

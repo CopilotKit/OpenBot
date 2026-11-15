@@ -287,6 +287,77 @@ mod connected_ipc {
         assert!(guard.contains(".open_url(destination.as_str(), None::<&str>);\n            false"));
     }
 
+    /// Connected to an OpenBot at an address on this computer (a developer's own, or one reached
+    /// through a port forward), with the relay on another port. A link to that OpenBot itself is
+    /// for the person's browser, where they have a session of their own: by its host it looked
+    /// like part of the window, and loaded there with no sign-in. Only the relay's own pages stay.
+    #[test]
+    fn while_connected_only_the_relays_own_pages_stay_in_the_window() {
+        let shell = Connected::new();
+        let typed = "http://127.0.0.1:20001";
+        shell.choose(choice::Mode::Connected, typed, None);
+        let to = |address: &str| {
+            desktop_connected::leaves_for_browser(shell.handle(), &address.parse().unwrap())
+        };
+        let api_keys = format!("{typed}/settings/api-keys");
+
+        // On this computer, or connected with nothing showing yet: the rule there has always been.
+        assert_eq!(to(&api_keys), None);
+        assert_eq!(to("https://example.com/"), None);
+        assert!(!outside_links::leaves(&api_keys.parse().unwrap()));
+        assert!(!outside_links::leaves(
+            &"http://127.0.0.1:3010/connections".parse().unwrap()
+        ));
+        assert!(outside_links::leaves(&"https://example.com/".parse().unwrap()));
+
+        desktop_connected::showing_for_test(shell.handle(), RELAY);
+        // The OpenBot it is connected to, by its own address: the browser, and the window stays.
+        assert_eq!(to(&api_keys), Some(true));
+        assert_eq!(to(typed), Some(true));
+        // Anything else on this computer that is not the relay, and any other site, as before.
+        for outside in [
+            "http://127.0.0.1:49201/",
+            "http://localhost:49200/",
+            "http://[::1]:49200/",
+            "http://dashboard.localhost:8080/",
+            "https://openbot.example.com/settings/api-keys",
+            "https://app.hubspot.com/oauth/authorize?client_id=x",
+            "http://example.com/",
+        ] {
+            assert_eq!(to(outside), Some(true), "{outside}");
+        }
+        // The relay's own pages, the setup page, the frames a page embeds, and what is no site.
+        for inside in [
+            "http://127.0.0.1:49200/",
+            "http://127.0.0.1:49200/settings/api-keys",
+            "http://127.0.0.1:49200/.openbot-relay/enter?key=k",
+            SETUP,
+            "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business?embed_type=Inline",
+            "https://js.stripe.com/v3/m-outer.html",
+            "about:blank",
+            "blob:http://127.0.0.1:49200/0b0e0c0a",
+            "openbot://open?path=/channel/c-1",
+        ] {
+            assert_eq!(to(inside), Some(false), "{inside}");
+        }
+
+        // The window's guard asks this first, opens what leaves in the browser and refuses the
+        // navigation; a new window asked for is opened the same way and never in the app. Read as
+        // text: the real webview cannot be built here.
+        let main = include_str!("main.rs");
+        let guard = &main[main.find("fn outside_links_guard").unwrap()..];
+        let guard = &guard[..guard.find("\n}\n").unwrap()];
+        let connected = guard
+            .find("desktop_connected::leaves_for_browser(webview.app_handle(), destination)")
+            .expect("the guard asks the connected rule");
+        assert!(connected < guard.find("outside_links::leaves(destination)").unwrap());
+        assert!(guard[connected..].contains("return !leaves;"));
+        let new_window = &main[main.find(".on_new_window(").unwrap()..];
+        let new_window = &new_window[..new_window.find(".build()?").unwrap()];
+        assert!(new_window.contains("desktop_connected::leaves_for_browser(&opener, &destination)"));
+        assert!(new_window.contains("tauri::webview::NewWindowResponse::Deny"));
+    }
+
     /// With the choice on record saying connected, nothing of an installation on this computer is
     /// asked, read or made: not by the page's status, Restart or Stop, not by Show, not by Quit.
     /// The installation's folder is a path that does not exist and must still not exist after,
