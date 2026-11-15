@@ -28,6 +28,7 @@ export * from "./network-policies/network-policies";
 export * from "./notification-settings/notification-settings";
 export * from "./organization-settings/organization-settings";
 export * from "./people/people";
+export * from "./product-events/product-events";
 export * from "./reactions/reactions";
 export * from "./recorder/recorder";
 export * from "./reviewer-guidance/reviewer-guidance";

@@ -288,6 +288,7 @@ export const getListGithubEventSourcesResponseMock =
         source: "github",
         repository: "acme/storefront",
         createdAt: "2026-11-12T10:30:00.000Z",
+        webhookPath: "/api/events/github/6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f",
       },
     ],
     nextCursor: null,

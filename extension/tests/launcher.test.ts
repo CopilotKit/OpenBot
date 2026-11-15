@@ -13,7 +13,6 @@ import {
 import {
   type LearningSpaceState,
   RECORDER_SIGNED_OUT,
-  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
@@ -105,10 +104,13 @@ function route(request: Request): Response | Promise<Response> | null {
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
   if (path.startsWith("/api/v2/organizations/default/recorder"))
     openbotAsked.push(`${request.method} ${path}`);
-  if (path === recorderApiPaths.connections && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder-connections" &&
+    request.method === "POST"
+  )
     return exchange();
   if (
-    path === recorderApiPaths.currentConnection &&
+    path === "/api/v2/organizations/default/recorder-connections/current" &&
     request.method === "DELETE"
   ) {
     revokedTokens.push(token);
@@ -131,7 +133,7 @@ function route(request: Request): Response | Promise<Response> | null {
       connectionId: `c-${token}`,
     });
   }
-  if (path === recorderApiPaths.learning && learning)
+  if (path === "/api/v2/organizations/default/recorder/learning" && learning)
     return Response.json({ learning });
   if (path.startsWith("/api/v2/organizations/default/recorder"))
     return Response.json({ error: "Not found." }, { status: 404 });

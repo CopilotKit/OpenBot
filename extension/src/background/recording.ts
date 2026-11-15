@@ -11,9 +11,7 @@
 import {
   type LearningSpaceState,
   RECORDER_AUTHORITY_UNAVAILABLE,
-  type RecorderLearningResponse,
   type RecorderMe,
-  recorderApiPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
 import {
@@ -38,13 +36,17 @@ import type {
   StreamSession,
 } from "../protocol/messages";
 import { IDLE_STATE, parseOffscreenSignedOut } from "../protocol/messages";
+import {
+  getRecorderIdentity,
+  getRecorderLearning,
+} from "../shared/generated/recorder";
 import { hasHostPermission } from "../shared/host-access";
 import {
   KEPT_FOR_PERSON_DAYS,
   KEPT_FOR_PERSON_MS,
   RECORDER_ACTION_NOTICE_AT,
 } from "../shared/limits";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
 import { isRecordablePage } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -2045,10 +2047,9 @@ export function installRecording(
     const current = live;
     if (!current || state.phase !== "recording") return;
     try {
-      await openbotJson<RecorderMe>(
-        { openbotUrl: current.openbotUrl, token: current.token },
-        recorderApiPaths.me,
-      );
+      await getRecorderIdentity(ORGANIZATION_ID, {
+        target: { openbotUrl: current.openbotUrl, token: current.token },
+      });
     } catch (error) {
       const reason = signedOutReason(error);
       if (reason)
@@ -2616,10 +2617,9 @@ export function installRecording(
     )
       return cached.value;
     try {
-      const value = await openbotJson<RecorderMe>(
-        connection,
-        recorderApiPaths.me,
-      );
+      const value = await getRecorderIdentity(ORGANIZATION_ID, {
+        target: connection,
+      });
       await writeSession("me", { value, fetchedAt: deps.now() });
       return value;
     } catch (error) {
@@ -2679,10 +2679,9 @@ export function installRecording(
     const connection = await currentConnection();
     if (!connection) return { ok: false, error: SENTENCES.noConnection };
     try {
-      const answer = await openbotJson<RecorderLearningResponse>(
-        connection,
-        recorderApiPaths.learning,
-      );
+      const answer = await getRecorderLearning(ORGANIZATION_ID, {
+        target: connection,
+      });
       learningSpace = answer.learning;
       await writeSession("learning", {
         value: answer.learning,

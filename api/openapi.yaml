@@ -6,7 +6,7 @@ info:
     name: MIT
     identifier: MIT
   description: |-
-    The one API every OpenBot client uses: the web app, Desktop, mobile, the Recorder and the CLI. It follows the conventions of CopilotKit Intelligence's v2 API so both read as one API, and OpenBot's resources sit beside Intelligence's under the same organization address (/api/v2/organizations/{organizationId}/...). Errors are RFC 9457 problem details (application/problem+json), lists page with an opaque cursor and a limit, and every write takes an Idempotency-Key.
+    The one API every OpenBot client uses: the web app, Desktop, mobile and the Recorder. It follows the conventions of CopilotKit Intelligence's v2 API so both read as one API, and OpenBot's resources sit beside Intelligence's under the same organization address (/api/v2/organizations/{organizationId}/...). Errors are RFC 9457 problem details (application/problem+json), lists page with an opaque cursor and a limit, and every write takes an Idempotency-Key.
 
     Until multi-organization lands, an OpenBot install has exactly one organization, and organizationId is that organization. Clients address it as `default`; the server treats any other value as an organization that does not exist.
 
@@ -101,6 +101,8 @@ tags:
     description: The logins a person saved for their Bots to sign in with, by site. A password goes in and is never read back out.
   - name: Recorder
     description: 'The OpenBot Recorder, the browser extension a person records what they do with: the browsers connected as a person, their recordings, and the Recorder''s own operations, which it signs with its connection token.'
+  - name: Product events
+    description: 'What a person did with a Bot''s answer, seen on screen or copied, counted so OpenBot knows which answers people use. Best effort: a client never waits on one.'
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -13063,7 +13065,7 @@ paths:
         - Team Bots
       operationId: answerTeamBotConsent
       summary: Answer whether a Team Bot may use the caller's account
-      description: 'Record the caller''s answer when a Team Bot somebody else published asks to use one of the caller''s own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller''s own answer and binds nobody else.'
+      description: 'Record the caller''s answer when a Team Bot somebody else published asks to use one of the caller''s own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller''s own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.'
       security:
         - webSession: []
         - appOAuth:
@@ -16254,6 +16256,48 @@ paths:
           $ref: '#/components/responses/RecorderAuthorityUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/product-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordProductEvent
+      summary: Record that the caller saw or copied a Bot's answer
+      description: 'Tell OpenBot that the caller saw a Bot''s answer on screen, or copied it, so OpenBot can count which answers people use. It is best effort: a client sends one for each answer it shows or copies, waits on nothing, and sends it with keepalive so it still leaves when the page closes. The event counts for the caller, and names only the answer. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductEvent'
+            examples:
+              viewed:
+                $ref: '#/components/examples/ProductEventViewed'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -16263,7 +16307,7 @@ components:
       description: The web app's server-side session, so no token ever reaches the browser. Served over HTTPS the cookie is __Secure-better-auth.session_token. A single-user install signs its one person in without a cookie.
     appOAuth:
       type: oauth2
-      description: Desktop, mobile and the CLI. OAuth 2.1 authorization code with PKCE (RFC 7636, S256 only); the access token is sent as a bearer token. The server does not accept it yet.
+      description: Desktop and mobile. OAuth 2.1 authorization code with PKCE (RFC 7636, S256 only); the access token is sent as a bearer token.
       flows:
         authorizationCode:
           authorizationUrl: /api/auth/oauth2/authorize
@@ -16347,7 +16391,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: OpenBot API key
-      description: Automation. An API key acts as the person who created it, inside one organization. The server does not accept it yet.
+      description: Automation. An API key acts as the person who created it, inside one organization.
     recorderConnection:
       type: http
       scheme: bearer
@@ -24894,6 +24938,7 @@ components:
         - source
         - repository
         - createdAt
+        - webhookPath
       properties:
         id:
           type: string
@@ -24910,7 +24955,7 @@ components:
           description: When it was connected.
         webhookPath:
           type: string
-          description: The path on this server to give the repository's webhook. Answered when the source is made.
+          description: The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it.
     GithubEventSourcePage:
       type: object
       required:
@@ -29703,6 +29748,47 @@ components:
           minimum: 0
           maximum: 9007199254740991
           description: How many actions the recording holds so far.
+    ProductEvent:
+      type: object
+      description: The caller saw a Bot's answer, or copied it. Names the answer and nothing about the person, who is the caller.
+      additionalProperties: false
+      required:
+        - kind
+        - threadId
+        - messageId
+        - surface
+      properties:
+        kind:
+          type: string
+          enum:
+            - result_viewed
+            - result_copied
+          description: What the caller did with the answer, result_viewed when it was on screen and result_copied when they copied it.
+        threadId:
+          type: string
+          description: The thread the answer is in, as its messages name it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        messageId:
+          type: string
+          description: The answer's message, by the id its thread gives it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        runId:
+          type: string
+          description: The run that wrote the answer, when the client knows it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+            - mobile
+          description: Where the caller saw or copied it.
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -35963,6 +36049,7 @@ components:
             source: github
             repository: acme/storefront
             createdAt: '2026-11-12T10:30:00.000Z'
+            webhookPath: /api/events/github/6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f
         nextCursor: null
     GithubEventSourceResponseExample:
       summary: A GitHub event source, as it was connected.
@@ -37035,3 +37122,10 @@ components:
         learning:
           state: assigned
           containerId: 6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b2a
+    ProductEventViewed:
+      summary: An answer the caller saw in the web app.
+      value:
+        kind: result_viewed
+        threadId: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
+        messageId: msg_0b1c6f0e
+        surface: web

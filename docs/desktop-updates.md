@@ -7,7 +7,6 @@ A person can also ask at any time, and every place reads the same feed: **Check 
 The app update itself replaces only the app, on a Mac and on Windows alike. On a Mac the new `OpenBot.app` is put in place of the old one, then OpenBot is stopped and the app restarts. On Windows OpenBot is stopped first, then the installer runs in update mode, which never runs the uninstaller, and starts the new version. Either way the installation, its `.env`, keys and database volumes, and the app's own settings and data stay as they are, and the restarted app's Start is what moves the installation forward. See [Windows updates](releasing.md#windows-updates).
 
 The images are usually there before the click. As soon as the feed names a newer release, the app downloads that release's images in the background while this version keeps running: OpenBot's into its container engine and the back end's into the local Intelligence node, only images the installation runs. It does the same for an installation behind the app's own release, as soon as its engine answers. It only adds images, pulls one at a time, gives way to anything the person starts, and downloads nothing when the engine or the computer's drive is short of room, in which case the upgrade pulls them as before (`desktop/src-tauri/src/update_ready.rs`).
-
 ## The upgrade
 
 The app's own release is the tag it was released as, or, for an internal or candidate build, the release it was pinned to. One rule for every build: when the installed version (`.openbot-deployment`) is not that release, Start (`desktop/src-tauri/src/upgrade.rs`):
@@ -35,7 +34,7 @@ Start also brings the local Intelligence up to date. When it runs a release olde
 
 ## What is laid out
 
-Every container runs from an image the release pins by digest, the server's migrations and the tenant package included. So a deployment is the Compose file and image list (`deployment::LAYOUT`), and nothing runs on the host: the person's own browser runs on the one computer, shown in the OpenBot window. Nothing of `server/`, `app/`, `worker/`, `agent-computer/`, `shared/`, `toolkit/`, `scripts/`, `patches/` or `examples/` is laid out, and nothing is installed with Bun. An installation laid out by an earlier app keeps those folders until its next upgrade sets them aside with the previous version; nothing reads them.
+Every OpenBot container runs from an image the release pins by digest, the server's migrations and the tenant package included; PostgreSQL is `pgvector/pgvector:pg17`, by tag. So a deployment is the Compose file and image list (`deployment::LAYOUT`), and nothing runs on the host: the person's own browser runs on the one computer, shown in the OpenBot window. Nothing of `server/`, `app/`, `worker/`, `agent-computer/`, `shared/`, `toolkit/`, `scripts/`, `patches/` or `examples/` is laid out, and nothing is installed with Bun. An installation laid out by an earlier app keeps those folders until its next upgrade sets them aside with the previous version; nothing reads them.
 
 ## Distribution policy
 
@@ -79,4 +78,4 @@ bun test src/App.test.tsx
 bun run typecheck
 ```
 
-Run desktop tests from `desktop/` to use its own dependency graph instead of the root server/app preload configuration. The real-engine tests need a registry on `OPENBOT_TEST_REGISTRY` (`docker run -d -p 127.0.0.1:5050:5000 registry:2`) and `pgvector/pgvector:pg17` on the engine; each runs in its own Compose project and removes its containers, volume and image tags.
+Run desktop tests from `desktop/` to use its own dependency graph instead of the root's preload configuration. The real-engine tests need a registry on `OPENBOT_TEST_REGISTRY` (`docker run -d -p 127.0.0.1:5050:5000 registry:2`) and `pgvector/pgvector:pg17` on the engine; each runs in its own Compose project and removes its containers, volume and image tags.

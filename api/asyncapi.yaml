@@ -64,9 +64,10 @@ servers:
       CopilotKit Intelligence's realtime gateway, where runs stream. Its
       address is never configured in a client: the REST answer that carries a
       join token carries the address to dial with it (realtime.clientUrl).
-      Where an OpenBot is set to relay the gateway, that address is OpenBot's
-      own, at /api/intelligence/client, and the relay also asks for the
-      person's session.
+      Where Intelligence runs beside an OpenBot, that address is OpenBot's
+      own, so a client dials one host: either /api/intelligence/client, which
+      OpenBot relays and which also asks for the person's session, or
+      /client, which the deployment's edge sends straight to the gateway.
     security:
       - $ref: "#/components/securitySchemes/joinToken"
   voiceService:

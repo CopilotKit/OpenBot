@@ -1,16 +1,20 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { updatePerson } from "@/lib/api/generated/people/people";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
-import { client } from "@/lib/client";
 import { clearSkin } from "@/skins/store";
+import { authClient } from "./client";
 import { authKeys } from "./queries";
 
+const SIGN_OUT_UNFINISHED = "Signing out did not finish. Try again.";
+
+/**
+ * Sign out through Better Auth's own client, which owns sign-in's addresses. It answers a refusal
+ * rather than throwing, so a refused sign-out is thrown here, in one plain sentence whoever refused
+ * it (Better Auth, or the organization's sign-in) and whatever kept it from reaching the server.
+ */
 async function signOut() {
-  await client("/api/auth/sign-out", {
-    method: "POST",
-    // What a refused sign-out means whoever answers it (Better Auth puts its sentence where `client` does not read).
-    fallback: "Signing out did not finish. Try again.",
-  });
+  const answered = await authClient.signOut().catch(() => null);
+  if (!answered || answered.error) throw new Error(SIGN_OUT_UNFINISHED);
 }
 
 /**

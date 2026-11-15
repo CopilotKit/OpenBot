@@ -7,10 +7,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { LAUNCHER_GLOBAL } from "@openbot/shared/openbot-browser";
-import {
-  RECORDER_SIGNED_OUT,
-  recorderApiPaths,
-} from "@openbot/shared/recorder-api";
+import { RECORDER_SIGNED_OUT } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import { installConnection } from "../src/background/connection";
@@ -82,17 +79,20 @@ function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (path === recorderApiPaths.connections && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder-connections" &&
+    request.method === "POST"
+  )
     return exchange(request);
   if (
-    path === recorderApiPaths.currentConnection &&
+    path === "/api/v2/organizations/default/recorder-connections/current" &&
     request.method === "DELETE"
   ) {
     revokedTokens.push(token);
     liveTokens.delete(token);
     return new Response(null, { status: 204 });
   }
-  if (path === recorderApiPaths.me) {
+  if (path === "/api/v2/organizations/default/recorder/me") {
     if (!liveTokens.has(token))
       return Response.json(
         {

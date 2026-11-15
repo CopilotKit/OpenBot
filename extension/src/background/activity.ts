@@ -7,12 +7,10 @@
 // a time, always with the newest state, and OpenBot not answering, or answering anything but signed out, is let go
 // (OpenBot treats a report older than 90 s as stale, so one that never arrives ends the red dot rather than freezing
 // it). A signed-out answer goes the way any other signed-out answer goes.
-import {
-  type RecorderActivity,
-  recorderApiPaths,
-} from "@openbot/shared/recorder-api";
+import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import type { RecorderState } from "../protocol/messages";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import { reportRecorderActivity } from "../shared/generated/recorder";
+import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
 
 /** How often a running recording reports, well inside the 90 s after which OpenBot treats a report as stale. */
 export const ACTIVITY_REPORT_MS = 30_000;
@@ -72,8 +70,8 @@ export function createActivityReport(deps: ActivityDeps): ActivityReport {
     const target = await deps.target();
     if (!target) return;
     try {
-      await openbotJson(target, recorderApiPaths.activity, {
-        body: activityOf(deps.state()),
+      await reportRecorderActivity(ORGANIZATION_ID, activityOf(deps.state()), {
+        target,
         signal: AbortSignal.timeout(REPORT_WAIT_MS),
       });
     } catch (error) {
