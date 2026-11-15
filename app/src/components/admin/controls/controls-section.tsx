@@ -21,7 +21,7 @@ export type Controls = {
     key: K,
     value: EnterpriseSettings[K],
   ) => void;
-  /** At the organization's scope. Roles and groups are set in the overrides dialog. */
+  /** At the organization's scope. Roles and teams are set in the overrides dialog. */
   setCapability: (capability: CapabilityKey, allowed: boolean) => void;
   saving: boolean;
 };

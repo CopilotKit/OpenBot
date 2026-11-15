@@ -19,6 +19,7 @@ import {
   translateCapabilityChanges,
 } from "@/lib/capability-changes/translate";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
+import { teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/permissions_/describe")({
@@ -48,6 +49,8 @@ function DescribePermissionsPage() {
   const navigate = Route.useNavigate();
   const save = useMutation(saveCapabilityChangesMutationOptions(queryClient));
   const overview = useQuery(enterpriseOverviewQueryOptions());
+  /* A change for a team carries its id; the rows and the preview say its name. */
+  const teams = useQuery(teamListQueryOptions());
   const [written, setWritten] = useState<WrittenChanges | null>(null);
   const [changes, setChanges] = useState<CapabilityChange[]>([]);
 
@@ -113,7 +116,7 @@ function DescribePermissionsPage() {
           <FieldGroup>
             <DescribeField
               action="Write changes"
-              description="Say in a sentence who may or may not do something, and your model writes the changes from this OpenBot's roles and groups. A second reading that never sees your words says what the changes do."
+              description="Say in a sentence who may or may not do something, and your model writes the changes from this OpenBot's roles and teams. A second reading that never sees your words says what the changes do."
               id="permissions-english"
               label="Describe the change"
               placeholder="Contractors can't use their own computer"
@@ -141,11 +144,16 @@ function DescribePermissionsPage() {
                     : "These changes don't check, so OpenBot won't save them."
                 }
                 heading="What these changes do"
-                passed="Checks. Every change names a permission, role or group this OpenBot has."
+                passed="Checks. Every change names a permission, role or team this OpenBot has."
                 warning={written.warning}
               />
             ) : null}
-            {changes.length > 0 ? (
+            {teams.error ? (
+              <p className="text-destructive text-sm" role="alert">
+                Couldn't load teams. Reload the page.
+              </p>
+            ) : null}
+            {changes.length > 0 && teams.data ? (
               <ChangeRows
                 changes={changes}
                 onRemove={(index) =>
@@ -154,6 +162,7 @@ function DescribePermissionsPage() {
                 problems={
                   current && !current.check.ok ? current.check.problems : []
                 }
+                teams={teams.data.teams}
                 titles={titles}
               />
             ) : null}
@@ -162,8 +171,8 @@ function DescribePermissionsPage() {
             current.check.problems.length === 0 ? (
               <p className="text-destructive text-sm">{current.check.error}</p>
             ) : null}
-            {changes.length > 0 ? (
-              <PermissionsPreview preview={preview} />
+            {changes.length > 0 && teams.data ? (
+              <PermissionsPreview preview={preview} teams={teams.data.teams} />
             ) : null}
           </FieldGroup>
           {save.error ? (

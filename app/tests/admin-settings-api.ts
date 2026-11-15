@@ -117,6 +117,8 @@ export type TodayOverview = {
     organization: boolean | null;
     roles: Record<string, boolean>;
     groups: Record<string, boolean>;
+    /** By team id. */
+    teams?: Record<string, boolean>;
   }[];
   settings?: Record<string, unknown>;
   groups?: string[];
@@ -200,7 +202,7 @@ export function overviewResponse(
         id:
           policy.scopeKind === "organization"
             ? "organization"
-            : `group:${policy.scopeId}`,
+            : `${policy.scopeKind}:${policy.scopeId}`,
         ...policy,
       })),
       nextCursor: null,
