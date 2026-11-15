@@ -222,6 +222,8 @@ function answer(path: string, persona: Persona): unknown {
           image: null,
           role: one === DANA ? "admin" : "member",
           joinedAt: "2026-11-01T09:00:00.000Z",
+          removable: false,
+          assignableRoles: [],
         }),
       ),
       nextCursor: null,

@@ -272,6 +272,7 @@ const server = setupServer(
           ? ("admin" as const)
           : ("member" as const),
         active: id === currentOrganizationId(),
+        personal: false,
       })),
     canCreate: false,
     nextCursor: null,
@@ -287,6 +288,8 @@ const server = setupServer(
           image: null,
           role: organization.admins.includes(person.id) ? "admin" : "member",
           joinedAt: "2026-11-01T09:00:00.000Z",
+          removable: false,
+          assignableRoles: [],
         }),
       ),
       nextCursor: null,
