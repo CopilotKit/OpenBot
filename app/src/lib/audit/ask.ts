@@ -1,6 +1,6 @@
 import type { AuditFilters } from "@openbot/shared/audit-filters";
 import { askAuditEvents } from "@/lib/api/generated/audit-events/audit-events";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /** The names the server resolved for the values in a set of filters, so a chip reads as a name. */
 export type AuditFilterLabels = {
@@ -33,7 +33,7 @@ export type AuditAnswer = {
  */
 export async function askAuditTrail(question: string): Promise<AuditAnswer> {
   const answer = await askAuditEvents(
-    ORGANIZATION_ID,
+    organizationId(),
     {
       question,
       // So "yesterday" is the admin's yesterday.

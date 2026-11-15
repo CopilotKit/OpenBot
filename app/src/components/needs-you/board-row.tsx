@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
  */
 export function BoardRow({
   icon,
+  state,
   waiting = false,
   title,
   detail,
@@ -23,6 +24,8 @@ export function BoardRow({
   onSelect,
 }: {
   icon: ReactNode;
+  /** Where a task's row stands, for finding it: "failed", "stopped", "working". */
+  state?: string;
   /** A Bot is stopped on this: the icon's square is tinted. */
   waiting?: boolean;
   title: ReactNode;
@@ -47,7 +50,11 @@ export function BoardRow({
   const opens = Boolean(onSelect || (detail && !wholeDetail) || more || title);
   const shownMeta = meta.filter(Boolean);
   return (
-    <div className="flex flex-col gap-2 px-3.5 py-3" data-slot="item">
+    <div
+      className="flex flex-col gap-2 px-3.5 py-3"
+      data-slot="item"
+      data-task-state={state}
+    >
       <div className="flex items-start gap-3">
         <span
           className={cn(

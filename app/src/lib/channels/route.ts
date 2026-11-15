@@ -1,5 +1,5 @@
 import { routeConversationMessage } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /**
@@ -57,7 +57,7 @@ export async function routeMessage(
   const asked = routingText(text);
   try {
     const { botId, ...routed } = await routeConversationMessage(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         text: asked,
         ...(agentId ? { botId: agentId } : {}),

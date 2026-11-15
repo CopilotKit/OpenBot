@@ -8,6 +8,7 @@ export * from "./conversations/conversations";
 export * from "./devices/devices";
 export * from "./memory/memory";
 export * from "./organization-settings/organization-settings";
+export * from "./organizations/organizations";
 export * from "./routines/routines";
 export * from "./skills/skills";
 export * from "./tasks/tasks";

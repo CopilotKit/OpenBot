@@ -29,6 +29,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
 import {
   setPersonAccessMutationOptions,
@@ -155,7 +156,7 @@ function PeoplePage() {
                     <ItemMedia variant="icon">
                       {person.revoked ? (
                         <IconLock />
-                      ) : person.role === "admin" ? (
+                      ) : isOrganizationAdmin(person.role) ? (
                         <IconShieldCheck />
                       ) : (
                         <IconUser />

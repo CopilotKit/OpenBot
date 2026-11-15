@@ -15,7 +15,7 @@ import type {
   BotGrant,
   Connection,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * Re-exported, not re-declared.
@@ -297,7 +297,7 @@ export function connectionsQueryOptions() {
     queryFn: async (): Promise<PluginConnections> => {
       const connections = await everyPage(async (cursor) => {
         const page = await listConnections(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load your connections." },
@@ -318,7 +318,7 @@ export function sharedConnectionQueryOptions(serverId: string) {
   return queryOptions({
     queryKey: pluginKeys.sharedConnection(serverId),
     queryFn: async (): Promise<PluginConnection> => {
-      const shared = await getSharedConnection(ORGANIZATION_ID, serverId, {
+      const shared = await getSharedConnection(organizationId(), serverId, {
         fallback: "Couldn't load the shared account.",
       });
       return {
@@ -352,7 +352,7 @@ export function connectionSiblingsQueryOptions(serverId: string) {
     queryKey: pluginKeys.siblings(serverId),
     queryFn: async (): Promise<ConnectionSiblings> => {
       const preview = await getConnectionDisconnectPreview(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         serverId,
         { fallback: "Couldn't read which other apps share this connection." },
@@ -389,7 +389,7 @@ export function agentPluginsQueryOptions(agentId: string) {
       // Every grant the Bot holds, page after page, so a Bot given a whole large app is read whole.
       const grants = await everyPage(async (cursor) => {
         const page = await listBotGrants(
-          ORGANIZATION_ID,
+          organizationId(),
           agentId,
           { limit: 100, ...(cursor ? { cursor } : {}) },
           options,
@@ -433,7 +433,7 @@ export function brokeredAccountsQueryOptions(serverId: string) {
       const [accounts, connection] = await Promise.all([
         everyPage(async (cursor) => {
           const page = await listConnectedAccounts(
-            ORGANIZATION_ID,
+            organizationId(),
             "me",
             serverId,
             { limit: 100, ...(cursor ? { cursor } : {}) },
@@ -441,7 +441,7 @@ export function brokeredAccountsQueryOptions(serverId: string) {
           );
           return { items: page.accounts, nextCursor: page.nextCursor };
         }),
-        getConnection(ORGANIZATION_ID, "me", serverId, { fallback }),
+        getConnection(organizationId(), "me", serverId, { fallback }),
       ]);
       return { accounts, canAddAnother: connection.canAddAccount };
     },

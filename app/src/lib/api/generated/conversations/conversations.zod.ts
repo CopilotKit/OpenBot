@@ -17,7 +17,7 @@ export const CreateConversationJoinTokenParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -93,7 +93,7 @@ export const ListConversationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -261,7 +261,7 @@ export const CreateConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -375,7 +375,7 @@ export const RouteConversationMessageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -456,7 +456,7 @@ export const GetConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -538,7 +538,7 @@ export const UpdateConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -602,7 +602,7 @@ export const DeleteConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -648,7 +648,7 @@ export const MarkConversationReadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -685,7 +685,7 @@ export const RecordConversationActivityParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -741,7 +741,7 @@ export const SignalConversationBusyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -784,7 +784,7 @@ export const ListConversationMembersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -873,7 +873,7 @@ export const AddConversationMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -926,7 +926,7 @@ export const RemoveConversationMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -969,7 +969,7 @@ export const ListConversationMessagesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -1112,7 +1112,7 @@ export const SendConversationMessageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -1187,7 +1187,7 @@ export const UploadConversationAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   conversationId: zod
     .string()
@@ -1246,7 +1246,7 @@ export const GetAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   attachmentId: zod
     .string()
@@ -1272,7 +1272,7 @@ export const DeleteAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   attachmentId: zod
     .string()
@@ -1306,7 +1306,7 @@ export const CreateConversationThreadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -1336,7 +1336,7 @@ export const GetConversationThreadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   threadId: zod.uuid().describe("The thread's id."),
 });
@@ -1358,7 +1358,7 @@ export const CreateTranscriptionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 

@@ -13,7 +13,7 @@ export const ListComputersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -121,7 +121,7 @@ export const StopComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -169,7 +169,7 @@ export const ResetComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -217,7 +217,7 @@ export const UpdateComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -274,7 +274,7 @@ export const GetComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -308,7 +308,7 @@ export const WakeComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -354,7 +354,7 @@ export const GetComputerScreenshotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -411,7 +411,7 @@ export const GetComputerPageFrameParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -451,7 +451,7 @@ export const ReadComputerPageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -497,7 +497,7 @@ export const GetComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -592,7 +592,7 @@ export const RequestComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -695,7 +695,7 @@ export const TakeComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -801,7 +801,7 @@ export const ReleaseComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -907,7 +907,7 @@ export const CancelComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1013,7 +1013,7 @@ export const RequestComputerSecretParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1121,7 +1121,7 @@ export const SupplyComputerSecretParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1167,7 +1167,7 @@ export const SendComputerHumanInputParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1221,7 +1221,7 @@ export const SnapshotComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1294,7 +1294,7 @@ export const NavigateComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1369,7 +1369,7 @@ export const ClickComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1446,7 +1446,7 @@ export const TypeComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1528,7 +1528,7 @@ export const PressComputerKeyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1607,7 +1607,7 @@ export const ScrollComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1685,7 +1685,7 @@ export const RunComputerCommandParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1747,7 +1747,7 @@ export const ListComputerFilesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1799,7 +1799,7 @@ export const ReadComputerFileParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()
@@ -1851,7 +1851,7 @@ export const WriteComputerFileParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   botId: zod
     .string()

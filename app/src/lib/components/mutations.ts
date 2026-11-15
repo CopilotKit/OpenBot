@@ -9,7 +9,7 @@ import {
   unpublishComponent,
   withholdBotComponent,
 } from "@/lib/api/generated/components/components";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ComponentRecord, componentKeys } from "./queries";
 
 /**
@@ -43,7 +43,7 @@ export function setComponentGrantMutationOptions(queryClient: QueryClient) {
       granted: boolean;
     }) => {
       await (variables.granted ? allowBotComponent : withholdBotComponent)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.agentId,
         variables.name,
         key(),
@@ -65,7 +65,7 @@ export function setComponentFunctionMutationOptions(queryClient: QueryClient) {
       await (variables.granted
         ? grantComponentFunction
         : revokeComponentFunction)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.name,
         variables.functionName,
         key(),
@@ -81,7 +81,7 @@ export function setComponentPublishedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { name: string; published: boolean }) => {
       await (variables.published ? publishComponent : unpublishComponent)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.name,
         key(),
         { fallback: FALLBACK },
@@ -106,7 +106,7 @@ export function saveComponentDraftMutationOptions(queryClient: QueryClient) {
     }) => {
       const { component, description } = variables;
       await replaceComponentDraft(
-        ORGANIZATION_ID,
+        organizationId(),
         component.name,
         component.draftSource
           ? {
@@ -151,7 +151,7 @@ export function playgroundName(slug: string): string {
 /** Save the draft on screen, which makes the component the first time it is saved. */
 async function savePlaygroundDraft(input: PlaygroundDraftInput) {
   await replaceComponentDraft(
-    ORGANIZATION_ID,
+    organizationId(),
     playgroundName(input.slug),
     {
       title: input.title,
@@ -188,7 +188,7 @@ export function publishPlaygroundMutationOptions(queryClient: QueryClient) {
     mutationFn: async (input: PlaygroundDraftInput) => {
       await savePlaygroundDraft(input);
       await publishComponent(
-        ORGANIZATION_ID,
+        organizationId(),
         playgroundName(input.slug),
         key(),
         { fallback: PLAYGROUND_FALLBACK },
@@ -203,7 +203,7 @@ export function deletePlaygroundComponentMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (name: string) => {
-      await deleteComponent(ORGANIZATION_ID, name, key(), {
+      await deleteComponent(organizationId(), name, key(), {
         fallback: PLAYGROUND_FALLBACK,
       });
     },

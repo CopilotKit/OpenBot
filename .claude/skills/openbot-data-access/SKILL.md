@@ -39,6 +39,13 @@ is built on `clientRequest` in `lib/client.ts`: the same session cookie, and a r
 `ClientError` carrying the server's own sentence (`error` today, `detail` in problem details) or the
 `fallback` the caller passes. A screen cannot tell which kind of request it made.
 
+`organizationId()` is the organization the person is working in (`lib/organizations/current.ts`).
+A person can belong to several; the app learns which one from the list of their own before it asks
+for anything else, and a call made before that throws instead of guessing. Call it where the request
+is made, never keep it in a constant. The query client keeps every cached answer under the
+organization it was asked in (`query-client.ts`), so a key factory does not name the organization
+itself.
+
 The generated code is checked in. CI regenerates it and fails when it differs, lints the spec, and
 fails a pull request that breaks a client of the base branch's spec (oasdiff). A change that takes
 nothing from a client, such as writing down a rule the server already enforces, goes through only
@@ -56,7 +63,7 @@ api/openapi.yaml           # the contract, bundled from them
 app/src/lib/
   client.ts                # the only fetch in the app
   api/
-    request.ts             # Orval's mutator: apiRequest, ORGANIZATION_ID, idempotencyKey()
+    request.ts             # Orval's mutator: apiRequest, organizationId(), idempotencyKey()
     generated/             # Orval's output: functions, hooks, types, Zod schemas, MSW handlers
   <entity>/
     queries.ts   # read types, key factory, queryOptions factories
@@ -125,7 +132,7 @@ factories already hold.
 3. `bun run api:generate`, which bundles `api/openapi.yaml` and then generates the client, and commit
    the area file, the bundle and `app/src/lib/api/generated` together. Never edit the bundle or a
    generated file: change the area file and generate again.
-4. Call the new function from the entity's factory (Procedures 1 and 2): pass `ORGANIZATION_ID`, a
+4. Call the new function from the entity's factory (Procedures 1 and 2): pass `organizationId()`, a
    `fallback` sentence, and on a write `{ "Idempotency-Key": idempotencyKey() }`. Unwrap the
    envelope (`.bot`, `.bots`) in the factory, so components see the payload. A list reads every page
    until `nextCursor` is null (`everyBot` in `lib/agents/queries.ts`).
@@ -168,7 +175,7 @@ factories already hold.
 
    ```ts
    queryFn: async (): Promise<AgentProfile> =>
-     (await getBot(ORGANIZATION_ID, agentId, { fallback: "Couldn't load this Bot." })).bot,
+     (await getBot(organizationId(), agentId, { fallback: "Couldn't load this Bot." })).bot,
    ```
 
    Otherwise call `client` with the path, the envelope key, and a `fallback` sentence. It
@@ -199,7 +206,7 @@ factories already hold.
 
    ```ts
    mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
-     (await createBot(ORGANIZATION_ID, input, { "Idempotency-Key": idempotencyKey() }, {
+     (await createBot(organizationId(), input, { "Idempotency-Key": idempotencyKey() }, {
        fallback: FALLBACK,
      })).bot,
    ```

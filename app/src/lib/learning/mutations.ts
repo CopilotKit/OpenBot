@@ -25,7 +25,7 @@ import type {
   PersonLearningChoices,
   SkillSharingOutcomeSharing,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   autoAssignState,
   type LearningSettings,
@@ -58,7 +58,7 @@ export async function saveLearningSettings(
   const { enabled, defaultTarget, bots } = participation;
   return (
     await updateLearningSettings(
-      ORGANIZATION_ID,
+      organizationId(),
       { enabled, defaultTarget, bots },
       once(),
       { fallback: "Learning settings could not be saved." },
@@ -70,7 +70,7 @@ export async function saveLearningSettings(
 export async function createLearningContainer(): Promise<LearningAutoAssignState | null> {
   return autoAssignState(
     (
-      await createAutomaticLearningSpace(ORGANIZATION_ID, once(), {
+      await createAutomaticLearningSpace(organizationId(), once(), {
         fallback: "The Learning container could not be created.",
       })
     ).automatic,
@@ -83,7 +83,7 @@ export function setLearningSharingModeMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: (mode: LearningSharingMode): Promise<PersonLearningChoices> =>
-      updatePersonLearningSettings(ORGANIZATION_ID, ME, { mode }, once(), {
+      updatePersonLearningSettings(organizationId(), ME, { mode }, once(), {
         fallback: FALLBACK,
       }),
     onSuccess: () =>
@@ -99,7 +99,7 @@ export function setLearnedSkillOpenMutationOptions(queryClient: QueryClient) {
       open: boolean;
     }): Promise<void> => {
       await updateLearnedSkill(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         variables.name,
         { open: variables.open },
@@ -125,7 +125,7 @@ export function reviewLearningProposalMutationOptions(
       (variables.decision === "approve"
         ? approveLearningProposal
         : rejectLearningProposal)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.proposalId,
         once(),
         variables.agentId ? { botId: variables.agentId } : {},
@@ -141,7 +141,7 @@ export function startLearningRunMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (agentId?: string): Promise<LearningRun> =>
       startOrganizationLearningRun(
-        ORGANIZATION_ID,
+        organizationId(),
         once(),
         agentId ? { botId: agentId } : {},
         { fallback: LEARN_NOW_FALLBACK },
@@ -163,7 +163,7 @@ function reviewPersonProposal(variables: {
       ? approvePersonLearningProposal
       : rejectPersonLearningProposal
   )(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.personId,
     variables.proposalId,
     once(),
@@ -200,7 +200,7 @@ export function startPersonalLearningRunMutationOptions(
   return mutationOptions({
     mutationFn: (container: string): Promise<LearningRun> =>
       startPersonLearningRun(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         once(),
         { containerId: container },
@@ -235,7 +235,7 @@ export function reviewPersonProposalMutationOptions(queryClient: QueryClient) {
 export function requestSkillSharingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (name: string): Promise<void> => {
-      await requestSkillSharing(ORGANIZATION_ID, ME, name, once(), {
+      await requestSkillSharing(organizationId(), ME, name, once(), {
         fallback: "Couldn't send your request. Try again.",
       });
     },
@@ -256,7 +256,7 @@ export function decideSharingMutationOptions(queryClient: QueryClient) {
         await (variables.decision === "approve"
           ? approveSkillSharing
           : declineSkillSharing)(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.requestId,
           { requestedAt: variables.requestedAt },
           once(),
@@ -278,7 +278,7 @@ export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
     ): Promise<LearningSettings> =>
       (
         await updateLearningSettings(
-          ORGANIZATION_ID,
+          organizationId(),
           { personalReview },
           once(),
           { fallback: "Couldn't save who approves. Try again." },
@@ -294,7 +294,7 @@ export function saveAutoApproveMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (autoApprove: boolean): Promise<PersonLearningChoices> =>
       updatePersonLearningSettings(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         { autoApprove },
         once(),

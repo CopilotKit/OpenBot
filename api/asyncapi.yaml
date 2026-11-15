@@ -539,8 +539,8 @@ components:
   parameters:
     organizationId:
       description: >-
-        The organization. Until multi-organization lands every install has
-        one, addressed as default.
+        The organization, by its id or its slug, which the caller must be a
+        member of. Every install has one addressed as default.
     botId:
       description: The Bot whose computer it is.
   messages:

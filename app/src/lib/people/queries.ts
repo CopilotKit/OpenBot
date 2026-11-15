@@ -1,6 +1,6 @@
 import { infiniteQueryOptions } from "@tanstack/react-query";
 import { listPeople } from "@/lib/api/generated/people/people";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * Somebody who has signed in to this deployment.
@@ -55,7 +55,7 @@ export function peopleListQueryOptions(search = "") {
     initialPageParam: "",
     queryFn: async ({ pageParam, signal }): Promise<PeoplePage> => {
       const page = await listPeople(
-        ORGANIZATION_ID,
+        organizationId(),
         {
           ...(search ? { search } : {}),
           ...(pageParam ? { cursor: pageParam as string } : {}),

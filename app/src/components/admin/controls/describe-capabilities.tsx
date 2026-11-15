@@ -31,6 +31,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import type {
   CapabilityAnswer,
   CapabilityPreview,
@@ -317,7 +318,7 @@ export function PermissionsPreview({
                     <ItemContent className="min-w-0">
                       <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription className="line-clamp-none">
-                        {person.role === "admin" ? "Admin" : "Member"}
+                        {isOrganizationAdmin(person.role) ? "Admin" : "Member"}
                         {person.groups.length > 0
                           ? ` in ${person.groups.join(", ")}`
                           : ", in no group"}

@@ -13,7 +13,7 @@ export const ListIdentityProvidersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -97,7 +97,7 @@ export const CreateIdentityProviderParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -281,7 +281,7 @@ export const DeleteIdentityProviderParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   identityProviderId: zod
     .string()

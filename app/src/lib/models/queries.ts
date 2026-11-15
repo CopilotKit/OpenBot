@@ -3,7 +3,7 @@ import {
   getModelCatalogue,
   getModelChoice,
 } from "@/lib/api/generated/models/models";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * The models a person may pick for a built-in Bot's run. See server/src/model-catalogue.ts.
@@ -95,7 +95,7 @@ export function modelCatalogueQueryOptions() {
     queryKey: modelKeys.catalogue,
     queryFn: async ({ signal }): Promise<ModelCatalogue> =>
       getModelCatalogue(
-        ORGANIZATION_ID,
+        organizationId(),
         { view: "offered" },
         { signal, fallback: "Couldn't load models" },
       ),
@@ -110,7 +110,7 @@ export function availableModelsQueryOptions() {
     queryKey: modelKeys.available,
     queryFn: async ({ signal }): Promise<AvailableModels> =>
       getModelCatalogue(
-        ORGANIZATION_ID,
+        organizationId(),
         { view: "all" },
         { signal, fallback: "Couldn't load the models" },
       ),
@@ -127,7 +127,7 @@ export function conversationModelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: modelKeys.conversation(channelId),
     queryFn: async ({ signal }): Promise<ConversationModel> =>
-      getModelChoice(ORGANIZATION_ID, "me", channelId, {
+      getModelChoice(organizationId(), "me", channelId, {
         signal,
         fallback: "Couldn't load this conversation's model",
       }),

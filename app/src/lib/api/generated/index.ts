@@ -29,6 +29,7 @@ export * from "./models/models";
 export * from "./network-policies/network-policies";
 export * from "./notification-settings/notification-settings";
 export * from "./organization-settings/organization-settings";
+export * from "./organizations/organizations";
 export * from "./people/people";
 export * from "./product-events/product-events";
 export * from "./reactions/reactions";

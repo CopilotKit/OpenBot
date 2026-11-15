@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   decideSharedUseMutationOptions,
   describeApproval,
@@ -36,7 +37,7 @@ const WHY: Record<SharedUseRequestReason, string> = {
 export function SharedUseRequests() {
   const queryClient = useQueryClient();
   const me = useQuery(currentUserQueryOptions()).data;
-  const isAdmin = me?.role === "admin";
+  const isAdmin = isOrganizationAdmin(me?.role);
   const requests = useQuery(sharedUseRequestsQueryOptions(isAdmin));
   const decide = useMutation(decideSharedUseMutationOptions(queryClient));
   if (!isAdmin || !requests.data?.length) return null;

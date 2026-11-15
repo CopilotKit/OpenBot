@@ -24,7 +24,7 @@ export {
 } from "@openbot/shared/attachments";
 
 import { getGetAttachmentUrl } from "@/lib/api/generated/conversations/conversations";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 
 /**
@@ -40,6 +40,6 @@ export function attachmentAddress(stored: string): string {
   const prefix = storedAttachmentUrl("");
   if (!stored.startsWith(prefix)) return stored;
   const [id = "", query] = stored.slice(prefix.length).split("?", 2);
-  const address = getGetAttachmentUrl(ORGANIZATION_ID, decodeURIComponent(id));
+  const address = getGetAttachmentUrl(organizationId(), decodeURIComponent(id));
   return query === undefined ? address : `${address}?${query}`;
 }

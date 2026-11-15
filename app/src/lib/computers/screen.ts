@@ -3,7 +3,7 @@ import {
   getComputerScreenshot,
   wakeComputer,
 } from "@/lib/api/generated/computers/computers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import type { ComputerState } from "./queries";
 
@@ -56,7 +56,7 @@ export async function readScreenshot(
   const unavailable = "The screen is not available right now.";
   try {
     const body: unknown = await getComputerScreenshot(
-      ORGANIZATION_ID,
+      organizationId(),
       computerId,
       { fallback: unavailable },
     );
@@ -87,7 +87,7 @@ export async function startComputer(
 ): Promise<ComputerState | null> {
   try {
     const body: { state?: unknown } = await wakeComputer(
-      ORGANIZATION_ID,
+      organizationId(),
       computerId,
       { "Idempotency-Key": idempotencyKey() },
     );
@@ -165,7 +165,7 @@ export async function readPageFrame(
 ): Promise<PageFrame | null> {
   try {
     const body: unknown = await getComputerPageFrame(
-      ORGANIZATION_ID,
+      organizationId(),
       computerId,
       toolCallId,
     );

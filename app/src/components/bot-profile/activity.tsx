@@ -36,6 +36,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   type ActivityEntry,
   groupActivity,
@@ -533,7 +534,9 @@ export function BotActivitySections({
 function BotActionsSection({ agentId }: { agentId: string }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
   if (!personal && !admin) return null;
   return (
     <PageSection title="Actions">

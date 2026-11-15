@@ -18,7 +18,7 @@ import {
   unassignTeamBot,
   unpublishTeamBot,
 } from "@/lib/api/generated/team-bots/team-bots";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
 
 /**
@@ -42,7 +42,7 @@ async function everyTeamBot(): Promise<TeamBot[]> {
   let cursor: string | undefined;
   do {
     const page = await listTeamBots(
-      ORGANIZATION_ID,
+      organizationId(),
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { fallback: "Team Bots could not be loaded." },
     );
@@ -81,7 +81,7 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
       groups: string[];
     }) => {
       const { botId, ...publication } = input;
-      await publishTeamBot(ORGANIZATION_ID, botId, publication, once(), {
+      await publishTeamBot(organizationId(), botId, publication, once(), {
         fallback: "The Bot could not be published.",
       });
     },
@@ -98,7 +98,7 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
 export function unpublishTeamBotMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (botId: string) => {
-      await unpublishTeamBot(ORGANIZATION_ID, botId, once(), {
+      await unpublishTeamBot(organizationId(), botId, once(), {
         fallback: "The Bot could not be unpublished.",
       });
     },
@@ -114,7 +114,7 @@ export function assignTeamBotMutationOptions(queryClient: QueryClient) {
       remove?: boolean;
     }) => {
       const write = input.remove ? unassignTeamBot : assignTeamBot;
-      await write(ORGANIZATION_ID, input.botId, input.group, once(), {
+      await write(organizationId(), input.botId, input.group, once(), {
         fallback: "The assignment could not be saved.",
       });
     },
@@ -132,7 +132,7 @@ export function teamBotConsentMutationOptions() {
       decision: TeamBotConsentDecision;
     }) => {
       await answerTeamBotConsent(
-        ORGANIZATION_ID,
+        organizationId(),
         input.botId,
         { serverId: input.serverId, decision: input.decision },
         once(),
@@ -145,7 +145,7 @@ export function teamBotConsentMutationOptions() {
 export function clearTeamBotConsentsMutationOptions() {
   return mutationOptions({
     mutationFn: async () => {
-      await clearTeamBotConsents(ORGANIZATION_ID, "me", once(), {
+      await clearTeamBotConsents(organizationId(), "me", once(), {
         fallback: "Your connector preferences could not be cleared.",
       });
     },

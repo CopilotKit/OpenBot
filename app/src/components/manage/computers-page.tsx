@@ -39,6 +39,7 @@ import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
@@ -139,7 +140,9 @@ export function ComputersPage({
   const clearing = useClearBrowserData(clearOwnBrowser);
 
   // Every computer is an admin's to list. On one Bot's page a person who isn't an admin has only folders.
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
   /*
    * An OpenBot with no computers for Bots has no list to read: the server refuses it, and "Couldn't
    * load the computers. Reload the page." sent a person to retry what can never work. So the list

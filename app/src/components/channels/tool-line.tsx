@@ -23,6 +23,7 @@ export function ToolLine({
   failed,
   failedLabel,
   notYet,
+  interrupted,
   byYou,
   bare,
   children,
@@ -54,6 +55,12 @@ export function ToolLine({
    * does not read as one.
    */
   notYet?: boolean;
+  /**
+   * The step was under way when its run was cut off, so nobody knows how it ended. Muted, because
+   * nothing is known to have gone wrong, and labelled with what was tried so it reads neither as
+   * done nor as still happening.
+   */
+  interrupted?: boolean;
   /**
    * The step was handed to the person and they did it themselves. Muted like a success, because it
    * was done, and labelled so it does not read as the Bot having done it.
@@ -97,11 +104,13 @@ export function ToolLine({
           ? `Blocked: ${attempted ?? label}`
           : failed
             ? (failedLabel ?? `${label}, didn't work`)
-            : notYet
-              ? `${label}, not done yet`
-              : byYou
-                ? `${label}, done by you`
-                : label}
+            : interrupted
+              ? `${attempted ?? label}, interrupted`
+              : notYet
+                ? `${label}, not done yet`
+                : byYou
+                  ? `${label}, done by you`
+                  : label}
       </span>
       {detail ? (
         <span className="min-w-0 shrink-[100] truncate opacity-70">

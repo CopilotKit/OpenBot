@@ -6,7 +6,7 @@ import {
   getSharedConnectionAuthorizations,
 } from "@/lib/api/generated/connections/connections";
 import type { ActionAuthorizations } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { desktopShell } from "@/lib/desktop/shell";
 import type { ConsentAction } from "./enablement-notes";
 
@@ -65,10 +65,10 @@ export function grantsQueryOptions(
     queryFn: async (): Promise<GrantState[]> => {
       const fallback = "Couldn't read what this account allows.";
       const answer = shared
-        ? await getSharedConnectionAuthorizations(ORGANIZATION_ID, serverId, {
+        ? await getSharedConnectionAuthorizations(organizationId(), serverId, {
             fallback,
           })
-        : await getConnectionAuthorizations(ORGANIZATION_ID, "me", serverId, {
+        : await getConnectionAuthorizations(organizationId(), "me", serverId, {
             fallback,
           });
       return grantsOf(serverId, answer);
@@ -102,14 +102,14 @@ export function authorizeActionMutationOptions(
       const options = { fallback: "Couldn't authorize that action." };
       const started = shared
         ? await authorizeSharedConnectionAction(
-            ORGANIZATION_ID,
+            organizationId(),
             variables.serverId,
             body,
             headers,
             options,
           )
         : await authorizeConnectionAction(
-            ORGANIZATION_ID,
+            organizationId(),
             "me",
             variables.serverId,
             body,

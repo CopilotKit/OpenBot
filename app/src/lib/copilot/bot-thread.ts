@@ -3,7 +3,7 @@ import {
   createConversationThread,
   getConversationThread,
 } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { newId } from "../new-id";
 
@@ -52,7 +52,7 @@ function remember(agentId: string, threadId: string): void {
 
 async function mint(): Promise<string | null> {
   try {
-    const made = await createConversationThread(ORGANIZATION_ID, {
+    const made = await createConversationThread(organizationId(), {
       "Idempotency-Key": idempotencyKey(),
     });
     return typeof made.threadId === "string" ? made.threadId : null;
@@ -72,7 +72,7 @@ async function checkKnown(
   threadId: string,
 ): Promise<{ known: boolean | undefined; unavailable: boolean }> {
   try {
-    const status = await getConversationThread(ORGANIZATION_ID, threadId);
+    const status = await getConversationThread(organizationId(), threadId);
     if (typeof status.known !== "boolean") {
       // An answer that does not carry the shape this hook asked for is not an answer either.
       return { known: undefined, unavailable: true };

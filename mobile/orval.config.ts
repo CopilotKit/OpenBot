@@ -28,6 +28,7 @@ export default defineConfig({
           "Devices",
           "Memory",
           "Organization settings",
+          "Organizations",
           "Routines",
           "Skills",
           "Tasks",

@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import { BotActivitySections } from "@/components/bot-profile/activity";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
 import { activityResponse, answerBotsList, botOperationPath } from "./bots-api";
@@ -284,4 +284,120 @@ test("a group with nothing in it is not drawn, and a Bot with nothing says so on
   await none.findByText("No activity yet");
   for (const name of ["Needs you", "Working", "Done", "Failed", "Recurring"])
     expect(none.queryByRole("heading", { name })).toBeNull();
+});
+
+test("a task the person stopped reads Stopped on its row, in its card's words, and can be tried again", async () => {
+  const view = draw({}, [
+    task("stopped", "failed", { failure: "you stopped it", stoppedAt: NOW }),
+    task("failed", "failed"),
+  ]);
+  const stopped = within(
+    (await view.findByText("Task stopped")).closest(
+      "[data-slot=item]",
+    ) as HTMLElement,
+  );
+  expect(stopped.getByText(/^Stopped · /)).toBeTruthy();
+  expect(
+    stopped.getByText(
+      "You stopped this. Anything it had already done stays done.",
+    ),
+  ).toBeTruthy();
+  expect(stopped.queryByText(/^Failed · /)).toBeNull();
+  expect(stopped.queryByText(/Couldn't finish/)).toBeNull();
+  expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+  // Its own choice, so it is not drawn as a failure: the card's stop icon, not the warning.
+  const row = (title: string) =>
+    view.getByText(title).closest("[data-slot=item]") as HTMLElement;
+  expect(row("Task stopped").dataset.taskState).toBe("stopped");
+  expect(
+    row("Task stopped").querySelector(".tabler-icon-player-stop"),
+  ).not.toBeNull();
+  expect(
+    row("Task stopped").querySelector(".tabler-icon-alert-triangle"),
+  ).toBeNull();
+  expect(row("Task stopped").querySelector(".bg-destructive")).toBeNull();
+  expect(row("Task failed").dataset.taskState).toBe("failed");
+  expect(
+    row("Task failed").querySelector(".tabler-icon-alert-triangle"),
+  ).not.toBeNull();
+
+  // One that couldn't finish on its own still says so.
+  const failed = within(
+    view.getByText("Task failed").closest("[data-slot=item]") as HTMLElement,
+  );
+  expect(failed.getByText(/^Failed · /)).toBeTruthy();
+  expect(
+    failed.getByText("Couldn't finish: a service didn't answer."),
+  ).toBeTruthy();
+  expect(failed.queryByText(/^Stopped · /)).toBeNull();
+  expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+test("a row under Done reads Done, as the task's card does, and never Ready for review", async () => {
+  const view = draw({}, [
+    task("ready", "ready_for_review"),
+    task("marked", "resolved"),
+  ]);
+  const done = within(
+    (await view.findByRole("heading", { name: "Done" })).closest(
+      "section",
+    ) as HTMLElement,
+  );
+  expect(done.getAllByText(/^Done · /)).toHaveLength(2);
+  expect(done.queryByText(/Ready for review/)).toBeNull();
+  expect(done.queryByText(/Resolved/)).toBeNull();
+  // What each can still do is unchanged.
+  expect(done.getByRole("button", { name: "Mark done" })).toBeTruthy();
+  expect(done.getByRole("button", { name: "Reopen" })).toBeTruthy();
+});
+
+test("a task's line is plain text that says something, or it is left out", async () => {
+  const view = draw({}, [
+    task("table", "ready_for_review", {
+      next: "| Begins / headwaters | **Columbia Lake**, British Columbia, at roughly 2,650 ft elevation.",
+    }),
+    task("source", "ready_for_review", {
+      next: "Source: Lake Washington Ship …",
+    }),
+    task("plain", "ready_for_review", {
+      next: "The stadium opened in 1976 and was replaced by Lumen Field.",
+    }),
+  ]);
+  const row = async (title: string) =>
+    (await view.findByText(title)).closest("[data-slot=item]") as HTMLElement;
+  expect(
+    within(await row("Task table")).getByText(
+      "Begins / headwaters: Columbia Lake, British Columbia, at roughly 2,650 ft elevation.",
+    ),
+  ).toBeTruthy();
+  expect((await row("Task table")).textContent).not.toContain("|");
+  expect((await row("Task table")).textContent).not.toContain("*");
+  // A note of where the answer came from, cut short, says nothing: the title and status stand.
+  expect((await row("Task source")).textContent).not.toContain("Source:");
+  expect(
+    within(await row("Task plain")).getByText(
+      "The stadium opened in 1976 and was replaced by Lumen Field.",
+    ),
+  ).toBeTruthy();
+});
+
+test("a working task's row opens its thread and does not offer Mark done", async () => {
+  const view = draw({}, [
+    task("running", "working"),
+    task("asking", "needs_input"),
+    task("ready", "ready_for_review"),
+    task("failed", "failed"),
+  ]);
+  const row = async (title: string) =>
+    within(
+      (await view.findByText(title)).closest("[data-slot=item]") as HTMLElement,
+    );
+  const running = await row("Task running");
+  expect(running.getByText("Open")).toBeTruthy();
+  expect(running.queryByRole("button", { name: "Mark done" })).toBeNull();
+  // Where there is something to be done with, it stays.
+  for (const title of ["Task asking", "Task ready", "Task failed"])
+    expect(
+      (await row(title)).getByRole("button", { name: "Mark done" }),
+    ).toBeTruthy();
 });

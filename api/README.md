@@ -26,6 +26,7 @@ not touch the same lines:
 | `bot-grants.yaml` | What a Bot was given: its grants and apps, giving and taking back an app, and app access requests |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
+| `organizations.yaml` | The organizations a person is a member of, and each one's members |
 | `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |
 | `browsers.yaml` | A Bot's browser and a person's own OpenBot browser |
 | `passwords-and-recorder.yaml` | Sign-in requests, saved logins and the Recorder |

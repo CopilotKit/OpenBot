@@ -7,7 +7,7 @@ import type {
   Conversation,
   ConversationSummary,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A channel as the browser sees it.
@@ -152,7 +152,7 @@ export function channelListQueryOptions() {
     queryFn: async ({ pageParam }): Promise<ChannelPage> =>
       channelPageOf(
         await listConversations(
-          ORGANIZATION_ID,
+          organizationId(),
           pageParam ? { cursor: pageParam as string } : undefined,
           { fallback: "Couldn't load your conversations." },
         ),
@@ -212,7 +212,7 @@ export function channelSearchInfiniteQueryOptions(
     queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
       channelPageOf(
         await listConversations(
-          ORGANIZATION_ID,
+          organizationId(),
           {
             q: normalized,
             limit,
@@ -233,7 +233,7 @@ export function channelQueryOptions(channelId: string) {
     queryFn: async (): Promise<AgentChannel> =>
       channelOf(
         (
-          await getConversation(ORGANIZATION_ID, channelId, {
+          await getConversation(organizationId(), channelId, {
             fallback: "Couldn't load this conversation.",
           })
         ).conversation,

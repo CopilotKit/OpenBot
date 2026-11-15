@@ -7,7 +7,7 @@ import {
   getComputer,
   listComputers,
 } from "@/lib/api/generated/computers/computers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /**
  * One computer as Admin sees it: a person's, or an isolated Bot's.
@@ -96,7 +96,7 @@ export function computerStatusQueryOptions(botId: string) {
   return queryOptions({
     queryKey: computerKeys.status(botId),
     queryFn: ({ signal }): Promise<ComputerStatus> =>
-      getComputer(ORGANIZATION_ID, botId, {
+      getComputer(organizationId(), botId, {
         signal,
         fallback: "Couldn't check the computer.",
       }),
@@ -118,7 +118,7 @@ export function computerFleetQueryOptions() {
       let cursor: string | undefined;
       do {
         const page = await listComputers(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { signal, fallback: "The computers could not be listed." },
         );
@@ -135,7 +135,7 @@ export function actionPolicyQueryOptions() {
   return queryOptions({
     queryKey: computerKeys.policy(),
     queryFn: ({ signal }): Promise<ActionPolicy> =>
-      getBoundaries(ORGANIZATION_ID, {
+      getBoundaries(organizationId(), {
         signal,
         fallback: "The boundary could not be read.",
       }),
@@ -184,7 +184,7 @@ export async function dryRunActionPolicy(
 ): Promise<DryRunReport> {
   // A test writes nothing, but it is a POST to the API, so it carries a key of its own.
   return replayBoundaries(
-    ORGANIZATION_ID,
+    organizationId(),
     { boundaries: candidate },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "The rule could not be tested against history." },

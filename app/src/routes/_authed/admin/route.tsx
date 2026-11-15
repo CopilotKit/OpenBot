@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { currentUserQueryOptions } from "../../../lib/auth/queries";
 
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/_authed/admin")({
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
-    if (user?.role !== "admin") {
+    if (!isOrganizationAdmin(user?.role)) {
       throw redirect({ to: "/" });
     }
   },

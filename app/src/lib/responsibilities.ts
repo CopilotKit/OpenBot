@@ -35,7 +35,7 @@ import type {
   GoalTriggerKind,
   UpdateGoalRequest,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
 import {
   everyPage,
@@ -67,7 +67,7 @@ export function responsibilitiesQueryOptions() {
     queryKey: responsibilityKeys.all,
     queryFn: async ({ signal }): Promise<ResponsibilityRecord[]> => {
       const goals = await everyPage(async (params) => {
-        const page = await listGoals(ORGANIZATION_ID, params, {
+        const page = await listGoals(organizationId(), params, {
           signal,
           fallback: "Couldn't load your goals. Reload the page.",
         });
@@ -87,7 +87,7 @@ export function responsibilityRunsQueryOptions(id: string) {
     queryKey: responsibilityKeys.runs(id),
     queryFn: ({ signal }): Promise<ResponsibilityRunRecord[]> =>
       everyPage(async (params) => {
-        const page = await listGoalRuns(ORGANIZATION_ID, id, params, {
+        const page = await listGoalRuns(organizationId(), id, params, {
           signal,
           fallback: "Couldn't load this goal's runs. Reload the page.",
         });
@@ -101,7 +101,7 @@ export function githubBindingsQueryOptions() {
     queryKey: responsibilityKeys.bindings,
     queryFn: ({ signal }): Promise<GithubBindingRecord[]> =>
       everyPage(async (params) => {
-        const page = await listGithubEventSources(ORGANIZATION_ID, params, {
+        const page = await listGithubEventSources(organizationId(), params, {
           signal,
           fallback: "Could not load GitHub event sources",
         });
@@ -116,13 +116,13 @@ export async function createResponsibility(
   input: CreateGoalRequest,
 ): Promise<ResponsibilityRecord> {
   return (
-    await createGoal(ORGANIZATION_ID, input, once(), {
+    await createGoal(organizationId(), input, once(), {
       fallback: "Couldn't save the goal. Try again.",
     })
   ).goal;
 }
 export function updateResponsibility(id: string, patch: UpdateGoalRequest) {
-  return updateGoal(ORGANIZATION_ID, id, patch, once(), {
+  return updateGoal(organizationId(), id, patch, once(), {
     fallback: "Couldn't save your changes to the goal. Try again.",
   });
 }
@@ -146,13 +146,13 @@ export async function responsibilityAction(
   id: string,
   action: keyof typeof GOAL_ACTION_FALLBACK,
 ): Promise<void> {
-  await GOAL_ACTIONS[action](ORGANIZATION_ID, id, once(), {
+  await GOAL_ACTIONS[action](organizationId(), id, once(), {
     fallback: GOAL_ACTION_FALLBACK[action],
   });
 }
 /** Delete a goal, and on the server the routines that run it. */
 export function deleteResponsibility(id: string) {
-  return deleteGoal(ORGANIZATION_ID, id, once(), {
+  return deleteGoal(organizationId(), id, once(), {
     fallback: "Couldn't delete the goal. Try again.",
   });
 }
@@ -162,7 +162,7 @@ export async function createGithubBinding(
 ): Promise<GithubBindingRecord> {
   return (
     await createGithubEventSource(
-      ORGANIZATION_ID,
+      organizationId(),
       { repository, secret },
       once(),
       { fallback: "Could not connect GitHub events" },
@@ -170,7 +170,7 @@ export async function createGithubBinding(
   ).githubEventSource;
 }
 export function removeGithubBinding(id: string) {
-  return deleteGithubEventSource(ORGANIZATION_ID, id, once(), {
+  return deleteGithubEventSource(organizationId(), id, once(), {
     fallback: "Could not disconnect GitHub events",
   });
 }
@@ -192,7 +192,7 @@ export function triggersQueryOptions(id: string) {
     queryKey: responsibilityKeys.triggers(id),
     queryFn: ({ signal }): Promise<TriggerRecord[]> =>
       everyPage(async (params) => {
-        const page = await listGoalTriggers(ORGANIZATION_ID, id, params, {
+        const page = await listGoalTriggers(organizationId(), id, params, {
           signal,
           fallback: "Could not load triggers",
         });
@@ -204,7 +204,7 @@ export function createTrigger(
   goalId: string,
   input: { config: TriggerConfig; secret?: string },
 ): Promise<{ trigger: TriggerRecord; secret: string | null }> {
-  return createGoalTrigger(ORGANIZATION_ID, goalId, input, once(), {
+  return createGoalTrigger(organizationId(), goalId, input, once(), {
     fallback: "Could not add the trigger",
   });
 }
@@ -214,7 +214,7 @@ export function setTriggerSecret(
   secret?: string,
 ): Promise<{ trigger: TriggerRecord; secret: string | null }> {
   return replaceGoalTriggerSecret(
-    ORGANIZATION_ID,
+    organizationId(),
     trigger.goalId,
     trigger.id,
     once(),
@@ -226,14 +226,14 @@ export async function revealTriggerSecret(
   trigger: TriggerRef,
 ): Promise<string | null> {
   return (
-    await getGoalTriggerSecret(ORGANIZATION_ID, trigger.goalId, trigger.id, {
+    await getGoalTriggerSecret(organizationId(), trigger.goalId, trigger.id, {
       fallback: "Could not read the trigger secret",
     })
   ).secret;
 }
 export function removeTrigger(trigger: TriggerRef) {
   return deleteGoalTrigger(
-    ORGANIZATION_ID,
+    organizationId(),
     trigger.goalId,
     trigger.id,
     once(),
@@ -243,7 +243,7 @@ export function removeTrigger(trigger: TriggerRef) {
 
 export function setTriggerEnabled(trigger: TriggerRef, enabled: boolean) {
   return (enabled ? enableGoalTrigger : disableGoalTrigger)(
-    ORGANIZATION_ID,
+    organizationId(),
     trigger.goalId,
     trigger.id,
     once(),

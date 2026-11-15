@@ -546,8 +546,17 @@ INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/inf
 # machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
 # found" and exits 49, so the run stopped here with the server and worker up and the app never
 # started.
-bun run - "$INFO" <<'JS'
+# Nobody is signed in here, and the server lists Bots only to somebody working in an organization.
+# So the list is checked where there is one person who is always signed in (the personal edition,
+# or OPENBOT_SINGLE_USER), and where people sign in an empty list is what a healthy server answers.
+if [ "$EDITION" = "personal" ] || [ "$(setting OPENBOT_SINGLE_USER "")" = "true" ]; then
+  LISTS_BOTS=true
+else
+  LISTS_BOTS=false
+fi
+bun run - "$INFO" "$LISTS_BOTS" <<'JS'
 const info = JSON.parse(process.argv[2]);
+const listsBots = process.argv[3] === "true";
 const status = info.licenseStatus;
 const agents = Object.keys(info.agents ?? {});
 if (status !== "valid") {
@@ -556,11 +565,13 @@ if (status !== "valid") {
   console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
   process.exit(1);
 }
-if (agents.length === 0) {
+if (listsBots && agents.length === 0) {
   console.log("\x1b[31m  No Bots registered.\x1b[0m");
   process.exit(1);
 }
-console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${agents.join(", ")}\x1b[0m`);
+// A server that lists its Bots to nobody signed in still names them here, as it always has.
+const bots = agents.length > 0 ? agents.join(", ") : "listed to people once they sign in";
+console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${bots}\x1b[0m`);
 JS
 
 info "4/4  App"

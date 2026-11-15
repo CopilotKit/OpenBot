@@ -11,7 +11,7 @@ import {
   takeBackBotApp,
 } from "@/lib/api/generated/bot-grants/bot-grants";
 import type { AppAccessApproval } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { type AppAccessRequest, accessRequestOf } from "./queries";
 
@@ -52,7 +52,7 @@ export function requestAppAccessMutationOptions(queryClient: QueryClient) {
     }): Promise<{ request: AppAccessRequest }> => ({
       request: accessRequestOf(
         await createAppAccessRequest(
-          ORGANIZATION_ID,
+          organizationId(),
           { botId: variables.agentId, appId: variables.app },
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },
@@ -70,7 +70,7 @@ export function cancelAppAccessRequestMutationOptions(
   return mutationOptions({
     mutationFn: (id: string): Promise<void> =>
       deleteAppAccessRequest(
-        ORGANIZATION_ID,
+        organizationId(),
         id,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "That request could not be withdrawn." },
@@ -98,7 +98,7 @@ export function approveAppAccessRequestMutationOptions(
     }> =>
       approvalOf(
         await approveAppAccessRequest(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.id,
           { "Idempotency-Key": idempotencyKey() },
           // No actions named sends no body: the Bot then gets the actions that only read.
@@ -128,7 +128,7 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
     }> =>
       approvalOf(
         await approveBotApp(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.agentId,
           variables.app,
           { "Idempotency-Key": idempotencyKey() },
@@ -149,7 +149,7 @@ export async function giveBotApp(variables: {
   app: string;
 }): Promise<{ granted: string[] }> {
   const given = await giveBotAppOperation(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.agentId,
     variables.app,
     { "Idempotency-Key": idempotencyKey() },
@@ -174,7 +174,7 @@ export function takeBackBotAppMutationOptions(queryClient: QueryClient) {
       app: string;
     }): Promise<{ revoked: string[] }> => {
       const taken = await takeBackBotApp(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.agentId,
         variables.app,
         { "Idempotency-Key": idempotencyKey() },
@@ -194,7 +194,7 @@ export function dismissAppAccessRequestMutationOptions(
     mutationFn: async (id: string): Promise<AppAccessRequest> =>
       accessRequestOf(
         await dismissAppAccessRequest(
-          ORGANIZATION_ID,
+          organizationId(),
           id,
           { "Idempotency-Key": idempotencyKey() },
           { fallback: "That request could not be dismissed." },

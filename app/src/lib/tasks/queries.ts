@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { Reaction, Task } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
 import { getTask, listTasks } from "@/lib/api/generated/tasks/tasks";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /*
  * The person's tasks: what Start makes of an item a Bot's check-in found. Each runs in a conversation
@@ -118,7 +118,7 @@ export const taskListQueryOptions = () =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listTasks(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load your tasks" },
         );
@@ -144,7 +144,7 @@ export const taskQueryOptions = (id: string) =>
     queryFn: async (): Promise<BotTask> =>
       botTaskOf(
         (
-          await getTask(ORGANIZATION_ID, id, {
+          await getTask(organizationId(), id, {
             fallback: "Couldn't load this task",
           })
         ).task,
@@ -167,7 +167,7 @@ export const reactionsQueryOptions = (threadId: string) =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listReactions(
-          ORGANIZATION_ID,
+          organizationId(),
           { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load reactions." },
         );
@@ -202,3 +202,26 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 export function couldNotFinish(failure: string | null): string {
   return failure ? `Couldn't finish: ${failure}.` : "Couldn't finish.";
 }
+
+/**
+ * Whether the person stopped this task. Its status is `failed` either way, and only a stop sets
+ * `stoppedAt`. A stop is the person's own choice, so nothing that lists the task calls it a failure.
+ */
+export function stoppedByYou(
+  task: { status?: TaskStatus; stoppedAt?: string | null } | undefined,
+): boolean {
+  return task?.status === "failed" && Boolean(task.stoppedAt);
+}
+
+/**
+ * A finished task's status in a word, on its card and on its row under Done on a Bot's Activity
+ * page. One name for one state: a row under Done never reads "Ready for review".
+ */
+export const TASK_DONE_LABEL = "Done";
+
+/** A stopped task's status in a word, on its card and on every row that lists it. */
+export const TASK_STOPPED_LABEL = "Stopped";
+
+/** What a stopped task says after its status. Stopping never undoes what was already done. */
+export const TASK_STOPPED =
+  "You stopped this. Anything it had already done stays done.";

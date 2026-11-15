@@ -3,7 +3,7 @@ import {
   advanceOnboarding,
   completeOnboarding,
 } from "@/lib/api/generated/people/people";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { authKeys, type OnboardingStatus } from "@/lib/auth/queries";
 import { channelKeys } from "@/lib/channels/queries";
 
@@ -33,7 +33,7 @@ export function advanceOnboardingMutationOptions(queryClient: QueryClient) {
     mutationFn: async (step: number): Promise<OnboardingStatus> =>
       (
         await advanceOnboarding(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { step },
           { "Idempotency-Key": idempotencyKey() },
@@ -49,7 +49,7 @@ export function completeOnboardingMutationOptions(queryClient: QueryClient) {
     mutationFn: async (): Promise<OnboardingStatus> =>
       (
         await completeOnboarding(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },

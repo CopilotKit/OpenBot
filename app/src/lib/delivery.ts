@@ -14,7 +14,7 @@ import {
 import { deleteDevice, listDevices } from "@/lib/api/generated/devices/devices";
 import type { Delivery, Destination, Device } from "@/lib/api/generated/model";
 import { listNotificationTransports } from "@/lib/api/generated/notification-settings/notification-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { UpdateTransport } from "@/lib/bot-lifecycle/queries";
 import { ClientError } from "@/lib/client";
 
@@ -69,7 +69,7 @@ export function destinationsQueryOptions() {
     queryFn: ({ signal }): Promise<Destination[]> =>
       everyPage(async (cursor) => {
         const page = await listDestinations(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           paging(cursor),
           { signal, fallback: FALLBACK },
@@ -87,7 +87,7 @@ export function devicesQueryOptions() {
     queryKey: deliveryKeys.devices,
     queryFn: ({ signal }): Promise<Device[]> =>
       everyPage(async (cursor) => {
-        const page = await listDevices(ORGANIZATION_ID, ME, paging(cursor), {
+        const page = await listDevices(organizationId(), ME, paging(cursor), {
           signal,
           fallback: FALLBACK,
         });
@@ -104,7 +104,7 @@ export function deliveriesQueryOptions() {
     queryFn: async ({ signal }): Promise<Delivery[]> =>
       (
         await listDeliveries(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           { limit: 100 },
           { signal, fallback: FALLBACK },
@@ -121,7 +121,7 @@ export function transportsQueryOptions() {
     queryFn: async ({ signal }): Promise<Transports> => {
       const offered = await everyPage(async (cursor) => {
         const page = await listNotificationTransports(
-          ORGANIZATION_ID,
+          organizationId(),
           paging(cursor),
           { signal, fallback: FALLBACK },
         );
@@ -158,7 +158,7 @@ export async function startChatLink(target: {
   platform: "slack" | "teams";
 }): Promise<ChatLink> {
   const link = await linkChatDestination(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     {
       platform: target.platform,
@@ -180,7 +180,7 @@ export async function startSms(target: {
   phone: string;
 }): Promise<string> {
   const verification = await verifyPhoneDestination(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     {
       phone: target.phone,
@@ -195,7 +195,7 @@ export async function startSms(target: {
 
 export function confirmSms(challengeId: string, code: string) {
   return confirmPhoneDestination(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     { verificationId: challengeId, code },
     { "Idempotency-Key": idempotencyKey() },
@@ -216,7 +216,7 @@ async function gone(remove: () => Promise<unknown>) {
 export function removeDeliveryBinding(id: string) {
   return gone(() =>
     deleteDestination(
-      ORGANIZATION_ID,
+      organizationId(),
       ME,
       id,
       { "Idempotency-Key": idempotencyKey() },
@@ -228,7 +228,7 @@ export function removeDeliveryBinding(id: string) {
 export function removePushDevice(id: string) {
   return gone(() =>
     deleteDevice(
-      ORGANIZATION_ID,
+      organizationId(),
       ME,
       id,
       { "Idempotency-Key": idempotencyKey() },

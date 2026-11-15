@@ -9,7 +9,7 @@ import {
   createRecorderConnectCode,
   deleteRecorderConnection,
 } from "@/lib/api/generated/recorder/recorder";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   connectRefusalSentence,
   sendConnectCode,
@@ -23,7 +23,7 @@ export function revokeRecorderConnectionMutationOptions(
   return mutationOptions({
     mutationFn: async (connectionId: string): Promise<void> => {
       await deleteRecorderConnection(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         connectionId,
         { "Idempotency-Key": idempotencyKey() },
@@ -39,7 +39,7 @@ export function revokeRecorderConnectionMutationOptions(
 export async function mintRecorderConnectCode(): Promise<ConnectCodeResponse> {
   // A fresh key each time: the code is a credential, so the API never answers the same write twice.
   return createRecorderConnectCode(
-    ORGANIZATION_ID,
+    organizationId(),
     "me",
     { via: "web" },
     { "Idempotency-Key": idempotencyKey() },
