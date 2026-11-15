@@ -21,7 +21,7 @@ import {
   brokeredKeyMissing,
   brokeredReach,
 } from "@/lib/plugins/provider-vocabulary";
-import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
+import { pluginKeys } from "@/lib/plugins/queries";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
 import { type AppsFixture, seedAppReads, type TodayServer } from "./apps-api";
 import { seedAuditPage } from "./seed-audit-page";
@@ -81,7 +81,6 @@ const page: AppsFixture = {
   composioConfigured: false,
   authorizesPerAction: false,
 };
-const skills: PluginsPage = { skills: [] };
 
 const startedByOpenBot = {
   id: "e1",
@@ -126,7 +125,6 @@ function draw(edition: "team" | "personal", screen: () => ReactNode) {
     edition,
   });
   seedAppReads(client, page);
-  client.setQueryData(pluginKeys.page(), skills);
   client.setQueryData(pluginKeys.connections(), { connections: [] });
   client.setQueryData(agentKeys.list(false), []);
   client.setQueryData(agentKeys.list(true), []);

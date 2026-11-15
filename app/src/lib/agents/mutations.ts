@@ -1,11 +1,21 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { createBot, deleteBot, updateBot } from "@/lib/api/generated/bots/bots";
+import {
+  createBot,
+  deleteBot,
+  duplicateBot,
+  hideBot,
+  issueBotCallbackToken,
+  pinBot,
+  revokeBotCallbackToken,
+  unhideBot,
+  unpinBot,
+  updateBot,
+} from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
 import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
-import { type AgentProfile, agentApiPath, agentKeys } from "./queries";
+import { type AgentProfile, agentKeys } from "./queries";
 
 /**
  * What a Bot is created or changed with: api/openapi.yaml's `CreateBotRequest`, generated from the
@@ -65,11 +75,12 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
 
 export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (agentId: string): Promise<AgentProfile> =>
-      client(`${agentApiPath(agentId)}/duplicate`, "agent", {
-        method: "POST",
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (agentId: string): Promise<AgentProfile> =>
+      (
+        await duplicateBot(ORGANIZATION_ID, agentId, once(), {
+          fallback: FALLBACK,
+        })
+      ).bot,
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
@@ -77,10 +88,10 @@ export function duplicateAgentMutationOptions(queryClient: QueryClient) {
 export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
-      await client(
-        `${agentApiPath(variables.agentId)}/${variables.hidden ? "hide" : "unhide"}`,
-        { method: "POST", fallback: FALLBACK },
-      );
+      const write = variables.hidden ? hideBot : unhideBot;
+      await write(ORGANIZATION_ID, variables.agentId, once(), {
+        fallback: FALLBACK,
+      });
     },
     onSuccess: () => invalidateAgents(queryClient),
   });
@@ -89,10 +100,10 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
 export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
-      await client(
-        `${agentApiPath(variables.agentId)}/${variables.pinned ? "pin" : "unpin"}`,
-        { method: "POST", fallback: FALLBACK },
-      );
+      const write = variables.pinned ? pinBot : unpinBot;
+      await write(ORGANIZATION_ID, variables.agentId, once(), {
+        fallback: FALLBACK,
+      });
     },
     onSuccess: () => invalidateAgents(queryClient),
   });
@@ -110,29 +121,29 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Issue this coworker a credential for calling tools back, and hand it over once.
+ * Issue this Bot a credential for calling tools back, and hand it over once.
  *
  * The token is in this response and nowhere else, ever again, so the caller has to show it to the
- * person immediately. Calling this on a coworker that already has one rotates it, which is how a
- * leaked token is retired.
+ * person immediately. Calling this on a Bot that already has one rotates it, which is how a leaked
+ * token is retired.
  */
 export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (agentId: string): Promise<string> =>
-      client(`${agentApiPath(agentId)}/callback-token`, "token", {
-        method: "POST",
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (agentId: string): Promise<string> =>
+      (
+        await issueBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
+          fallback: FALLBACK,
+        })
+      ).token,
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
 
-/** Take the credential away. The coworker may still talk; it may not reach anything outside a chat. */
+/** Take the credential away. The Bot may still talk; it may not reach anything outside a chat. */
 export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await client(`${agentApiPath(agentId)}/callback-token`, {
-        method: "DELETE",
+      await revokeBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
         fallback: FALLBACK,
       });
     },

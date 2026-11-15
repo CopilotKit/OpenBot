@@ -45,8 +45,29 @@ beforeEach(() => {
   general = `general-${cases}`;
   knowledge = `knowledge-${cases}`;
   isolated = `isolated-${cases}`;
-  globalThis.fetch = (async () =>
-    new Response(null, { status: 200 })) as unknown as typeof fetch;
+  // The API's stop, reset and update, each a write with its key. Anything else is not found.
+  globalThis.fetch = (async (
+    url: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const verb =
+      /^\/api\/v2\/organizations\/default\/computers\/(stop|reset|update)$/.exec(
+        String(url),
+      )?.[1];
+    if (
+      !verb ||
+      init?.method !== "POST" ||
+      !new Headers(init.headers).get("idempotency-key")
+    )
+      return Response.json({ error: "Not found." }, { status: 404 });
+    return Response.json(
+      verb === "stop"
+        ? { wasRunning: true }
+        : verb === "reset"
+          ? { cleared: true }
+          : { updated: true, wasRunning: true },
+    );
+  }) as unknown as typeof fetch;
   queryClient = new QueryClient();
   queryClient.setQueryData(authKeys.currentUser(), {
     id: ME,

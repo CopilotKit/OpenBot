@@ -19,20 +19,20 @@ import type { ComponentType } from "react";
 import { EditSkill } from "@/components/skills/edit-skill";
 import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
 import { learningKeys } from "@/lib/learning/queries";
-import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
+import { skillKeys } from "@/lib/skills/queries";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
 import { ME_PATH, meBody } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
 
 /**
- * The three places skills are listed or opened, when `GET /api/plugins` fails.
+ * The three places skills are listed or opened, when the skills list (`listSkills`) fails.
  *
  * Each read `data?.skills ?? []` once `isPending` was false, and `isPending` goes false on a failed
  * fetch exactly as it does on a successful one: a request that never came back was drawn as "You
  * don't have any skills yet.", "No skills yet." and "That skill no longer exists", to people who
  * may have written a dozen. `agent-roster-error.test.tsx` is the same mistake on the agent screens.
  *
- * Only the plugins read fails here; who is signed in and the roster answer.
+ * Only the skills read fails here; who is signed in and the roster answer.
  *
  * THE HARNESS IS THIS REPOSITORY'S, as in `agent-roster-error.test.tsx` and
  * `boundaries-read-failure.test.tsx`: `GlobalRegistrator` in `beforeAll`/`afterAll`, `cleanup` in
@@ -84,12 +84,11 @@ function failingQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-/** A client already holding a plugins page with no skills in it: the honest empty answer. */
+/** A client already holding a skills list with nothing in it: the honest empty answer. */
 function answeredEmpty() {
   const client = failingQueryClient();
-  const page: PluginsPage = { skills: [] };
-  client.setQueryData(pluginKeys.page(), page);
-  // Nothing learned either: the person has no skills at all. Held, so only the plugins read fails.
+  client.setQueryData(skillKeys.list(), []);
+  // Nothing learned either: the person has no skills at all. Held, so only the skills read fails.
   client.setQueryDefaults(learningKeys.personal, { staleTime: Infinity });
   client.setQueryData(learningKeys.personal, {
     mode: "closed",
@@ -101,7 +100,7 @@ function answeredEmpty() {
 
 async function waitForFailedRead(client: QueryClient) {
   await waitFor(() => {
-    expect(client.getQueryState(pluginKeys.page())?.status).toBe("error");
+    expect(client.getQueryState(skillKeys.list())?.status).toBe("error");
   });
 }
 

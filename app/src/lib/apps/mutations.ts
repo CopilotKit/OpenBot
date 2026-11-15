@@ -109,7 +109,9 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
             : thrown.code === "APP_NOT_APPROVED"
               ? { code: "not-approved" as const }
               : {}),
-          ...(thrown.appId ? { serverId: thrown.appId } : {}),
+          ...(typeof thrown.body?.appId === "string"
+            ? { serverId: thrown.body.appId }
+            : {}),
         };
       }
     },

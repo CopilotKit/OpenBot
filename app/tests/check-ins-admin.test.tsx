@@ -28,12 +28,13 @@ import {
   overviewResponse,
   SETTINGS_PATH,
 } from "./admin-settings-api";
+import { CHECK_IN_USAGE_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * Admin, Check-ins: the organization's switch, the daily limit, and each Bot's numbers. The server
  * is faked at the fetch boundary with the API's answers for the settings and the switches, and
- * `GET /api/admin/proactive`'s for the numbers; the writes are the API's own.
+ * `getCheckInUsage`'s for the numbers; the writes are the API's own.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -60,7 +61,7 @@ const skipped = (counts: Partial<BotCheckInMetrics["runs"]["skipped"]>) => ({
 });
 
 const inbox: BotCheckInMetrics = {
-  agentId: "inbox-bot",
+  botId: "inbox-bot",
   name: "Inbox Bot",
   avatarSeed: "inbox-bot",
   peopleOn: 11,
@@ -75,7 +76,7 @@ const inbox: BotCheckInMetrics = {
   pinged: 44,
 };
 const fresh: BotCheckInMetrics = {
-  agentId: "general-assistant",
+  botId: "general-assistant",
   name: "General Assistant",
   avatarSeed: "general-assistant",
   peopleOn: 2,
@@ -151,7 +152,7 @@ function serving() {
       actionRecordRetentionDays: 90,
     });
     if (overview) return overview;
-    if (path.startsWith("/api/admin/proactive?days=")) {
+    if (path.startsWith(`${CHECK_IN_USAGE_PATH}?days=`)) {
       const days = Number(path.split("=")[1]) as 7 | 30;
       const body: CheckInMetrics = {
         days,

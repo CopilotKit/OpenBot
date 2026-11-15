@@ -5,7 +5,8 @@ import {
   ApiError,
   api,
   type BotGrant,
-  type BotGrantPage,
+  everyPage,
+  ORGANIZATION,
   type SkillSummary,
 } from "../src/api";
 import { authClient } from "../src/auth";
@@ -20,9 +21,6 @@ import {
 } from "../src/ui";
 import { useLoad } from "../src/use-load";
 
-/** The organization every request is in: an install has one, addressed as `default`. */
-const ORGANIZATION = "/api/v2/organizations/default";
-
 /** What a Bot can use: skills switched on and off here, connected tools listed. */
 export default function PluginsScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
@@ -30,16 +28,7 @@ export default function PluginsScreen() {
   const action = useAction();
   const grantsPath = `${ORGANIZATION}/bots/${encodeURIComponent(botId)}/grants`;
   const loadGranted = useCallback(async () => {
-    // Every page of what the Bot holds.
-    const grants: BotGrant[] = [];
-    let cursor: string | null = null;
-    do {
-      const page: BotGrantPage = await api<BotGrantPage>(
-        `${grantsPath}?limit=100${cursor ? `&cursor=${cursor}` : ""}`,
-      );
-      grants.push(...page.grants);
-      cursor = page.nextCursor;
-    } while (cursor);
+    const grants = await everyPage<BotGrant>(grantsPath, "grants");
     return {
       tools: grants.flatMap((grant) =>
         grant.kind === "action" && grant.action
@@ -52,10 +41,20 @@ export default function PluginsScreen() {
     };
   }, [grantsPath]);
   const granted = useLoad(loadGranted, Boolean(session && botId));
-  const loadCatalogue = useCallback(
-    () => api<{ skills: SkillSummary[] }>("/api/plugins"),
-    [],
-  );
+  // Every skill this person can see, page after page.
+  const loadCatalogue = useCallback(async () => {
+    const skills: SkillSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { skills: SkillSummary[]; nextCursor: string | null } =
+        await api(
+          `/api/v2/organizations/default/skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        );
+      skills.push(...page.skills);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return { skills };
+  }, []);
   const catalogue = useLoad(loadCatalogue, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const on = new Set(granted.data?.skills.map((skill) => skill.slug));

@@ -65,14 +65,22 @@ export class ClientError extends Error {
    * (`LINKED_ACCOUNTS_UNAVAILABLE`), or the `code` a few of today's routes answer beside `error`.
    */
   readonly code: string | undefined;
-  /** The app a refusal names, where it names one: the app already at an address (`APP_ALREADY_ADDED`). */
-  readonly appId: string | undefined;
-  constructor(message: string, status: number, code?: string, appId?: string) {
+  /**
+   * What else the refusal said, when it was JSON: the members a problem carries beside its sentence,
+   * such as the rule that refused a Bot's action on its computer.
+   */
+  readonly body: Record<string, unknown> | undefined;
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    body?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "ClientError";
     this.status = status;
     this.code = code;
-    this.appId = appId;
+    this.body = body;
   }
 }
 
@@ -103,7 +111,9 @@ async function refusal(
     message ?? fallback ?? "That request failed.",
     response.status,
     typeof body?.code === "string" ? body.code : undefined,
-    typeof body?.appId === "string" ? body.appId : undefined,
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : undefined,
   );
 }
 

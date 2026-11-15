@@ -86,6 +86,39 @@ test("each convention is enforced", () => {
   }
 });
 
+test("an area's own problem must be the shared one and more", () => {
+  const extended = spec();
+  extended.components.schemas.ThingProblem = {
+    allOf: [
+      { $ref: "#/components/schemas/Problem" },
+      { type: "object", properties: { thing: { type: "string" } } },
+    ],
+  };
+  const problem = (schema: string) => ({
+    description: "Not found.",
+    content: {
+      "application/problem+json": { schema: { $ref: schema } },
+    },
+  });
+  extended.paths[`${BOTS}/{botId}`].get.responses["404"] = problem(
+    "#/components/schemas/ThingProblem",
+  );
+  expect(
+    lint(extended).filter(
+      (found) => found.ruleId === "openbot/problem-details-errors",
+    ),
+  ).toEqual([]);
+
+  // One that only looks like a problem is still refused.
+  extended.components.schemas.ThingProblem = {
+    type: "object",
+    properties: { detail: { type: "string" } },
+  };
+  expect(lint(extended).map((found) => found.ruleId)).toContain(
+    "openbot/problem-details-errors",
+  );
+});
+
 test("a collision names what Intelligence owns", () => {
   const broken = spec();
   broken.paths["/api/v2/organizations/{organizationId}/memory-sources"] =

@@ -13,8 +13,10 @@ import {
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { approvalBody, approvalInboxResponse } from "./approvals-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -157,9 +159,14 @@ beforeAll(() => {
       const method = (
         input instanceof Request ? input.method : (init?.method ?? "GET")
       ).toUpperCase();
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json(inbox());
-      if (url.pathname === "/api/approvals/approval-1/decision") {
+      {
+        const approvals = approvalInboxResponse(url.pathname, inbox());
+        if (approvals) return approvals;
+      }
+      if (
+        url.pathname ===
+        "/api/v2/organizations/default/people/me/approvals/approval-1/decide"
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         const { decision } = (await request.json()) as { decision: string };
@@ -167,7 +174,9 @@ beforeAll(() => {
         // As the server does: decided, and handed to the loop that carries the conversation on.
         status = "approved";
         decidedAt = new Date().toISOString();
-        return NativeResponse.json({ id: "approval-1", status });
+        return NativeResponse.json(
+          approvalBody({ ...inbox().requests[0], decision }),
+        );
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
@@ -177,8 +186,8 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: "maps-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/maps-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("maps-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
@@ -199,9 +208,17 @@ beforeAll(() => {
        */
       if (url.pathname.endsWith("/connect"))
         return new NativeResponse(null, { status: 204 });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname)) {
         historyReads += 1;

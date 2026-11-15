@@ -27,6 +27,7 @@ import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -163,7 +164,10 @@ function runEvents(input: RunAgentInput): unknown[] {
 
 /** The computer's control routes, answering as `agent-computer/src/control.ts` does. */
 async function computer(path: string, request: Request): Promise<Response> {
-  const route = path.replace(`/api/computers/${BOT}`, "");
+  const route = path.replace(
+    `/api/v2/organizations/default/computers/${BOT}`,
+    "",
+  );
   if (route === "/control" && request.method === "GET")
     return NativeResponse.json(control);
   if (route === "/control/request") {
@@ -224,8 +228,8 @@ async function computer(path: string, request: Request): Promise<Response> {
       capturedAt: SINCE,
       url: "https://forms.example/order",
     });
-  if (route === "/status")
-    return NativeResponse.json({ botId: BOT, state: "ready" });
+  // The computer itself: its state.
+  if (route === "") return NativeResponse.json({ botId: BOT, state: "ready" });
   return NativeResponse.json({ error: "Not found" }, { status: 404 });
 }
 
@@ -247,7 +251,11 @@ beforeAll(() => {
         "http://localhost",
       );
       const request = input instanceof Request ? input : new Request(url, init);
-      if (url.pathname.startsWith(`/api/computers/${BOT}/`))
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${BOT}`,
+        )
+      )
         return computer(url.pathname, request);
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -278,18 +286,30 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       // Whether this conversation asks before every step, as the server answers it: the person's
       // own conversation with their Bot, not a task's, so a look goes straight to the computer.
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
       // Grants, capabilities, approvals: none of them decides anything here, and the app reads none as a refusal.
       return NativeResponse.json({ error: "Not found" }, { status: 404 });

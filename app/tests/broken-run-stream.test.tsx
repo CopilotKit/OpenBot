@@ -24,6 +24,7 @@ import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A run whose live stream reaches the browser out of shape is read back from the thread, and the
@@ -251,8 +252,8 @@ beforeAll(() => {
             canManage: true,
           },
         });
-      if (url.pathname === "/api/components/for-agent/broken-stream-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("broken-stream-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
@@ -267,9 +268,17 @@ beforeAll(() => {
       if (url.pathname.endsWith("/connect")) return sse([]);
       if (url.pathname.endsWith("/run"))
         return run(RunAgentInputSchema.parse(await request().json()));
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       const thread = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (thread)

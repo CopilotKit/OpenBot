@@ -20,7 +20,7 @@ import type {
   ConnectAppRequest,
 } from "@/lib/api/generated/model";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
-import { ClientError, client } from "@/lib/client";
+import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
 import { pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
@@ -33,27 +33,8 @@ import type { SharedUseApproval } from "./shared-use";
  * two of everything.
  */
 
-/** A skill as the server accepts it. `global` is an administrator writing for everybody. */
-export type SkillInput = {
-  slug: string;
-  title: string;
-  summary?: string;
-  instructions: string;
-  global?: boolean;
-  /**
-   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
-   *
-   * Sent on every save, including empty, because the server replaces the set rather than merging
-   * into it: omitting the field to mean "leave them alone" and sending `[]` to mean "clear them"
-   * would be the same request from a form that just had its last one unticked.
-   */
-  tools?: string[];
-};
-
 /** Which kinds of plugin a grant can be about. */
 export type PluginKind = "mcp" | "skill";
-
-const FALLBACK = "That didn't work. Try again.";
 
 /**
  * Refetch everything the plugin screens read.
@@ -183,28 +164,6 @@ export function setPluginGrantMutationOptions(queryClient: QueryClient) {
       }
       await revokePlugin(variables);
     },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Write a skill, or rewrite one.
- *
- * One endpoint for both: the slug is the identity, so posting an existing one replaces it. The
- * fallback names saving rather than creating for that reason.
- */
-export function saveSkillMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: (input: SkillInput): Promise<unknown> =>
-      client("/api/plugins/skills", {
-        method: "POST",
-        body: input,
-        /*
-         * The server refuses for reasons a form cannot check — a slug somebody else already owns is
-         * the common one — and paraphrasing that would throw away the only part worth reading.
-         */
-        fallback: "Couldn't save the skill.",
-      }),
     onSettled: () => invalidatePlugins(queryClient),
   });
 }
@@ -484,18 +443,6 @@ export function disconnectBrokeredAccountMutationOptions(
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't disconnect that account." },
       );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function removeSkillMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (slug: string) => {
-      await client(`/api/plugins/skills/${encodeURIComponent(slug)}`, {
-        method: "DELETE",
-        fallback: FALLBACK,
-      });
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

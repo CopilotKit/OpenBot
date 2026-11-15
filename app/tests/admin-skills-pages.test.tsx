@@ -28,11 +28,18 @@ import userEvent from "@testing-library/user-event";
 import { NewSkillPage } from "@/components/manage/new-skill-page";
 import { SkillPage } from "@/components/manage/skill-page";
 import { SkillsPage } from "@/components/manage/skills-page";
-import { type PluginSkill, pluginKeys } from "@/lib/plugins/queries";
+import { pluginKeys } from "@/lib/plugins/queries";
+import { skillKeys } from "@/lib/skills/queries";
 import { answerAppsApi } from "./apps-api";
 import { botGrantPath } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  SKILLS_PATH,
+  skillPath,
+  skillsResponse,
+  type TodaySkill,
+} from "./skills-api";
 
 /**
  * The deployment's Skills under Admin: a list whose rows open each skill's page, a page of its own
@@ -51,18 +58,17 @@ afterAll(async () => {
 
 const originalFetch = global.fetch;
 let writes: { method: string; path: string; body: unknown }[];
-let skills: PluginSkill[];
+let skills: TodaySkill[];
+/** How many skills the first page of the list holds; the rest come on the next. All on one by default. */
+let firstPage: number;
 
-function skill(overrides: Partial<PluginSkill> = {}): PluginSkill {
+function skill(overrides: Partial<TodaySkill> = {}): TodaySkill {
   return {
-    id: "skill-triage",
     slug: "triage",
     ownerUserId: null,
     title: "Triage the inbox",
     summary: "Sorts new mail by what needs an answer",
     instructions: "Read my unread mail and sort it.",
-    origin: "admin",
-    installedBy: null,
     grantedTo: ["bot-ada"],
     tools: [],
     ...overrides,
@@ -72,6 +78,7 @@ function skill(overrides: Partial<PluginSkill> = {}): PluginSkill {
 beforeEach(() => {
   writes = [];
   skills = [skill()];
+  firstPage = Number.POSITIVE_INFINITY;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
@@ -122,7 +129,15 @@ beforeEach(() => {
         botsMayCallBack: true,
       });
       if (apps) return apps;
-      if (path === "/api/plugins") return json({ skills });
+      if (path === SKILLS_PATH) {
+        const cursor = new URL(url, "http://localhost").searchParams.get(
+          "cursor",
+        );
+        if (cursor === "next") return skillsResponse(skills.slice(firstPage));
+        return skills.length > firstPage
+          ? skillsResponse(skills.slice(0, firstPage), "next")
+          : skillsResponse(skills);
+      }
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -207,20 +222,19 @@ describe("writing a skill", () => {
       view.getByLabelText("Instructions"),
       "Summarise yesterday.",
     );
-    skills = [...skills, skill({ id: "skill-standup", slug: "standup" })];
+    skills = [...skills, skill({ slug: "standup" })];
     await user.click(view.getByRole("button", { name: "Save skill" }));
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/admin/skills/standup"),
     );
     expect(writes).toEqual([
       {
-        method: "POST",
-        path: "/api/plugins/skills",
+        method: "PUT",
+        path: skillPath("standup"),
         body: expect.objectContaining({
-          slug: "standup",
           title: "Standup notes",
           instructions: "Summarise yesterday.",
-          global: true,
+          forEveryone: true,
         }),
       },
     ]);
@@ -313,7 +327,7 @@ describe("a skill's page", () => {
       expect(router.state.location.pathname).toBe("/admin/skills"),
     );
     expect(writes).toEqual([
-      { method: "DELETE", path: "/api/plugins/skills/triage", body: null },
+      { method: "DELETE", path: skillPath("triage"), body: null },
     ]);
   });
 
@@ -323,7 +337,20 @@ describe("a skill's page", () => {
   });
 });
 
-test("the list reads its skills from the plugins page", () => {
-  // Guards the cache key these pages share with the rest of Admin.
-  expect(pluginKeys.page()).toEqual(["plugins", "page"]);
+test("every page of the skills list is shown", async () => {
+  skills = [
+    skill({ slug: "triage", title: "Triage the inbox" }),
+    skill({ slug: "standup", title: "Standup notes" }),
+  ];
+  firstPage = 1;
+  const { view } = renderAt("/admin/skills");
+  expect(await view.findByText("Standup notes")).toBeTruthy();
+  expect(view.getByText("Triage the inbox")).toBeTruthy();
+});
+
+test("the skills are read under the plugins root, so a Bot's grant refreshes them", () => {
+  // Turning a skill on for a Bot is a plugins grant, and invalidates the plugins root.
+  expect(skillKeys.all.slice(0, pluginKeys.all.length)).toEqual([
+    ...pluginKeys.all,
+  ]);
 });

@@ -16,11 +16,11 @@ import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import {
   MessageReactions,
+  SentFromBot,
   TaskCard,
   TaskReport,
   ThreadLinks,
 } from "@/components/tasks/task-thread";
-import { todayRoutes } from "@/lib/api/served-today";
 import { inAppPath, markdownComponents } from "@/lib/markdown";
 import { settleReactWork } from "./settle-react-work";
 
@@ -39,8 +39,8 @@ const WAITING =
 
 let task = {
   id: "task-1",
-  agentId: "general-assistant",
-  channelId: "channel_task",
+  botId: "general-assistant",
+  conversationId: "channel_task",
   threadId: "thread_task",
   title: "Order heirloom tomato seeds",
   why: null,
@@ -48,7 +48,7 @@ let task = {
   suggestionId: null,
   sourceApp: null,
   sourceLink: null,
-  originChannelId: "channel_main",
+  originConversationId: "channel_main",
   status: "needs_input",
   failure: null,
   failedAt: null,
@@ -59,18 +59,33 @@ let task = {
 };
 const requests: string[] = [];
 const server = setupServer(
-  http.get("*/api/tasks/:id", ({ params }) =>
+  // Tasks and reactions, at the API's addresses and in its shapes, as the server answers them.
+  http.get("*/api/v2/organizations/:organizationId/tasks/:id", ({ params }) =>
     params.id === task.id
       ? HttpResponse.json({ task })
       : HttpResponse.json(
-          { error: "Couldn't find that task." },
-          { status: 404 },
+          {
+            type: "https://open.bot/errors/not-found",
+            title: "Not found.",
+            status: 404,
+            detail: "Couldn't find that task.",
+            code: "NOT_FOUND",
+            category: "not_found",
+            retryable: false,
+            requestId: "req_test",
+            traceId: "trace_test",
+          },
+          {
+            status: 404,
+            headers: { "content-type": "application/problem+json" },
+          },
         ),
   ),
-  http.get("*/api/tasks/reactions/:threadId", ({ params }) =>
+  http.get("*/api/v2/organizations/:organizationId/reactions", ({ request }) =>
     HttpResponse.json({
+      nextCursor: null,
       reactions:
-        params.threadId === "thread_main"
+        new URL(request.url).searchParams.get("threadId") === "thread_main"
           ? [
               {
                 messageId: "message-thanks",
@@ -81,6 +96,10 @@ const server = setupServer(
             ]
           : [],
     }),
+  ),
+  // The task list, which the brief finds its task in by thread.
+  http.get("*/api/v2/organizations/:organizationId/tasks", () =>
+    HttpResponse.json({ tasks: [task], nextCursor: null }),
   ),
   // The Bots list, at the API's address and in its shape, as the server answers it.
   http.get("*/api/v2/organizations/:organizationId/bots", () =>
@@ -106,7 +125,6 @@ afterEach(() => {
 });
 afterAll(async () => {
   server.close();
-  todayRoutes.on = true;
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
@@ -286,21 +304,33 @@ test("a Bot's reaction is read through the generated client and drawn under its 
     name: "General Assistant reacted 👍",
   });
   expect(chip.textContent).toBe("👍");
-  // Asked at the API's address, and sent where today's server answers it.
-  expect(requests).toContain("GET /api/tasks/reactions/thread_main");
+  // Asked at the API's address, and nowhere else.
+  expect(requests).toContain(
+    "GET /api/v2/organizations/default/reactions?threadId=thread_main&limit=100",
+  );
+  expect(requests.filter((request) => request.includes("/api/tasks"))).toEqual(
+    [],
+  );
 });
 
-test("today's table sends the reactions operation where today's server answers it", async () => {
-  const { servedToday } = await import("@/lib/api/served-today");
-  const route = servedToday(
-    "/api/v2/organizations/default/reactions?threadId=thread%2Fwith%20slash&limit=100",
+test("a task's brief links back to the conversation that asked for it, and a check-in's stays plain", async () => {
+  task = { ...task, origin: "delegated", originConversationId: "channel_main" };
+  const delegated = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
   );
-  expect(route?.path).toBe("/api/tasks/reactions/thread%2Fwith%20slash");
-  expect(route?.answer({ reactions: [{ emoji: "👍" }] })).toEqual({
-    reactions: [{ emoji: "👍" }],
-    nextCursor: null,
+  const link = await delegated.findByRole("link", {
+    name: "Sent from General Assistant",
   });
-  expect(
-    servedToday("/api/v2/organizations/default/reactions", "POST"),
-  ).toBeUndefined();
+  expect(link.getAttribute("href")).toBe("/channel/channel_main");
+  link.click();
+  await delegated.findByText("the thread");
+  cleanup();
+
+  // A check-in's task was not asked for in a conversation, so there is nowhere to go back to.
+  task = { ...task, origin: "check_in", originConversationId: null as never };
+  const checkIn = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
+  );
+  await checkIn.findByText("Sent from General Assistant");
+  expect(checkIn.queryByRole("link")).toBeNull();
 });

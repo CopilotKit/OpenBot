@@ -23,12 +23,14 @@ import {
   connectBrokeredWithFieldsMutationOptions,
   disconnectBrokeredMutationOptions,
   recheckBrokeredConnectionMutationOptions,
-  removeSkillMutationOptions,
-  saveSkillMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
-import { appPath } from "./apps-api";
 import { pluginKeys } from "../src/lib/plugins/queries";
+import {
+  removeSkillMutationOptions,
+  saveSkillMutationOptions,
+} from "../src/lib/skills/mutations";
+import { appPath } from "./apps-api";
 import { myConnectionPath } from "./connections-api";
 
 /**
@@ -202,7 +204,7 @@ const REFUSALS: {
   },
   {
     name: "saving a skill",
-    route: "POST /api/plugins/skills",
+    route: "PUT /api/v2/organizations/:organizationId/skills/:skillId",
     status: 500,
     message: "The skill could not be saved.",
     factory: saveSkillMutationOptions,
@@ -215,7 +217,7 @@ const REFUSALS: {
   },
   {
     name: "removing a skill",
-    route: "DELETE /api/plugins/skills/:slug",
+    route: "DELETE /api/v2/organizations/:organizationId/skills/:skillId",
     status: 500,
     message: "That did not work.",
     factory: removeSkillMutationOptions,
@@ -442,7 +444,7 @@ const ENCODED_REQUESTS: {
   },
   {
     name: "removing a skill",
-    url: `/api/plugins/skills/${ENCODED_ID}`,
+    url: `/api/v2/organizations/default/skills/${ENCODED_ID}`,
     build: removeSkillMutationOptions,
     variables: HOSTILE_ID,
   },

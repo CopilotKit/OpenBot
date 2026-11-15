@@ -16,7 +16,6 @@ import type {
   Connection,
 } from "@/lib/api/generated/model";
 import { ORGANIZATION_ID } from "@/lib/api/request";
-import { client } from "@/lib/client";
 
 /**
  * Re-exported, not re-declared.
@@ -64,14 +63,6 @@ export type PluginSkill = {
 };
 
 export type { CatalogueItem } from "@/lib/apps/queries";
-
-/**
- * The skills half of `GET /api/plugins`, the one part of it the screens still read there. The apps,
- * the catalogue and how apps are set up are read through the API (lib/apps/queries.ts).
- */
-export type PluginsPage = {
-  skills: PluginSkill[];
-};
 
 /**
  * What one Bot holds and is offered now: each app action whose app still lists it, as
@@ -123,7 +114,6 @@ export function grantedPluginsOf(grants: readonly BotGrant[]): GrantedPlugins {
 
 export const pluginKeys = {
   all: ["plugins"] as const,
-  page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
   sharedConnection: (serverId: string) =>
@@ -382,18 +372,6 @@ export function connectionSiblingsQueryOptions(serverId: string) {
             ? body.unanswered
             : 0,
       };
-    },
-  });
-}
-
-export function pluginsPageQueryOptions() {
-  return queryOptions({
-    queryKey: pluginKeys.page(),
-    queryFn: async (): Promise<PluginsPage> => {
-      const response = await client("/api/plugins", {
-        fallback: "Couldn't load your apps. Reload the page.",
-      });
-      return response.json();
     },
   });
 }

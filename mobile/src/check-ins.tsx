@@ -4,6 +4,7 @@ import {
   api,
   type BotTask,
   type CheckInItem,
+  ORGANIZATION,
   type StartedItem,
   type TaskStatus,
 } from "./api";
@@ -18,19 +19,19 @@ import { card, colors, muted } from "./ui";
 /** Start an item and open the conversation its task runs in. */
 export async function startItem(item: CheckInItem) {
   const started = await api<StartedItem>(
-    `/api/proactive/suggestions/${encodeURIComponent(item.id)}/start`,
+    `${ORGANIZATION}/check-in-items/${encodeURIComponent(item.id)}/start`,
     { method: "POST" },
   );
   router.push({
     pathname: "/conversation",
-    params: { channelId: started.task.channelId, agentId: item.agentId },
+    params: { channelId: started.task.conversationId, agentId: item.botId },
   });
 }
 
 /** Hide an item: off every list, and remembered for 30 days. */
 export async function hideItem(item: CheckInItem) {
   await api(
-    `/api/proactive/suggestions/${encodeURIComponent(item.id)}/dismiss`,
+    `${ORGANIZATION}/check-in-items/${encodeURIComponent(item.id)}/dismiss`,
     {
       method: "POST",
     },
@@ -197,7 +198,7 @@ export function TaskCard({
       onPress={() =>
         router.push({
           pathname: "/conversation",
-          params: { channelId: task.channelId, agentId: task.agentId },
+          params: { channelId: task.conversationId, agentId: task.botId },
         })
       }
       style={card}

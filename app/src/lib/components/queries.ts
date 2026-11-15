@@ -1,10 +1,39 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import {
+  announceComponents,
+  callComponentFunction as callComponentFunctionApi,
+  checkBotComponent,
+  listBotComponents,
+  listComponentFunctions,
+  listComponents,
+} from "@/lib/api/generated/components/components";
+import type { Component } from "@/lib/api/generated/model";
+import { everyPage } from "@/lib/api/every-page";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
-/** A component as the Admin surface sees it: its state, its versions and who is held back from it. */
+/** The kind the API gives a component an admin wrote in Playground. */
+export const PLAYGROUND_KIND = "playground";
+
+/** A Playground component's source as an admin edits it. */
+export type PlaygroundDraftSource = {
+  html: string;
+  css: string;
+  jsFunctions: string;
+  argumentSchema: Record<string, unknown>;
+  sampleArguments: Record<string, unknown>;
+};
+
+/**
+ * A component as the Admin surface sees it: its state, its versions and who is held back from it.
+ *
+ * Somebody who isn't an admin is sent the published components only, with nothing an admin governs:
+ * for them the draft is the published description and the lists are empty.
+ */
 export type ComponentRecord = {
   name: string;
   title: string;
+  /** chart, card and so on, or {@link PLAYGROUND_KIND} for one written in Playground. */
   kind: string;
   draftDescription: string;
   publishedDescription: string | null;
@@ -17,6 +46,16 @@ export type ComponentRecord = {
   withheldFrom: string[];
   /** The data functions this component may read. Empty means it draws only what the model hands it. */
   functions: string[];
+  /** A Playground component's draft source, for an admin. Null otherwise. */
+  draftSource: PlaygroundDraftSource | null;
+  /** A published Playground component's source, which a conversation draws it from. Null otherwise. */
+  source: {
+    html: string;
+    css: string;
+    jsFunctions: string;
+    argumentSchema: Record<string, unknown>;
+    revision: number;
+  } | null;
 };
 
 /** A component as a Bot holds it: the name to register, and what the model is told about it. */
@@ -25,22 +64,87 @@ export type GrantedComponent = {
   description: string;
 };
 
+/** A component written in Playground, as the playground edits it. */
+export type PlaygroundRecord = {
+  name: string;
+  title: string;
+  draftDescription: string;
+  draftHtml: string;
+  draftCss: string;
+  draftJsFunctions: string;
+  draftArgumentSchema: Record<string, unknown>;
+  publishedHtml: string | null;
+  publishedCss: string | null;
+  publishedJsFunctions: string | null;
+  publishedArgumentSchema: Record<string, unknown> | null;
+  sampleArguments: Record<string, unknown>;
+  revision: number;
+  published: boolean;
+  publishedAt: string | null;
+  hasUnpublishedChanges: boolean;
+};
+
+/** What a Bot may actually draw with. The draft never appears here. */
+export type PublishedPlayground = {
+  name: string;
+  html: string;
+  css: string;
+  jsFunctions: string;
+  /** What the model fills in. A tool with no parameters is called with no arguments. */
+  argumentSchema: Record<string, unknown>;
+};
+
 export const componentKeys = {
   all: ["components"] as const,
   list: () => ["components", "list"] as const,
   forAgent: (agentId: string) => ["components", "for-agent", agentId] as const,
+  functions: (name: string) => ["components", "functions", name] as const,
+  playground: () => ["components", "playground"] as const,
+  published: () => ["components", "playground", "published"] as const,
 };
+
+/** One component in the shape the screens read. */
+function componentRecord(component: Component): ComponentRecord {
+  return {
+    name: component.name,
+    title: component.title,
+    kind: component.kind,
+    draftDescription:
+      component.draft?.description ?? component.description ?? "",
+    publishedDescription: component.description,
+    published: component.published,
+    publishedAt: component.publishedAt,
+    updatedBy: component.updatedBy,
+    updatedAt: component.updatedAt,
+    hasUnpublishedChanges: component.hasUnpublishedChanges ?? false,
+    withheldFrom: component.withheldFrom ?? [],
+    functions: component.functions ?? [],
+    draftSource: component.draft?.source ?? null,
+    source: component.source,
+  };
+}
+
+/** Every component the caller may see, every page read, optionally of one kind. */
+async function everyComponent(kind?: string): Promise<Component[]> {
+  return everyPage(async (cursor) => {
+    const page = await listComponents(
+      ORGANIZATION_ID,
+      {
+        limit: 100,
+        ...(kind === undefined ? {} : { kind }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      { fallback: "The components could not be loaded." },
+    );
+    return { items: page.components, nextCursor: page.nextCursor };
+  });
+}
 
 export function componentListQueryOptions() {
   return queryOptions({
     queryKey: componentKeys.list(),
-    queryFn: async (): Promise<ComponentRecord[]> => {
-      return (
-        (await client("/api/components", "components", {
-          fallback: "The components could not be loaded.",
-        })) ?? []
-      );
-    },
+    queryFn: async (): Promise<ComponentRecord[]> =>
+      (await everyComponent()).map(componentRecord),
   });
 }
 
@@ -58,15 +162,16 @@ export function agentComponentsQueryOptions(agentId: string | undefined) {
     // Refetched when the tab is looked at again, so a grant changed on another screen is not waiting
     // out an interval before it shows.
     refetchOnWindowFocus: true,
-    queryFn: async (): Promise<GrantedComponent[]> => {
-      return (
-        (await client(
-          `/api/components/for-agent/${encodeURIComponent(agentId ?? "")}`,
-          "components",
+    queryFn: async (): Promise<GrantedComponent[]> =>
+      everyPage(async (cursor) => {
+        const page = await listBotComponents(
+          ORGANIZATION_ID,
+          agentId ?? "",
+          { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
           { fallback: "This Bot's components could not be loaded." },
-        )) ?? []
-      );
-    },
+        );
+        return { items: page.components, nextCursor: page.nextCursor };
+      }),
   });
 }
 
@@ -80,34 +185,97 @@ export async function announceGallery(
   }[],
 ): Promise<string[]> {
   try {
-    const response = await tryClient("/api/components/catalogue", {
-      method: "PUT",
-      body: { components },
-    });
-    if (!response.ok) return [];
-    return (await response.json()).added ?? [];
+    const { added } = await announceComponents(
+      ORGANIZATION_ID,
+      { components },
+      { "Idempotency-Key": idempotencyKey() },
+    );
+    return added;
   } catch {
     return [];
   }
 }
 
-/** A data function this build ships, as an administrator sees it. */
+/** A data function this build ships, as an administrator sees it for one component. */
 export type DataFunctionSummary = {
   name: string;
   description: string;
   reads: string;
+  /** Whether this component may read it. */
+  granted: boolean;
 };
 
-export function dataFunctionsQueryOptions() {
+/** The data functions this build ships, each with whether this component may read it. */
+export function componentFunctionsQueryOptions(name: string) {
   return queryOptions({
-    queryKey: ["components", "functions"] as const,
-    queryFn: async (): Promise<DataFunctionSummary[]> => {
-      return (
-        (await client("/api/components/functions", "functions", {
-          fallback: "The data functions could not be loaded.",
-        })) ?? []
-      );
-    },
+    queryKey: componentKeys.functions(name),
+    queryFn: async (): Promise<DataFunctionSummary[]> =>
+      everyPage(async (cursor) => {
+        const page = await listComponentFunctions(
+          ORGANIZATION_ID,
+          name,
+          { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
+          { fallback: "The data functions could not be loaded." },
+        );
+        return { items: page.functions, nextCursor: page.nextCursor };
+      }),
+  });
+}
+
+/** Every component written in Playground, with its draft, as an admin edits them. */
+export function playgroundListQueryOptions() {
+  return queryOptions({
+    queryKey: componentKeys.playground(),
+    queryFn: async (): Promise<PlaygroundRecord[]> =>
+      (await everyComponent(PLAYGROUND_KIND)).map((component) => {
+        const draft = component.draft?.source;
+        return {
+          name: component.name,
+          title: component.title,
+          draftDescription: component.draft?.description ?? "",
+          draftHtml: draft?.html ?? "",
+          draftCss: draft?.css ?? "",
+          draftJsFunctions: draft?.jsFunctions ?? "",
+          draftArgumentSchema: draft?.argumentSchema ?? {},
+          publishedHtml: component.source?.html ?? null,
+          publishedCss: component.source?.css ?? null,
+          publishedJsFunctions: component.source?.jsFunctions ?? null,
+          publishedArgumentSchema: component.source?.argumentSchema ?? null,
+          sampleArguments: draft?.sampleArguments ?? {},
+          revision: component.source?.revision ?? 0,
+          published: component.published,
+          publishedAt: component.publishedAt,
+          hasUnpublishedChanges: component.hasUnpublishedChanges ?? false,
+        };
+      }),
+  });
+}
+
+/**
+ * The published source, which is what a conversation renders from.
+ *
+ * Refetched periodically so publishing takes effect in an open conversation without a reload. It is
+ * not what enforces anything: whether this Bot may use the component at all is the grant, which the
+ * server is asked about separately and at call time.
+ */
+export function publishedPlaygroundQueryOptions() {
+  return queryOptions({
+    queryKey: componentKeys.published(),
+    refetchInterval: 30_000,
+    queryFn: async (): Promise<PublishedPlayground[]> =>
+      (await everyComponent(PLAYGROUND_KIND)).flatMap((component) =>
+        component.source
+          ? [
+              {
+                name: component.name,
+                html: component.source.html,
+                css: component.source.css,
+                jsFunctions: component.source.jsFunctions,
+                argumentSchema: component.source.argumentSchema,
+              },
+            ]
+          : [],
+      ),
   });
 }
 
@@ -126,25 +294,25 @@ export async function callComponentFunction(
   allowed: boolean;
   data?: unknown;
   reason?: string;
-  error?: string;
 }> {
   try {
-    const response = await tryClient(
-      `/api/components/${encodeURIComponent(component)}/call`,
-      { method: "POST", body: { agentId, args, function: functionName } },
+    const result = await callComponentFunctionApi(
+      ORGANIZATION_ID,
+      agentId,
+      component,
+      { function: functionName, arguments: args },
+      { "Idempotency-Key": idempotencyKey() },
     );
-    const payload = await response.json().catch(() => null);
-    if (payload && typeof payload === "object") {
-      return payload as { allowed: boolean; data?: unknown; reason?: string };
-    }
+    return result.allowed
+      ? { allowed: true, data: result.data }
+      : { allowed: false, reason: result.reason ?? undefined };
+  } catch (error) {
     return {
       allowed: false,
-      reason: "OpenBot couldn't be asked for that data.",
-    };
-  } catch {
-    return {
-      allowed: false,
-      reason: "OpenBot couldn't be reached to read that data.",
+      reason:
+        error instanceof ClientError
+          ? error.message
+          : "OpenBot couldn't be reached to read that data.",
     };
   }
 }
@@ -161,23 +329,23 @@ export async function decideComponent(
   functions: readonly string[] = [],
 ): Promise<{ allowed: boolean; reason?: string }> {
   try {
-    const response = await tryClient(
-      `/api/components/${encodeURIComponent(name)}/decision`,
-      { method: "POST", body: { agentId, functions } },
+    const decision = await checkBotComponent(
+      ORGANIZATION_ID,
+      agentId,
+      name,
+      { functions: [...functions] },
+      { "Idempotency-Key": idempotencyKey() },
     );
-    if (!response.ok) {
-      return {
-        allowed: false,
-        reason:
-          "OpenBot couldn't be asked whether that component is allowed, so it wasn't shown.",
-      };
-    }
-    return await response.json();
-  } catch {
+    return decision.allowed
+      ? { allowed: true }
+      : { allowed: false, reason: decision.reason ?? undefined };
+  } catch (error) {
     return {
       allowed: false,
       reason:
-        "OpenBot couldn't be reached to check whether that component is allowed, so it wasn't shown.",
+        error instanceof ClientError
+          ? "OpenBot couldn't be asked whether that component is allowed, so it wasn't shown."
+          : "OpenBot couldn't be reached to check whether that component is allowed, so it wasn't shown.",
     };
   }
 }

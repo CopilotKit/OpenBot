@@ -13,6 +13,35 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The organization's address in the API. Until a person can belong to several, an install has one,
+ * addressed as `default`.
+ */
+export const ORGANIZATION = "/api/v2/organizations/default";
+
+/** Whether this request is a write to the API, which takes an Idempotency-Key. */
+const apiWrite = (path: string, method: string | undefined) =>
+  path.startsWith("/api/v2/") && !!method && method.toUpperCase() !== "GET";
+
+/**
+ * Every item of one of the API's lists, page by page. The API pages every list (`cursor`, `limit`,
+ * `nextCursor`), and the screens here show the whole list. A cursor handed back twice ends it too.
+ */
+export async function everyPage<T>(path: string, key: string): Promise<T[]> {
+  const all: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await api<Record<string, unknown>>(
+      `${path}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    all.push(...((page[key] as T[] | undefined) ?? []));
+    if (cursor) seen.add(cursor);
+    cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
+  } while (cursor && !seen.has(cursor));
+  return all;
+}
+
 export async function api<T>(
   path: string,
   input?: {
@@ -24,20 +53,19 @@ export async function api<T>(
 ): Promise<T> {
   if (!path.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const cookie = await authClient.getCookie();
-  // Every write to the API carries a key of its own, so a retry of it is recognised as the same write.
-  const write =
-    path.startsWith("/api/v2/") &&
-    (input?.method ?? "GET").toUpperCase() !== "GET";
   const response = await fetch(`${serverUrl}${path}`, {
     method: input?.method,
     credentials: "omit",
     headers: {
+      // A new key for each write asked for, unless the caller sends its own to retry with.
+      ...(apiWrite(path, input?.method)
+        ? { "Idempotency-Key": Crypto.randomUUID() }
+        : {}),
       ...input?.headers,
       ...(cookie ? { Cookie: cookie } : {}),
       ...(input?.body !== undefined
         ? { "content-type": "application/json" }
         : {}),
-      ...(write ? { "Idempotency-Key": Crypto.randomUUID() } : {}),
     },
     ...(input?.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
     signal: input?.signal,
@@ -70,17 +98,70 @@ export async function api<T>(
   }
   return body as T;
 }
+/** The person asking, as the API addresses them. */
+const ME = `${ORGANIZATION}/people/me`;
+/** Where one of the person's approvals is decided. */
+export const approvalDecisionPath = (id: string) =>
+  `${ME}/approvals/${encodeURIComponent(id)}/decide`;
+/** Where one of the questions a Bot asked the person is answered. */
+export const questionResponsePath = (id: string) =>
+  `${ME}/questions/${encodeURIComponent(id)}/respond`;
+export const APPROVAL_PREFERENCES_PATH = `${ME}/approval-preferences`;
+export const APPROVAL_RULES_PATH = `${ME}/approval-rules`;
+export const approvalRulePath = (id: string) =>
+  `${APPROVAL_RULES_PATH}/${encodeURIComponent(id)}`;
+/** What waits on the person: the actions their Bots asked about, and the questions they asked. */
+export async function loadApprovalInbox(): Promise<ApprovalInbox> {
+  const [requests, questions] = await Promise.all([
+    everyPage<ApprovalInbox["requests"][number]>(
+      `${ME}/approvals`,
+      "approvals",
+    ),
+    everyPage<NonNullable<ApprovalInbox["questions"]>[number]>(
+      `${ME}/questions`,
+      "questions",
+    ),
+  ]);
+  return { requests, questions };
+}
+/** The person's own approval preferences and rules, with what the organization set for everybody. */
+export async function loadApprovalSettings(): Promise<ApprovalSettings> {
+  const [preferences, rules, team, teamRules] = await Promise.all([
+    api<{ enabled: boolean; autoReview: boolean }>(APPROVAL_PREFERENCES_PATH),
+    everyPage<ApprovalRule>(APPROVAL_RULES_PATH, "approvalRules"),
+    api<{ enforceAutoReview: boolean; customRulesEnabled: boolean }>(
+      `${ORGANIZATION}/approval-settings`,
+    ),
+    everyPage<ApprovalRule>(`${ORGANIZATION}/approval-rules`, "approvalRules"),
+  ]);
+  return {
+    enabled: preferences.enabled,
+    rules,
+    teamRules,
+    preferences: {
+      enabled: preferences.enabled,
+      autoReview: preferences.autoReview,
+    },
+    team: {
+      enforceAutoReview: team.enforceAutoReview,
+      customRulesEnabled: team.customRulesEnabled,
+    },
+  };
+}
+/** A conversation, as the API lists it. */
 export type Conversation = {
   id: string;
   name: string;
-  agentIds: string[];
+  botIds: string[];
   active: boolean;
 };
+/** One thing said in a conversation, as the API lists it. */
 export type TranscriptMessage = {
   id: string;
-  role: string;
-  content?: string | unknown[];
-  toolCalls?: unknown[];
+  role: "person" | "bot" | "tool" | "system";
+  text: string;
+  /** How many tools the Bot called in this message, when it called any. */
+  toolCalls?: number;
 };
 export type ApprovalInbox = {
   requests: {
@@ -110,7 +191,7 @@ export type ApprovalInbox = {
     channelId?: string;
   }[];
 };
-/** A Bot as `GET /api/agents` returns it. */
+/** A Bot as the API's `listBots` and `getBot` return it, in the fields this app reads. */
 export type Bot = {
   id: string;
   name: string;
@@ -119,33 +200,48 @@ export type Bot = {
   mine: boolean;
   canManage: boolean;
 };
-export type BotLifecycle = { paused: boolean; pausedAt: string | null };
+/** The person's own state with a Bot, as the API's `getBotLifecycle` returns it. */
+export type BotLifecycle = {
+  botId: string;
+  paused: boolean;
+  pausedAt: string | null;
+};
+
+/** Every Bot this person can reach, read page by page to the end. */
+export function everyBot(): Promise<Bot[]> {
+  return everyPage<Bot>(`${ORGANIZATION}/bots`, "bots");
+}
+
+/** One Bot's address in the API. */
+export function botPath(botId: string): string {
+  return `${ORGANIZATION}/bots/${encodeURIComponent(botId)}`;
+}
 /**
- * Something a Bot's check-in found that needs the person, as `GET /api/proactive/suggestions` lists
+ * Something a Bot's check-in found that needs the person, as the API's check-in items list
  * it (open ones only). `detail` says why it was raised; `sourceApp` is the app it was read in.
  */
 export type CheckInItem = {
   id: string;
-  agentId: string;
+  botId: string;
   title: string;
   detail: string;
   sourceApp: string | null;
   sourceLink: string | null;
   createdAt: string;
 };
-/** What `POST /api/proactive/suggestions/:id/start` made of an item: a task in its own conversation. */
-export type StartedItem = { task: { id: string; channelId: string } };
+/** What starting an item made of it: a task in its own conversation. */
+export type StartedItem = { task: { id: string; conversationId: string } };
 export type TaskStatus =
   | "needs_input"
   | "working"
   | "resolved"
   | "failed"
   | "ready_for_review";
-/** A task started from an item, as `GET /api/tasks` lists it. */
+/** A task started from an item, as the API lists it. */
 export type BotTask = {
   id: string;
-  agentId: string;
-  channelId: string;
+  botId: string;
+  conversationId: string;
   title: string;
   status: TaskStatus;
   /** Why its turn couldn't finish, while failed. */
@@ -162,12 +258,12 @@ export type RoutineStatus =
   | "waiting";
 export type Routine = {
   id: string;
-  agentId: string;
+  botId: string;
   /** Display text from the server; never parsed here. */
   schedule: string;
   timezone: string;
   instruction: string;
-  channel: { id: string; name: string | null; gone: boolean };
+  conversation: { id: string; name: string | null; gone: boolean };
   enabled: boolean;
   nextRunAt: string;
   lastRun: { status: RoutineStatus | null; at: string | null } | null;
@@ -218,10 +314,8 @@ export type BotGrant = {
   action: { description: string } | null;
   skill: { slug: string; title: string; summary: string } | null;
 };
-/** One page of a Bot's grants. */
-export type BotGrantPage = { grants: BotGrant[]; nextCursor: string | null };
 export type SkillSummary = { slug: string; title: string; summary: string };
-/** Who drives a Bot's computer, as `GET /api/computers/:botId/control` answers. */
+/** Who drives a Bot's computer: the API's ComputerControl, as `GET .../computers/{botId}/control` answers. */
 export type ControlState = {
   holder: "bot" | "human";
   requested: boolean;
@@ -230,6 +324,7 @@ export type ControlState = {
   request?: { id: string; status: string; reason: string };
   secretWanted?: string;
 };
+/** One frame of a Bot's screen: the API's ComputerFrame. */
 export type Screenshot = {
   base64: string;
   width: number;

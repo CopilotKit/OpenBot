@@ -97,7 +97,7 @@ import {
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
-import { publishedSandboxedQueryOptions } from "@/lib/sandboxed/queries";
+import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import {
   askChannelAgent,
   messageText,
@@ -501,7 +501,7 @@ function describeAttachments(attachments: readonly Attachment[]): string {
 function authoredComponents(): ReadonlySet<string> {
   return new Set(
     (
-      queryClient.getQueryData(publishedSandboxedQueryOptions().queryKey) ?? []
+      queryClient.getQueryData(publishedPlaygroundQueryOptions().queryKey) ?? []
     ).map((component) => component.name),
   );
 }
