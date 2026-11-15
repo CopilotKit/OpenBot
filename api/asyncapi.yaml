@@ -26,11 +26,6 @@ info:
     that opens the socket.
 
 
-    The three sockets OpenBot serves were first at other addresses, which are
-    still served for apps released before these and are described here as the
-    channels whose names start with legacy. They take a session only.
-
-
     A voice call that the server sets up over WebRTC has no socket to
     describe: its audio and its events travel on a peer connection, which is
     outside what AsyncAPI describes. The REST operation that starts a call
@@ -164,90 +159,6 @@ channels:
     parameters:
       organizationId:
         $ref: "#/components/parameters/organizationId"
-      botId:
-        $ref: "#/components/parameters/botId"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      terminalOutput:
-        $ref: "#/components/messages/TerminalOutput"
-      terminalSnapshot:
-        $ref: "#/components/messages/TerminalSnapshot"
-      terminalReady:
-        $ref: "#/components/messages/TerminalReady"
-      terminalError:
-        $ref: "#/components/messages/TerminalError"
-      terminalInput:
-        $ref: "#/components/messages/TerminalInput"
-      terminalResize:
-        $ref: "#/components/messages/TerminalResize"
-      terminalAck:
-        $ref: "#/components/messages/TerminalAck"
-  legacyConversationEvents:
-    address: /api/channels/events
-    title: Conversation events, at the earlier address
-    description: >-
-      The conversationEvents channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      conversationActivity:
-        $ref: "#/components/messages/ConversationActivity"
-      conversationResync:
-        $ref: "#/components/messages/ConversationResync"
-  legacyBotScreen:
-    address: /api/computers/{botId}/stream
-    title: A Bot's screen, at the earlier address
-    description: >-
-      The botScreen channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    parameters:
-      botId:
-        $ref: "#/components/parameters/botId"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      screenHello:
-        $ref: "#/components/messages/ScreenHello"
-      screenFrame:
-        $ref: "#/components/messages/ScreenFrame"
-      screenError:
-        $ref: "#/components/messages/ScreenError"
-      screenInputError:
-        $ref: "#/components/messages/ScreenInputError"
-      screenFrameReceived:
-        $ref: "#/components/messages/ScreenFrameReceived"
-      screenMouse:
-        $ref: "#/components/messages/ScreenMouse"
-      screenWheel:
-        $ref: "#/components/messages/ScreenWheel"
-      screenKey:
-        $ref: "#/components/messages/ScreenKey"
-      screenText:
-        $ref: "#/components/messages/ScreenText"
-  legacyBotTerminal:
-    address: /api/computers/{botId}/terminal
-    title: A Bot's terminal, at the earlier address
-    description: >-
-      The botTerminal channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    parameters:
       botId:
         $ref: "#/components/parameters/botId"
     bindings:
@@ -511,59 +422,6 @@ operations:
       - $ref: "#/channels/threadStream/messages/threadHeartbeat"
       - $ref: "#/channels/threadStream/messages/threadStopRun"
       - $ref: "#/channels/threadStream/messages/threadLeave"
-  sendLegacyConversationEvents:
-    action: send
-    title: Tell a person what changed in their conversations, at the earlier address
-    summary: A conversation the person is in changed, or everything may have.
-    channel:
-      $ref: "#/channels/legacyConversationEvents"
-    messages:
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationActivity"
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationResync"
-  sendLegacyBotScreen:
-    action: send
-    title: Show a Bot's screen, at the earlier address
-    summary: The screen's pictures, and why something could not be shown or done.
-    channel:
-      $ref: "#/channels/legacyBotScreen"
-    messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenHello"
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrame"
-      - $ref: "#/channels/legacyBotScreen/messages/screenError"
-      - $ref: "#/channels/legacyBotScreen/messages/screenInputError"
-  receiveLegacyBotScreenInput:
-    action: receive
-    title: Take a person's mouse and keyboard, at the earlier address
-    summary: The person's input to the Bot's computer, and each picture's receipt.
-    channel:
-      $ref: "#/channels/legacyBotScreen"
-    messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrameReceived"
-      - $ref: "#/channels/legacyBotScreen/messages/screenMouse"
-      - $ref: "#/channels/legacyBotScreen/messages/screenWheel"
-      - $ref: "#/channels/legacyBotScreen/messages/screenKey"
-      - $ref: "#/channels/legacyBotScreen/messages/screenText"
-  sendLegacyBotTerminal:
-    action: send
-    title: Show a Bot's terminal, at the earlier address
-    summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
-    channel:
-      $ref: "#/channels/legacyBotTerminal"
-    messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalOutput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalSnapshot"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalReady"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalError"
-  receiveLegacyBotTerminalInput:
-    action: receive
-    title: Take a person's typing, at the earlier address
-    summary: What the person typed, the size of their terminal, and how much they have drawn.
-    channel:
-      $ref: "#/channels/legacyBotTerminal"
-    messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalInput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalResize"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalAck"
   receiveTrajectoryEvents:
     action: receive
     title: Take what the Recorder captured
