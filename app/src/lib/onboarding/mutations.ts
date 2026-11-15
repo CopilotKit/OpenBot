@@ -1,7 +1,11 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  advanceOnboarding,
+  completeOnboarding,
+} from "@/lib/api/generated/people/people";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { authKeys, type OnboardingStatus } from "@/lib/auth/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
 const FALLBACK = "Onboarding could not be saved";
@@ -26,24 +30,31 @@ function invalidateCurrentUser(queryClient: QueryClient) {
 
 export function advanceOnboardingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (step: number): Promise<OnboardingStatus> =>
-      client("/api/me/onboarding", "onboarding", {
-        method: "POST",
-        body: { step },
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (step: number): Promise<OnboardingStatus> =>
+      (
+        await advanceOnboarding(
+          ORGANIZATION_ID,
+          "me",
+          { step },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: FALLBACK },
+        )
+      ).onboarding,
     onSuccess: () => invalidateCurrentUser(queryClient),
   });
 }
 
 export function completeOnboardingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (): Promise<OnboardingStatus> =>
-      client("/api/me/onboarding", "onboarding", {
-        method: "POST",
-        body: { completed: true },
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (): Promise<OnboardingStatus> =>
+      (
+        await completeOnboarding(
+          ORGANIZATION_ID,
+          "me",
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: FALLBACK },
+        )
+      ).onboarding,
     /*
      * The roster too, not just the user: finishing the wizard navigates straight into the app, and
      * a channel list cached from before it — or mid-fetch while the wizard held the screen — lands

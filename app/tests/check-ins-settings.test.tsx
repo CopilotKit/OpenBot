@@ -21,7 +21,9 @@ import { ProactiveResearchSettings } from "@/components/suggestions/proactive-pa
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -58,21 +60,22 @@ function serving() {
       skin: "openbot",
       proactive,
     });
-    if (path === "/api/settings/preferences" && method === "PATCH") {
+    if (path === PREFERENCES_PATH && method === "PATCH") {
       const body = JSON.parse(String(init?.body));
       writes.push({ request: `${method} ${path}`, body });
       proactive = body.proactive;
-      return Response.json({ preferences: preferences() });
+      return preferencesResponse({ preferences: preferences() });
     }
-    if (path === "/api/settings/preferences")
-      return Response.json({ preferences: preferences() });
-    if (path === "/api/proactive/settings")
+    if (path === PREFERENCES_PATH)
+      return preferencesResponse({ preferences: preferences() });
+    if (pathOf(path) === CHECK_INS_PATH)
       return Response.json({
-        settings: [
+        nextCursor: null,
+        checkIns: [
           {
             id: "p1",
-            agentId: "expenses",
-            channelId: "c1",
+            botId: "expenses",
+            conversationId: "c1",
             focus: "",
             enabled: true,
             intervalMinutes: 60,
@@ -134,7 +137,7 @@ test("turning check-ins off for all Bots saves it and says so", async () => {
   await waitFor(() =>
     expect(writes).toEqual([
       {
-        request: "PATCH /api/settings/preferences",
+        request: `PATCH ${PREFERENCES_PATH}`,
         body: { proactive: "off" },
       },
     ]),

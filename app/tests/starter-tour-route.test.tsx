@@ -28,8 +28,27 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
+import { ME_PATH, meResponse, PREFERENCES_PATH } from "./accounts-api";
+import {
+  DEPLOYMENT_PATH,
+  MY_CAPABILITIES_PATH,
+  SETUP_CHECKLIST_PATH,
+} from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPath,
+  ROUTE_PATH,
+} from "./conversations-api";
+import {
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
 const NativeResponse = globalThis.Response;
@@ -71,8 +90,8 @@ const channel: AgentChannel = {
 /** The run inputs that actually left the browser, in order. */
 let runs: RunAgentInput[] = [];
 let runPaths: string[] = [];
-let creates: { agentIds: string[] }[] = [];
-let chosen: { agentId?: string; text?: string }[] = [];
+let creates: { botIds: string[] }[] = [];
+let chosen: { botId?: string; text?: string }[] = [];
 let preferences: { starterTourChannelId?: string } = {};
 let failModel = false;
 let modelSaveGate: Promise<void> | undefined;
@@ -113,8 +132,8 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/me")
-        return NativeResponse.json({
+      if (url.pathname === ME_PATH)
+        return meResponse({
           user: {
             id: "person",
             name: "Sam",
@@ -123,37 +142,41 @@ beforeAll(() => {
             onboarding: null,
           },
         });
-      if (url.pathname === "/api/settings/preferences")
-        return NativeResponse.json({ preferences });
-      if (url.pathname === "/api/capabilities")
+      if (url.pathname === PREFERENCES_PATH)
+        return NativeResponse.json(preferences);
+      if (url.pathname === DEPLOYMENT_PATH)
         return NativeResponse.json({ generativeUi: true });
-      if (url.pathname === "/api/setup")
+      if (url.pathname === SETUP_CHECKLIST_PATH)
         return NativeResponse.json({
-          checklist: {
-            audience: "admin",
-            rows: [{ id: "computer", ready: true }],
-          },
+          audience: "admin",
+          rows: [{ id: "computer", ready: true }],
         });
-      if (url.pathname === "/api/channels" && method === "GET")
-        return NativeResponse.json({ channels: [], nextCursor: null });
-      if (url.pathname === "/api/channels" && method === "POST") {
+      if (url.pathname === CONVERSATIONS_PATH && method === "GET")
+        return NativeResponse.json({ conversations: [], nextCursor: null });
+      if (url.pathname === CONVERSATIONS_PATH && method === "POST") {
         const body = JSON.parse(String(init?.body));
         creates.push(body);
         channel.id = `tour-channel-${creates.length}`;
         channel.threadId = `tour-thread-${creates.length}`;
-        channel.agentIds = body.agentIds;
+        channel.agentIds = body.botIds;
         preferences.starterTourChannelId ??= channel.id;
-        return NativeResponse.json({ channel }, { status: 201 });
+        return NativeResponse.json(
+          { conversation: conversationOf(channel) },
+          { status: 201 },
+        );
       }
-      if (url.pathname === "/api/route") {
+      if (url.pathname === ROUTE_PATH) {
         chosen.push(JSON.parse(String(init?.body)));
         // The response cannot override the explicitly selected starter recipient.
         return NativeResponse.json({
-          agentId: "other-bot",
+          botId: "other-bot",
+          name: "Other Bot",
           reason: "fixture override",
+          fallback: false,
+          viaMention: false,
         });
       }
-      if (url.pathname === "/api/models")
+      if (catalogueView(url) === "offered")
         return NativeResponse.json({
           provider: "openai",
           source: "openai",
@@ -169,20 +192,21 @@ beforeAll(() => {
             },
           ],
         });
-      if (url.pathname.endsWith("/model")) {
+      if (modelChoiceConversation(url.pathname)) {
         if (method === "PUT") {
           await modelSaveGate;
           if (failModel)
-            return NativeResponse.json(
-              { error: "Model save failed. Try again." },
-              { status: 500 },
+            return problemResponse(
+              500,
+              "INTERNAL_SERVER_ERROR",
+              "Model save failed. Try again.",
             );
           saved = JSON.parse(String(init?.body));
         }
         return NativeResponse.json(saved);
       }
       if (
-        url.pathname === `/api/channels/${channel.id}` &&
+        url.pathname === conversationPath(channel.id) &&
         method === "DELETE"
       ) {
         deletes++;
@@ -197,16 +221,20 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({
+      if (url.pathname === botGrantsPath(BOT))
+        return botGrantsResponse({
           tools: [],
           skills: [],
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -242,10 +270,15 @@ beforeAll(() => {
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
         ]);
       }
-      if (/\/api\/channels\/[^/]+(\/(activity|busy|read))?$/.test(url.pathname))
-        return method === "GET"
-          ? NativeResponse.json({ channel })
-          : new NativeResponse(null, { status: 204 });
+      if (url.pathname === conversationPath(channel.id) && method === "GET")
+        return NativeResponse.json({ conversation: conversationOf(channel) });
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy|mark-read)$/.test(
+          url.pathname,
+        ) &&
+        method === "POST"
+      )
+        return new NativeResponse(null, { status: 204 });
       if (/\/threads\/[^/]+(\/messages)?$/.test(url.pathname))
         return NativeResponse.json({ messages: [] });
       throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);
@@ -352,8 +385,8 @@ for (const path of ["/", `/channel/new?agent=${BOT}`]) {
       await view.findByRole("button", { name: STARTER_SUGGESTIONS[0].title }),
     );
     await waitFor(() => expect(runs).toHaveLength(1), { timeout: 5000 });
-    expect(creates).toEqual([{ agentIds: [BOT] }]);
-    expect(chosen[0]?.agentId).toBe(BOT);
+    expect(creates).toEqual([{ botIds: [BOT] }]);
+    expect(chosen[0]?.botId).toBe(BOT);
     expect(
       runs[0]?.messages.find((message) => message.role === "user")?.content,
     ).toBe(STARTER_SUGGESTIONS[0].message);

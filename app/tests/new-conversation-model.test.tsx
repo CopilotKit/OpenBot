@@ -19,7 +19,22 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import type { ConversationModel, ModelCatalogue } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPath,
+  ROUTE_PATH,
+} from "./conversations-api";
+import {
+  catalogueBody,
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -32,7 +47,7 @@ import { settleReactWork } from "./settle-react-work";
  *
  * Everything below the HTTP boundary is real: the route, its composer and picker, the start
  * sequence, the hand-over to `ChannelChat` and the run request. Only `fetch` is a fixture, and its
- * model endpoints answer and refuse as `GET`/`PUT /api/channels/:id/model` and `GET /api/models` do.
+ * model addresses answer and refuse as the API's `model-catalogue` and a person's `model-choices` do.
  */
 
 const NativeResponse = globalThis.Response;
@@ -122,12 +137,16 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/channels" && method === "POST") {
+      if (url.pathname === CONVERSATIONS_PATH && method === "POST") {
         trail.push("create");
-        return NativeResponse.json({ channel }, { status: 201 });
+        return NativeResponse.json(
+          { conversation: conversationOf(channel) },
+          { status: 201 },
+        );
       }
-      if (url.pathname === "/api/models") return NativeResponse.json(catalogue);
-      if (url.pathname === `/api/channels/${channel.id}/model`) {
+      if (catalogueView(url) === "offered")
+        return NativeResponse.json(catalogueBody(catalogue));
+      if (modelChoiceConversation(url.pathname) === channel.id) {
         if (method === "PUT") {
           const pick = JSON.parse(String(init?.body)) as ConversationModel;
           trail.push(`save ${pick.model} ${pick.effort}`);
@@ -135,32 +154,43 @@ beforeAll(() => {
             (option) => option.id === (pick.model ?? catalogue.default),
           );
           if (!runs)
-            return NativeResponse.json(
-              { error: "That model isn't available. Pick another one." },
-              { status: 400 },
+            return problemResponse(
+              400,
+              "VALIDATION_ERROR",
+              "That model isn't available. Pick another one.",
             );
           if (pick.effort !== null && !runs.efforts?.includes(pick.effort))
-            return NativeResponse.json(
-              { error: `${runs.label} doesn't take that thinking effort.` },
-              { status: 400 },
+            return problemResponse(
+              400,
+              "VALIDATION_ERROR",
+              `${runs.label} doesn't take that thinking effort.`,
             );
           saved = { model: pick.model, effort: pick.effort };
         }
         return NativeResponse.json(saved);
       }
-      if (url.pathname === "/api/route")
-        return NativeResponse.json({ agentId: BOT, reason: "chosen" });
+      if (url.pathname === ROUTE_PATH)
+        return NativeResponse.json({
+          botId: BOT,
+          name: bot.name,
+          reason: "chosen",
+          fallback: false,
+          viaMention: false,
+        });
       const bots = answerBotsList(url, init, { visible: [bot] });
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ tools: [], skills: [] });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -185,10 +215,15 @@ beforeAll(() => {
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
         ]);
       }
-      if (/\/api\/channels\/[^/]+(\/(activity|busy|read))?$/.test(url.pathname))
-        return method === "GET"
-          ? NativeResponse.json({ channel })
-          : new NativeResponse(null, { status: 204 });
+      if (url.pathname === conversationPath(channel.id) && method === "GET")
+        return NativeResponse.json({ conversation: conversationOf(channel) });
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy|mark-read)$/.test(
+          url.pathname,
+        ) &&
+        method === "POST"
+      )
+        return new NativeResponse(null, { status: 204 });
       if (/\/threads\/[^/]+(\/messages)?$/.test(url.pathname))
         return NativeResponse.json({ messages: [] });
       throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);

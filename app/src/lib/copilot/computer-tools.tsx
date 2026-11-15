@@ -2,22 +2,23 @@ import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
+import { ComputerView } from "@/components/computer/computer-view";
+import { HelpRequestCard } from "@/components/computer/help-request-card";
 import {
   commandStatus,
   TerminalBlock,
 } from "@/components/computer/terminal-block";
-import { ComputerView } from "@/components/computer/computer-view";
-import { HelpRequestCard } from "@/components/computer/help-request-card";
-import { tryClient } from "@/lib/client";
+import { reportBotDecline } from "@/lib/api/generated/bots/bots";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
-import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
 import {
   runBrowserRead,
   runHelpRequest,
   runNavigation,
 } from "@/lib/computers/handoff";
+import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
 import {
   type ToolCallContext,
   useActiveBotHolder,
@@ -654,13 +655,17 @@ export function ComputerTools() {
       { signal, agent }: ToolCallContext = {},
     ) => {
       try {
-        const response = await tryClient(
-          `/api/agents/${encodeURIComponent(botOf(agent))}/declined`,
-          { method: "POST", body: input, signal },
+        await reportBotDecline(
+          ORGANIZATION_ID,
+          botOf(agent),
+          {
+            reason: input.reason,
+            ...(input.request !== undefined ? { request: input.request } : {}),
+          },
+          { "Idempotency-Key": idempotencyKey() },
+          { signal },
         );
-        return response.ok
-          ? "Recorded. Now tell the person what you decided and why."
-          : "That could not be recorded. Tell the person what you decided anyway.";
+        return "Recorded. Now tell the person what you decided and why.";
       } catch {
         // Audit bookkeeping must not prevent the Bot from answering.
         return "That could not be recorded. Tell the person what you decided anyway.";

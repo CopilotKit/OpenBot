@@ -1,3 +1,10 @@
+# The server applies its own migrations when it starts and does the scheduled work itself (firing
+# routines, cleaning up unsent attachments, suspending idle computers), so nothing in this release
+# starts the `worker` or `migrate` service below. OpenBot Desktop, scripts/start.sh and the updater
+# read this one line to tell this file from an earlier release's, where both are in use. Compose
+# ignores a top-level `x-` field.
+x-openbot-scheduled-work: server
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -10,9 +17,10 @@ services:
     # says it plainly: isolation is the container's job, a shell can reach whatever the container
     # can reach.
     #
-    # `migrate` reaches this by name, and so do `server` and `worker` when an installed OpenBot runs
-    # them; those are all that belong here. In local development the API server and the worker run
-    # on the host instead and connect through the published port below.
+    # `server` reaches this by name, and it is what belongs here: it applies its own migrations
+    # when it starts and does its scheduled work itself. (`migrate` and `worker` are here too, for
+    # this one release, and nothing starts them: see each.) Anything on the host connects through
+    # the published port below.
     environment:
       POSTGRES_DB: openbot
       POSTGRES_USER: openbot
@@ -43,9 +51,24 @@ services:
     networks:
       - data
 
-  migrate:
-    # PULLED, NEVER BUILT HERE. This image, and the computer's and the supervisor's below, are the
-    # published OpenBot images, all at one tag: OPENBOT_BACKEND_TAG, set in backend-images.env.
+  # OpenBot itself, the API and the app it serves, as an installed OpenBot runs it.
+  #
+  # BEHIND A PROFILE, so a plain `docker compose up -d` starts only what it always did. Naming
+  # `server` on the command line still starts it, profile or not, which is how `scripts/start.sh`
+  # and an installed OpenBot ask for it.
+  #
+  # One image and one process: the API, the built app at `APP_DIST_DIR`, the database migrations,
+  # which it applies when it starts, and the scheduled work (firing routines, cleaning up unsent
+  # attachments, suspending idle computers). A machine with that image needs Docker and nothing
+  # else, which is the point.
+  server:
+    profiles: ["openbot"]
+    # ONE IMAGE, AND A COMMAND FOR EACH ROLE. The OpenBot image runs this server and every Bot's
+    # computer. Started with no command it is the whole of OpenBot in one container, so each service
+    # here names the part it is: this one the server, `agent-computer` below the computer.
+    #
+    # PULLED, NEVER BUILT HERE. This image and the supervisor's below are the published OpenBot
+    # images, both at one tag: OPENBOT_BACKEND_TAG, set in backend-images.env.
     # scripts/start.sh, CI and Desktop's local build read that file and hand the tag to Compose
     # here. SERVER_IMAGE still wins over it, which is how OpenBot Desktop pins a
     # release's digest.
@@ -56,35 +79,13 @@ services:
     #
     # `missing` rather than `always`: a `sha-` tag names one build and never moves, so an image this
     # machine already has is the right one. OpenBot Desktop sets `missing` too.
-    image: &server-image ${SERVER_IMAGE:-ghcr.io/copilotkit/openbot-server:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
+    image: &server-image ${SERVER_IMAGE:-ghcr.io/copilotkit/openbot:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    # The server's own migrator, which is what this image ships, and not `drizzle-kit`, which will
-    # skip a migration stamped below what the database has already recorded and still report
-    # success. The local stack is a developer's database and therefore one of the places that
-    # happens.
-    command: ["bun", "scripts/migrate.ts"]
-    environment:
-      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-    networks:
-      - data
-
-  # OpenBot itself, the API and the app it serves, as an installed OpenBot runs it.
-  #
-  # BEHIND A PROFILE, so a plain `docker compose up -d` starts only what it always did. Naming
-  # `server` on the command line still starts it, profile or not, which is how `scripts/start.sh`
-  # and an installed OpenBot ask for it.
-  #
-  # The image `migrate` runs, because it is one image: the API, the built app at `APP_DIST_DIR`, and
-  # the worker below. A machine with that image needs Docker and nothing else, which is the point.
-  server:
-    profiles: ["openbot"]
-    # See migrate above for where the image comes from.
-    image: *server-image
-    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # The server, and nothing else in the image: the executable and its command, from the directory
+    # the server reads its migrations from. Naming the entrypoint drops the image's own, and with it
+    # everything else the image would have started.
+    entrypoint: ["/app/bin/openbot", "server"]
+    working_dir: /app/server
     # The deployment's settings, `.env`. Optional, because `docker compose config` and a first start
     # both come before anything wrote it. `scripts/start.sh` names a file of its own instead, `.env`
     # with its run's environment on top (scripts/server-env.ts), removed once the container exists.
@@ -129,10 +130,23 @@ services:
       OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       INTELLIGENCE_API_URL: ${INTELLIGENCE_CONTAINER_API_URL:-${INTELLIGENCE_API_URL:-}}
       INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:-${INTELLIGENCE_GATEWAY_WS_URL:-}}
-      # The browser opens the gateway too, at the address the server gives it in `/info`, and the
-      # browser is on the host. So it gets the deployment's own address, the one a host server would
-      # have used, whatever this container uses itself.
-      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-}
+      # ONE ADDRESS. The browser opens the gateway's socket too, at the address the server gives it,
+      # and with Intelligence on this machine that address is OpenBot's own: the server carries the
+      # socket at `/api/intelligence/client`, so the app, the Recorder and every other client are
+      # given the address they already reached OpenBot at and never the gateway's own port. On
+      # when the gateway has a container address, which is what an Intelligence on this machine is
+      # given (OpenBot Desktop and `scripts/start.sh` both write it for a loopback address). An
+      # Intelligence somewhere else, managed Intelligence among them, has a host of its own that
+      # the browser reaches itself, as before.
+      #
+      # Whoever starts this service may say otherwise with OPENBOT_GATEWAY_PROXY, set empty for
+      # off, and then names the browser's own way to the gateway in
+      # OPENBOT_BROWSER_GATEWAY_WS_URL. `scripts/start.sh` does, for a checkout with no
+      # OPENBOT_PUBLIC_URL: the Recorder is not on the page and needs a whole address, which the
+      # server can only write on a public URL, so there the browser and the Recorder keep the
+      # gateway's own port. OpenBot Desktop always writes the public URL and sets neither.
+      INTELLIGENCE_GATEWAY_PROXY: ${OPENBOT_GATEWAY_PROXY-${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:+on}}
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${OPENBOT_BROWSER_GATEWAY_WS_URL:-}
       # The person's own browser, where a host-side computer runs it (scripts/start.sh's personal
       # edition), listening on the host's loopback, and its container address when one is given.
       # Unset, the person's browser runs on the computers the Bots run on and shows in the page.
@@ -152,7 +166,6 @@ services:
       KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-}
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
-      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-openbot-dev-worker-secret}
       INTELLIGENCE_API_KEY: ${INTELLIGENCE_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -209,9 +222,10 @@ services:
     # machine's loopback and the address it gives is.
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
+    # The database, ready to answer, because the server applies its migrations before it listens.
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://127.0.0.1:3001/health'); process.exit(r.ok ? 0 : 1)\""]
@@ -224,27 +238,47 @@ services:
       - data
       - default
 
-  # The routines worker, from the same image: the server's own sweep in a loop, which a local
-  # deployment runs rather than a CronJob.
+  # DEFINED FOR THIS ONE RELEASE, AND STARTED BY NOTHING IN IT. An OpenBot Desktop app from the
+  # release before reads a Compose file as current only when it defines `worker`, and starts the
+  # service by name. The server does the scheduled work itself now, so started that way this says
+  # so and waits. Nothing depends on it. It goes in the next release.
   worker:
     profiles: ["openbot"]
     image: *server-image
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
-    command: ["bun", "../worker/src/index.ts"]
-    # Its three settings and nothing else. It is handed no `.env`: it does not read the deployment's
-    # configuration, and the less this process holds, the less a mistake in it can spend.
+    # The executable and the command, in full, as `server` above: nothing else in the image starts.
+    entrypoint: ["/app/bin/openbot"]
+    command: ["worker"]
+    working_dir: /app/server
+    # No health check. The image's own asks after a server on its port, which this container does
+    # not run, so it would be reported unhealthy for ever, and an app that starts its services with
+    # `up --wait` would be told the start failed.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    networks:
+      - data
+
+  # DEFINED FOR THIS ONE RELEASE, AND STARTED BY NOTHING IN IT. An OpenBot Desktop app from the
+  # release before asks for this service's image by name. The server applies its own migrations
+  # when it starts, so run by hand this finds nothing left to do and exits. Nothing depends on it.
+  # It goes in the next release.
+  migrate:
+    profiles: ["openbot"]
+    image: *server-image
+    pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    entrypoint: ["/app/bin/openbot"]
+    command: ["migrate"]
+    working_dir: /app/server
+    # No health check, as `worker` above: this runs to its end and is never a server.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
-      SERVER_INTERNAL_URL: http://server:3001
-      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:-openbot-dev-worker-secret}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      server:
-        condition: service_started
-    restart: unless-stopped
-    # `data` only. It reaches the database there, and the server, which is on it too. Nothing a Bot
-    # can reach can reach this.
+      postgres:
+        condition: service_healthy
+    restart: "no"
     networks:
       - data
 
@@ -269,10 +303,17 @@ services:
 
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
-    # Named rather than Compose-derived, because the supervisor starts one computer per Bot from this
-    # image by name. Pulled like the server's; see migrate above.
-    image: &computer-image ${COMPUTER_IMAGE:-ghcr.io/copilotkit/openbot-agent-computer:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
+    # The OpenBot image again, the one `server` runs, started as a computer. Named rather than
+    # Compose-derived, because the supervisor starts one computer per Bot from this image by name.
+    # COMPUTER_IMAGE is still a setting of its own: an OpenBot Desktop app pins it from a release's
+    # image list, where it names the same image as SERVER_IMAGE.
+    image: &computer-image ${COMPUTER_IMAGE:-ghcr.io/copilotkit/openbot:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # THE COMPUTER, AND NOTHING ELSE IN THE IMAGE. A container of its own, so what a Bot's shell can
+    # read is what this service is given below and not one setting of the server's: no database
+    # address, no keys, no licence. The server's executable is in the image, and from here it has
+    # none of those either, so it does not start.
+    entrypoint: ["/app/bin/openbot-computer"]
     # A Bot's shell runs `ping`, which needs raw ICMP sockets. Docker grants NET_RAW by default and
     # Podman does not, so without this ping fails with "Operation not permitted" on Podman (the
     # Desktop's engine on Windows), even as root. Asked for here so both engines give the same.
@@ -301,6 +342,8 @@ services:
       # shutdown notes tell you to use -- hands the container an empty string instead. Reaches only
       # a loopback-bound port; a deployment sets a real value in .env.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # Where the computer listens. Said here because the image's own PORT is the server's.
+      PORT: "4100"
       # Headed by default: full Chromium on the container's own X server, behind the same streamed
       # screen, which bot checks such as Cloudflare's challenge far less than headless. `headless`
       # still chooses headless, for a smaller footprint where the sites a Bot uses do not mind.
@@ -331,7 +374,8 @@ services:
       # The laptop's loopback addresses a browser here is handed, as this container reaches them
       # (`<port>=<host>:<port>`, comma-separated). The Recorder reaches OpenBot only at https or at
       # loopback, so on a laptop it is given `http://127.0.0.1:<port>`, which in here is this
-      # container. OpenBot Desktop sets it; unset, nothing is relayed (loopback-relay.ts).
+      # container. OpenBot Desktop and scripts/start.sh set it; unset, nothing is relayed
+      # (loopback-relay.ts).
       COMPUTER_LOOPBACK_RELAYS: ${COMPUTER_LOOPBACK_RELAYS:-}
     # Where a relay above sends a local Intelligence gateway: this machine. As for the server.
     extra_hosts:
@@ -353,7 +397,7 @@ services:
   # Each Bot gets a container with its own files, browser session and processes. The Docker socket is
   # root-equivalent on the host, so only the supervisor holds it and only exposes Bot-level verbs.
   supervisor:
-    # Pulled like the server's; see migrate above.
+    # Pulled like the server's; see server above.
     image: ${SUPERVISOR_IMAGE:-ghcr.io/copilotkit/openbot-supervisor:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
     # The same file, because this process does not read these itself: it forwards every EGRESS_PROXY
@@ -374,7 +418,8 @@ services:
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
       # Forwarded into every per-Bot computer the supervisor creates. Headed, as above.
       COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headed}
-      # The same image the shared computer above runs.
+      # The same image the shared computer above runs. The supervisor starts each computer it makes
+      # from it with the computer's command.
       COMPUTER_IMAGE: *computer-image
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.
@@ -386,6 +431,9 @@ services:
       # Set to runsc to run every computer under gVisor, when the host has it. Left unset each
       # computer is an ordinary container and shares the host kernel.
       COMPUTER_RUNTIME: ${COMPUTER_RUNTIME:-}
+      # Forwarded into every computer the supervisor creates, as agent-computer is given it above:
+      # Record in a Bot's browser there reaches OpenBot at this machine's loopback address too.
+      COMPUTER_LOOPBACK_RELAYS: ${COMPUTER_LOOPBACK_RELAYS:-}
     ports:
       # For the server on the host to ask for a Bot's computer.
       #
@@ -464,6 +512,10 @@ services:
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Claude Code's tool search, on the Claude Agent SDK harness. Empty leaves it on, which is
+      # what a Bot holding many app tools needs. `false` is for a gateway at ANTHROPIC_BASE_URL
+      # that cannot pass the search on: every tool then goes with every request.
+      ENABLE_TOOL_SEARCH: ${ENABLE_TOOL_SEARCH:-}
       # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
       # there either way; this variable is what tells the harness to read it.
       CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
@@ -492,7 +544,11 @@ services:
       dockerfile: agent-langgraph-agui/Dockerfile
     # Built from this checkout. A release publishes it too, and IMAGE_PULL_POLICY=missing pulls that
     # instead, as OpenBot Desktop does.
-    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph-agui:latest}
+    #
+    # The built image's tag carries the stack's project name, as the tag Compose gives a built
+    # service with no `image:` does. A tag is one name on the whole machine, so with one fixed tag a
+    # second stack's start moved it and the first stack's Bot was no longer the image it was built as.
+    image: ${LANGGRAPH_IMAGE:-${COMPOSE_PROJECT_NAME:-openbot}-agent-langgraph-agui:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, not every interface. The token is the boundary; this means an attacker needs to be

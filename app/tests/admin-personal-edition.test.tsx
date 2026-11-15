@@ -19,7 +19,15 @@ import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
+import {
+  COMPUTER_ACTIONS_PATH,
+  isOverviewRead,
+  MODEL_USAGE_PATH,
+} from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
+import { MODEL_CATALOGUE_PATH } from "./models-api";
+import { CHECK_IN_USAGE_PATH } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -84,7 +92,7 @@ function servePersonal() {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "http://localhost/").pathname;
     asked.push(path);
-    if (path === "/api/models/available")
+    if (path === MODEL_CATALOGUE_PATH)
       return Response.json({
         provider: "openai",
         source: "openai",
@@ -96,7 +104,7 @@ function servePersonal() {
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
-    if (path === "/api/admin/enterprise/models/usage")
+    if (path === MODEL_USAGE_PATH)
       return Response.json({
         days: 30,
         summary: [
@@ -111,7 +119,7 @@ function servePersonal() {
         ],
         recent: [],
       });
-    if (path === "/api/admin/proactive")
+    if (path === CHECK_IN_USAGE_PATH)
       return Response.json({
         days: 7,
         dailyRuns: 24,
@@ -188,7 +196,16 @@ test.each([
     ).toBeTruthy();
     // Nothing it would have shown was asked for.
     await settleReactWork();
-    expect(asked.filter((path) => path.startsWith("/api/admin"))).toEqual([]);
+    expect(
+      asked.filter(
+        (path) =>
+          path.startsWith("/api/admin") ||
+          isOverviewRead(path) ||
+          path.startsWith(COMPUTER_ACTIONS_PATH) ||
+          path.startsWith(PEOPLE_PATH) ||
+          path.startsWith(IDENTITY_PROVIDERS_PATH),
+      ),
+    ).toEqual([]);
   },
 );
 
@@ -219,7 +236,7 @@ test("Providers shows who serves the models and what the Bots ran on, without th
   expect(view.getByText(/3 runs by 1 person/)).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Routines shows how check-ins went, and the check-in switch is for a team", async () => {
@@ -233,7 +250,7 @@ test("Routines shows how check-ins went, and the check-in switch is for a team",
   expect(within(checkIns).getByText(FOR_A_TEAM)).toBeTruthy();
   expect(within(checkIns).queryByRole("switch")).toBeNull();
   expect(view.queryByRole("alert")).toBeNull();
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("Computers keeps the idle and network settings in place, for a team", async () => {
@@ -244,7 +261,7 @@ test("Computers keeps the idle and network settings in place, for a team", async
     ).closest("section") as HTMLElement;
     expect(within(section).getByText(FOR_A_TEAM)).toBeTruthy();
   }
-  expect(asked).not.toContain("/api/admin/enterprise");
+  expect(asked.filter(isOverviewRead)).toEqual([]);
 });
 
 test("in the team edition the same pages are the team's, and ask for what they show", async () => {
@@ -253,5 +270,5 @@ test("in the team edition the same pages are the team's, and ask for what they s
   await view.findByRole("heading", { level: 1, name: "People" });
   await settleReactWork();
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
-  expect(asked.some((path) => path.startsWith("/api/admin/people"))).toBe(true);
+  expect(asked.some((path) => path.startsWith(PEOPLE_PATH))).toBe(true);
 });

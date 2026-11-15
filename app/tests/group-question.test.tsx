@@ -14,7 +14,10 @@ import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { GroupChat } from "@/components/channels/group-chat";
 import type { GroupMessage } from "@/lib/groups";
 import { queryClient } from "@/query-client";
-import { answerBotsList } from "./bots-api";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse } from "./approvals-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import { answerGroupRead, conversationPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -81,8 +84,8 @@ beforeAll(() => {
       "http://localhost",
     );
     const method = init?.method ?? "GET";
-    if (url.pathname === "/api/me")
-      return Response.json({
+    if (url.pathname === ME_PATH)
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
     const bots = answerBotsList(url, init, {
@@ -92,24 +95,32 @@ beforeAll(() => {
       ],
     });
     if (bots) return bots;
-    if (url.pathname === `/api/groups/${CHANNEL}`) {
-      if (method === "POST") {
-        groupSends.push(JSON.parse(String(init?.body)));
-        return Response.json({ queued: true }, { status: 202 });
-      }
-      return Response.json({
-        bots: [
-          { id: ERRANDS, name: "Errand Helper" },
-          { id: BUDGET, name: "Budget Buddy" },
-        ],
-        people: [
-          { userId: "me", email: "me@example.test", name: null, creator: true },
-        ],
-        messages,
-      });
+    // A message sent to the group is taken (202) to be answered there.
+    if (
+      url.pathname === conversationPath(CHANNEL, "/messages") &&
+      method === "POST"
+    ) {
+      const sentMessage = JSON.parse(String(init?.body)) as { id: string };
+      groupSends.push(sentMessage);
+      return Response.json(
+        { id: sentMessage.id, queued: true },
+        { status: 202 },
+      );
     }
-    if (url.pathname === "/api/approvals")
-      return Response.json({
+    // The two reads the group is drawn from: its members and its lines.
+    const read = answerGroupRead(url, init, CHANNEL, {
+      bots: [
+        { id: ERRANDS, name: "Errand Helper" },
+        { id: BUDGET, name: "Budget Buddy" },
+      ],
+      people: [
+        { userId: "me", email: "me@example.test", name: null, creator: true },
+      ],
+      messages,
+    });
+    if (read) return read;
+    {
+      const approvals = approvalInboxResponse(url.pathname, {
         enabled: true,
         requests: [],
         rules: [],
@@ -130,27 +141,23 @@ beforeAll(() => {
             ]
           : [],
       });
-    if (url.pathname === "/api/bots/attention")
-      return Response.json({
-        lastPingId: null,
-        bots: [
-          {
-            agentId: ERRANDS,
-            name: "Errand Helper",
-            questions: open ? 1 : 0,
-            approvals: 0,
-            handoffs: 0,
-            unread: 0,
-            paused: false,
-            notify: "none",
-            items: 0,
-            tasks: { needsInput: 0, ready: 0, failed: 0 },
-          },
-        ],
-      });
+      if (approvals) return approvals;
+    }
+    const waiting = answerBotAttention(url, init, {
+      bots: [
+        attentionOf(ERRANDS, "Errand Helper", {
+          questions: open ? 1 : 0,
+          notify: "none",
+        }),
+      ],
+    });
+    if (waiting) return waiting;
     // As the server answers a group question: closed, the answer posted to the group, and the Bot
     // that asked queued to answer it there.
-    if (url.pathname === "/api/approvals/questions/q-1/respond") {
+    if (
+      url.pathname ===
+      "/api/v2/organizations/default/people/me/questions/q-1/respond"
+    ) {
       answers.push(JSON.parse(String(init?.body)));
       open = false;
       messages = [
@@ -158,7 +165,7 @@ beforeAll(() => {
         line("person-response:q-1", null, ANSWER),
         line(`person-response:q-1:${ERRANDS}`, ERRANDS, REPLY),
       ];
-      return Response.json({ id: "q-1", queued: true });
+      return Response.json({ id: "q-1", continueHere: false });
     }
     throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);
   }) as typeof fetch;

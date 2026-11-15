@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { explainable, WhyButton } from "@/components/what-if/why-button";
 import { useBotNames } from "@/lib/agents/bot-names";
+import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
 import {
   CALLS_RECORDED_AS_CHANGES,
   COMPUTER_ACTION_EVENT_TYPES,
@@ -38,16 +39,14 @@ import {
   oneRowPerAction,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
 import {
   auditEventsQueryOptions,
-  auditExportUrl,
   auditVocabularyQueryOptions,
+  exportAuditTrail,
 } from "@/lib/audit/queries";
-import { client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -216,9 +215,9 @@ export function AuditPage({
   });
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...skillListQueryOptions(),
     enabled: edition === "personal",
-  }).data?.skills;
+  }).data;
   const rows = withSkillTitles(
     oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
     skills,
@@ -239,13 +238,10 @@ export function AuditPage({
     setExportError(null);
     setExportCapped(null);
     try {
-      const response = await client(auditExportUrl(search), {
-        fallback: "Couldn't export these events. Try again.",
-      });
+      const file = await exportAuditTrail(search);
       // A file that stopped early must say so, or it reads as the whole trail.
-      const capped = Number(response.headers.get("x-audit-export-truncated"));
-      if (Number.isInteger(capped) && capped > 0) setExportCapped(capped);
-      const blob = await response.blob();
+      if (file.truncatedAt) setExportCapped(file.truncatedAt);
+      const blob = new Blob([file.csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;

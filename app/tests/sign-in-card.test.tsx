@@ -54,18 +54,22 @@ const signInRequest = {
   savedLogins: [],
 };
 
+/** Where the API answers a person's own sign-in requests. */
+const SIGN_IN_REQUESTS =
+  "/api/v2/organizations/default/people/me/sign-in-requests";
+
 function serving(open: (typeof signInRequest)[]) {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://127.0.0.1").pathname;
       const method = init?.method ?? "GET";
-      if (path === "/api/sign-in-requests" && method === "POST")
-        return Response.json(signInRequest, { status: 201 });
-      if (path === "/api/sign-in-requests")
-        return Response.json({ requests: open });
-      if (path === `/api/sign-in-requests/${signInRequest.id}`)
-        return Response.json(signInRequest);
-      return Response.json({ error: "Not found" }, { status: 404 });
+      if (path === SIGN_IN_REQUESTS && method === "POST")
+        return Response.json({ signInRequest }, { status: 201 });
+      if (path === SIGN_IN_REQUESTS)
+        return Response.json({ signInRequests: open, nextCursor: null });
+      if (path === `${SIGN_IN_REQUESTS}/${signInRequest.id}`)
+        return Response.json({ signInRequest });
+      return Response.json({ detail: "Not found" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -183,11 +187,11 @@ test("the private sign-in dialog spaces its sections as a dialog does", async ()
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://127.0.0.1").pathname;
-      if (path === "/api/sign-in-requests")
-        return Response.json({ requests: [offered] });
-      if (path === `/api/sign-in-requests/${offered.id}`)
-        return Response.json(offered);
-      return Response.json({ error: "Not found" }, { status: 404 });
+      if (path === SIGN_IN_REQUESTS)
+        return Response.json({ signInRequests: [offered], nextCursor: null });
+      if (path === `${SIGN_IN_REQUESTS}/${offered.id}`)
+        return Response.json({ signInRequest: offered });
+      return Response.json({ detail: "Not found" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
   );

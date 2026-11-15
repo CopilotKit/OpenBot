@@ -30,7 +30,21 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import {
+  approvalInboxResponse,
+  COMPUTER_STEPS_PATH,
+  computerStepResponse,
+} from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+  CHECK_COMPONENT,
+  checkResponse,
+} from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -245,11 +259,10 @@ beforeAll(() => {
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
-      // The gate: `POST /api/approvals/computer/:botId` in server/src/approvals/routes.ts.
-      if (url.pathname === `/api/approvals/computer/${bot}`) {
-        const body = (await request.json()) as {
-          toolCallId: string;
-          args: Record<string, unknown>;
+      // The gate: the API's computer step, which carries the conversation with the call in it.
+      if (url.pathname === COMPUTER_STEPS_PATH) {
+        const { conversation: body } = (await request.json()) as {
+          conversation: { toolCallId: string; args: Record<string, unknown> };
         };
         gated.push({ toolCallId: body.toolCallId, args: body.args });
         inFlight += 1;
@@ -257,40 +270,53 @@ beforeAll(() => {
         // Long enough that steps sent together would overlap here.
         await new Promise((resolve) => setTimeout(resolve, 30));
         inFlight -= 1;
-        return gate(String(body.args.ref));
+        return computerStepResponse(gate(String(body.args.ref)));
       }
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: [],
           rules: [],
           teamRules: [],
           questions: [],
         });
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+        if (approvals) return approvals;
+      }
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`))
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      )
         return NativeResponse.json({ botId: bot, state: "ready" });
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${bot}`)
-        return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (url.pathname === botGrantsPath(bot)) return botGrantsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/components/catalogue")
-        return NativeResponse.json({ added: [] });
+      if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
       // The Bot holds the chart, the table and the approval card.
-      if (url.pathname === `/api/components/for-agent/${bot}`)
-        return NativeResponse.json({
-          components: GALLERY.map(({ name, description }) => ({
-            name,
-            description,
-          })),
-        });
-      if (/^\/api\/components\/[^/]+\/decision$/.test(url.pathname))
-        return NativeResponse.json({ allowed: true });
+      if (url.pathname === botComponentsPath(bot))
+        return botComponentsResponse(
+          GALLERY.map(({ name, description }) => ({ name, description })),
+        );
+      if (CHECK_COMPONENT.test(url.pathname))
+        return checkResponse({ allowed: true });
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },
     { preconnect: () => undefined },

@@ -241,20 +241,22 @@ fn covers(recorded: &[String]) -> bool {
     })
 }
 
-/// Whether the deployment on disk is a release from before OpenBot's server and worker were
-/// Compose services.
+/// Whether the deployment on disk is a release from before OpenBot's server was a Compose
+/// service.
 ///
-/// Such a release ran both as Bun processes on the host, and this app no longer starts those. Its
-/// Compose file has no `server` or `worker` to raise, and its server image has no worker in it, so
-/// keeping its pin would leave an installation that used to start unable to. Answered from the
-/// Compose file because that is what is missing; an unreadable or absent file is a damaged
-/// deployment, not an old one, and the ordinary repair of the pinned version covers it.
+/// Such a release ran the server and its routines worker as Bun processes on the host, and this app
+/// no longer starts those. Its Compose file has no `server` to raise, so keeping its pin would
+/// leave an installation that used to start unable to. Answered from the Compose file because that
+/// is what is missing; an unreadable or absent file is a damaged deployment, not an old one, and
+/// the ordinary repair of the pinned version covers it.
+///
+/// `server` alone decides. Releases up to 1.0.3 define a `worker` service beside it and later ones
+/// do not, because their server does the scheduled work itself: both run in containers.
 pub fn predates_containers(root: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(root.join("docker-compose.yml")) else {
         return false;
     };
-    let services = compose_services(&text);
-    !(services.contains(&"server") && services.contains(&"worker"))
+    !compose_services(&text).contains(&"server")
 }
 
 /// The service names in a Compose file, read line by line.
@@ -1015,13 +1017,120 @@ mod tests {
         assert_eq!(connections(&count), 2);
     }
 
+    /// This release's file still defines `migrate` and `worker`, which nothing in it starts, so an
+    /// app from the release before reads the file as current.
     #[test]
-    fn this_repositorys_compose_file_runs_the_server_and_worker_as_services() {
+    fn this_repositorys_compose_file_defines_the_server_and_still_migrate_and_worker() {
         let text = include_str!("../../../docker-compose.yml");
         let services = compose_services(text);
-        for name in ["postgres", "supervisor", "server", "worker"] {
+        for name in ["postgres", "supervisor", "server", "migrate", "worker"] {
             assert!(services.contains(&name), "{name} not in {services:?}");
         }
+    }
+
+    /// How the OpenBot Desktop 1.0.2 app decides that an installed release is one it cannot run:
+    /// `predates_containers` and its `compose_services` reader, word for word from
+    /// `desktop/src-tauri/src/deployment.rs` at the tag `v1.0.2`. The rule is the same at `v1.0.3`:
+    /// that file does not differ between the two tags. Such a release it downloads again
+    /// and then refuses with "This OpenBot app needs a newer OpenBot release than the latest one."
+    mod as_the_1_0_2_and_1_0_3_apps_read_it {
+        pub fn predates_containers(text: &str) -> bool {
+            let services = compose_services(text);
+            !(services.contains(&"server") && services.contains(&"worker"))
+        }
+
+        fn compose_services(text: &str) -> Vec<&str> {
+            let mut in_services = false;
+            let mut services = Vec::new();
+            for line in text.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                if !line.starts_with(' ') {
+                    in_services = line.starts_with("services:");
+                    continue;
+                }
+                let Some(entry) = line.strip_prefix("  ").filter(|_| in_services) else {
+                    continue;
+                };
+                if entry.starts_with(' ') {
+                    continue;
+                }
+                if let Some((name, _)) = entry.split_once(':') {
+                    services.push(name.trim().trim_matches(|c| c == '"' || c == '\''));
+                }
+            }
+            services
+        }
+    }
+
+    /// A 1.0.2 or 1.0.3 app put back over an updated installation, or one of their installers on a
+    /// new computer, is handed this release's Compose file. It reads it as a release it can run, because the file
+    /// still defines `worker`; without that service it would not.
+    #[test]
+    fn the_1_0_2_and_1_0_3_apps_read_this_releases_compose_file_as_current() {
+        let current = include_str!("../../../docker-compose.yml");
+        assert!(!as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
+            current
+        ));
+        // As it reads its own release's file, and 1.0.3's.
+        for released in [
+            include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml"),
+            include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml"),
+        ] {
+            assert!(!as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
+                released
+            ));
+        }
+
+        // The same file with its `worker` service taken out, as a release that stops defining it
+        // would have it.
+        let mut without_worker = String::new();
+        let mut inside_worker = false;
+        for line in current.lines() {
+            if line.starts_with("  ") && !line.starts_with("   ") && !line.starts_with("  #") {
+                inside_worker = line.trim_end() == "  worker:";
+            } else if !line.starts_with(' ') && !line.trim().is_empty() {
+                inside_worker = false;
+            }
+            if !inside_worker {
+                without_worker.push_str(line);
+                without_worker.push('\n');
+            }
+        }
+        assert!(
+            without_worker.contains("\n  server:\n") && !without_worker.contains("\n  worker:\n")
+        );
+        assert!(as_the_1_0_2_and_1_0_3_apps_read_it::predates_containers(
+            &without_worker
+        ));
+    }
+
+    /// A release without a `worker` service is not one from before the server ran in a container.
+    /// Read as one, this app refused to start it and Install laid out another release over it.
+    #[test]
+    fn a_release_whose_server_does_the_scheduled_work_itself_runs_in_containers() {
+        let root = crate::test_support::temp_root("deployment-no-worker");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(images_path(&root), "{}").unwrap();
+        record(&root, "v1.0.3", false).unwrap();
+        for (release, text) in [
+            ("this release", include_str!("../../../docker-compose.yml")),
+            (
+                "1.0.2",
+                include_str!("../test-fixtures/compose/docker-compose-v1.0.2.yml"),
+            ),
+            (
+                "1.0.3",
+                include_str!("../test-fixtures/compose/docker-compose-v1.0.3.yml"),
+            ),
+        ] {
+            std::fs::write(root.join("docker-compose.yml"), text).unwrap();
+            assert!(!predates_containers(&root), "{release}");
+            assert!(!needs_fetch(&root, "v1.0.3"), "{release}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1298,13 +1407,10 @@ mod tests {
         record(&root, "v0.0.15", false).unwrap();
         assert!(predates_containers(&root));
 
-        // The latest release's Compose file has the server and worker in it.
+        // The latest release's Compose file has the server in it.
         let tarball = release_tarball(
             "OpenBot-0.0.16",
-            &[(
-                "docker-compose.yml",
-                "services:\n  server: {}\n  worker: {}\n",
-            )],
+            &[("docker-compose.yml", "services:\n  server: {}\n")],
         );
         let published: Vec<&str> = IMAGE_VARIABLES.iter().map(|(name, _)| *name).collect();
         let images = serde_json::to_vec(&manifest(&published)).unwrap();

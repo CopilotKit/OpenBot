@@ -28,7 +28,24 @@ import { PageShell } from "@/components/layout/page-shell";
 import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
-import { answerBotsList } from "./bots-api";
+import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  type TestInbox,
+} from "./approvals-api";
+import { answerBotAttention, answerBotsList } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  TASKS_PATH,
+} from "./conversations-api";
+import {
+  CHECK_IN_ITEMS_PATH,
+  GOALS_PATH,
+  ROUTINES_PATH,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -65,6 +82,9 @@ class QuietSocket {
 
 type Sent = { method: string; path: string; body: unknown };
 
+/** Where the table below keeps the approvals inbox, which is served as the API's separate reads. */
+const INBOX = "approvals inbox";
+
 const now = "2026-10-27T10:00:00.000Z";
 
 function channel(id: string, agentIds: string[], summary: string) {
@@ -87,7 +107,7 @@ function channel(id: string, agentIds: string[], summary: string) {
 function api(role: "admin" | "user") {
   const sent: Sent[] = [];
   const bodies: Record<string, unknown> = {
-    "/api/me": {
+    [ME_PATH]: meBody({
       user: {
         id: "u-1",
         name: "Maya Chen",
@@ -95,23 +115,17 @@ function api(role: "admin" | "user") {
         role,
         onboarding: null,
       },
+    }),
+    [DEPLOYMENT_PATH]: { transcription: true },
+    [PREFERENCES_PATH]: {
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: true,
     },
-    "/api/capabilities": { transcription: true },
-    "/api/settings/preferences": {
-      preferences: {
-        messageListEmphasis: "thread",
-        selfHostBannerDismissed: true,
-      },
-    },
-    "/api/channels": {
-      channels: [
-        channel("c-1", ["b-1"], "Renewal for the studio policy"),
-        channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
-      ],
-      nextCursor: null,
-    },
-    "/api/bots/attention": { bots: [], lastPingId: null },
-    "/api/approvals": {
+    [CONVERSATIONS_PATH]: conversationPage([
+      channel("c-1", ["b-1"], "Renewal for the studio policy"),
+      channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
+    ]),
+    [INBOX]: {
       enabled: true,
       rules: [],
       teamRules: [],
@@ -137,8 +151,10 @@ function api(role: "admin" | "user") {
         },
         {
           id: "r-decided",
-          status: "allowed",
+          status: "approved",
+          decision: "allow_once",
           createdAt: now,
+          decidedAt: now,
           action: {
             botId: "b-1",
             toolRef: "mcp/drive/share",
@@ -160,12 +176,13 @@ function api(role: "admin" | "user") {
         },
       ],
     },
-    "/api/responsibilities": {
-      responsibilities: [
+    [GOALS_PATH]: {
+      nextCursor: null,
+      goals: [
         {
           id: "resp-on",
-          agentId: "b-1",
-          channelId: "c-1",
+          botId: "b-1",
+          conversationId: "c-1",
           threadId: "t-c-1",
           title: "Keep the support inbox at zero",
           instruction: "Answer what you can, hand me the rest.",
@@ -178,8 +195,8 @@ function api(role: "admin" | "user") {
         },
         {
           id: "resp-paused",
-          agentId: "b-1",
-          channelId: "c-1",
+          botId: "b-1",
+          conversationId: "c-1",
           threadId: "t-c-1",
           title: "Chase overdue invoices",
           instruction: "",
@@ -192,15 +209,16 @@ function api(role: "admin" | "user") {
         },
       ],
     },
-    "/api/routines": {
+    [ROUTINES_PATH]: {
+      nextCursor: null,
       routines: [
         {
           id: "rt-on",
-          agentId: "b-2",
+          botId: "b-2",
           schedule: "Every weekday at 9:00",
           timezone: "UTC",
           instruction: "Post the standup notes",
-          channel: {
+          conversation: {
             id: "g-1",
             name: "Ops group",
             title: "Weekly ops review",
@@ -212,11 +230,11 @@ function api(role: "admin" | "user") {
         },
         {
           id: "rt-off",
-          agentId: "b-2",
+          botId: "b-2",
           schedule: "Every Monday at 8:00",
           timezone: "UTC",
           instruction: "Summarise last week's orders",
-          channel: {
+          conversation: {
             id: "g-1",
             name: "Ops group",
             title: "Weekly ops review",
@@ -227,13 +245,13 @@ function api(role: "admin" | "user") {
           lastRun: null,
         },
       ],
-      sweep: { lastSweptAt: now, working: true },
     },
-    "/api/proactive/suggestions": {
-      suggestions: [
+    [CHECK_IN_ITEMS_PATH]: {
+      nextCursor: null,
+      checkInItems: [
         {
           id: "s-1",
-          agentId: "b-1",
+          botId: "b-1",
           title: "Confirm Friday ship date for the 120 mugs",
           detail: "Ana needs it confirmed by end of day.",
           sourceApp: "Gmail",
@@ -244,7 +262,7 @@ function api(role: "admin" | "user") {
         },
       ],
     },
-    "/api/tasks": { tasks: [] },
+    [TASKS_PATH]: { tasks: [], nextCursor: null },
   };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
@@ -255,7 +273,7 @@ function api(role: "admin" | "user") {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : null,
       });
-      return Response.json({ ok: true });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
     }
     const bots = answerBotsList(input, init, {
       visible: [
@@ -264,6 +282,10 @@ function api(role: "admin" | "user") {
       ],
     });
     if (bots) return bots;
+    const waiting = answerBotAttention(input, init, { bots: [] });
+    if (waiting) return waiting;
+    const approvals = approvalInboxResponse(input, bodies[INBOX] as TestInbox);
+    if (approvals) return approvals;
     if (path in bodies) return Response.json(bodies[path]);
     return Response.json({ error: "not served" }, { status: 404 });
   }) as typeof fetch;
@@ -497,7 +519,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/approvals/r-waiting/decision",
+        path: "/api/v2/organizations/default/people/me/approvals/r-waiting/decide",
         body: { decision: "allow_once" },
       }),
     );
@@ -517,7 +539,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/approvals/questions/q-1/respond",
+        path: "/api/v2/organizations/default/people/me/questions/q-1/respond",
         body: { response: "Kiln 2" },
       }),
     );
@@ -534,7 +556,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/proactive/suggestions/s-1/start",
+        path: `${CHECK_IN_ITEMS_PATH}/s-1/start`,
         body: null,
       }),
     );
@@ -542,7 +564,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: "/api/proactive/suggestions/s-1/dismiss",
+        path: `${CHECK_IN_ITEMS_PATH}/s-1/dismiss`,
         body: null,
       }),
     );

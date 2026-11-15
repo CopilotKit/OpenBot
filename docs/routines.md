@@ -39,8 +39,9 @@ Two ways, and either way a routine or a goal is written by the same store calls.
   when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal
   or a check-in; the answers decide: `planRoutine` (`app/src/lib/routines/plan.ts`) turns them into a
   plan, and `createFromPlanMutationOptions` writes it:
-  - Act on a schedule with nothing in Done when is a routine (`POST /api/routines`, which calls
-    `routineStore.create` exactly as `create_routine` does).
+  - Act on a schedule with nothing in Done when is a routine
+    (`POST /api/v2/organizations/{organizationId}/routines`, which writes it exactly as
+    `create_routine` does).
   - Act on a schedule with an outcome is a goal that ends when met, plus a routine that runs it.
   - Act when something happens is a goal with that subscription.
   - Now, once is a goal, run at once.
@@ -63,24 +64,24 @@ every Bot all of its tools, including the write tools `create_routine`, `update_
 `delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
 its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
 while Extra vigilant is on, and `delete_routine` asks as any delete does, unless the person allowed
-it for the conversation or always (see [Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
+it for the conversation or always (see [Approvals](approvals.md)).
 
 **Goals too.** The same app carries a goal's tools for a conversation: `create_goal`, `list_goals`,
 `update_goal`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal`, beside the trigger tools
 that wake a goal. Asked for a goal, a Bot makes one that reports into the conversation it was asked
 in, or into another the person names, and it shows on the Bot's Routines page. A goal has no schedule of
 its own: it runs when asked, or when an event wakes it. A goal's own run is not given these copies,
-because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
+because it already holds the goal's own tools.
 
 A goal that repeats is never completed by one of its runs. It repeats when it was made `recurring`,
 or, unless it was made `endsWhenMet`, when an enabled routine of its Bot runs it or an event wakes
 it. Its run is told so, records its result with `report_goal_progress`, and is refused
 `complete_goal`; only the person ends it. Asked to run a completed or paused goal, `run_goal` says
-so instead of running nothing. See `GoalRepeats` in `server/src/responsibilities/types.ts`.
+so instead of running nothing.
 
 A goal that a routine or an event starts can still be completed by a run that meets its outcome, when
 it is made `endsWhenMet`; without it, a goal a routine or an event starts repeats and a run never
-completes it (`repeatsOf` in `server/src/responsibilities/store.ts`). It never combines with `recurring`: the
+completes it. It never combines with `recurring`: the
 store and `parseResponsibilityInput` refuse both together. Completing a goal by any path, a run or
 the person, switches off the routines that run it (`routineRunsGoal`): those whose `goal_id` is that
 goal, and an older routine that names it by id or whole quoted title. An older routine that also
@@ -91,7 +92,7 @@ been carried out (`NO_OUTCOME` in `shared/responsibility-turn.ts`); a Bot's `cre
 requires them.
 
 A routine records the goal it runs (`routines.goal_id`): the `goalId` passed to `create_routine`, `update_routine` or
-`POST /api/routines` (as the New routine screen does), else the goal whose id its instruction names,
+`POST /api/v2/organizations/{organizationId}/routines` (as the New routine screen does), else the goal whose id its instruction names,
 else the goal its firing first runs with `run_goal`. Never a goal its instruction only mentions. A routine made
 before 0.3.3 (`goal_by_title`) is read from its instruction, by the goal's id or its whole title in
 quotes. See `routineRunsGoal`.
@@ -130,10 +131,10 @@ one night's attempt will fix that — only switching it off, and saying so, does
 
 ## Missed windows are skipped, not replayed
 
-A routine's next run is a stamp, not a queue. If nothing was watching the clock — a worker that was
-never started, or one that was down for a month — a routine's stamp falls behind, and the deployment
+A routine's next run is a stamp, not a queue. If nothing was watching the clock (a deployment
+that was stopped for a month), a routine's stamp falls behind, and the deployment
 does not owe it every occurrence it missed: catching up is a silent drain, not a burst. A deployment
-whose worker comes back after a quiet month drains that backlog by advancing the stamp forward without
+that comes back after a quiet month drains that backlog by advancing the stamp forward without
 firing anything for it, occurrence by occurrence, until it is current again — not by firing thirty
 stale summaries of thirty different mornings.
 
@@ -143,41 +144,42 @@ because the clock had already moved on before that firing was attempted. A serve
 loses more than that: every occurrence whose stamp ages past the grace window while nothing can
 carry it out is skipped, not just the one that was in flight.
 
-## The worker requirement
+## What fires them
 
-Nothing above happens without a second process. The API server answers `/internal/routines/run` when
-it is handed a run, but nothing hands it one on its own — that is a separate worker's whole job, and a
-deployment that never started one schedules nothing.
+The server does. It sweeps for due routines itself, inside its own process, alongside the rest of
+its scheduled work (cleaning up unsent attachments, suspending idle computers), so a deployment
+needs nothing beside the server for a routine to fire. `scripts/start.sh` starts no worker and
+OpenBot Desktop runs none. (`docker-compose.yml` still defines a `worker` service for one release,
+which nothing starts and which does nothing if started: an OpenBot Desktop app from the release
+before reads a Compose file as current only when it defines one.)
 
-This used to fail silently. A routine created in chat is stored, its schedule is computed, and the
-Routines page shows it sitting there with a next run time like any other — because as far as that
-page knows, it is correct. A deployment with no worker looked identical to one running normally,
-right up until nobody's standup notes ever arrive.
+Where several servers run against one database, one of them at a time decides which routines are
+due: the one holding a PostgreSQL advisory lock, which looks every 30 seconds. Every server runs
+the turns, claiming five at a time, so one server does not carry every routine in the deployment. Each
+server checks the lock every five seconds, so when the one that held it stops, another takes over
+at its next check. A firing is still claimed from the shared work queue under a key naming the
+minute it was due, so two servers that both believe they lead for a moment cannot fire it twice.
 
-Each sweep now records that it happened, in `routine_sweeps`, and the Routines page reads it. A
-person with standing routines and nothing sweeping is told so: that no worker has ever checked in,
-or when the last one did. The window is `MINIMUM_INTERVAL_MS` — fifteen minutes, the floor a
-routine's own schedule already has, so a gap longer than that is one no routine could have wanted.
-A CronJob scheduled less often than that will read as quiet between runs.
+It used to take a second process: a worker that ran the sweep in a loop and handed each due run to
+the server at `/internal/routines/run`. A deployment that never started one stored every routine,
+showed it with a next run time, and fired nothing, so the Routines page carried a warning for it.
+With the sweep in the server there is no such state to warn about, and the page no longer does.
+The routines list (`GET /api/v2/organizations/{organizationId}/routines`) carries no record of the
+sweep.
 
-Two settings carry this:
+A sweep no longer records that it happened: nothing writes `routine_sweeps` now, and the table
+stays for one more release.
 
-- **`WORKER_SHARED_SECRET`** — the credential the worker presents to `/internal/routines/run`. The API
-  server refuses every handoff without it configured on both sides, and the worker refuses to start
-  without it at all, rather than firing routines nobody could ever prove came from it.
-- **`SERVER_INTERNAL_URL`** — where the worker reaches this deployment's own API server. It is a fact
-  about where the worker process runs rather than a fact about the deployment, so it is read from the
-  environment directly rather than from the rest of the deployment's configuration.
+The server has no `/internal/routines/run` now and reads neither of the two settings that worker
+took: `WORKER_SHARED_SECRET`, the credential it presented there, and `SERVER_INTERNAL_URL`, where it
+reached the server. Neither is in `.env.example`, and a line for either left in an existing `.env`
+does nothing.
 
-On Kubernetes, the chart runs a CronJob of `fire-routines.ts` on `routines.schedule`, on by default
-(`routines.enabled`), and generates the shared secret for it and the API server unless one is
-supplied (see the routines sweep in the Helm guide that comes with the chart). It is a
-CronJob the same way the computer culler is a CronJob rather than a timer inside the API: a timer fires in
-every replica, and a CronJob's single run does the whole sweep once. On a laptop, `scripts/start.sh`
-starts a worker process that runs that same sweep in a loop instead of once and exiting, so the two
-shapes are the same code doing the same thing on two different clocks, not two implementations to keep
-in sync. OpenBot Desktop runs the same loop as the `worker` Compose service, from the server image,
-behind the `openbot` profile in `docker-compose.yml`.
+The one place a worker still runs is an OpenBot Desktop installation whose Compose file is a
+release's up to 1.0.3, which runs the sweep in its `worker` service: Desktop reads the installed
+file, so it still starts, restarts and stops that worker with the server, and removes its container
+once an update puts in place a Compose file that says its server does the work (see
+[Desktop updates](desktop-updates.md)). Desktop supplies both settings for it.
 
 ## Who a routine runs as
 
@@ -192,7 +194,7 @@ separate, because as far as the channel is concerned, that is exactly what it is
 ## Scope
 
 This ships the core: creating, listing, changing and deleting routines from chat; the schedule, the
-cap and the fatigue rule; the worker that fires them. Four follow-ups were listed in
+cap and the fatigue rule; the sweep that fires them. Four follow-ups were listed in
 [#193](https://github.com/CopilotKit/OpenBot/issues/193), which is now closed; the first of them has
 been built. Audit rows now say what started the run they came out of, so a
 routine's action is told apart from the same person's own by reading the row rather than by
@@ -207,4 +209,3 @@ limit; and a tenant package cannot yet ship routines the way it ships agents, ch
 - [Architecture](architecture.md) — where the routines sweep sits beside the computer culler on the
   shared work queue.
 - [Coworkers](coworkers.md) — durable Bot profiles and channels, which a routine posts into.
-- [Configuration](configuration.md) — `WORKER_SHARED_SECRET`, `SERVER_INTERNAL_URL`.

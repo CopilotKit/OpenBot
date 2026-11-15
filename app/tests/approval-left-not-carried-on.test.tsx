@@ -12,6 +12,7 @@ import {
   repairUnansweredToolCalls,
   UNANSWERED,
 } from "@/lib/copilot/repair-history";
+import { approvalInboxResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -42,7 +43,7 @@ const DONE =
 const ANSWER =
   'Ran: the app made this change. It answered: {"ok":true,"channel":"C0LAUNCH01"}';
 
-/** `GET /api/approvals`, with one request whose conversation was never carried on. */
+/** The inbox the screens read, with one request whose conversation was never carried on. */
 function inbox(left: { done: boolean; message: string; answer: string }) {
   return {
     enabled: true,
@@ -73,7 +74,9 @@ function inbox(left: { done: boolean; message: string; answer: string }) {
 }
 
 function drawn(data: ApprovalInboxData) {
-  global.fetch = (async () => Response.json(data)) as unknown as typeof fetch;
+  global.fetch = (async (input: RequestInfo | URL) =>
+    approvalInboxResponse(input, data) ??
+    Response.json({})) as unknown as typeof fetch;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -94,10 +97,11 @@ test("a step whose conversation could not be carried on says the action was done
 });
 
 test("a step folded into its group says so beside the group, where a waiting card would be", async () => {
-  global.fetch = (async () =>
-    Response.json(
+  global.fetch = (async (input: RequestInfo | URL) =>
+    approvalInboxResponse(
+      input,
       inbox({ done: true, message: DONE, answer: ANSWER }),
-    )) as unknown as typeof fetch;
+    ) ?? Response.json({})) as unknown as typeof fetch;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });

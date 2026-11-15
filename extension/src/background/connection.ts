@@ -1,9 +1,4 @@
 import {
-  type ExchangeResponse,
-  type RecorderMe,
-  recorderPaths,
-} from "@openbot/shared/recorder-api";
-import {
   RECORDER_CONNECT_STATUS,
   type TrustedConnectRule,
 } from "@openbot/shared/recorder-page";
@@ -14,7 +9,13 @@ import type {
   PageToBackground,
 } from "../protocol/messages";
 import { defaultBrowserName } from "../shared/browser-name";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import {
+  deleteCurrentRecorderConnection,
+  exchangeRecorderConnectCode,
+  getRecorderIdentity,
+  type RecorderConnectionGrant,
+} from "../shared/generated/recorder";
+import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -180,7 +181,7 @@ async function keepAlive(deps: ConnectionDeps): Promise<void> {
   const connection = await currentConnection();
   if (!connection) return;
   try {
-    await openbotJson<RecorderMe>(connection, recorderPaths.me);
+    await getRecorderIdentity(ORGANIZATION_ID, { target: connection });
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
       await deps.connectionLost({
@@ -296,18 +297,16 @@ async function approve(
     await clearPendingConnect(pending);
     return { ok: false, error: POLICY_REFUSED };
   }
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: pending.origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      ORGANIZATION_ID,
       {
-        body: {
-          code: pending.code,
-          label,
-          installId: await installIdFor(pending.origin),
-        },
+        code: pending.code,
+        label,
+        installId: await installIdFor(pending.origin),
       },
+      { target: { openbotUrl: pending.origin } },
     );
   } catch (error) {
     // The Recorder's own sentence for what OpenBot answered (EXCHANGE_REFUSED), or a plain one: a network failure's
@@ -576,17 +575,17 @@ async function trustedConnect(
   code: string,
   deps: ConnectionDeps,
 ): Promise<ExternalResponse> {
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      ORGANIZATION_ID,
       {
-        body: {
-          code,
-          label: defaultBrowserName(),
-          installId: await installIdFor(origin),
-        },
+        code,
+        label: defaultBrowserName(),
+        installId: await installIdFor(origin),
+      },
+      {
+        target: { openbotUrl: origin },
         signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
       },
     );
@@ -743,8 +742,8 @@ function sameOrigin(raw: string, origin: string): boolean {
 /** Best effort: OpenBot revokes the token (the person can also revoke it in OpenBot). */
 async function revoke(connection: ConnectionRecord): Promise<void> {
   try {
-    await openbotJson(connection, recorderPaths.currentConnection, {
-      method: "DELETE",
+    await deleteCurrentRecorderConnection(ORGANIZATION_ID, {
+      target: connection,
     });
   } catch {
     // Unreachable, or already revoked.
@@ -827,17 +826,17 @@ async function desktopConnect(
   if (!allowsOpenBot(policy, checked.origin))
     return refused("pinned-elsewhere");
   if (await launched()) return refused("launched");
-  let exchanged: ExchangeResponse;
+  let exchanged: RecorderConnectionGrant;
   try {
-    exchanged = await openbotJson<ExchangeResponse>(
-      { openbotUrl: checked.origin },
-      recorderPaths.connections,
+    exchanged = await exchangeRecorderConnectCode(
+      ORGANIZATION_ID,
       {
-        body: {
-          code: handoff.code,
-          label: defaultBrowserName(),
-          installId: await installIdFor(checked.origin),
-        },
+        code: handoff.code,
+        label: defaultBrowserName(),
+        installId: await installIdFor(checked.origin),
+      },
+      {
+        target: { openbotUrl: checked.origin },
         signal: AbortSignal.timeout(DESKTOP_EXCHANGE_WAIT_MS),
       },
     );

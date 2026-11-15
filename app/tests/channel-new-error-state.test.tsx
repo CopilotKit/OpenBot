@@ -32,6 +32,7 @@ import {
   NewBotCreationStub,
   SidebarToggleStub,
 } from "./channel-new-error-state.fixture";
+import { CONVERSATIONS_PATH } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 const NativeResponse = globalThis.Response;
@@ -115,7 +116,7 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   return queryClient;
 }
 
-/** The roster, and which edition this is, as `/api/capabilities` says it. */
+/** The roster, and which edition this is, as the API's `deployment` says it. */
 function queryClientWithEdition(
   agents: AgentProfile[],
   edition: DeploymentCapabilities["edition"],
@@ -673,14 +674,14 @@ test("+ with only one Bot still opens the menu with it, and the Bot picked there
           : input.url,
       "http://localhost",
     );
-    if (url.pathname === "/api/channels" && init?.method === "POST") {
+    if (url.pathname === CONVERSATIONS_PATH && init?.method === "POST") {
       created.push(JSON.parse(String(init.body)));
       return NativeResponse.json(
         {
-          channel: {
+          conversation: {
             id: "assistant-channel",
             name: "General Assistant",
-            agentIds: [GENERAL_ASSISTANT.id],
+            botIds: [GENERAL_ASSISTANT.id],
             threadId: "assistant-thread",
             active: true,
             lastMessageAt: null,
@@ -714,7 +715,7 @@ test("+ with only one Bot still opens the menu with it, and the Bot picked there
     await userEvent.setup({ document }).keyboard("{Enter}");
 
     await waitFor(() =>
-      expect(created).toEqual([{ agentIds: [GENERAL_ASSISTANT.id] }]),
+      expect(created).toEqual([{ botIds: [GENERAL_ASSISTANT.id] }]),
     );
     expect(view.queryByText("Choose a Bot first.")).toBeNull();
   } finally {

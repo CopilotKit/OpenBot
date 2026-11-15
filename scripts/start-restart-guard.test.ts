@@ -47,6 +47,8 @@ type Run = {
   cli?: "missing-provision" | "provisions";
   /** The tag `backend-images.env` names in the copied checkout. */
   pinnedTag?: string;
+  /** The checkout's docker-compose.yml. This checkout's own unless a test gives another. */
+  composeFile?: string;
 };
 
 async function runStart({
@@ -59,6 +61,7 @@ async function runStart({
   composioSetup,
   cli,
   pinnedTag = "sha-pinned-for-the-test",
+  composeFile,
 }: Run = {}) {
   const root =
     await Bun.$`mktemp -d ${tmpdir()}/openbot-start-guard-XXXXXX`.text();
@@ -119,6 +122,10 @@ async function runStart({
   // The templates that say which settings the server reads.
   for (const template of [".env.example", ".env.personal.example"])
     await writeFile(join(directory, template), await readFile(template));
+  await writeFile(
+    join(directory, "docker-compose.yml"),
+    composeFile ?? (await readFile("docker-compose.yml")),
+  );
   await writeFile(
     join(directory, "backend-images.env"),
     `# The images the test runs.\nOPENBOT_BACKEND_TAG=${pinnedTag}\n`,
@@ -199,15 +206,23 @@ if [[ "$args" == *"compose pull"* ]] && [ -n "\${TEST_PULL_FAILS:-}" ]; then ech
 # The server's container refused: for any reason, every time; or the way Docker Desktop refuses a
 # strict bind of a folder whose view is stale, until a plain -v bind of that folder resolves it.
 if [[ "$args" == run*" -v $PWD/.openbot:"* ]]; then touch "$DOCKER_LOG.seen"; fi
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then
   if [ -n "\${TEST_SERVER_FAILS:-}" ]; then echo "Error response from daemon: no space left on device" >&2; exit 1; fi
   if [ -n "\${TEST_MOUNT_NOT_SEEN:-}" ] && [ ! -f "$DOCKER_LOG.seen" ]; then
     echo "Error response from daemon: invalid mount config for type bind: bind source path does not exist: /host_mnt$PWD/.openbot" >&2
     exit 1
   fi
 fi
+# What the computer and the supervisor would be created with, kept for the test to read.
+if [[ "$args" == *"compose up -d --build"* ]]; then printf '%s' "$COMPUTER_LOOPBACK_RELAYS" > "$DOCKER_LOG.relays"; fi
 # The settings the server's container would be created with, kept for the test to read.
-if [[ "$args" == *"up -d --no-deps"*"server worker"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
+# What docker-compose.yml would read for the server's way to the Intelligence gateway, kept too.
+if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then printf 'proxy=%s browser=%s container=%s' "\${OPENBOT_GATEWAY_PROXY-unset}" "\${OPENBOT_BROWSER_GATEWAY_WS_URL-unset}" "\${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL-unset}" > "$DOCKER_LOG.gateway"; fi
+# What Compose calls this checkout's project, and the services its file defines.
+if [[ "$args" == "compose config" ]]; then printf 'name: fixture-project\\nservices: {}\\n'; fi
+# A routine worker's container, left by a start from when the worker was a Compose service.
+if [[ "$args" == "ps -aq --filter label=com.docker.compose.project=fixture-project --filter label=com.docker.compose.service=worker" ]] && [ -n "\${TEST_OLD_WORKER_CONTAINER:-}" ]; then echo old-worker-container; fi
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
 if [[ "$args" == *"to_regclass('public.agent_preferences')"* ]]; then echo agent_preferences; fi
 exit 0
@@ -270,9 +285,15 @@ exit 0
     const curlLog = await Bun.file(curlLogPath)
       .text()
       .catch(() => "");
+    const loopbackRelays = await Bun.file(`${dockerLogPath}.relays`)
+      .text()
+      .catch(() => undefined);
     const serverEnvironment = await Bun.file(serverEnvironmentPath)
       .text()
       .catch(() => "");
+    const gatewaySettings = await Bun.file(`${dockerLogPath}.gateway`)
+      .text()
+      .catch(() => undefined);
     const envFile = await Bun.file(join(directory, ".env")).text();
     return {
       exitCode,
@@ -281,7 +302,9 @@ exit 0
       pkillLog,
       dockerLog,
       curlLog,
+      loopbackRelays,
       serverEnvironment,
+      gatewaySettings,
       envFile,
     };
   } finally {
@@ -308,7 +331,200 @@ describe("start.sh and a server an earlier start ran on the host", () => {
     );
     expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     expect(result.pkillLog).toContain("bun worker/src/index.ts");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
+  });
+});
+
+/**
+ * Record in a Bot's browser, from a checkout: "Not saved to your Learning space. It's kept in this browser until you
+ * connect it to OpenBot again." The Recorder there is handed the address the person's window uses,
+ * `http://127.0.0.1:<app port>`, which inside a computer's container is that container. OpenBot Desktop told its
+ * computer where each such port is reached (`COMPUTER_LOOPBACK_RELAYS`) and this script never did. The faked `docker`
+ * keeps what the computer and the supervisor are started with.
+ */
+describe("start.sh and the loopback addresses a Bot's computer relays", () => {
+  test("names the app's and the server's ports, as the computers reach the server", async () => {
+    const result = await runStart({ settings: { SERVER_PORT: "3301" } });
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(result.loopbackRelays).toBe("3010=server:3001,3301=server:3001");
+  });
+
+  test("names both by their defaults in a .env that sets neither", async () => {
+    const result = await runStart({ omitFromEnv: ["APP_PORT", "SERVER_PORT"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.loopbackRelays).toBe("3010=server:3001,3001=server:3001");
+  });
+
+  test.each([
+    "ws://localhost:14401",
+    "ws://127.0.0.1:14401/socket",
+    "ws://[::1]:14401",
+  ])(
+    "relays an Intelligence gateway on this machine (%s) to this machine",
+    async (gateway) => {
+      const result = await runStart({
+        settings: { INTELLIGENCE_GATEWAY_WS_URL: gateway },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.loopbackRelays).toBe(
+        "3010=server:3001,3001=server:3001,14401=host.docker.internal:14401",
+      );
+    },
+  );
+
+  test("relays no gateway that is reached at its own address", async () => {
+    const result = await runStart({
+      settings: {
+        INTELLIGENCE_GATEWAY_WS_URL: "wss://realtime.intelligence.example",
+      },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.loopbackRelays).toBe("3010=server:3001,3001=server:3001");
+  });
+
+  test("leaves relays that .env already names as they are", async () => {
+    const result = await runStart({
+      settings: { COMPUTER_LOOPBACK_RELAYS: "3010=elsewhere:3001" },
+    });
+    expect(result.loopbackRelays).toBe("3010=elsewhere:3001");
+  });
+
+  test("leaves relays that the environment already names as they are", async () => {
+    const result = await runStart({
+      processEnvironment: { COMPUTER_LOOPBACK_RELAYS: "3010=another:3001" },
+    });
+    expect(result.loopbackRelays).toBe("3010=another:3001");
+  });
+});
+
+/**
+ * One address, where it can be kept. With an Intelligence gateway on this machine the server can carry the gateway's
+ * socket, so the app dials one port. From a checkout it does only when a public URL is named: the Recorder needs that
+ * socket as a whole address, and the server, in a container, has none to write without one, so a recording would not
+ * save. Without a public URL the server is given exactly what it was given before: the gateway's own address for the
+ * browser, which each computer relays.
+ *
+ * start.sh run whole against the faked tools, and what it exported read through the real docker-compose.yml by the
+ * real Compose, so the two files are held to each other.
+ */
+describe("start.sh and the browser's way to an Intelligence gateway on this machine", () => {
+  const GATEWAY = "ws://127.0.0.1:14401";
+
+  /** The server's settings for the gateway, as Compose writes them from what start.sh exported. */
+  function serverSettings(gatewaySettings: string | undefined) {
+    const exported = Object.fromEntries(
+      (gatewaySettings ?? "").split(" ").map((pair) => {
+        const at = pair.indexOf("=");
+        return [pair.slice(0, at), pair.slice(at + 1)];
+      }),
+    ) as { proxy: string; browser: string; container: string };
+    const environment: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      INTELLIGENCE_GATEWAY_WS_URL: GATEWAY,
+    };
+    if (exported.proxy !== "unset")
+      environment.OPENBOT_GATEWAY_PROXY = exported.proxy;
+    if (exported.browser !== "unset")
+      environment.OPENBOT_BROWSER_GATEWAY_WS_URL = exported.browser;
+    if (exported.container !== "unset")
+      environment.INTELLIGENCE_CONTAINER_GATEWAY_WS_URL = exported.container;
+    const config = Bun.spawnSync(
+      [
+        "docker",
+        "compose",
+        "--env-file",
+        "/dev/null",
+        "--profile",
+        "harness",
+        "--profile",
+        "openbot",
+        "config",
+        "--format",
+        "json",
+      ],
+      {
+        cwd: join(import.meta.dir, ".."),
+        env: {
+          ...environment,
+          PICKED_HARNESS_IMAGE: "openbot-agent-langgraph-agui:test",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    if (config.exitCode !== 0)
+      throw new Error(new TextDecoder().decode(config.stderr));
+    const server = (
+      JSON.parse(new TextDecoder().decode(config.stdout)) as {
+        services: { server: { environment: Record<string, string | null> } };
+      }
+    ).services.server.environment;
+    return {
+      gateway: server.INTELLIGENCE_GATEWAY_WS_URL ?? "",
+      relay: server.INTELLIGENCE_GATEWAY_PROXY ?? "",
+      browser: server.INTELLIGENCE_BROWSER_GATEWAY_WS_URL ?? "",
+    };
+  }
+
+  test("with no public URL, the server is given what it was before: the gateway's own address for the browser, and no relay", async () => {
+    const result = await runStart({
+      settings: { INTELLIGENCE_GATEWAY_WS_URL: GATEWAY },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(serverSettings(result.gatewaySettings)).toEqual({
+      gateway: "ws://host.docker.internal:14401",
+      relay: "",
+      browser: GATEWAY,
+    });
+    // And the computers still relay that port, so a recording made in a Bot's browser saves.
+    expect(result.loopbackRelays).toContain("14401=host.docker.internal:14401");
+  });
+
+  test.each([
+    ["in .env", { settings: { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3010" } }],
+    [
+      "in the environment",
+      { processEnvironment: { OPENBOT_PUBLIC_URL: "http://127.0.0.1:3010" } },
+    ],
+  ])(
+    "with a public URL %s, the server carries the gateway's socket and is given no second address for the browser",
+    async (_where, named) => {
+      const result = await runStart({
+        ...named,
+        settings: {
+          INTELLIGENCE_GATEWAY_WS_URL: GATEWAY,
+          ...(named.settings ?? {}),
+        },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(serverSettings(result.gatewaySettings)).toEqual({
+        gateway: "ws://host.docker.internal:14401",
+        relay: "on",
+        browser: "",
+      });
+    },
+  );
+
+  test("an Intelligence somewhere else is reached at its own address, public URL or not", async () => {
+    for (const settings of [
+      {},
+      { OPENBOT_PUBLIC_URL: "https://openbot.example.com" },
+    ]) {
+      const result = await runStart({
+        settings: {
+          INTELLIGENCE_GATEWAY_WS_URL: "wss://realtime.intelligence.example",
+          ...settings,
+        },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.gatewaySettings).toStartWith(
+        "proxy= browser=wss://realtime.intelligence.example ",
+      );
+    }
   });
 });
 
@@ -669,9 +885,79 @@ describe("start.sh and the managed Bot", () => {
   });
 });
 
+describe("start.sh and the work the server does itself", () => {
+  /**
+   * The server applies its own migrations when it starts and does the scheduled work itself.
+   * docker-compose.yml still defines `migrate` and `worker`, for one release, and nothing starts
+   * them: the start runs no migration step and starts no worker, as a container or on the host, and
+   * looks for the migrated tables once the server is up.
+   */
+  test("runs no migrate step and starts no worker", async () => {
+    const result = await runStart();
+
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    const calls = result.dockerLog.trim().split("\n");
+    // Compose is never handed either name: not to pull, run, start or read logs from.
+    for (const call of calls.filter((call) => call.startsWith("compose "))) {
+      expect(call).not.toMatch(/\b(migrate|worker)\b/);
+    }
+    expect(calls.filter((call) => call.includes("--no-deps"))).toHaveLength(1);
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
+    expect(result.stdout).not.toMatch(/\bworker\b/);
+    expect(result.dockerLog.indexOf("to_regclass")).toBeGreaterThan(
+      result.dockerLog.indexOf("compose up -d --no-deps server tool="),
+    );
+    expect(result.stdout).toContain("coworker tables migrated");
+    // Nothing of an earlier start's is there to remove.
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+  });
+
+  /**
+   * A checkout started before this had a `worker` container. Nothing starts that service now, as
+   * docker-compose.yml says on its `x-openbot-scheduled-work` line, so the container would be left
+   * running beside a server that does the same work. It is removed, found by this checkout's own
+   * Compose project and that one service.
+   */
+  test("removes the worker container an earlier start left", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).toMatch(/^rm -f old-worker-container /m);
+    expect(result.dockerLog.match(/^rm /gm)).toHaveLength(1);
+    expect(result.stdout).toContain(
+      "worker: removed the container an earlier start left",
+    );
+  });
+});
+
+describe("start.sh and a docker-compose.yml from an earlier release", () => {
+  /**
+   * A docker-compose.yml without the `x-openbot-scheduled-work` line is an earlier release's, where
+   * `worker` is a service in use. Its container is not a left-over there and is never removed.
+   */
+  test("leaves that file's worker container alone", async () => {
+    const result = await runStart({
+      processEnvironment: { TEST_OLD_WORKER_CONTAINER: "1" },
+      composeFile: await readFile(
+        "desktop/src-tauri/test-fixtures/compose/docker-compose-v1.0.2.yml",
+        "utf8",
+      ),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toMatch(/^rm /m);
+    expect(result.dockerLog).not.toMatch(/^ps -aq /m);
+  });
+});
+
 describe("start.sh and the OpenBot images", () => {
   /**
-   * The server, the worker, the migrations, the computer and the supervisor all run from the
+   * The server, the computer and the supervisor all run from the
    * published OpenBot images, at the one tag `backend-images.env` names. Compose reads it as
    * OPENBOT_BACKEND_TAG, so every Compose call the script makes is handed it.
    */
@@ -682,8 +968,7 @@ describe("start.sh and the OpenBot images", () => {
     const calls = result.dockerLog.trim().split("\n");
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) expect(call).toEndWith(" tag=sha-from-the-file");
-    expect(result.dockerLog).toContain("compose run --rm migrate");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   /**
@@ -711,7 +996,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("OpenBot images: main");
     const pull = result.dockerLog.indexOf(
-      "compose pull --quiet migrate supervisor agent-computer policy=always",
+      "compose pull --quiet server supervisor agent-computer policy=always",
     );
     expect(pull).toBeGreaterThan(-1);
     expect(pull).toBeLessThan(
@@ -733,7 +1018,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain("/.openbot; showing it the folder");
     expect(result.stdout).toContain("server ready");
     expect(result.dockerLog).toMatch(
-      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot-server:sha-pinned-for-the-test /,
+      /run --rm -v \S+\/\.openbot:\/openbot --entrypoint true ghcr\.io\/copilotkit\/openbot:sha-pinned-for-the-test /,
     );
     expect(result.dockerLog.match(/compose up -d --no-deps/g)).toHaveLength(2);
   });
@@ -758,7 +1043,7 @@ describe("start.sh and the OpenBot images", () => {
     expect(result.stdout).toContain(
       "Could not fetch the OpenBot images at sha-pinned-for-the-test",
     );
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("IMAGE_PULL_POLICY=never fetches nothing", async () => {
@@ -768,7 +1053,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).not.toContain("compose pull");
-    expect(result.dockerLog).toContain("compose up -d --no-deps server worker");
+    expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
   });
 
   test("a tag in .env or the environment runs another build", async () => {
@@ -779,7 +1064,7 @@ describe("start.sh and the OpenBot images", () => {
       const result = await runStart(run);
       expect(result.exitCode).toBe(0);
       expect(result.dockerLog).toMatch(
-        /compose up -d --no-deps server worker .* tag=sha-from-env-file\n/,
+        /compose up -d --no-deps server tool=.* tag=sha-from-env-file\n/,
       );
     }
     // Two whole starts, one after the other.

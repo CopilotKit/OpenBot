@@ -88,7 +88,8 @@ export function GithubSources() {
                 <ItemContent>
                   <ItemTitle>{binding.repository}</ItemTitle>
                   <ItemDescription className="line-clamp-none break-all font-mono text-xs">
-                    {window.location.origin}/api/events/github/{binding.id}
+                    {window.location.origin}
+                    {binding.webhookPath}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

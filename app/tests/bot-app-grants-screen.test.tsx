@@ -17,14 +17,12 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import {
-  type PluginServer,
-  type PluginsPage,
-  type PluginTool,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+import { appKeys } from "@/lib/apps/queries";
 import { Route as BotAppRoute } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { type AppsFixture, seedAppReads, type TodayServer } from "./apps-api";
 import { answerBotsList } from "./bots-api";
+
+type PluginTool = NonNullable<TodayServer["tools"]>[number];
 
 /**
  * What the per-Bot grant screen draws: which of its three pages a failed read returns, and the one
@@ -88,17 +86,17 @@ function failingQueryClient() {
 }
 
 /**
- * A client already holding a good plugins page under the exact key `pluginsPageQueryOptions()`
- * reads, built on `failingQueryClient()`.
+ * A client already holding good app reads under the exact keys `appsQueryOptions()` and
+ * `catalogueQueryOptions()` read, built on `failingQueryClient()`.
  *
  * With this file's always-failing `fetch`, mounting against it reproduces a failed BACKGROUND
  * refetch: `refetchOnMount` fires because `staleTime` is 0, that fetch 500s, and `isError` goes
  * true while `data` stays exactly this seeded page. That is the state the screen must keep
  * rendering from — see `agent-roster-error.test.tsx`, which documents the query-core behaviour.
  */
-function stalePluginsClient(page: PluginsPage) {
+function stalePluginsClient(page: AppsFixture) {
   const queryClient = failingQueryClient();
-  queryClient.setQueryData(pluginKeys.page(), page);
+  seedAppReads(queryClient, page);
   return queryClient;
 }
 
@@ -116,8 +114,8 @@ function tool(overrides: Partial<PluginTool> & { name: string }): PluginTool {
   };
 }
 
-/** A minimal but complete `PluginServer`, overridable per case. */
-function server(overrides: Partial<PluginServer> & { id: string }) {
+/** A minimal but complete app, as `GET /api/plugins` listed it, overridable per case. */
+function server(overrides: Partial<TodayServer> & { id: string }) {
   return {
     title: "Slack",
     vendor: "Slack",
@@ -139,15 +137,14 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     tools: [],
     withdrawn: [],
     ...overrides,
-  } satisfies PluginServer;
+  } satisfies TodayServer;
 }
 
-/** A minimal but complete `PluginsPage`, overridable per case. */
-function pluginsPage(overrides: Partial<PluginsPage> = {}): PluginsPage {
+/** A minimal but complete deployment, overridable per case. */
+function pluginsPage(overrides: Partial<AppsFixture> = {}): AppsFixture {
   return {
     catalogue: [],
     servers: [],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: false,
@@ -160,7 +157,7 @@ function pluginsPage(overrides: Partial<PluginsPage> = {}): PluginsPage {
  *  that the seeded data alone (which would render identically before any fetch ran) proves it. */
 async function waitForFailedRefetch(queryClient: QueryClient) {
   await waitFor(() => {
-    expect(queryClient.getQueryState(pluginKeys.page())?.status).toBe("error");
+    expect(queryClient.getQueryState(appKeys.list())?.status).toBe("error");
   });
 }
 

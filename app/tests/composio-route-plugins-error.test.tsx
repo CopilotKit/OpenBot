@@ -11,11 +11,12 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
+import { APP_DIRECTORY_PATH, APP_SETUP_PATH } from "./apps-api";
 
 /**
- * A FAILED `/api/plugins` READ SAYS SO, rather than drawing a blank page.
+ * A FAILED getAppSetup READ SAYS SO, rather than drawing a blank page.
  *
- * The route holds back until the plugins page names the provider, and `useQuery` leaves `data`
+ * The route holds back until getAppSetup names the provider, and `useQuery` leaves `data`
  * undefined permanently on an error, so without its own branch the gate answers "pending" forever.
  * The directory must also stay undrawn: it would request apps from a provider nobody confirmed.
  */
@@ -88,7 +89,7 @@ function renderPicker() {
   );
 }
 
-test("a failed plugins read renders an alert and never asks for the directory", async () => {
+test("a failed setup read renders an alert and never asks for the directory", async () => {
   requested.length = 0;
   global.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input).split("?")[0] ?? "";
@@ -104,6 +105,6 @@ test("a failed plugins read renders an alert and never asks for the directory", 
   const alert = await view.findByRole("alert");
   expect(alert.textContent).toContain("Couldn't load the app settings");
   expect(view.queryByLabelText("Search apps")).toBeNull();
-  expect(requested).toContain("/api/plugins");
-  expect(requested).not.toContain("/api/plugins/composio/apps");
+  expect(requested).toContain(APP_SETUP_PATH);
+  expect(requested).not.toContain(APP_DIRECTORY_PATH);
 });

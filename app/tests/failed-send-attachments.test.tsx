@@ -31,8 +31,12 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { attachmentPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * WHAT A FAILED SEND DOES TO THE FILES IT WAS CARRYING, DRIVEN THROUGH THE REAL CHANNEL.
@@ -79,7 +83,7 @@ const opening = {
 
 /** The run inputs that actually left the browser, in order. */
 let runs: RunAgentInput[];
-/** Every `DELETE /api/attachments/:id` the screen sent, by path. */
+/** Every attachment the screen gave back (`DELETE /attachments/:id` in the API), by path. */
 let deletes: string[];
 /** Every upload that actually left the browser, by file name. */
 let uploads: string[];
@@ -135,16 +139,24 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (init?.method === "DELETE") {
+      // An attachment given back, at the API's address for it.
+      if (
+        init?.method === "DELETE" &&
+        url.pathname.startsWith(attachmentPath(""))
+      ) {
         deletes.push(url.pathname);
         return new NativeResponse(null, { status: 204 });
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/plugins/for/failed-send-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("failed-send-bot"))
+        return botGrantsResponse();
       // What the Bot's runs are offered is read from these, as the server answers them.
       if (url.pathname === botPath("failed-send-bot"))
         return NativeResponse.json({
@@ -154,9 +166,9 @@ beforeAll(() => {
             canManage: true,
           },
         });
-      if (url.pathname === "/api/components/for-agent/failed-send-bot")
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === botComponentsPath("failed-send-bot"))
+        return botComponentsResponse();
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -181,7 +193,11 @@ beforeAll(() => {
         runs.push(body);
         return answer ? await answer(body) : finished(body);
       }
-      if (/\/api\/channels\/[^/]+\/attachments$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/attachments$/.test(
+          url.pathname,
+        )
+      ) {
         const body = init?.body as FormData;
         const file = body.get("file") as File;
         uploads.push(file.name);
@@ -192,11 +208,16 @@ beforeAll(() => {
             id: `stored-${file.name}`,
             name: file.name,
             mimeType: "text/plain",
+            sizeBytes: file.size,
           },
           { status: 201 },
         );
       }
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
         return NativeResponse.json({ messages: [opening] });
@@ -463,7 +484,7 @@ test("a failed send restored beside a second batch cannot be retried over the pe
   });
   await waitFor(() =>
     expect(deletes).toEqual(
-      second.map((file) => attachmentUrl(`stored-${file.name}`)),
+      second.map((file) => attachmentPath(`stored-${file.name}`)),
     ),
   );
 });

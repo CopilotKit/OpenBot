@@ -118,14 +118,20 @@ export function joinedLearningContainer(
     ? learning.containerId
     : null;
 }
-/** `GET /api/recorder/learning`: the person's own Learning space, which every recording they make joins. */
+/** `getRecorderLearning`: the person's own Learning space, which every recording they make joins. */
 export type RecorderLearningResponse = { learning: LearningSpaceState };
 export type TrajectoryGrant = {
   joinToken: string;
   realtime: { clientUrl: string; topic: string };
 };
+/**
+ * A refusal as the Recorder reads it: the API's problem details (RFC 9457). `detail` is the sentence a person reads,
+ * `code` the refusal's stable name (`RECORDER_SIGNED_OUT`, `RECORDER_AUTHORITY_UNAVAILABLE`), and `reason` why a
+ * connection ended, on a sign-out. The capture pass's gate answers `error` in place of `detail`; both are read.
+ */
 export type RecorderErrorBody = {
-  error: string;
+  detail?: string;
+  error?: string;
   code?: string;
   reason?: "revoked" | "removed" | "organization";
 };
@@ -207,6 +213,13 @@ export function isAllowedGatewayUrl(
 }
 
 const id = (value: string) => encodeURIComponent(value);
+
+/**
+ * The addresses a Recorder installed before the API's reached OpenBot at, which OpenBot keeps answering for it, and
+ * the capture pass (`trajectoryConnect`), which is the runtime's. Nothing new calls the `/api/recorder` ones: the
+ * Recorder reaches the API through its generated client (extension/src/shared/generated, the spec's Recorder tag), and
+ * OpenBot's own screens through theirs.
+ */
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",
   connections: "/api/recorder/connections",

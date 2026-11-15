@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  createIdentityProvider,
+  deleteIdentityProvider,
+} from "@/lib/api/generated/identity-providers/identity-providers";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { identityProviderKeys } from "./queries";
 
 const FALLBACK = "Could not change that identity provider";
@@ -34,45 +38,18 @@ export type IdentityProviderInput =
       clientSecret: string;
     };
 
-/** The body Better Auth's own route expects, which is not the shape the form collects. */
-function registerBody(input: IdentityProviderInput) {
-  const common = {
-    providerId: input.providerId,
-    issuer: input.issuer,
-    domain: input.domain,
-  };
-
-  if (input.protocol === "saml") {
-    return {
-      ...common,
-      samlConfig: {
-        entryPoint: input.entryPoint,
-        idpMetadata: { metadata: input.metadata },
-      },
-    };
-  }
-
-  return {
-    ...common,
-    oidcConfig: {
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
-      // Let the provider describe itself rather than asking somebody to type six endpoints.
-      discoveryEndpoint: `${input.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`,
-    },
-  };
-}
-
 export function registerIdentityProviderMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
     mutationFn: async (input: IdentityProviderInput): Promise<void> => {
-      await client("/api/auth/sso/register", {
-        method: "POST",
-        body: registerBody(input),
-        fallback: FALLBACK,
-      });
+      const { providerId, ...rest } = input;
+      await createIdentityProvider(
+        ORGANIZATION_ID,
+        { id: providerId, ...rest },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateProviders(queryClient),
   });
@@ -81,7 +58,7 @@ export function registerIdentityProviderMutationOptions(
 /**
  * Remove one.
  *
- * Our own route, not Better Auth's `delete-provider`, which refuses unless the person asking is the
+ * The API's, not Better Auth's `delete-provider`, which refuses unless the person asking is the
  * one who registered it. That left a provider nobody could remove the moment the administrator who
  * set it up had left, which is exactly when somebody needs to.
  */
@@ -90,9 +67,11 @@ export function deleteIdentityProviderMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (providerId: string): Promise<void> => {
-      await client(
-        `/api/admin/identity-providers/${encodeURIComponent(providerId)}`,
-        { method: "DELETE", fallback: FALLBACK },
+      await deleteIdentityProvider(
+        ORGANIZATION_ID,
+        providerId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
       );
     },
     onSuccess: () => invalidateProviders(queryClient),

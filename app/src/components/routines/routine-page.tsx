@@ -24,6 +24,7 @@ import {
   RoutineDetailMissing,
   useDeletedHere,
 } from "@/components/routines/routine-detail-missing";
+import { useRoutineRuns } from "@/components/routines/use-routine-runs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -57,7 +58,6 @@ import {
 import {
   type RoutineRecord,
   type RoutineRunRecord,
-  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -159,7 +159,7 @@ const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
  * status. Polled with the routine's runs read, so the one Run now started appears without a reload.
  */
 function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (
@@ -204,11 +204,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                       </ItemDescription>
                     ) : null}
                   </ItemContent>
-                  {routine.channel.gone ? null : (
+                  {routine.conversation.gone ? null : (
                     <ItemActions>
                       <Link
                         className="text-sm underline"
-                        params={{ channelId: routine.channel.id }}
+                        params={{ channelId: routine.conversation.id }}
                         to="/channel/$channelId"
                       >
                         Open conversation
@@ -262,14 +262,14 @@ export function RoutineRoutePage({
     );
   // A routine outlives hiding its Bot, so a hidden Bot still names it.
   const botName = [...(bots.data ?? []), ...(hidden.data ?? [])].find(
-    (bot) => bot.id === routine.agentId,
+    (bot) => bot.id === routine.botId,
   )?.name;
   return (
     <RoutinePage
       back={back}
       bot={
         agentId === undefined
-          ? { id: routine.agentId, name: botName ?? "A Bot" }
+          ? { id: routine.botId, name: botName ?? "A Bot" }
           : undefined
       }
       key={routine.id}
@@ -394,7 +394,7 @@ export function RoutinePage({
             </ItemContent>
           </Item>
           <Separator />
-          {routine.channel.gone ? (
+          {routine.conversation.gone ? (
             <Item size="sm">
               <ItemMedia variant="icon">
                 <IconMessageOff />
@@ -412,7 +412,7 @@ export function RoutinePage({
             <Item
               render={
                 <Link
-                  params={{ channelId: routine.channel.id }}
+                  params={{ channelId: routine.conversation.id }}
                   to="/channel/$channelId"
                 />
               }
@@ -424,7 +424,7 @@ export function RoutinePage({
               <ItemContent>
                 <ItemTitle>Open conversation</ItemTitle>
                 <ItemDescription>
-                  {routine.channel.title ?? "Untitled conversation"}
+                  {routine.conversation.title ?? "Untitled conversation"}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>

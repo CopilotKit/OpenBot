@@ -1,5 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
-import { tryClient } from "@/lib/client";
+import {
+  listLinkedAccountProviders,
+  listLinkedAccounts,
+} from "@/lib/api/generated/linked-accounts/linked-accounts";
+import { ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 export type LinkedAccount = {
   id: string;
@@ -17,84 +22,81 @@ export const identityKeys = {
 };
 
 const LOAD_FALLBACK = "Could not load your linked accounts";
+const PROVIDERS_FALLBACK = "Could not load the account types you can link";
 
-/** The machine-readable code on the server's own "no identity store here" 503. */
-export const IDENTITY_UNAVAILABLE = "identity_unavailable";
+/** The API's code for "this deployment keeps no linked accounts at all". */
+export const LINKED_ACCOUNTS_UNAVAILABLE = "LINKED_ACCOUNTS_UNAVAILABLE";
 
 /**
- * A deployment without an identity store answers 503 with `code: "identity_unavailable"`. That is
- * the feature being absent, not the server breaking, so it reads as no links and the section hides
- * itself. Any other failure, including a 503 from a proxy or the platform, throws so it is shown.
+ * Whether a refusal is the deployment saying it keeps no linked accounts: the API's 503 with
+ * `LINKED_ACCOUNTS_UNAVAILABLE`. That is the feature being absent, not the server breaking, so it
+ * reads as nothing to show and the section hides itself. Any other failure, a 503 from a proxy or the
+ * platform included, is shown.
  */
-export async function linksFromResponse(
-  response: Response,
-): Promise<LinkedAccount[]> {
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: unknown;
-      code?: unknown;
-    } | null;
-    if (response.status === 503 && body?.code === IDENTITY_UNAVAILABLE) {
-      return [];
-    }
-    throw new Error(
-      typeof body?.error === "string" ? body.error : LOAD_FALLBACK,
+export function linkedAccountsAbsent(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    error.status === 503 &&
+    error.code === LINKED_ACCOUNTS_UNAVAILABLE
+  );
+}
+
+/** Every page of the person's linked accounts. A handful at most, so the screen reads them all. */
+async function allLinks(signal?: AbortSignal): Promise<LinkedAccount[]> {
+  const links: LinkedAccount[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listLinkedAccounts(
+      ORGANIZATION_ID,
+      "me",
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+      { ...(signal ? { signal } : {}), fallback: LOAD_FALLBACK },
     );
-  }
-  const body = (await response.json().catch(() => null)) as {
-    links?: LinkedAccount[];
-  } | null;
-  if (!body || !Array.isArray(body.links)) throw new Error(LOAD_FALLBACK);
-  return body.links;
+    links.push(...page.linkedAccounts);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return links;
 }
 
 export function linkedAccountsQueryOptions() {
   return queryOptions({
     queryKey: identityKeys.links(),
-    queryFn: async (): Promise<LinkedAccount[]> =>
-      linksFromResponse(await tryClient("/api/identity/links")),
+    queryFn: async ({ signal }): Promise<LinkedAccount[]> => {
+      try {
+        return await allLinks(signal);
+      } catch (error) {
+        if (linkedAccountsAbsent(error)) return [];
+        throw error;
+      }
+    },
   });
 }
 
 /** Which account types this deployment can link a person to. */
 export type IdentityProviders = { slack: boolean; github: boolean };
 
-const PROVIDERS_FALLBACK = "Could not load the account types you can link";
-
-/** The tagged 503 means no identity store, so nothing is linkable; other failures throw. */
-export async function providersFromResponse(
-  response: Response,
-): Promise<IdentityProviders> {
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: unknown;
-      code?: unknown;
-    } | null;
-    if (response.status === 503 && body?.code === IDENTITY_UNAVAILABLE) {
-      return { slack: false, github: false };
-    }
-    throw new Error(
-      typeof body?.error === "string" ? body.error : PROVIDERS_FALLBACK,
-    );
-  }
-  const body = (await response.json().catch(() => null)) as {
-    providers?: { slack?: unknown; github?: unknown };
-  } | null;
-  const providers = body?.providers;
-  if (
-    !providers ||
-    typeof providers.slack !== "boolean" ||
-    typeof providers.github !== "boolean"
-  ) {
-    throw new Error(PROVIDERS_FALLBACK);
-  }
-  return { slack: providers.slack, github: providers.github };
-}
-
 export function identityProvidersQueryOptions() {
   return queryOptions({
     queryKey: identityKeys.providers(),
-    queryFn: async (): Promise<IdentityProviders> =>
-      providersFromResponse(await tryClient("/api/identity/providers")),
+    queryFn: async ({ signal }): Promise<IdentityProviders> => {
+      try {
+        const page = await listLinkedAccountProviders(
+          ORGANIZATION_ID,
+          { limit: 100 },
+          { signal, fallback: PROVIDERS_FALLBACK },
+        );
+        const offered = page.linkedAccountProviders.map(
+          (provider) => provider.id,
+        );
+        return {
+          slack: offered.includes("slack"),
+          github: offered.includes("github"),
+        };
+      } catch (error) {
+        // No linked accounts here, so nothing is linkable.
+        if (linkedAccountsAbsent(error)) return { slack: false, github: false };
+        throw error;
+      }
+    },
   });
 }

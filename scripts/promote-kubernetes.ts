@@ -113,11 +113,28 @@ function imageParts(reference: string) {
     digest,
   };
 }
+/** The init container a chart gives its server Deployment when that server applies its own
+ * migrations as it starts: the pod waits for the database, then the server migrates before it
+ * listens. */
+const WAITS_FOR_DATABASE = "wait-for-database";
+/** Requires that the effective target chart migrates the database with the target image, in one of
+ * the two ways a chart does:
+ *
+ * - a guarded `pre-upgrade` Job that runs the target image's `scripts/migrate.ts`; or
+ * - no migrations Job of any kind, and a server Deployment that runs the target image behind a
+ *   `wait-for-database` init container, which is the shape of a chart whose server applies its own
+ *   migrations when it starts.
+ *
+ * A chart with a migrations Job is held to the first: one that is disabled, not a `pre-upgrade`
+ * hook, or runs another image or runner is refused, and so is a chart with neither shape.
+ *
+ * Returns which of the two the chart is, so what is written for an operator or a controller
+ * afterwards names the step that chart really has. */
 async function requireRenderedMigration(
   options: KubernetesPromotionOptions,
   values: PromotionValues,
   previousValues: Record<string, unknown> | undefined,
-) {
+): Promise<"job" | "server"> {
   const directory = mkdtempSync(join(tmpdir(), "openbot-migration-preflight-"));
   try {
     const file = join(directory, "release-values.json");
@@ -147,11 +164,29 @@ async function requireRenderedMigration(
       repository: values.image.repository,
       digest: values.image.digest,
     };
-    const guarded = parseAllDocuments(rendered).some((document) => {
+    const documents = parseAllDocuments(rendered);
+    for (const document of documents)
       if (document.errors.length)
         throw new Error(
           "Target chart rendered invalid YAML during migration preflight",
         );
+    const component = (document: (typeof documents)[number]) =>
+      document.getIn(["metadata", "labels", "app.kubernetes.io/component"]);
+    const runsTargetImage = (container: unknown) => {
+      if (!isMap(container)) return false;
+      const image = container.get("image");
+      if (typeof image !== "string") return false;
+      try {
+        const actual = imageParts(image);
+        return (
+          actual.repository === expected.repository &&
+          actual.digest === expected.digest
+        );
+      } catch {
+        return false;
+      }
+    };
+    const guarded = documents.some((document) => {
       const hook = document.getIn(["metadata", "annotations", "helm.sh/hook"]);
       if (
         document.get("kind") !== "Job" ||
@@ -202,10 +237,41 @@ async function requireRenderedMigration(
         })
       );
     });
-    if (!guarded)
+    if (guarded) return "job";
+    // No Job at all that migrates, by its label or by what it runs. A chart that has one is held to
+    // the guarded Job above, so a disabled or replaced Job is never read as a server that migrates.
+    const anyMigrationJob = documents.some(
+      (document) =>
+        document.get("kind") === "Job" &&
+        (component(document) === "migrations" ||
+          /scripts\/migrate\.ts/.test(String(document))),
+    );
+    const serverMigratesAtStart =
+      !anyMigrationJob &&
+      documents.some((document) => {
+        if (
+          document.get("kind") !== "Deployment" ||
+          component(document) !== "server"
+        )
+          return false;
+        const pod = ["spec", "template", "spec"];
+        const containers = document.getIn([...pod, "containers"]);
+        const initContainers = document.getIn([...pod, "initContainers"]);
+        return (
+          isSeq(containers) &&
+          containers.items.some(runsTargetImage) &&
+          isSeq(initContainers) &&
+          initContainers.items.some(
+            (container) =>
+              isMap(container) && container.get("name") === WAITS_FOR_DATABASE,
+          )
+        );
+      });
+    if (!serverMigratesAtStart)
       throw new Error(
-        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart; migrations must remain enabled",
+        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart, and its server Deployment is not one that applies its own migrations at start (the target image behind a wait-for-database init container, with no migrations Job); migrations must remain enabled",
       );
+    return "server";
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -327,17 +393,63 @@ export async function planKubernetesPromotion(
     commonAnnotations: annotations,
     server: { podAnnotations: annotations },
   };
+  // How the target chart migrates the database: a guarded pre-upgrade Job, the server itself as it
+  // starts, or not at all, because this promotion leaves the database where it is.
+  let migration: MigrationStep = "none";
   if (
     !reasons.length &&
     current.compatibility.database.to !== candidate.compatibility.database.to
   ) {
     try {
-      await requireRenderedMigration(options, values, previousValues);
+      migration = await requireRenderedMigration(
+        options,
+        values,
+        previousValues,
+      );
     } catch (error) {
       reasons.push(error instanceof Error ? error.message : String(error));
     }
   }
-  return { ...common, allowed: reasons.length === 0, reasons, values, mirror };
+  return {
+    ...common,
+    allowed: reasons.length === 0,
+    reasons,
+    values,
+    mirror,
+    migration,
+  };
+}
+/** What migrates the database in a promotion: the target chart's guarded pre-upgrade Job, its
+ * server as it starts, or nothing, when the database does not change. */
+export type MigrationStep = "job" | "server" | "none";
+/** Where to look when a promotion stops after Helm started, by what was migrating. */
+function recoveryAdvice(migration: MigrationStep) {
+  const inspect =
+    migration === "job"
+      ? "Inspect the migration Job and rollout."
+      : migration === "server"
+        ? "This chart has no migration Job: its server applies the migrations as it starts. Inspect the server pods' logs and the rollout."
+        : "This release declares no database change. Inspect the rollout.";
+  return `No automatic Helm/database rollback. ${inspect} Restore only a matching database/configuration backup, or restart previous code only if declared compatible with resulting schema.`;
+}
+/** The ordering a GitOps controller must keep, for the migration step the target chart has. */
+function gitOpsOrdering(
+  options: KubernetesPromotionOptions,
+  migration: MigrationStep,
+) {
+  const migrate =
+    migration === "job"
+      ? "3. Run the target image's guarded migration Job and require successful completion before replacing server replicas. Preserve existing database advisory locking and migration-history refusal.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout, then verify image digest and release annotations."
+      : migration === "server"
+        ? "3. Run no migration Job: this chart has none. Its server applies the migrations itself as it starts, behind the `wait-for-database` init container, before it listens, and the first replica to start applies them all under the database's advisory lock.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout. A server that is ready has migrated; one that cannot migrate never becomes ready, so require readiness before accepting. Then verify image digest and release annotations."
+        : "3. Run no migration: this release declares no database change.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout, then verify image digest and release annotations.";
+  const hooks =
+    migration === "job"
+      ? "Helm's existing pre-upgrade hook supplies step 3 only when Helm owns execution. A renderer/controller that ignores Helm hooks must define its own ordered migration phase. First installation with bundled PostgreSQL intentionally uses an ordinary migration Job; it must not be converted into a pre-install hook."
+      : migration === "server"
+        ? "There is no Helm hook to run or to reproduce: a renderer/controller that ignores Helm hooks loses nothing. Do not add a migration Job of your own; two migrators would only contend for the same lock."
+        : "There is no migration phase to order in this promotion.";
+  return `# Proposed OpenBot promotion\n\nStatus: proposed; no cluster was changed.\n\n1. Verify chart archive SHA-256 ${options.candidate.artifacts.chart?.sha256}; keep customer values and Secret references separate.\n2. For maintenance transitions, stop write admission and scheduled API dispatch, wait for old work to finish or explicitly interrupt it, then create the matching backup (${options.backupReference}).\n${migrate}\n5. Resume routines and perform the customer browser/graph workflow before accepting the promotion.\n\n${hooks} No Argo CD or Flux execution integration is claimed by these generated files. A Git revert does not undo database changes.\n`;
 }
 function selector(release: string) {
   return `app.kubernetes.io/instance=${release},app.kubernetes.io/component=server`;
@@ -623,8 +735,7 @@ export async function promoteKubernetes(
     release: options.release,
     backupReference: options.backupReference,
     databaseMayHaveChanged: false,
-    recovery:
-      "No automatic Helm/database rollback. Inspect the migration Job and rollout. Restore only a matching database/configuration backup, or restart previous code only if declared compatible with resulting schema.",
+    recovery: recoveryAdvice(plan.migration),
   };
   const phase = (value: PromotionJournal["phase"]) => {
     journal.phase = value;
@@ -801,8 +912,9 @@ export async function promoteKubernetes(
       journal,
       await declaredSuspension(options, run),
     );
-    // Helm --wait waits for chart workload readiness and migration Jobs. Additional customer
-    // workflow acceptance remains the operator's responsibility and is not implied by this record.
+    // Helm --wait waits for chart workload readiness, and for the migration Job of a chart that has
+    // one. Additional customer workflow acceptance remains the operator's responsibility and is not
+    // implied by this record.
     atomicJson(
       join(options.outputDirectory, "accepted-release.json"),
       options.candidate,
@@ -845,7 +957,8 @@ export async function promoteKubernetes(
   }
 }
 
-/** Review artifacts only. A GitOps controller must implement the documented migration ordering. */
+/** Review artifacts only. A GitOps controller must keep the ordering written for it, which names a
+ * migration Job only for a target chart that has one. */
 export async function writeGitOpsPromotion(
   options: KubernetesPromotionOptions,
 ) {
@@ -859,7 +972,7 @@ export async function writeGitOpsPromotion(
   );
   writeFileSync(
     join(options.outputDirectory, "ORDERING.md"),
-    `# Proposed OpenBot promotion\n\nStatus: proposed; no cluster was changed.\n\n1. Verify chart archive SHA-256 ${options.candidate.artifacts.chart?.sha256}; keep customer values and Secret references separate.\n2. For maintenance transitions, stop write admission and scheduled API dispatch, wait for old work to finish or explicitly interrupt it, then create the matching backup (${options.backupReference}).\n3. Run the target image's guarded migration Job and require successful completion before replacing server replicas. Preserve existing database advisory locking and migration-history refusal.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout, then verify image digest and release annotations.\n5. Resume routines and perform the customer browser/graph workflow before accepting the promotion.\n\nHelm's existing pre-upgrade hook supplies step 3 only when Helm owns execution. A renderer/controller that ignores Helm hooks must define its own ordered migration phase. First installation with bundled PostgreSQL intentionally uses an ordinary migration Job; it must not be converted into a pre-install hook. No Argo CD or Flux execution integration is claimed by these generated files. A Git revert does not undo database changes.\n`,
+    gitOpsOrdering(options, plan.migration),
     { mode: 0o600 },
   );
   return {

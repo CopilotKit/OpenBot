@@ -5,7 +5,7 @@ import { SkillFields } from "@/components/skills/skill-fields";
 import { Button } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
-import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
+import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import { emptySkillForm } from "@/lib/skills/form";
 
 /**

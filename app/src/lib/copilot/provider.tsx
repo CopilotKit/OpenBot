@@ -33,8 +33,8 @@ import { SkillTools } from "./skill-tools";
  * deployment both work without a build-time base URL to get wrong.
  *
  * There is no `publicApiKey`. The Intelligence key and licence token are deployment secrets held by
- * the server; a browser never sees them (see server/src/app.ts, where /api/capabilities projects the
- * runtime rather than returning it).
+ * the server; a browser never sees them (the API's `deployment`, which the app reads what it may do
+ * from, is a projection of the runtime rather than the runtime itself).
  */
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());

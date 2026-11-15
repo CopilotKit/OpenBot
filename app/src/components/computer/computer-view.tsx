@@ -266,9 +266,14 @@ function BrowserWindow({
   return (
     // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
     // Top-aligned, as the wheel's column beside it is.
+    //
+    // `basis-0`, a length: the space is what the card has left once the wheel and Record have theirs, in a narrow
+    // window too, where they are under it. `flex-1` alone starts from 0%, which in a card as tall as its content is
+    // the page's own height at the window's full width: the page took the window and Record was below the fold,
+    // where a person scrolling over the Bot's page (which scrolls that page) never found it.
     <div
       ref={space}
-      className="flex min-h-80 min-w-0 flex-1 items-start justify-center"
+      className="flex min-h-80 min-w-0 flex-1 basis-0 items-start justify-center"
     >
       {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
       <div
@@ -287,7 +292,10 @@ function BrowserWindow({
 
 /**
  * Who has the wheel and Record, in a live full-size view: a column beside the Bot's browser in a wide window, so the
- * page takes the window's height, and under it in a narrow one. A turn that is over keeps them where they always were.
+ * page takes the window's height, and under it in a narrow one, where the page takes the height they leave
+ * (`BrowserWindow`), so Record is on screen without scrolling. A container, so Record lays itself out by the width
+ * it is given here: one column beside the browser, two under it (`BotRecordPanel`). A turn that is over keeps them
+ * where they always were.
  */
 function WheelColumn({
   live,
@@ -298,7 +306,7 @@ function WheelColumn({
 }) {
   if (!live) return children;
   return (
-    <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:pt-10">
+    <div className="@container flex min-w-0 flex-col gap-4 lg:min-h-0 lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:pt-10">
       {children}
     </div>
   );
@@ -1082,9 +1090,9 @@ export function ComputerView({
 
                 A live view fills the window, because the Bot's browser is what it is for: the bar and
                 the page take everything but a column beside them for the wheel and Record (under them
-                in a narrow window), and the page is as large as that space allows at its own shape.
-                Never less than a screen a person can work in: in a short, narrow window the card grows
-                past it and the view scrolls, so Record is always reachable.
+                in a narrow window), and the page is as large as that space allows at its own shape, so
+                Record is on screen with it. Never less than a screen a person can work in: in a short
+                window the card grows past it and the view scrolls, so Record is always reachable.
               */}
             <div
               className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "p-3 sm:max-w-[70vw] sm:p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}

@@ -13,7 +13,6 @@ import {
 import {
   type LearningSpaceState,
   RECORDER_SIGNED_OUT,
-  recorderPaths,
 } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
@@ -103,21 +102,27 @@ function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     openbotAsked.push(`${request.method} ${path}`);
-  if (path === recorderPaths.connections && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder-connections" &&
+    request.method === "POST"
+  )
     return exchange();
-  if (path === recorderPaths.currentConnection && request.method === "DELETE") {
+  if (
+    path === "/api/v2/organizations/default/recorder-connections/current" &&
+    request.method === "DELETE"
+  ) {
     revokedTokens.push(token);
     liveTokens.delete(token);
     return new Response(null, { status: 204 });
   }
-  if (path === "/api/recorder/me") {
+  if (path === "/api/v2/organizations/default/recorder/me") {
     meAsked.push(token);
     if (!liveTokens.has(token))
       return Response.json(
         {
-          error: "This browser is no longer connected to OpenBot.",
+          detail: "This browser is no longer connected to OpenBot.",
           code: RECORDER_SIGNED_OUT,
           reason: "revoked",
         },
@@ -128,9 +133,9 @@ function route(request: Request): Response | Promise<Response> | null {
       connectionId: `c-${token}`,
     });
   }
-  if (path === recorderPaths.learning && learning)
+  if (path === "/api/v2/organizations/default/recorder/learning" && learning)
     return Response.json({ learning });
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     return Response.json({ error: "Not found." }, { status: 404 });
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
   if (!pass || request.method !== "POST") return null;

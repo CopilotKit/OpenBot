@@ -26,14 +26,13 @@ import {
 import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { deliveryQueryOptions } from "@/lib/delivery";
+import { destinationsQueryOptions } from "@/lib/delivery";
 import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { memorySourcesQueryOptions } from "@/lib/memory";
-import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { primitive, SETUP } from "@/lib/primitives";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
@@ -41,6 +40,7 @@ import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
+import { useBotPlugins } from "./use-bot-reads";
 
 type Row = {
   to:
@@ -78,11 +78,14 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const goals = useQuery(responsibilitiesQueryOptions());
   const checkIns = useQuery(proactiveSettingsQueryOptions());
   const sources = useQuery({ ...memorySourcesQueryOptions(), enabled: memory });
-  const plugins = useQuery(agentPluginsQueryOptions(agent.id));
+  const plugins = useBotPlugins(agent.id);
   const approvals = useQuery(approvalInboxOptions());
   const teamBots = useQuery({ ...teamBotsQueryOptions(), enabled: !personal });
-  const reach = useQuery({ ...deliveryQueryOptions(), enabled: !personal });
-  const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
+  const reach = useQuery({
+    ...destinationsQueryOptions(),
+    enabled: !personal,
+  });
+  const published = teamBots.data?.find((bot) => bot.botId === agent.id);
   const admin = me?.role === "admin";
   // Its owner and admins change it there; anyone it is published to finds its link there.
   const canShare =
@@ -206,12 +209,9 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             icon: IconDeviceMobile,
             summary: reach.data
               ? reachSummary(
-                  reach.data.bindings
-                    .filter(
-                      (binding) =>
-                        binding.enabled && binding.agentId === agent.id,
-                    )
-                    .map((binding) => binding.transport),
+                  reach.data
+                    .filter((destination) => destination.botId === agent.id)
+                    .map((destination) => destination.transport),
                 )
               : "",
           },

@@ -1,6 +1,19 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
-import { client } from "@/lib/client";
+import {
+  stopPersonComputers,
+  updateCapability,
+} from "@/lib/api/generated/capabilities/capabilities";
+import {
+  deleteNetworkPolicy,
+  replaceNetworkPolicy,
+} from "@/lib/api/generated/network-policies/network-policies";
+import {
+  stopInactiveComputers,
+  updateOrganizationSettings,
+} from "@/lib/api/generated/organization-settings/organization-settings";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { modelKeys } from "@/lib/models/queries";
 import {
   type CapabilityKey,
@@ -25,11 +38,19 @@ export function setCapabilityMutationOptions(queryClient: QueryClient) {
       capability: CapabilityKey;
       allowed: boolean | null;
     }) => {
-      await client("/api/admin/enterprise/capabilities", {
-        method: "PUT",
-        body: variables,
-        fallback: FALLBACK,
-      });
+      const { scopeKind, scopeId, capability, allowed } = variables;
+      // One level of one switch: the organization's, or one role's or group's by name.
+      await updateCapability(
+        ORGANIZATION_ID,
+        capability,
+        scopeKind === "organization"
+          ? { organization: allowed }
+          : scopeKind === "role"
+            ? { roles: { [scopeId]: allowed } }
+            : { groups: { [scopeId]: allowed } },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      );
     },
     /*
      * A Bot's profile says whether its computer of its own is in effect, which is decided from its
@@ -49,11 +70,12 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
       key: keyof EnterpriseSettings;
       value: unknown;
     }) => {
-      await client(`/api/admin/enterprise/settings/${variables.key}`, {
-        method: "PUT",
-        body: { value: variables.value },
-        fallback: FALLBACK,
-      });
+      await updateOrganizationSettings(
+        ORGANIZATION_ID,
+        { [variables.key]: variables.value },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      );
     },
     /*
      * The model switch and allowlist change what the composer's picker offers, which the server
@@ -78,11 +100,14 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
       /** The sentence the list was written from, recorded with the save. */
       authoring?: { source: "english"; text: string };
     }) => {
-      await client("/api/admin/enterprise/network", {
-        method: "PUT",
-        body: variables,
-        fallback: FALLBACK,
-      });
+      const { scopeKind, scopeId, ...policy } = variables;
+      await replaceNetworkPolicy(
+        ORGANIZATION_ID,
+        networkPolicyId(scopeKind, scopeId),
+        policy,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateEnterprise(queryClient),
   });
@@ -94,17 +119,22 @@ export function removeNetworkPolicyMutationOptions(queryClient: QueryClient) {
       scopeKind: "organization" | "group";
       scopeId: string;
     }) => {
-      const query =
-        variables.scopeKind === "group"
-          ? `?group=${encodeURIComponent(variables.scopeId)}`
-          : "";
-      await client(
-        `/api/admin/enterprise/network/${variables.scopeKind}${query}`,
-        {
-          method: "DELETE",
-          fallback: FALLBACK,
-        },
-      );
+      try {
+        await deleteNetworkPolicy(
+          ORGANIZATION_ID,
+          networkPolicyId(variables.scopeKind, variables.scopeId),
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: FALLBACK },
+        );
+      } catch (error) {
+        // Already gone, as by another admin a moment ago: what was asked for is so.
+        if (
+          error instanceof ClientError &&
+          error.code === "NETWORK_POLICY_NOT_FOUND"
+        )
+          return;
+        throw error;
+      }
     },
     onSuccess: () => invalidateEnterprise(queryClient),
   });
@@ -116,29 +146,34 @@ export function terminateMemberComputersMutationOptions() {
     mutationFn: async (
       userId: string,
     ): Promise<{
+      /** The computers stopped: `person:<id>`, and `bot:<id>` for each of their Bots' own. */
       stopped: string[];
-      failed: { botId: string; reason: string }[];
+      failed: { computer: string; reason: string }[];
     }> =>
-      (
-        await client(
-          `/api/admin/enterprise/people/${userId}/terminate-computers`,
-          {
-            method: "POST",
-            fallback: "Could not stop that person's computers",
-          },
-        )
-      ).json(),
+      stopPersonComputers(
+        ORGANIZATION_ID,
+        userId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Could not stop that person's computers" },
+      ),
   });
 }
 
 export function terminateInactiveComputersMutationOptions() {
   return mutationOptions({
-    mutationFn: async (): Promise<{ stopped: string[] }> =>
-      (
-        await client("/api/admin/enterprise/computers/terminate-inactive", {
-          method: "POST",
-          fallback: "Could not sweep inactive computers",
-        })
-      ).json(),
+    mutationFn: (): Promise<{ stopped: string[] }> =>
+      stopInactiveComputers(
+        ORGANIZATION_ID,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Could not sweep inactive computers" },
+      ),
   });
+}
+
+/** A network policy's address in the API: `organization`, or `group:` and the group's name. */
+function networkPolicyId(
+  scopeKind: "organization" | "group",
+  scopeId: string,
+): string {
+  return scopeKind === "organization" ? "organization" : `group:${scopeId}`;
 }

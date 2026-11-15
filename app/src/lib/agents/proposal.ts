@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { PluginSkill } from "@/lib/plugins/queries";
+import type { Skill } from "@/lib/skills/queries";
 import { type AgentFormValues, agentFormSchema } from "./form";
 import type { AgentProfile } from "./queries";
 
@@ -15,8 +15,8 @@ import type { AgentProfile } from "./queries";
  * and a person making one are then held to one rule, with no second parser to drift from the
  * server's.
  *
- * Nothing here decides whether the coworker may be created. That stays the server's: `POST
- * /api/agents` already answers who may, records `bot.created`, and refuses in its own words.
+ * Nothing here decides whether the coworker may be created. That stays the server's: the API's
+ * `createBot` already answers who may, records `bot.created`, and refuses in its own words.
  */
 
 /**
@@ -269,9 +269,7 @@ export function describeBot(agent: AgentProfile): string {
  * The instructions are left out for the same reason `list_bots` leaves out role descriptions, and
  * because nothing here is being edited: this list exists to pick from.
  */
-export function describeGrantableSkills(
-  skills: readonly PluginSkill[],
-): string {
+export function describeGrantableSkills(skills: readonly Skill[]): string {
   if (skills.length === 0) {
     return "No skills exist here yet, so a coworker made now runs on its instructions alone. That is ordinary — most coworkers do.";
   }

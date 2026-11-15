@@ -22,8 +22,7 @@ Package-provided Bots are public and ownerless. A Bot a person makes is owned by
 
 ## Standing role
 
-A remote Bot receives a system message derived from its name, title and role description
-(`standingRoleMessage` in `server/src/copilot.ts`):
+A remote Bot receives a system message derived from its name, title and role description:
 
 ```text
 <identity>
@@ -61,7 +60,7 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 Filtering happens in server/database queries. Package-provided Bots cannot be edited or deleted through the product, except the personal edition's starter Personal Assistant, which its person can edit.
 
 An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
-(`/api/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
+(`/api/v2/organizations/{organizationId}/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
 visibility is unchanged by it. A published Bot stays invisible to teammates until it has a role
 description and a name other than a placeholder such as "New Bot".
 
@@ -129,7 +128,7 @@ In the product, create a Bot from `/bots` and edit it from its page's **Setup**,
 
 Endpoint registration uses target checks. Cloud metadata addresses are refused under every configuration. Optional keys are write-only: sending a key stores/replaces it, omitting it keeps the existing key, and APIs do not return it.
 
-`POST /api/agents/test-connection` checks whether an endpoint answers before saving it.
+`POST /api/v2/organizations/{organizationId}/bots/test-connection` checks whether an endpoint answers before saving it.
 
 ## What a role does not grant
 

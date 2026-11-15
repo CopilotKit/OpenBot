@@ -13,7 +13,15 @@ import { NewRoutinePage } from "@/components/routines/new-routine-page";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  conversationPath,
+  noContent,
+} from "./conversations-api";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The New routine screen: what it shows, and the writes it makes when submitted. */
@@ -54,22 +62,22 @@ function writes(): Write[] {
   return recorded;
 }
 
-/** What `GET /api/proactive/settings` answers now; `serving()` sets it, a test may change it later. */
+/** What `GET /api/v2/organizations/default/check-ins` answers now; `serving()` sets it, a test may change it later. */
 let proactiveAnswer: unknown;
 
 /** Answers what the page reads and records and answers what it writes. */
 function serving({
-  proactive = { allowed: true, settings: [] } as unknown,
+  proactive = { allowed: true, checkIns: [] } as unknown,
   routines = () => Response.json({ routine: { id: "r1" } }, { status: 201 }),
   goalDeletes = true,
   edition = "team",
 }: {
-  /** What `GET /api/capabilities` says this deployment is. */
+  /** What the API's `deployment` says this deployment is. */
   edition?: "team" | "personal";
   proactive?: unknown;
-  /** How `POST /api/routines` answers. */
+  /** How `POST /api/v2/organizations/default/routines` answers. */
   routines?: () => Response | Promise<Response>;
-  /** Whether `DELETE /api/responsibilities/g1` succeeds. When it fails, a refused schedule keeps the goal. */
+  /** Whether `DELETE /api/v2/organizations/default/goals/g1` succeeds. When it fails, a refused schedule keeps the goal. */
   goalDeletes?: boolean;
 } = {}) {
   recorded.length = 0;
@@ -83,17 +91,38 @@ function serving({
         url,
         typeof init?.body === "string" ? JSON.parse(init.body) : null,
       ]);
-      if (method === "POST" && url === "/api/channels")
-        return Response.json({ channel: { id: "new-conversation" } });
-      if (method === "POST" && url === "/api/routines") return routines();
+      // A conversation started for the routine: made (201), named (200), or removed (204).
+      if (method === "POST" && url === CONVERSATIONS_PATH)
+        return Response.json(
+          {
+            conversation: {
+              id: "new-conversation",
+              name: "Bot One",
+              botIds: (JSON.parse(String(init?.body)) as { botIds: string[] })
+                .botIds,
+              threadId: "thread-new-conversation",
+              active: true,
+              lastMessageAt: null,
+            },
+          },
+          { status: 201 },
+        );
+      if (method === "PATCH" && url === conversationPath("new-conversation"))
+        return Response.json({
+          summary: (JSON.parse(String(init?.body)) as { title: string }).title,
+        });
+      if (method === "DELETE" && url === conversationPath("new-conversation"))
+        return noContent();
+      if (method === "POST" && url === "/api/v2/organizations/default/routines")
+        return routines();
       if (
         method === "DELETE" &&
-        url === "/api/responsibilities/g1" &&
+        url === "/api/v2/organizations/default/goals/g1" &&
         !goalDeletes
       )
         return Response.json({ error: "Unavailable" }, { status: 503 });
-      if (method === "POST" && url === "/api/responsibilities")
-        return Response.json({ responsibility: { id: "g1", title: "Goal" } });
+      if (method === "POST" && url === "/api/v2/organizations/default/goals")
+        return Response.json({ goal: { id: "g1", title: "Goal" } });
       return Response.json({ ok: true });
     }
     const bots = answerBotsList(input, init, {
@@ -103,14 +132,19 @@ function serving({
       ],
     });
     if (bots) return bots;
-    if (url.startsWith("/api/channels"))
+    if (url.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json(
+        conversationPage([channel("c1", "Bot One", ["bot-1"])]),
+      );
+    if (url === "/api/v2/organizations/default/check-ins?limit=100")
       return Response.json({
-        channels: [channel("c1", "Bot One", ["bot-1"])],
         nextCursor: null,
+        ...(proactiveAnswer as object),
       });
-    if (url === "/api/proactive/settings")
-      return Response.json(proactiveAnswer);
-    if (url === "/api/capabilities") return Response.json({ edition });
+    // The routines and goals the page's lists read: none.
+    const schedules = answerScheduleLists(input, init);
+    if (schedules) return schedules;
+    if (url === DEPLOYMENT_PATH) return Response.json({ edition });
     return Response.json({});
   }) as unknown as typeof fetch;
 }
@@ -149,7 +183,7 @@ test("the default answers make a routine", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
@@ -170,8 +204,8 @@ test("an outcome on a schedule makes a goal and its routine", async () => {
   await settleReactWork();
   const calls = writes();
   expect(calls.map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/responsibilities",
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/goals",
+    "POST /api/v2/organizations/default/routines",
   ]);
   expect(calls[0][2]).toMatchObject({
     endsWhenMet: true,
@@ -268,7 +302,7 @@ test("When something happens makes a goal with that subscription", async () => {
   await settleReactWork();
   const calls = writes();
   expect(calls.map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/responsibilities",
+    "POST /api/v2/organizations/default/goals",
   ]);
   expect(calls[0][2]).toMatchObject({
     subscriptions: [{ source: "github", eventType: "issues.opened" }],
@@ -290,8 +324,8 @@ test("Now, once makes a goal and runs it", async () => {
   await waitFor(() => expect(writes()).toHaveLength(2));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/responsibilities",
-    "POST /api/responsibilities/g1/run",
+    "POST /api/v2/organizations/default/goals",
+    "POST /api/v2/organizations/default/goals/g1/run",
   ]);
 });
 
@@ -320,7 +354,7 @@ test("a hidden event does not block a schedule", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
@@ -348,11 +382,11 @@ test("Only tell you offers a schedule only, and no outcome", async () => {
   await settleReactWork();
   const calls = writes();
   expect(calls.map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings?refuseExisting=true",
+    "POST /api/v2/organizations/default/check-ins?refuseExisting=true",
   ]);
   expect(calls[0][2]).toMatchObject({
-    agentId: "bot-1",
-    channelId: "c1",
+    botId: "bot-1",
+    conversationId: "c1",
     focus: "Watch for unanswered customer emails",
     intervalMinutes: 1440,
   });
@@ -391,7 +425,7 @@ test("a long instruction that only tells you is refused on What to do", async ()
 });
 
 test("Only tell you is absent when an admin turned check-ins off", async () => {
-  serving({ proactive: { allowed: false, settings: [] } });
+  serving({ proactive: { allowed: false, checkIns: [] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Send it");
@@ -407,7 +441,7 @@ test("Only tell you is absent when an admin turned check-ins off", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
@@ -420,7 +454,7 @@ const TELL_OFF =
  * answer changes: the write log keeps what was written before, so a test can check all of it.
  */
 async function checkInsTurnOff(settings: unknown[] = []) {
-  proactiveAnswer = { allowed: false, settings };
+  proactiveAnswer = { allowed: false, checkIns: settings };
   await queryClient.refetchQueries({ queryKey: proactiveKeys.settings });
 }
 
@@ -482,7 +516,7 @@ test("choosing Act for you after check-ins are off is checked as acting", async 
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/responsibilities",
+    "POST /api/v2/organizations/default/goals",
   ]);
 });
 
@@ -501,13 +535,13 @@ test("switching back to Act for you brings Starts back", async () => {
 });
 
 /**
- * A Bot's default check-in, as `GET /api/proactive/settings` sends it: no Name, no link. OpenBot
+ * A Bot's default check-in, as `GET /api/v2/organizations/default/check-ins` sends it: no Name, no link. OpenBot
  * seeds one for a Bot (`server/src/memory/defaults.ts`).
  */
 const unnamedCheckIn = {
   id: "s1",
-  agentId: "bot-1",
-  channelId: "c0",
+  botId: "bot-1",
+  conversationId: "c0",
   focus: "",
   subject: "",
   sourceLink: null,
@@ -524,7 +558,7 @@ const unnamedCheckIn = {
 const watchingInbox = { ...unnamedCheckIn, subject: "Watch my inbox" };
 
 test("an unnamed Only tell you is made beside the Bot's default check-in, named for what it does", async () => {
-  serving({ proactive: { allowed: true, settings: [unnamedCheckIn] } });
+  serving({ proactive: { allowed: true, checkIns: [unnamedCheckIn] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(
@@ -537,7 +571,7 @@ test("an unnamed Only tell you is made beside the Bot's default check-in, named 
   await settleReactWork();
   expect(view.queryByText(/This Bot already checks in on this/)).toBeNull();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings?refuseExisting=true",
+    "POST /api/v2/organizations/default/check-ins?refuseExisting=true",
   ]);
   expect(writes()[0][2]).toMatchObject({
     focus: "Watch   my inbox\nfor invoices",
@@ -546,7 +580,7 @@ test("an unnamed Only tell you is made beside the Bot's default check-in, named 
 });
 
 test("Only tell you does not take over a check-in the Bot already has", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -574,7 +608,7 @@ test("Only tell you does not take over a check-in the Bot already has", async ()
 });
 
 test("a named Only tell you is made beside it", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -584,13 +618,13 @@ test("a named Only tell you is made beside it", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/proactive/settings?refuseExisting=true",
+    "POST /api/v2/organizations/default/check-ins?refuseExisting=true",
   ]);
   expect(writes()[0][2]).toMatchObject({ subject: "Inbox" });
 });
 
 test("acting instead lets that Name through", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -605,12 +639,12 @@ test("acting instead lets that Name through", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
 test("a stale Name error goes once check-ins are off", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -634,7 +668,7 @@ test("a stale Name error goes once check-ins are off", async () => {
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
@@ -698,9 +732,9 @@ test("a refused schedule takes the goal back, says why, and Create works again",
   ).toBeTruthy();
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/responsibilities",
-    "POST /api/routines",
-    "DELETE /api/responsibilities/g1",
+    "POST /api/v2/organizations/default/goals",
+    "POST /api/v2/organizations/default/routines",
+    "DELETE /api/v2/organizations/default/goals/g1",
   ]);
   // Nothing was kept, so nothing is locked: no Go to Routines, and Create is there to press again.
   expect(view.queryByRole("button", { name: "Go to Routines" })).toBeNull();
@@ -734,7 +768,9 @@ test("the Routines back link waits while the routine is being created", async ()
   await waitFor(() =>
     expect(
       writes().some(
-        ([method, path]) => method === "POST" && path === "/api/routines",
+        ([method, path]) =>
+          method === "POST" &&
+          path === "/api/v2/organizations/default/routines",
       ),
     ).toBe(true),
   );
@@ -763,7 +799,9 @@ test("Cancel waits while the routine is being created", async () => {
   await waitFor(() =>
     expect(
       writes().some(
-        ([method, path]) => method === "POST" && path === "/api/routines",
+        ([method, path]) =>
+          method === "POST" &&
+          path === "/api/v2/organizations/default/routines",
       ),
     ).toBe(true),
   );
@@ -804,7 +842,8 @@ test("after a partial save, a submit does not make a second goal", async () => {
   await settleReactWork();
   expect(
     writes().filter(
-      ([method, path]) => `${method} ${path}` === "POST /api/responsibilities",
+      ([method, path]) =>
+        `${method} ${path}` === "POST /api/v2/organizations/default/goals",
     ),
   ).toHaveLength(1);
 });
@@ -1201,7 +1240,7 @@ test("Done when follows It should: Only tell you does not measure it", async () 
 });
 
 test("Name follows Bot: another Bot has no such check-in", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -1247,7 +1286,7 @@ test("Time drawn again after Every hour clears its message once a time is chosen
   await waitFor(() => expect(writes()).not.toHaveLength(0));
   await settleReactWork();
   expect(writes().map(([method, path]) => `${method} ${path}`)).toEqual([
-    "POST /api/routines",
+    "POST /api/v2/organizations/default/routines",
   ]);
 });
 
@@ -1332,10 +1371,7 @@ test("a Name that still clashes keeps its message when the Bot or It should chan
   serving({
     proactive: {
       allowed: true,
-      settings: [
-        watchingInbox,
-        { ...watchingInbox, id: "s2", agentId: "bot-2" },
-      ],
+      checkIns: [watchingInbox, { ...watchingInbox, id: "s2", botId: "bot-2" }],
     },
   });
   const view = draw();
@@ -1356,7 +1392,7 @@ test("a Name that still clashes keeps its message when the Bot or It should chan
 
 /** An admin turns check-ins back on; the next read says so. */
 async function checkInsTurnOn(settings: unknown[] = []) {
-  proactiveAnswer = { allowed: true, settings };
+  proactiveAnswer = { allowed: true, checkIns: settings };
   await queryClient.refetchQueries({ queryKey: proactiveKeys.settings });
 }
 
@@ -1373,7 +1409,7 @@ test("It should follows check-ins: turned back on, Only tell you can go on", asy
 });
 
 test("Name follows check-ins: turned back on, the clash is back", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
@@ -1401,7 +1437,7 @@ test("an uncertain routine save locks the form and links to the chosen Bot", asy
   expect(
     writes().some(
       ([method, path]) =>
-        method === "DELETE" && path.startsWith("/api/channels/"),
+        method === "DELETE" && path.startsWith(`${CONVERSATIONS_PATH}/`),
     ),
   ).toBe(false);
   expect(view.getByRole("alert").textContent).toContain("may have been saved");
@@ -1437,7 +1473,7 @@ test("Create stays enabled with a message showing, and pressing it goes to the f
 });
 
 test("each message is tied to its control", async () => {
-  serving({ proactive: { allowed: true, settings: [watchingInbox] } });
+  serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
   const view = draw();
   const user = userEvent.setup({ document });
   await clearTime(view);

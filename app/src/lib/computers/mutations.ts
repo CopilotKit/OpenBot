@@ -1,7 +1,13 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { replaceBoundaries } from "@/lib/api/generated/boundaries/boundaries";
+import {
+  resetComputer,
+  stopComputer,
+  updateComputer,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { client } from "@/lib/client";
 import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
 
@@ -77,15 +83,20 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
       botId?: string;
       action: ComputerAction;
     }) => {
-      await client("/api/computers/fleet", {
-        method: "POST",
-        body: {
-          action: variables.action,
+      const act = {
+        stop: stopComputer,
+        reset: resetComputer,
+        update: updateComputer,
+      }[variables.action];
+      await act(
+        ORGANIZATION_ID,
+        {
           computer: variables.computer,
           ...(variables.botId ? { botId: variables.botId } : {}),
         },
-        fallback: `The computer could not be ${PAST[variables.action]}.`,
-      });
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: `The computer could not be ${PAST[variables.action]}.` },
+      );
     },
     /** A reset deletes the profile those commands ran on; a stop keeps it, so only reset forgets. */
     onSuccess: async (_result, variables) => {
@@ -115,11 +126,12 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
     mutationFn: (
       next: ActionPolicy & { authoring?: PolicyAuthoring },
     ): Promise<ActionPolicy> =>
-      client("/api/computers/policy", "policy", {
-        method: "PUT",
-        body: next,
-        fallback: "The boundary could not be saved.",
-      }),
+      replaceBoundaries(
+        ORGANIZATION_ID,
+        next,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "The boundary could not be saved." },
+      ),
     onSuccess: () => invalidateComputers(queryClient),
   });
 }

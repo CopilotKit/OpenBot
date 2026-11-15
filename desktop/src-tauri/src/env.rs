@@ -901,9 +901,9 @@ pub fn compose(
     // reports that it cannot answer without ever naming the space.
     //
     // And at `127.0.0.1` where they say `localhost`, as the local Intelligence CLI reports its
-    // stack. The server and the person's browser both dial these (`docker-compose.yml` hands the
-    // gateway to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`), the stack publishes on
-    // `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway at no other name.
+    // stack. The stack publishes on `127.0.0.1` alone, and whatever on this machine reads these
+    // from `.env` dials them there. The person's browser and the Recorder dial neither: they are
+    // given OpenBot's own address for the gateway (below).
     env.insert(
         "INTELLIGENCE_API_URL".into(),
         numeric_loopback(&intelligence.api_url),
@@ -916,10 +916,14 @@ pub fn compose(
      * The same two addresses as the server's container reaches them.
      *
      * Local Intelligence answers on this machine's loopback, which inside a container is the
-     * container. `host.docker.internal` is the machine. Only the server is moved: the browser opens
-     * the gateway too, from the address in `/info`, and the browser is on the host, so
-     * `docker-compose.yml` hands it the address above unchanged. Empty for an Intelligence somewhere
-     * else, which the container reaches at the address it was given.
+     * container. `host.docker.internal` is the machine. Empty for an Intelligence somewhere else,
+     * which the container reaches at the address it was given.
+     *
+     * A gateway address here is also what turns the server's own carrying of the gateway socket on
+     * (`INTELLIGENCE_GATEWAY_PROXY` in `docker-compose.yml`): the browser opens that socket too,
+     * and with Intelligence on this machine it is given OpenBot's address for it, the app's own
+     * port, and never the gateway's. An Intelligence somewhere else has a host of its own, which
+     * the browser reaches itself.
      */
     env.insert(
         "INTELLIGENCE_CONTAINER_API_URL".into(),
@@ -1145,9 +1149,10 @@ pub fn compose(
         loopback_relays(ports, &intelligence.gateway_ws_url),
     );
 
-    // The worker refuses to start without this, by design: it is a fact about where this process
-    // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
-    // from a developer's machine does not carry it either.
+    // For an installation whose Compose file is a release's up to 1.0.3, which runs the routines
+    // sweep as a `worker` service: that worker refuses to start without this, by design. It is a
+    // fact about where the process runs, and it would rather stop than guess. Later releases' server
+    // does the sweep itself and reads neither this nor the worker's secret.
     env.insert(
         "SERVER_INTERNAL_URL".into(),
         format!("http://127.0.0.1:{}", ports.server),
@@ -2941,10 +2946,11 @@ HTTPS_PROXY=http://proxy:8080
         );
     }
 
-    /// The local Intelligence CLI reports its stack at `localhost`, and `docker-compose.yml` hands
-    /// the gateway address to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`. The stack
-    /// publishes on `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at
-    /// `127.0.0.1` or `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved.
+    /// The local Intelligence CLI reports its stack at `localhost`. The stack publishes on
+    /// `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at `127.0.0.1` or
+    /// `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved when the
+    /// browser was handed that address. It is handed OpenBot's own now, and nothing written here
+    /// dials the name either.
     #[test]
     fn a_local_intelligence_is_written_at_127_0_0_1_and_nothing_written_dials_localhost() {
         let env = compose(

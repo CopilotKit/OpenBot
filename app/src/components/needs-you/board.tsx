@@ -49,7 +49,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
-    found.set(item.agentId, [...(found.get(item.agentId) ?? []), item]);
+    found.set(item.botId, [...(found.get(item.botId) ?? []), item]);
 
   /*
    * Each read that failed, said on its own whatever else loaded. A failed read is never "nothing
@@ -129,7 +129,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
               const watched = [
                 ...new Set(
                   items
-                    .map((item) => settingOf(item.settingId)?.subject)
+                    .map((item) => settingOf(item.checkInId)?.subject)
                     .filter((subject): subject is string => Boolean(subject)),
                 ),
               ];
@@ -253,7 +253,7 @@ function FoundGroup({
       botName={bot?.name ?? "Your Bot"}
       inGroup
       key={item.id}
-      setting={settingOf(item.settingId)}
+      setting={settingOf(item.checkInId)}
       suggestion={item}
     />
   ));

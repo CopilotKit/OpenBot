@@ -16,7 +16,8 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    `## Unreleased` heading to `## X.Y.Z`, moves the desktop Cargo package/lockfile to the same
    version, and pins `backend-images.env` to `vX.Y.Z`, so a checkout of the release runs the
    OpenBot server, computer and supervisor images of that release. Those images must be published
-   at `vX.Y.Z` before it merges. Tauri reads its version directly from the root `package.json`.
+   at `vX.Y.Z` before it merges, with their release files (`ghcr.io/copilotkit/openbot:charts-vX.Y.Z`),
+   which carry the two Helm charts and the name of the last migration. Tauri reads its version directly from the root `package.json`.
 5. Merge it. That is the publish. After a stable release, the publish workflow opens a PR that puts
    `main` back in `backend-images.env`, so main runs the images built from main again; merge it
    once its checks pass.
@@ -24,10 +25,20 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
 
-Kept for one release, and dropped in the release after: `container-images.json` names `agent-bot`
-and `agent-langgraph` (both the server image, written in `.github/workflows/images.yml`), and
-`docker-compose.yml` defines two services of those names that nothing starts, so that the 1.0.2 and
-1.0.3 apps can start a newer installation (`tests/older-apps.test.ts`).
+Kept for one release, so that the 1.0.2 and 1.0.3 apps can read and start a newer installation,
+and all dropped together in the release after:
+
+- `container-images.json` names `agent-bot` and `agent-langgraph` (both the OpenBot image, which
+  runs the server, written in `.github/workflows/images.yml`).
+- `docker-compose.yml` defines two services of those names that nothing starts, behind the
+  `for-older-apps` profile (`tests/older-apps.test.ts`).
+- `docker-compose.yml` defines a `worker` and a `migrate` service that nothing starts, behind the
+  `openbot` profile. Those apps read a Compose file as current only when it defines `worker`, and
+  ask for `migrate`'s image by name. The server applies its own migrations and does the scheduled
+  work itself, which the file says on its `x-openbot-scheduled-work: server` line.
+- The two commands those services run in the OpenBot image, `/app/bin/openbot worker` and
+  `/app/bin/openbot migrate`, which do nothing there now.
+- The `routine_sweeps` table, which nothing writes now.
 
 Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
 nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,
@@ -419,9 +430,9 @@ gh workflow run internal-build.yml --ref my-branch -f backend_tag=v1.0.3
 
 The run builds the Bot images for that commit, then a Mac (Apple Silicon) installer and a Windows
 (x64) installer. The Bot images are pushed tagged `sha-<commit>` and never `latest`, so the release
-images stay where they are. The OpenBot server, computer, supervisor and all-in-one images are the
-published ones at `backend_tag`: `main` unless you choose another, such as a version (`v1.0.3`) or
-a `test-<date>-<run>` tag.
+images stay where they are. The OpenBot images (`ghcr.io/copilotkit/openbot`, which runs the server
+and every Bot's computer, and `openbot-supervisor`) are the published ones at `backend_tag`: `main`
+unless you choose another, such as a version (`v1.0.3`) or a `test-<date>-<run>` tag.
 
 Each installer is pinned to what the run built:
 
@@ -480,8 +491,9 @@ carries main's tree at a chosen commit, so the candidate is what main's CI teste
 [Finishing a candidate](#finishing-a-candidate)).
 
 Each candidate or beta is published as a GitHub prerelease. It is never Latest, so customers who
-check for the latest release do not see it. Its images are tagged with the version and
-`sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
+check for the latest release do not see it. Its Bot images are tagged with the version and
+`sha-<commit>`, and never `latest`, and its OpenBot images are the ones published at that version.
+A Mac (Apple Silicon) and a Windows (x64) installer are attached
 to it, pinned to that version and to those images, the same as an internal build is. They are built
 beside the release rather than before it, so the signing runs start as soon as the release and its
 `container-images.json` exist, and they are attached when they are built, unless a signed one is
@@ -521,13 +533,15 @@ anything, and fails if anything else changed. The allowed difference is:
 
 - the `version` in `package.json`
 - `CHANGELOG.md`
+- the `version` in `release-policy.json`
+- the `OPENBOT_BACKEND_TAG` line in `backend-images.env`
 - the `openbot-desktop` version in `desktop/src-tauri/Cargo.toml` and `Cargo.lock`
 
 A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
 pinned.
 
-The final is a normal release: its installers are attached, and it becomes Latest, with its images
-tagged `latest`, only when no newer release already is, and only once its signed Mac and Windows
+The final is a normal release: its installers are attached, and it becomes Latest, with its Bot
+images tagged `latest`, only when no newer release already is, and only once its signed Mac and Windows
 installers are attached (see [Which release is Latest](#which-release-is-latest)). A patch from `main` can be
 released while a newer final is out, and that does not move Latest back.
 
@@ -647,7 +661,7 @@ all from this address and go to GitHub only when it does not answer
 | `v2/<repo>/referrers/sha256:<hex>` | an empty OCI image index (`application/vnd.oci.image.index.v1+json`) for each of those manifests | five minutes |
 
 The `v2/` tree is a read-only copy of the OCI Distribution API, at ghcr.io's own paths: `<repo>` is
-the ghcr.io path unchanged, such as `copilotkit/openbot-server`, so Docker and containerd pull
+the ghcr.io path unchanged, such as `copilotkit/openbot-supervisor`, so Docker and containerd pull
 `downloads.copilotkit.ai/<repo>@<digest>` (or use it as a mirror for `ghcr.io`) exactly as they
 pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same, and whole:
 Docker 29's containerd image store fetches every manifest an index names, attestations included,
@@ -766,20 +780,20 @@ Then, in order:
 - the commit is checked, as described under [What has to be green](#what-has-to-be-green): the full
   CI suite, or, when the release PR changed only the release files on a commit main's CI passed,
   that run and the checks that read the release files
-- the OpenBot images, `ghcr.io/copilotkit/openbot` and `openbot-server`, `openbot-agent-computer`
-  and `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
-  and pinned by digest in `container-images.json`. The run stops if one is missing or lacks an
-  architecture it needs
-- the services `docker-compose.yml` can build are published, one image each, at
-  `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
+- the OpenBot images, `ghcr.io/copilotkit/openbot` (the server and every Bot's computer) and
+  `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
+  and pinned by digest in `container-images.json`, where `openbot`, `server` and `agent-computer`
+  all name the one image. The run stops if one is missing or lacks an architecture it needs
+- the Bots and harnesses in this tree are built from the commit and published, one image each, at
+  `ghcr.io/copilotkit/openbot-<name>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
   are laptops as well as servers. `.github/published-images.json` is the list, and CI fails if it
   stops matching the Dockerfiles in the tree
 - a build provenance attestation is signed with the workflow's OIDC identity and pushed alongside
-  every one of them
+  every one of those
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
-  archive and the release manifest as assets. A candidate or beta is marked as a
+  archive, the `openbot` and `openbot-bundle` chart packages and the release manifest as assets. A candidate or beta is marked as a
   prerelease and never Latest. A stable release is published not Latest, with no installers yet
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag straight
   away. It waits for a `macos-signing` reviewer, then builds both Macs and attaches the signed `.dmg`
@@ -831,10 +845,10 @@ export IMAGE_PULL_POLICY=missing
 docker compose up -d
 ```
 
-`IMAGE_PULL_POLICY=missing` is what turns those names into pulls; without it every one of those
-services builds from source, because a service with a `build` section builds by default whatever
-its image is called. A pull that fails still falls back to building, so a machine with no toolchain
-wants the `build` sections overridden away rather than this variable alone.
+The OpenBot images are only ever pulled. `IMAGE_PULL_POLICY=missing` is what makes the Bot a pull
+too; without it `agent-langgraph-agui` builds from source, because a service with a `build` section
+builds by default whatever its image is called. A pull that fails still falls back to building, so a
+machine with no toolchain wants the `build` section overridden away rather than this variable alone.
 
 A tag can be moved to point at a different image; a digest cannot. The same digest that CI smoke
 tested is the one that runs, and rolling back is the same command with an earlier version.
@@ -842,13 +856,17 @@ tested is the one that runs, and rolling back is the same command with an earlie
 On Kubernetes the chart takes the same digest as `image.digest`; see "Pin the image by digest" in
 the Helm guide that comes with the chart.
 
-Before deploying, you can check an image is the one this repository built. Every published image
+Before deploying, you can check an image is OpenBot's. The OpenBot images are signed with OpenBot's
+own key, whose public half is [cosign.pub](cosign.pub), and every Bot image this repository built
 carries its own attestation:
 
 ```sh
-gh attestation verify oci://ghcr.io/copilotkit/openbot:v0.1.0 -R CopilotKit/OpenBot
-gh attestation verify oci://ghcr.io/copilotkit/openbot-supervisor:v0.1.0 -R CopilotKit/OpenBot
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot:main
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot-supervisor:main
+gh attestation verify oci://ghcr.io/copilotkit/openbot-agent-langgraph-agui:v1.0.3 -R CopilotKit/OpenBot
 ```
+
+The OpenBot images of releases up to 1.0.3 carry an attestation, checked the way the Bot image is.
 
 ## What has to be green
 
@@ -857,23 +875,18 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 
 | check | what it would catch |
 | --- | --- |
-| `format, lint, types` | the ordinary things, across every workspace including `agent-computer` and the supervisor |
-| `types (agent-computer)`, `types (supervisor)` | a type error in either deployable package, each checked on its own install |
+| `format, lint, types` | the ordinary things, across every workspace, and a desktop version that has left the release version |
+| `API spec` | a bundled spec that is not what its sources bundle to, a broken API convention, a generated client that is not the committed one, or, on a pull request, a breaking change to the API or the live channels |
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
-| `computer (real browser)` | the agent-computer behavior only a real Chromium shows, such as a password reaching the snapshot a model reads, a session cookie lost on restart, or WebRTC leaving around the egress filter |
+| `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
 | `tests` | a decision made wrongly, in isolation |
-| `chart` | a Helm values file that renders a server which cannot start, across the self-hosted, EKS, EKS sandbox, GKE and AKS targets |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses |
+| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
-| `migrations` | a schema change with no migration, or a snapshot that has drifted |
-| `image` | an image that builds but does not boot, or a supervised service that respawns |
 | `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
 
-`image` matters more than its position suggests. Everything above it can pass on a tree whose image
-never starts, because nothing else here runs the thing it ships. It builds the container, boots it
-with embedded PostgreSQL, waits for `/api/capabilities`, and fails if a supervised service is
-respawning.
+None of these runs the OpenBot server. It comes as published images, which a release pins by digest
+and refuses to publish without (see [What merging does](#what-merging-does)).
 
 These checks gate the publish rather than the proposal, which is why the release PR arriving
 without its own checks does not matter: a pull request opened by a workflow does not trigger them.
@@ -884,12 +897,13 @@ release commit:
 - When the release commit changes nothing but the release files from the commit it merged onto
   (its first parent), and main's CI passed on that commit, they do not. That commit's tree has been
   through all of them already. The release files are `CHANGELOG.md` and `release-policy.json`, which
-  may change freely, and the `version` in `package.json`, the `openbot-desktop` version line in
+  may change freely, and the `version` in `package.json`, the `OPENBOT_BACKEND_TAG` line in
+  `backend-images.env` and the `openbot-desktop` version line in
   `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
-  skips `image` unless it was labelled. A run still in progress is waited for, up to 40 minutes. In
+  skips `component dockerfiles` unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and
-  lint, the desktop and chart versions against `package.json`, and every test that names
+  lint, the desktop version against `package.json`, and every test that names
   `CHANGELOG.md` or `release-policy.json`.
 - Otherwise they all run again, as before: when any other path is added, removed, renamed or
   changed, when a version file changes more than its version, or when main's CI on that commit
@@ -915,9 +929,8 @@ the server reaches the supervisor, the supervisor builds a computer, the gateway
 browser acts, and the trail records it. It cannot run in CI, and this is not a gap to be closed
 later.
 
-OpenBot only runs in Intelligence mode, and `loadConfig` refuses to start without the project's
-Intelligence values, which a hosted runner has no business holding. The `image` check gets around
-this with placeholder values, because nothing is contacted at start-up, but the journey asserts
+OpenBot only runs in Intelligence mode, and the server refuses to start without the project's
+Intelligence values, which a hosted runner has no business holding. The journey also asserts
 `licenseStatus` is `valid`, and no placeholder can make that true.
 
 So it is a step a person takes, on a machine with real Intelligence credentials, before merging
@@ -928,6 +941,8 @@ bash scripts/start.sh
 export OPENBOT_SMOKE_COOKIE='better-auth.session_token=...'   # from a signed-in browser
 bun run test:smoke
 ```
+
+A deployment with sign-in needs `OPENBOT_SMOKE_COOKIE` from an administrator's session.
 
 The session is the second half of "a machine with real credentials": the routes the journey proves
 are behind `requireUser`, so a run without one answers 401 three times and says nothing about the

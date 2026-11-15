@@ -60,10 +60,27 @@ export function tryClient(
 /** The server answered, and said no. `status` tells a refusal (4xx) from a server that broke (5xx). */
 export class ClientError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /**
+   * The refusal's stable name, when the server gave one: the API's problem `code`
+   * (`LINKED_ACCOUNTS_UNAVAILABLE`), or the `code` a few of today's routes answer beside `error`.
+   */
+  readonly code: string | undefined;
+  /**
+   * What else the refusal said, when it was JSON: the members a problem carries beside its sentence,
+   * such as the rule that refused a Bot's action on its computer.
+   */
+  readonly body: Record<string, unknown> | undefined;
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    body?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "ClientError";
     this.status = status;
+    this.code = code;
+    this.body = body;
   }
 }
 
@@ -78,19 +95,25 @@ async function refusal(
   response: Response,
   fallback: string | undefined,
 ): Promise<ClientError> {
-  const message = await response
-    .json()
-    .then((body: { error?: unknown; detail?: unknown }) =>
-      typeof body.error === "string"
-        ? body.error
-        : typeof body.detail === "string"
-          ? body.detail
-          : undefined,
-    )
-    .catch(() => undefined);
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    detail?: unknown;
+    code?: unknown;
+    appId?: unknown;
+  } | null;
+  const message =
+    typeof body?.error === "string"
+      ? body.error
+      : typeof body?.detail === "string"
+        ? body.detail
+        : undefined;
   return new ClientError(
     message ?? fallback ?? "That request failed.",
     response.status,
+    typeof body?.code === "string" ? body.code : undefined,
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : undefined,
   );
 }
 

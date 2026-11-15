@@ -11,8 +11,11 @@ import { z } from "zod";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A task's conversation, carried on by the person in the browser.
@@ -64,7 +67,7 @@ let interrupt: Record<string, unknown> | null;
 let runRequests: RunAgentInput[] = [];
 let runEvents: (input: RunAgentInput) => unknown[];
 const ActivitySchema = z.object({
-  agentId: z.string().nullable(),
+  botId: z.string().nullable(),
   text: z.string(),
 });
 let activity: z.infer<typeof ActivitySchema>[] = [];
@@ -94,16 +97,16 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/waiting-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("waiting-bot"))
+        return botGrantsResponse();
       // What the Bot's runs are offered is read from these, as the server answers them.
       if (url.pathname === botPath("waiting-bot"))
         return NativeResponse.json({
           bot: { id: "waiting-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/waiting-bot")
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === botComponentsPath("waiting-bot"))
+        return botComponentsResponse();
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -135,13 +138,21 @@ beforeAll(() => {
         runRequests.push(body);
         return sse(runEvents(body));
       }
-      if (/\/api\/channels\/[^/]+\/activity$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/activity$/.test(
+          url.pathname,
+        )
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         activity.push(ActivitySchema.parse(await request.json()));
         return new NativeResponse(null, { status: 204 });
       }
-      if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/signal-busy$/.test(
+          url.pathname,
+        )
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         busy.push(
@@ -149,7 +160,11 @@ beforeAll(() => {
         );
         return new NativeResponse(null, { status: 204 });
       }
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
         return NativeResponse.json({ messages: [ask, call] });
@@ -328,12 +343,12 @@ test("what the Bot says after the browser answers its call is what the conversat
   await waitFor(() => expect(runRequests).toHaveLength(2));
   await waitFor(() =>
     expect(activity.at(-1)).toEqual({
-      agentId: "waiting-bot",
+      botId: "waiting-bot",
       text: "I couldn't send the reply. Sam hasn't heard back yet.",
     }),
   );
   expect(activity[0]).toEqual({
-    agentId: null,
+    botId: null,
     text: "Please send the reply now.",
   });
   // The whole turn is over: it started once, and ended once.

@@ -1,6 +1,11 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  environmentManager,
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,18 +14,19 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import {
   MessageReactions,
+  SentFromBot,
   TaskCard,
   TaskReport,
   ThreadLinks,
 } from "@/components/tasks/task-thread";
-import { todayRoutes } from "@/lib/api/served-today";
+import { refreshTaskCards } from "@/lib/channels/use-channel-events";
 import { inAppPath, markdownComponents } from "@/lib/markdown";
 import { settleReactWork } from "./settle-react-work";
 
@@ -39,8 +45,8 @@ const WAITING =
 
 let task = {
   id: "task-1",
-  agentId: "general-assistant",
-  channelId: "channel_task",
+  botId: "general-assistant",
+  conversationId: "channel_task",
   threadId: "thread_task",
   title: "Order heirloom tomato seeds",
   why: null,
@@ -48,10 +54,13 @@ let task = {
   suggestionId: null,
   sourceApp: null,
   sourceLink: null,
-  originChannelId: "channel_main",
+  originConversationId: "channel_main",
   status: "needs_input",
-  failure: null,
-  failedAt: null,
+  failure: null as string | null,
+  failedAt: null as string | null,
+  stoppedAt: null as string | null,
+  workingSince: null as string | null,
+  lastActivityAt: "2026-11-12T22:00:00.000Z",
   next: WAITING as string | null,
   resolvedAt: null,
   createdAt: "2026-11-12T22:00:00.000Z",
@@ -59,18 +68,33 @@ let task = {
 };
 const requests: string[] = [];
 const server = setupServer(
-  http.get("*/api/tasks/:id", ({ params }) =>
+  // Tasks and reactions, at the API's addresses and in its shapes, as the server answers them.
+  http.get("*/api/v2/organizations/:organizationId/tasks/:id", ({ params }) =>
     params.id === task.id
       ? HttpResponse.json({ task })
       : HttpResponse.json(
-          { error: "Couldn't find that task." },
-          { status: 404 },
+          {
+            type: "https://open.bot/errors/not-found",
+            title: "Not found.",
+            status: 404,
+            detail: "Couldn't find that task.",
+            code: "NOT_FOUND",
+            category: "not_found",
+            retryable: false,
+            requestId: "req_test",
+            traceId: "trace_test",
+          },
+          {
+            status: 404,
+            headers: { "content-type": "application/problem+json" },
+          },
         ),
   ),
-  http.get("*/api/tasks/reactions/:threadId", ({ params }) =>
+  http.get("*/api/v2/organizations/:organizationId/reactions", ({ request }) =>
     HttpResponse.json({
+      nextCursor: null,
       reactions:
-        params.threadId === "thread_main"
+        new URL(request.url).searchParams.get("threadId") === "thread_main"
           ? [
               {
                 messageId: "message-thanks",
@@ -81,6 +105,10 @@ const server = setupServer(
             ]
           : [],
     }),
+  ),
+  // The task list, which the brief finds its task in by thread.
+  http.get("*/api/v2/organizations/:organizationId/tasks", () =>
+    HttpResponse.json({ tasks: [task], nextCursor: null }),
   ),
   // The Bots list, at the API's address and in its shape, as the server answers it.
   http.get("*/api/v2/organizations/:organizationId/bots", () =>
@@ -96,22 +124,32 @@ server.events.on("request:start", ({ request }) => {
   requests.push(`${request.method} ${url.pathname}${url.search}`);
 });
 
+let wasServer = true;
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
   server.listen({ onUnhandledRequest: "error" });
+  /*
+   * A browser, with the page in front, as it is for a person reading the conversation. The query
+   * library decided it was on a server when it was first evaluated, before this DOM existed, and on
+   * a server no read is ever repeated on a timer, which is how a card follows its task.
+   */
+  wasServer = environmentManager.isServer();
+  environmentManager.setIsServer(() => false);
+  focusManager.setFocused(true);
 });
 afterEach(() => {
   cleanup();
   requests.length = 0;
 });
 afterAll(async () => {
+  environmentManager.setIsServer(() => wasServer);
+  focusManager.setFocused(undefined);
   server.close();
-  todayRoutes.on = true;
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
 
-function draw(children: ReactNode) {
+function draw(children: ReactNode, client?: QueryClient) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
@@ -134,6 +172,7 @@ function draw(children: ReactNode) {
   return render(
     <QueryClientProvider
       client={
+        client ??
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
@@ -286,21 +325,238 @@ test("a Bot's reaction is read through the generated client and drawn under its 
     name: "General Assistant reacted 👍",
   });
   expect(chip.textContent).toBe("👍");
-  // Asked at the API's address, and sent where today's server answers it.
-  expect(requests).toContain("GET /api/tasks/reactions/thread_main");
+  // Asked at the API's address, and nowhere else.
+  expect(requests).toContain(
+    "GET /api/v2/organizations/default/reactions?threadId=thread_main&limit=100",
+  );
+  expect(requests.filter((request) => request.includes("/api/tasks"))).toEqual(
+    [],
+  );
 });
 
-test("today's table sends the reactions operation where today's server answers it", async () => {
-  const { servedToday } = await import("@/lib/api/served-today");
-  const route = servedToday(
-    "/api/v2/organizations/default/reactions?threadId=thread%2Fwith%20slash&limit=100",
+test("a task's brief links back to the conversation that asked for it, and a check-in's stays plain", async () => {
+  task = { ...task, origin: "delegated", originConversationId: "channel_main" };
+  const delegated = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
   );
-  expect(route?.path).toBe("/api/tasks/reactions/thread%2Fwith%20slash");
-  expect(route?.answer({ reactions: [{ emoji: "👍" }] })).toEqual({
-    reactions: [{ emoji: "👍" }],
-    nextCursor: null,
+  const link = await delegated.findByRole("link", {
+    name: "Sent from General Assistant",
   });
+  expect(link.getAttribute("href")).toBe("/channel/channel_main");
+  link.click();
+  await delegated.findByText("the thread");
+  cleanup();
+
+  // A check-in's task was not asked for in a conversation, so there is nowhere to go back to.
+  task = { ...task, origin: "check_in", originConversationId: null as never };
+  const checkIn = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
+  );
+  await checkIn.findByText("Sent from General Assistant");
+  expect(checkIn.queryByRole("link")).toBeNull();
+});
+
+/** An ISO time this many seconds before now, as the server stamps a task. */
+const ago = (seconds: number) =>
+  new Date(Date.now() - seconds * 1000).toISOString();
+
+const cardOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-card]");
+const stateOf = (view: ReturnType<typeof draw>) =>
+  cardOf(view)?.getAttribute("data-state");
+const elapsedOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-elapsed] time")?.textContent;
+const lastActivityOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-last-activity]")?.textContent;
+
+test("one card follows its task through every state without a reload: working, needs you, stopped, done, couldn't finish", async () => {
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    workingSince: ago(125),
+    lastActivityAt: ago(4),
+  };
+  // The card is drawn once and never drawn again: every change below reaches this one card.
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await view.findByText("Working");
+  expect(stateOf(view)).toBe("working");
+  // How long it has been at it, counted from when this stretch of work began, and still counting.
+  const first = elapsedOf(view);
+  expect(first).toMatch(/^2:0[5-9]$/);
+  await waitFor(() => expect(elapsedOf(view)).not.toBe(first), {
+    timeout: 3_000,
+  });
+  expect(lastActivityOf(view)).toMatch(/^Last activity .*(second|now)/);
+
+  // It stops for the person: the card says so on its next read, which is seconds away.
+  task = { ...task, status: "needs_input", next: WAITING, workingSince: null };
+  await view.findByText("Needs you", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("needs");
+  // Nothing is counted while it waits on the person.
+  expect(elapsedOf(view)).toBeUndefined();
+
+  // The person stops it in its thread. Its status is failed, and the card does not call it a failure.
+  task = {
+    ...task,
+    status: "failed",
+    next: null,
+    failure: "the run was stopped",
+    failedAt: ago(1),
+    stoppedAt: ago(1),
+  };
+  await view.findByText("Stopped", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("stopped");
+  expect(view.queryByText("Couldn't finish")).toBeNull();
   expect(
-    servedToday("/api/v2/organizations/default/reactions", "POST"),
-  ).toBeUndefined();
+    view.getByText(
+      "You stopped this. Anything it had already done stays done.",
+    ),
+  ).toBeTruthy();
+  expect(lastActivityOf(view)).toMatch(/^Last activity /);
+}, 20_000);
+
+test("a card that had stopped reading its task reads it again when the conversation's work changes", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  task = {
+    ...task,
+    status: "ready_for_review",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: null,
+    lastActivityAt: ago(600),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+    client,
+  );
+  await view.findByText("Done");
+  expect(lastActivityOf(view)).toBe("Finished 10 minutes ago");
+
+  // The person replied in its thread and the task carries on. Done is no longer read on a timer,
+  // so nothing tells the card: it still says Done well past the few seconds a working card waits.
+  task = {
+    ...task,
+    status: "working",
+    workingSince: ago(2),
+    lastActivityAt: ago(1),
+  };
+  const asked = () =>
+    requests.filter((request) => request.endsWith("/tasks/task-1")).length;
+  const before = asked();
+  await new Promise((resolve) => setTimeout(resolve, 3_500));
+  expect(asked()).toBe(before);
+  expect(stateOf(view)).toBe("done");
+
+  // An event that is not about work leaves the card alone.
+  act(() =>
+    refreshTaskCards(client, {
+      channelId: "channel_main",
+      lastMessage: "hello",
+      lastMessageAt: ago(0),
+      lastMessageAgentId: null,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(asked()).toBe(before);
+
+  // The server says the conversation's work changed: the card reads its task again, at once.
+  act(() =>
+    refreshTaskCards(client, {
+      channelId: "channel_main",
+      lastMessage: null,
+      lastMessageAt: null,
+      lastMessageAgentId: null,
+      work: [],
+      workAt: "2026-11-14T23:59:00.000000Z",
+    }),
+  );
+  await view.findByText("Working", {}, { timeout: 2_000 });
+  expect(stateOf(view)).toBe("working");
+
+  // It runs out of tries: Couldn't finish, with why, and not Stopped.
+  task = {
+    ...task,
+    status: "failed",
+    failure: "a service didn't answer",
+    failedAt: ago(0),
+    stoppedAt: null,
+    workingSince: null,
+  };
+  await view.findByText("Couldn't finish", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("failed");
+  expect(view.getByText("a service didn't answer")).toBeTruthy();
+}, 20_000);
+
+test("last activity moves when the task does something, and keeps ageing when it does not", async () => {
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: ago(400),
+    lastActivityAt: ago(57),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await view.findByText("Working");
+  expect(lastActivityOf(view)).toMatch(/^Last activity 5\d seconds ago$/);
+  // The task says and does nothing: the same stamp reads older as the seconds pass, by itself.
+  await waitFor(
+    () => expect(lastActivityOf(view)).toBe("Last activity 1 minute ago"),
+    { timeout: 6_000 },
+  );
+  // It takes a step: the stamp moves, and the card shows it on its next read.
+  task = { ...task, lastActivityAt: ago(0) };
+  await waitFor(
+    () =>
+      expect(lastActivityOf(view)).toMatch(
+        /^Last activity (now|\d seconds? ago)$/,
+      ),
+    { timeout: 6_000 },
+  );
+}, 20_000);
+
+test("a stopped task's line in the conversation reads Stopped, and its link row too", async () => {
+  task = {
+    ...task,
+    status: "failed",
+    failure: "the run was stopped",
+    failedAt: ago(30),
+    stoppedAt: ago(30),
+    workingSince: null,
+  };
+  const view = draw(
+    <>
+      <TaskReport kind="failed" taskId="task-1">
+        <p>Stopped. I had found two suppliers and ordered nothing.</p>
+      </TaskReport>
+      <ThreadLinks
+        threads={[
+          {
+            taskId: "task-1",
+            channelId: "channel_task",
+            title: "Order heirloom tomato seeds",
+            status: "failed",
+            link: "/channel/channel_task",
+          },
+        ]}
+      />
+    </>,
+  );
+  const line = await view.findByRole("region", { name: "A task was stopped" });
+  expect(line.textContent).toContain("Stopped · Order heirloom tomato seeds");
+  expect(view.queryByText(/Couldn't finish/)).toBeNull();
+  expect(
+    view.container.querySelector("li[data-state]")?.getAttribute("data-state"),
+  ).toBe("stopped");
 });

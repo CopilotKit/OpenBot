@@ -10,6 +10,13 @@ import {
 import { cleanup, render } from "@testing-library/react";
 import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
+import { botGrantsResponse } from "./bot-grants-api";
+import { answerTeamBots, teamBotOf } from "./bots-api";
+import { notificationsResponse } from "./notifications-api";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** The "Settings for this Bot" card: each row says its current answer and opens its page. */
@@ -54,61 +61,67 @@ function serving(
   role: "admin" | "user",
   teamBots: { id: string; audience: "team" | "people" }[] = [],
 ) {
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/routines")) {
-      return Response.json({
-        routines: [{ id: "r1", agentId: "expenses" }],
-        sweep: null,
-      });
+    const listed = answerTeamBots(
+      input,
+      init,
+      teamBots.map((bot) =>
+        teamBotOf(bot.id, bot.id, { audience: bot.audience, mine: false }),
+      ),
+    );
+    if (listed) return listed;
+    const schedules = answerScheduleLists(input, init, {
+      routines: [{ id: "r1", botId: "expenses" }],
+      goals: [
+        { id: "g1", botId: "expenses", status: "active" },
+        { id: "g2", botId: "expenses", status: "paused" },
+        { id: "g3", botId: "knowledge", status: "active" },
+      ],
+    });
+    if (schedules) return schedules;
+    if (url.includes("/bots/") && url.includes("/grants")) {
+      return botGrantsResponse();
     }
-    if (url.includes("/api/plugins/for/")) {
-      return Response.json({ tools: [], skills: [] });
-    }
-    if (url.includes("/api/team-bots")) {
-      return Response.json({ teamBots, publishable: [] });
-    }
-    if (url === "/api/responsibilities") {
-      return Response.json({
-        responsibilities: [
-          { id: "g1", agentId: "expenses", status: "active" },
-          { id: "g2", agentId: "expenses", status: "paused" },
-          { id: "g3", agentId: "knowledge", status: "active" },
-        ],
-      });
-    }
-    if (url === "/api/delivery") {
-      return Response.json({
-        bindings: [
-          { id: "b1", transport: "slack", agentId: "expenses", enabled: true },
-          { id: "b2", transport: "sms", agentId: "knowledge", enabled: true },
-        ],
-        devices: [],
-        deliveries: [],
-        available: { slack: true, teams: false, sms: true, push: false },
-      });
-    }
+    const reach = notificationsResponse("GET", url, {
+      bindings: [
+        { id: "b1", transport: "slack", channelId: "c1", agentId: "expenses" },
+        { id: "b2", transport: "sms", channelId: "c2", agentId: "knowledge" },
+      ],
+      available: { slack: true, sms: true },
+    });
+    if (reach) return reach;
     if (url === "/api/memory/sources") {
       return Response.json({
         sources: [{ id: "s1", agentId: "expenses", enabled: true }],
       });
     }
-    if (url === "/api/proactive/settings") {
-      return Response.json({ settings: [], allowed: true });
-    }
-    if (url === "/api/approvals") {
-      return Response.json({
-        enabled: true,
-        requests: [],
-        questions: [],
-        rules: [
-          { id: "r1", botId: "expenses" },
-          { id: "r2", botId: "*" },
-        ],
-        teamRules: [],
-      });
-    }
-    return Response.json({
+    const approvals = approvalInboxResponse(url, {
+      enabled: true,
+      requests: [],
+      questions: [],
+      rules: [
+        {
+          id: "r1",
+          botId: "expenses",
+          toolRef: "mcp/drive/share",
+          effect: "write",
+          scope: "*",
+          behaviour: "allow",
+        },
+        {
+          id: "r2",
+          botId: "*",
+          toolRef: "mcp/drive/share",
+          effect: "write",
+          scope: "*",
+          behaviour: "ask",
+        },
+      ],
+      teamRules: [],
+    });
+    if (approvals) return approvals;
+    return meResponse({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;
@@ -154,7 +167,7 @@ test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input) === "/api/capabilities"
+    String(input) === DEPLOYMENT_PATH
       ? Response.json({ edition: "personal" })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
@@ -236,7 +249,7 @@ const ON_HARNESS: AgentProfile = {
 function withEdition(edition: "team" | "personal") {
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input) === "/api/capabilities"
+    String(input) === DEPLOYMENT_PATH
       ? Response.json({ edition })
       : served(input, init)) as unknown as typeof fetch;
 }

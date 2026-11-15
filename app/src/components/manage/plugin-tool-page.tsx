@@ -21,7 +21,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 
 /**
  * One tool, and which Bots hold it.
@@ -46,7 +46,8 @@ export function PluginToolPage({
   const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
@@ -58,7 +59,7 @@ export function PluginToolPage({
    * past the front door. A Bot with the grant and neither credential produced "May call this tool"
    * beside a tool that refused every call, with no audit row, because the call never arrived.
    */
-  const sharedCallback = plugins.data?.botsMayCallBack === true;
+  const sharedCallback = setup.data?.botsMayCallBack === true;
   const canCallBack = (bot: { id: string }) =>
     sharedCallback ||
     [...(agents ?? []), ...(hiddenAgents ?? [])].find(
@@ -71,7 +72,7 @@ export function PluginToolPage({
     onError: (thrown: Error) => setError(thrown.message),
   });
 
-  const server = plugins.data?.servers.find((row) => row.id === key);
+  const server = plugins.data?.find((row) => row.id === key);
   const tool = server?.tools.find((row) => row.name === toolName);
 
   const back = {

@@ -15,6 +15,7 @@ import {
   SHARING_CHOICES,
 } from "@/components/settings/learning-sharing";
 import { queryClient } from "@/query-client";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 
 let wasServer = true;
 beforeAll(() => {
@@ -105,7 +106,7 @@ beforeEach(() => {
           },
         });
       }
-      if (url === "/api/capabilities") return Response.json({ edition });
+      if (url === DEPLOYMENT_PATH) return Response.json({ edition });
       if (url === "/api/settings/learning") {
         if (failRead) return new Response(null, { status: 500 });
         return Response.json(answer);

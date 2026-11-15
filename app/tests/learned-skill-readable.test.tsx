@@ -30,6 +30,7 @@ import {
 import { LearningSharing } from "@/components/settings/learning-sharing";
 import { readableSkillBody, skillTitle } from "@/lib/learning/display";
 import { queryClient } from "@/query-client";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -97,7 +98,7 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0]) => {
       const url = String(path);
-      if (url === "/api/capabilities")
+      if (url === DEPLOYMENT_PATH)
         return Response.json({ edition: "personal" });
       if (url === "/api/settings/learning") return Response.json(listing);
       if (url === `/api/settings/learning/skills/${NAME}`)

@@ -47,9 +47,9 @@ import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
   type GrantedPlugins,
-  pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 import { toolName } from "@/lib/plugins/tool-words";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -252,18 +252,18 @@ function YourApps({ agent }: { agent: AgentProfile }) {
  * Your own skills, one switch each. Only on your own Bot: the server lets a person put their own
  * skill on a Bot they own, and neither half alone is enough.
  *
- * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS PAGE; WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
- * GRANTS (`GET /api/plugins/for/:agentId`, the read "What it can use" draws from too). That read is
+ * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS LIST (`listSkills`); WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
+ * GRANTS (listBotGrants, the read "What it can use" draws from too). That read is
  * where the personal edition gives a Bot every skill the first time it is listed, so it is what
  * gives a Bot made a moment ago its skills. The skills page, read alongside it or earlier, still said
  * the Bot had none, and every switch was drawn off until the page was opened again.
  */
 function YourSkills({ agentId }: { agentId: string }) {
   const me = useQuery(currentUserQueryOptions()).data;
-  const page = useQuery(pluginsPageQueryOptions());
+  const page = useQuery(skillListQueryOptions());
   const held = useQuery(agentPluginsQueryOptions(agentId));
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
-  const skills = (page.data?.skills ?? []).filter(
+  const skills = (page.data ?? []).filter(
     (skill) => me && skill.ownerUserId === me.id,
   );
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
@@ -343,7 +343,7 @@ function YourSkills({ agentId }: { agentId: string }) {
  * READ-ONLY FOR GRANTS, NOT FOR THE PERSON'S OWN PART. Apps are granted by an administrator, who gets
  * a link to where that is decided — or, on a Bot you own, by you, under Your apps above. But a Bot that holds Gmail is no use to somebody who has not
  * connected their Gmail, and this list used to say "Gmail · 4 tools" to everybody alike — so each
- * app now says what it is for the person reading (`GET /api/plugins/for/:agentId/apps`) with the one
+ * app now says what it is for the person reading (listBotApps) with the one
  * thing they can do about it: Connect, Reconnect, Request access, or Requested. The state is the
  * server's and is drawn as it comes; see `AppAccessAction`.
  *

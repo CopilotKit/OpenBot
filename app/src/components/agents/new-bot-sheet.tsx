@@ -58,10 +58,7 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { testAgentConnection } from "@/lib/agents/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
@@ -72,11 +69,8 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import {
-  type PluginsPage,
-  pluginKeys,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
+import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -195,22 +189,21 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
@@ -248,7 +241,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    * list Connections shows as on, and not only the ones this person could give.
    */
   const turnedOn = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...appsQueryOptions(),
     enabled: personal,
   });
   const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
@@ -680,7 +673,7 @@ function AboutStep({
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
-  turnedOn: UseQueryResult<PluginsPage>;
+  turnedOn: UseQueryResult<PluginServer[]>;
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
@@ -811,9 +804,13 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
+function EveryAppList({
+  turnedOn,
+}: {
+  turnedOn: UseQueryResult<PluginServer[]>;
+}) {
   if (turnedOn.isPending) return null;
-  const servers = turnedOn.data?.servers ?? [];
+  const servers = turnedOn.data ?? [];
   return (
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>

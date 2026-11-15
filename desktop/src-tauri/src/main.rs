@@ -25,7 +25,8 @@ use openbot_desktop_lib::{
     local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
+    superseded_images, telemetry, tray, troubleshooting, uninstall, update_ready, upgrade,
+    windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -2002,6 +2003,7 @@ async fn upgrade_and_start_now(
                 engine::StepLine::here("OpenBot is updated.")
                     .logged(format!("OpenBot is on {}.", planned.to)),
             );
+            remove_superseded_images(&app, &selected);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
@@ -3047,7 +3049,7 @@ async fn prepare_installation_inner(
         /*
          * NO BUN, NO `bun install`, NO APP BUILD.
          *
-         * The server, the app and the worker run from the published server image, so installing
+         * The server and the app it serves run from the published server image, so installing
          * OpenBot is pulling images and nothing else. This step used to download Bun and install
          * the app's packages here, on every machine, and on a fresh Windows machine that took longer
          * than everything else in the install together: Defender scans each of the thousands of
@@ -4166,7 +4168,8 @@ async fn start_stack_now<R: tauri::Runtime>(
         return Err(Problem::plain(UPGRADE_INTERRUPTED));
     }
     let menus = app.clone();
-    let started = start_stack_inner(app, root, api_url, gateway_ws_url, model, harness).await;
+    let started =
+        start_stack_inner(app, root.clone(), api_url, gateway_ws_url, model, harness).await;
     // The menu bar says whether OpenBot is running.
     refresh_menus(&menus);
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
@@ -4174,8 +4177,37 @@ async fn start_stack_now<R: tauri::Runtime>(
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
         // Attribution after Start, in the background: OpenBot is already open.
         desktop_telemetry::link_account_after_start(&menus);
+        // What an earlier update could not remove yet, now that OpenBot answers again.
+        remove_superseded_images(&menus, &root);
     }
     started
+}
+
+/**
+Remove the images of releases this installation was updated from, once OpenBot has started and
+answered: straight after the update that replaced them, and after every later Start while any are
+left. See `superseded_images`.
+
+In the background, on its own thread: nothing waits on it and nothing is said about it. An image
+that cannot go yet stays for the next Start. On the engine this Start ran on, which is the one the
+installation's images are in.
+*/
+fn remove_superseded_images<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) {
+    let Some(address) = app
+        .state::<Shell>()
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|owned| owned.root == root)
+        .map(|owned| owned.address.clone())
+    else {
+        return;
+    };
+    let root = root.to_path_buf();
+    std::thread::spawn(move || {
+        superseded_images::remove(&address, &root);
+    });
 }
 
 async fn start_stack_inner<R: tauri::Runtime>(
@@ -4563,8 +4595,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         remember_own_ports(&ports);
         acquire::readied_for_backend(Some(&found), || ());
         let requested_services = stack::up(&found, &root, installed_harness, &secrets)?;
-        // The migrations ran with that: `migrate` is the dependency Compose completes before it
-        // starts `server`, once, and a failed one fails the `up`.
+        // The server applies its migrations as it starts. In an installation whose Compose file is
+        // an earlier release's, they ran with that `up`: `migrate` is the dependency Compose
+        // completes before it starts `server`, once, and a failed one fails the `up`.
         report_plain(&app, "services", true, "OpenBot's services are running.");
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
@@ -6594,12 +6627,13 @@ fn on_setup_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url)
 }
 
 /**
-The appearance the setup screens use: OpenBot's own light or dark, the last time its page reported
-one (`page_appearance`), and the system's until then. Both themes exist; the page follows the
-window's appearance through `prefers-color-scheme`, so `Some(Dark)` or `Some(Light)` pins one.
+The appearance the setup screens use: the light or dark the person chose in OpenBot, the last time
+its page reported one (`page_appearance`), and the system's until then or when OpenBot follows the
+system. Both themes exist; the page follows the window's appearance through `prefers-color-scheme`,
+so `Some(Dark)` or `Some(Light)` pins one and `None` follows the system.
 
-OpenBot's, not the system's: somebody who set OpenBot to light on a Mac in dark mode saw setup in
-dark, then OpenBot in light, as if they were two apps.
+The person's choice, not the system's: somebody who set OpenBot to light on a Mac in dark mode saw
+setup in dark, then OpenBot in light, as if they were two apps.
 */
 fn setup_theme<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::Theme> {
     let record = app.path().app_config_dir().ok()?.join(APPEARANCE_FILE);
@@ -6623,10 +6657,12 @@ fn ground_color(palette: first_paint::Palette) -> tauri::window::Color {
     tauri::window::Color(red, green, blue, 0xff)
 }
 
-/// Where OpenBot's last light or dark is kept, in the app's own configuration folder.
+/// Where OpenBot's last light or dark, or that it follows the system, is kept, in the app's own
+/// configuration folder.
 const APPEARANCE_FILE: &str = "appearance.json";
 
-/// The theme a saved record names, or None for no record or one that cannot be read.
+/// The theme a saved record names, or None for no record, one that cannot be read, or one that says
+/// OpenBot follows the system.
 fn theme_from_record(record: Option<&str>) -> Option<tauri::Theme> {
     let record: serde_json::Value = serde_json::from_str(record?).ok()?;
     match record.get("dark")?.as_bool()? {
@@ -6635,14 +6671,24 @@ fn theme_from_record(record: Option<&str>) -> Option<tauri::Theme> {
     }
 }
 
+/// The record for what OpenBot's page reported: the light or dark the person chose, or that OpenBot
+/// follows the system, which names no theme, so setup follows the system too.
+fn appearance_record(dark: bool, system: bool) -> String {
+    if system {
+        serde_json::json!({ "system": true }).to_string()
+    } else {
+        serde_json::json!({ "dark": dark }).to_string()
+    }
+}
+
 /// Keep OpenBot's light or dark for the next setup screen. Best effort: a record that cannot be
 /// written only means setup follows the system next time.
-fn remember_appearance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, dark: bool) {
+fn remember_appearance<R: tauri::Runtime>(app: &tauri::AppHandle<R>, dark: bool, system: bool) {
     let Ok(directory) = app.path().app_config_dir() else {
         return;
     };
     let record = directory.join(APPEARANCE_FILE);
-    let wanted = serde_json::json!({ "dark": dark }).to_string();
+    let wanted = appearance_record(dark, system);
     if std::fs::read_to_string(&record).ok().as_deref() == Some(wanted.as_str()) {
         return;
     }
@@ -6999,11 +7045,16 @@ fn match_title_bar<R: tauri::Runtime>(window: &tauri::Window<R>, page: WindowPag
     }
 }
 
-/// OpenBot's own page reporting its light or dark (`APP_THEME_PAGE`). On Windows the title bar
-/// takes the page's ground, when the page is one whose ground that is: an OpenBot from before the
-/// reskin keeps Windows's own bar, in the page's light or dark.
-pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark: bool) {
-    remember_appearance(window.app_handle(), dark);
+/// OpenBot's own page reporting its light or dark, and whether that is the system's
+/// (`APP_THEME_PAGE`). On Windows the title bar takes the page's ground, when the page is one whose
+/// ground that is: an OpenBot from before the reskin keeps Windows's own bar, in the page's light or
+/// dark.
+pub(crate) fn page_appearance<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    dark: bool,
+    system: bool,
+) {
+    remember_appearance(window.app_handle(), dark, system);
     #[cfg(target_os = "windows")]
     {
         let app = window.app_handle();
@@ -7017,6 +7068,18 @@ pub(crate) fn page_appearance<R: tauri::Runtime>(window: &tauri::Window<R>, dark
     }
     #[cfg(not(target_os = "windows"))]
     let _ = (window, dark);
+}
+
+/// The window's theme for what OpenBot's page reported: pinned to the light or dark the person
+/// chose, and the system's own (`None`) when OpenBot follows the system. A pinned window answers
+/// the page's `prefers-color-scheme` with the pin, so a window left pinned would never show the
+/// page that the system changed.
+pub(crate) fn window_theme(dark: bool, system: bool) -> Option<tauri::Theme> {
+    match (system, dark) {
+        (true, _) => None,
+        (false, true) => Some(tauri::Theme::Dark),
+        (false, false) => Some(tauri::Theme::Light),
+    }
 }
 
 /**
@@ -7201,28 +7264,37 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
 })();"#;
 
 /**
-Keeps the window's appearance on OpenBot's own light or dark, which it chooses itself (Settings)
-rather than following the system.
+Keeps the window's appearance on OpenBot's own light or dark when the person chose one (Settings),
+and on the system's when OpenBot follows the system.
 
 MEASURED: with the Mac in dark and OpenBot set to light, the window kept the dark appearance, and
 macOS drew its dark-window outline, a black line, around a light window. The page sets the window's
 theme to its own whenever its `dark` class changes, through `desktop_page::appearance`.
+
+The page names the choice in `data-theme-choice` on its root (app/index.html, app/src/lib/theme.ts).
+"system" lets the window follow the system, which is what lets the page see the system change. It
+is watched as well as the class: going back to System from a chosen dark on a dark window changes
+no class, and the window must still be let go. An OpenBot from before it followed the system names
+no choice, and its window stays pinned to its light or dark.
 */
 const APP_THEME_PAGE: &str = r#"(() => {
   const internals = window.__TAURI_INTERNALS__;
   if (!internals || typeof internals.invoke !== "function") return;
   let applied = null;
   const sync = () => {
-    const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-    if (theme === applied) return;
-    applied = theme;
+    const root = document.documentElement;
+    const dark = root.classList.contains("dark");
+    const system = root.dataset.themeChoice === "system";
+    const reported = `${dark}:${system}`;
+    if (reported === applied) return;
+    applied = reported;
     internals
-      .invoke("plugin:openbot-desktop|appearance", { dark: theme === "dark" })
+      .invoke("plugin:openbot-desktop|appearance", { dark, system })
       .catch(() => {});
   };
   new MutationObserver(sync).observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-theme-choice"],
   });
   sync();
 })();"#;
@@ -8095,7 +8167,7 @@ pub(crate) struct DesktopStatus {
     /// This session of the desktop app started the OpenBot that is running, so it can restart it.
     /// False for an OpenBot left running by an earlier session that ended without its Quit.
     openbot_held: bool,
-    /// Always empty now: OpenBot's server and worker are containers and are listed with them.
+    /// Always empty now: OpenBot's server is a container and is listed with the rest.
     /// Kept so a Status window from before that still reads the shape it expects.
     processes: Vec<desktop_status::Part>,
     containers: Vec<desktop_status::Part>,
@@ -8366,7 +8438,8 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
 }
 
 /**
-Restart OpenBot itself: the server and the worker containers, through Compose. The other
+Restart OpenBot itself: the server's container, through Compose, and the worker's in an
+installation whose Compose file still defines one. The other
 containers, its database among them, keep running, so nothing is lost and the restart takes seconds.
 Only an OpenBot this session started, whose engine it knows.
 */
@@ -10543,7 +10616,7 @@ const SERVER_GONE_AFTER: std::time::Duration = std::time::Duration::from_secs(10
 Watch a running OpenBot for a connection it reports refused, and send the window back to setup to
 refresh it.
 
-What is left of the host-process supervisor. Docker's restart policy keeps the server and the worker
+What is left of the host-process supervisor. Docker's restart policy keeps the server
 up now, so nothing here starts anything. The server still knows, as only it can, when the model, the
 Intelligence it was given has been refused, and it tells the desktop
 through the token minted for this run. The watcher ends with the run it was started for: a Stop or
@@ -12963,11 +13036,7 @@ mod tests {
         )
         .unwrap();
         assert!(!app_makes_room_for_window_buttons(&root));
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         assert!(app_makes_room_for_window_buttons(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -13004,8 +13073,44 @@ mod tests {
             assert_eq!(theme_from_record(unreadable), None, "{unreadable:?}");
         }
         // What `remember_appearance` writes is what this reads.
-        let written = serde_json::json!({ "dark": false }).to_string();
-        assert_eq!(theme_from_record(Some(&written)), Some(tauri::Theme::Light));
+        assert_eq!(
+            theme_from_record(Some(&appearance_record(false, false))),
+            Some(tauri::Theme::Light)
+        );
+        assert_eq!(
+            theme_from_record(Some(&appearance_record(true, false))),
+            Some(tauri::Theme::Dark)
+        );
+    }
+
+    /// When OpenBot follows the system, so do its window and the setup screens: the window is not
+    /// pinned, whatever the page showed when it reported, and the record names no theme.
+    #[test]
+    fn a_window_following_the_system_is_not_pinned() {
+        assert_eq!(window_theme(true, true), None);
+        assert_eq!(window_theme(false, true), None);
+        assert_eq!(window_theme(true, false), Some(tauri::Theme::Dark));
+        assert_eq!(window_theme(false, false), Some(tauri::Theme::Light));
+        for dark in [true, false] {
+            assert_eq!(
+                theme_from_record(Some(&appearance_record(dark, true))),
+                None
+            );
+        }
+        // The page says which, and says again when only the choice changes.
+        assert!(APP_THEME_PAGE.contains(r#"root.dataset.themeChoice === "system""#));
+        assert!(APP_THEME_PAGE.contains(r#"attributeFilter: ["class", "data-theme-choice"]"#));
+        assert!(APP_THEME_PAGE.contains("{ dark, system }"));
+        // The app this release ships names its choice there, before paint and after.
+        let page = include_str!("../../../app/index.html");
+        assert!(page.contains("document.documentElement.dataset.themeChoice"));
+        let command = include_str!("desktop_page.rs");
+        let command = &command[command.find("async fn appearance(").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains(".set_theme(crate::window_theme(dark, system))"),
+            "{command}"
+        );
     }
     use std::io::{Read, Write};
 
@@ -17240,7 +17345,7 @@ mod tests {
         let command = &command[command.find("async fn appearance(").unwrap()..];
         let command = &command[..command.find("\n}\n").unwrap()];
         assert!(
-            command.contains("crate::page_appearance(&window, dark);"),
+            command.contains("crate::page_appearance(&window, dark, system);"),
             "{command}"
         );
         // As the main window first shows, before `build()` returns.
@@ -19258,6 +19363,8 @@ fn main() {
         ["compose","-f","docker-compose.yml","config","--format","json"] => println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}"),
         ["compose","-f","docker-compose.yml","stop","supervisor"] => (),
         ["ps","--quiet","--filter",_,"--filter",_] => (),
+        // Start and Stop look for a `migrate` or `worker` container an earlier release left; none here.
+        ["ps","--all","--quiet","--filter",_,"--filter",_] => (),
         ["compose","-f","docker-compose.yml","--profile","harness","--profile","openbot","down"] => {
             if cwd.join("fail-down").exists() { eprintln!("synthetic down refusal");std::process::exit(73); }
             if fs::read_to_string(cwd.join("fixture-containers-running")).ok().as_deref()==Some(&identity) {
@@ -20181,39 +20288,39 @@ fn main() {
         let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
         let (expected_up, expected_image) = match case {
             "remote" | "remote-stale-image" => (
-                "compose up -d --no-build --pull never postgres agent-computer server worker",
+                "compose up -d --no-build --pull never postgres agent-computer server",
                 None,
             ),
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
                 (
-                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    "compose up -d --no-build --pull never postgres agent-computer server",
                     None,
                 )
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
                 (
-                    "compose up -d --no-build --pull never postgres agent-computer server worker",
+                    "compose up -d --no-build --pull never postgres agent-computer server",
                     None,
                 )
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server worker agent-harness", Some("agent-claude-sdk"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -20293,9 +20400,14 @@ fn main() {
             vec![expected_up],
             "case={case}, actual Start IPC commands:\n{commands}"
         );
-        // Migrations run once, as the dependency `up` starts before `server`: never a second
-        // `compose run migrate` after it.
-        assert!(!commands.contains("migrate"), "{commands}");
+        // The server applies its migrations as it starts (in a release that has a `migrate`
+        // service, as the dependency `up` completes before `server`): never a `compose run migrate`.
+        assert!(
+            !commands
+                .lines()
+                .any(|line| line.contains("\tcompose ") && line.contains("migrate")),
+            "{commands}"
+        );
         assert!(!root.join(".logs").exists(), "no host runtime was launched");
         // The server container's own credential reaches Compose for `up`, and only Compose.
         assert_eq!(
@@ -20501,7 +20613,7 @@ fn main() {
         assert!(commands.contains("\tcompose version\n"), "{commands}");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "{commands}"
         );
@@ -20581,7 +20693,7 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "Start reached the runtime handoff: {commands}"
         );
@@ -20646,7 +20758,7 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build --pull never postgres agent-computer server worker\n"
+                "\tcompose up -d --no-build --pull never postgres agent-computer server\n"
             ),
             "{commands}"
         );
@@ -21481,8 +21593,8 @@ fn main() {
         let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
-    /// A Compose file from a release that runs the server and worker as services.
-    const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n  worker: {}\n";
+    /// A Compose file from a release that runs the server as a service.
+    const INSTALLED_COMPOSE: &str = "services:\n  server: {}\n";
 
     /// The key `local connect` would have stored, which Start reads from the credential store.
     fn remember_local_intelligence_key(root: &Path) {

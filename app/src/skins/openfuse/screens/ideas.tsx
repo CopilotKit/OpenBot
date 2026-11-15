@@ -25,7 +25,7 @@ export function IdeasScreen() {
   }
   const none =
     suggestions.data !== undefined &&
-    !suggestions.data.some((suggestion) => suggestion.agentId === bot.id);
+    !suggestions.data.some((suggestion) => suggestion.botId === bot.id);
   return (
     <FuseScreen title="Ideas">
       <div className="[&>section:first-child]:mt-0">

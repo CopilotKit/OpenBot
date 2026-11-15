@@ -1,40 +1,47 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import {
+  deleteLinkedAccount,
+  linkAccount,
+} from "@/lib/api/generated/linked-accounts/linked-accounts";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { identityKeys } from "./queries";
 
 const UNLINK_FALLBACK = "The account could not be disconnected";
 
-/** The machine-readable code on the server's own "no such link" 404. */
-export const IDENTITY_LINK_NOT_FOUND = "identity_link_not_found";
+/** The API's code for "no such link". */
+export const LINKED_ACCOUNT_NOT_FOUND = "LINKED_ACCOUNT_NOT_FOUND";
 
 /**
- * The server's own 404, tagged `code: "identity_link_not_found"`, means the link is already gone —
- * removed in another tab, or by a retry after a failed audit write — which is what the person asked
- * for, so it is success rather than an error. Any other 404 (a proxy, a missing route, an SPA
- * fallback page) says nothing about the link, so it throws: the credential may still be live.
+ * Whether a refusal says the link is already gone: the API's own 404, `LINKED_ACCOUNT_NOT_FOUND`.
+ * Removed in another tab, or by a retry after a failed audit write, which is what the person asked
+ * for, so it is success. Any other 404 (a proxy, a missing route, an SPA fallback page) says nothing
+ * about the link and is a failure: the credential may still be live.
  */
-export async function unlinkOutcome(response: Response): Promise<void> {
-  if (response.ok) return;
-  const body = (await response.json().catch(() => null)) as {
-    error?: unknown;
-    code?: unknown;
-  } | null;
-  if (response.status === 404 && body?.code === IDENTITY_LINK_NOT_FOUND) {
-    return;
-  }
-  throw new Error(
-    typeof body?.error === "string" ? body.error : UNLINK_FALLBACK,
+export function alreadyUnlinked(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    error.status === 404 &&
+    error.code === LINKED_ACCOUNT_NOT_FOUND
   );
 }
 
 export function unlinkMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (id: string): Promise<void> =>
-      unlinkOutcome(
-        await tryClient(`/api/identity/links/${encodeURIComponent(id)}`, {
-          method: "DELETE",
-        }),
-      ),
+    mutationFn: async (id: string): Promise<void> => {
+      try {
+        await deleteLinkedAccount(
+          ORGANIZATION_ID,
+          "me",
+          id,
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: UNLINK_FALLBACK },
+        );
+      } catch (error) {
+        if (alreadyUnlinked(error)) return;
+        throw error;
+      }
+    },
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: identityKeys.links() }),
   });
@@ -47,14 +54,25 @@ export type SlackLinkCode = {
   instruction: string;
 };
 
+const SLACK_CODE_FAILED = "Could not create a Slack link code";
+
 export function issueSlackCodeMutationOptions() {
   return mutationOptions({
-    mutationFn: (): Promise<SlackLinkCode> =>
-      client<SlackLinkCode>("/api/identity/challenges", "challenge", {
-        method: "POST",
-        body: { provider: "slack" },
-        fallback: "Could not create a Slack link code",
-      }),
+    mutationFn: async (): Promise<SlackLinkCode> => {
+      const started = await linkAccount(
+        ORGANIZATION_ID,
+        "me",
+        { provider: "slack" },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: SLACK_CODE_FAILED },
+      );
+      if (started.provider !== "slack") throw new Error(SLACK_CODE_FAILED);
+      return {
+        code: started.code,
+        expiresAt: started.expiresAt,
+        instruction: started.instruction,
+      };
+    },
   });
 }
 
@@ -91,12 +109,15 @@ export function githubAuthorizationUrl(value: unknown): string {
 export function connectGithubMutationOptions() {
   return mutationOptions({
     mutationFn: async (): Promise<string> =>
-      // `client` yields undefined when the envelope key is absent; the validator handles that.
+      // Checked, whatever the answer says: the browser follows it.
       githubAuthorizationUrl(
-        await client<unknown>("/api/identity/github/connect", "connect", {
-          method: "POST",
-          fallback: CONNECT_GITHUB_FAILED,
-        }),
+        await linkAccount(
+          ORGANIZATION_ID,
+          "me",
+          { provider: "github" },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: CONNECT_GITHUB_FAILED },
+        ),
       ),
   });
 }

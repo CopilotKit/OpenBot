@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import {
   askRunLiveness,
   type RunLiveness,
@@ -9,79 +9,100 @@ import {
  * FOUND IN TESTING, with the service that carries a conversation's events frozen mid-run. The reply
  * stopped half written and the step said "Running", with Stop up, for as long as anybody watched:
  * the server had given the run up, and nothing could tell this browser. A quiet run is now asked
- * about, and ended on the runtime's answer, never on the quiet alone.
+ * about, and ended on the server's answer, never on the quiet alone.
  */
 
 const later = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** The runtime's connect call, answering as it does. */
-function runtime(answer: () => Promise<Response>) {
-  const asked: { path: string; threadId: unknown }[] = [];
-  return {
-    asked,
-    request: async (path: string, options: { body?: unknown }) => {
-      asked.push({
-        path,
-        threadId: (options.body as { threadId?: unknown }).threadId,
-      });
-      return answer();
-    },
-  };
-}
+const JOIN_TOKENS =
+  "/api/v2/organizations/default/conversations/channel_1/join-tokens";
 
-test("the runtime's answer says whether a conversation still has a run going", async () => {
-  const live = runtime(async () =>
-    Response.json({ threadId: "t1", runId: "run-7", joinToken: "j" }),
-  );
-  expect(
-    await askRunLiveness("personal-assistant", "t1", { request: live.request }),
-  ).toBe("live");
-  expect(live.asked).toEqual([
+/** What a join token for the conversation answers, with a run going or without. */
+const joined = (runId: string | null) =>
+  Response.json(
     {
-      path: "/api/copilotkit/agent/personal-assistant/connect",
+      joinToken: "jt_1",
+      expiresAt: "2026-11-14T12:00:30.000Z",
       threadId: "t1",
+      runId,
+      realtime: { clientUrl: "ws://127.0.0.1:4401/client", topic: "thread:t1" },
     },
-  ]);
-
-  // Joined, with no run named: the conversation has none going.
-  const idle = runtime(async () =>
-    Response.json({ threadId: "t1", joinToken: "j" }),
+    { status: 201 },
   );
-  expect(
-    await askRunLiveness("personal-assistant", "t1", { request: idle.request }),
-  ).toBe("over");
-  const nothing = runtime(async () => new Response(null, { status: 204 }));
-  expect(
-    await askRunLiveness("personal-assistant", "t1", {
-      request: nothing.request,
-    }),
-  ).toBe("over");
 
-  // It failed, as it did while the service behind it answered 500.
-  const failing = runtime(async () =>
-    Response.json({ error: "Connect request failed" }, { status: 500 }),
-  );
-  expect(
-    await askRunLiveness("personal-assistant", "t1", {
-      request: failing.request,
+/** A refusal as the API answers one: problem details, with its stable code. */
+const problem = (status: number, code: string) =>
+  new Response(
+    JSON.stringify({
+      status,
+      code,
+      title: code,
+      detail: "No.",
+      type: "about:blank",
     }),
-  ).toBe("unreachable");
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
-test("a runtime that never answers, as with the service behind it frozen, has not answered", async () => {
-  const frozen = runtime(() => new Promise<Response>(() => {}));
+/** The server, at the API's join-token operation, answering as it does. */
+function server(answer: () => Promise<Response>) {
+  const asked: { path: string; method: string; key: string | null }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    asked.push({
+      path: String(input),
+      method: init?.method ?? "GET",
+      key: new Headers(init?.headers).get("idempotency-key"),
+    });
+    return answer();
+  }) as typeof fetch;
+  return asked;
+}
+
+test("the server's answer says whether a conversation still has a run going", async () => {
+  const asked = server(async () => joined("run-7"));
+  expect(await askRunLiveness("channel_1")).toBe("live");
+  // Asked through the API's join-token operation, as a write of its own each time.
+  expect(asked).toHaveLength(1);
+  expect(asked[0]?.path).toBe(JOIN_TOKENS);
+  expect(asked[0]?.method).toBe("POST");
+  expect(asked[0]?.key).toBeTruthy();
+  expect(await askRunLiveness("channel_1")).toBe("live");
+  expect(asked[1]?.key).not.toBe(asked[0]?.key);
+
+  // Joined, with no run named: the conversation has none going.
+  server(async () => joined(null));
+  expect(await askRunLiveness("channel_1")).toBe("over");
+  // No Bot has run in it yet, so none is going.
+  server(async () => problem(409, "CONVERSATION_NOT_STARTED"));
+  expect(await askRunLiveness("channel_1")).toBe("over");
+
+  // It could not say, as while the service behind it does not answer.
+  server(async () => problem(502, "LIVE_CHANNELS_UNAVAILABLE"));
+  expect(await askRunLiveness("channel_1")).toBe("unreachable");
+  // Any other refusal is not an answer about the run either.
+  server(async () => problem(404, "CONVERSATION_NOT_FOUND"));
+  expect(await askRunLiveness("channel_1")).toBe("unreachable");
+  server(async () => {
+    throw new TypeError("Failed to fetch");
+  });
+  expect(await askRunLiveness("channel_1")).toBe("unreachable");
+});
+
+test("a server that never answers, as with the service behind it frozen, has not answered", async () => {
+  server(() => new Promise<Response>(() => {}));
   const started = Date.now();
-  expect(
-    await askRunLiveness("personal-assistant", "t1", {
-      request: frozen.request,
-      answerMs: 40,
-    }),
-  ).toBe("unreachable");
+  expect(await askRunLiveness("channel_1", { answerMs: 40 })).toBe(
+    "unreachable",
+  );
   expect(Date.now() - started).toBeLessThan(1000);
 });
 
-test("a quiet run is asked about, kept while the runtime says it is going, and ended when it says it is not", async () => {
+test("a quiet run is asked about, kept while the server says it is going, and ended when it says it is not", async () => {
   const answers: RunLiveness[] = ["live", "live", "over"];
   let asked = 0;
   const watch = watchQuietRun({

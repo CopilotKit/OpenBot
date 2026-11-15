@@ -97,7 +97,7 @@ import {
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
-import { publishedSandboxedQueryOptions } from "@/lib/sandboxed/queries";
+import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import {
   askChannelAgent,
   messageText,
@@ -122,6 +122,12 @@ import { newId } from "../../lib/new-id";
  * next message sent.
  */
 const JOIN_DEADLINE_MS = 1500;
+
+/**
+ * How long the runtime is given to say whether a turn the roster reports can still be heard, before
+ * the join is ended. Shorter than a quiet run's ask: the conversation shows nothing while it waits.
+ */
+const JOIN_LIVENESS_MS = 5_000;
 
 /**
  * Whether the roster says a turn is running in this conversation now: one this tab started from a
@@ -495,7 +501,7 @@ function describeAttachments(attachments: readonly Attachment[]): string {
 function authoredComponents(): ReadonlySet<string> {
   return new Set(
     (
-      queryClient.getQueryData(publishedSandboxedQueryOptions().queryKey) ?? []
+      queryClient.getQueryData(publishedPlaygroundQueryOptions().queryKey) ?? []
     ).map((component) => component.name),
   );
 }
@@ -688,6 +694,16 @@ export function ChannelChat({
            * once the thread's run is over, so a roster that is late to clear cannot hold it open.
            */
           answering: () => lastRun.running() || rosterSaysWorking(channel.id),
+          /*
+           * A turn the replay has carried is being heard. One only the roster knows of is checked
+           * with the server, which is asked the way a quiet run is: when it cannot answer, nothing
+           * is coming down this join, and keeping it kept the conversation shut for good.
+           */
+          reachable: async () =>
+            lastRun.running() ||
+            (await askRunLiveness(channel.id, {
+              answerMs: JOIN_LIVENESS_MS,
+            })) !== "unreachable",
           onAnswering: () => {
             if (current) {
               setRestoring(false);
@@ -1322,7 +1338,7 @@ export function ChannelChat({
          * watch covers one run at a time.
          */
         const quiet = watchQuietRun({
-          ask: () => askRunLiveness(runtimeAgentId, channel.threadId),
+          ask: () => askRunLiveness(channel.id),
         });
         const hearing = target.subscribe({
           onEvent: ({ event }) => {

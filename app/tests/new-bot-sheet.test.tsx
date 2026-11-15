@@ -32,8 +32,25 @@ import {
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
 } from "@/lib/agents/isolation";
-import { deploymentKeys } from "@/lib/deployment/queries";
-import { BOTS_PATH } from "./bots-api";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  DEPLOYMENT_PATH,
+  deploymentResponse,
+  MY_CAPABILITIES_PATH,
+} from "./admin-settings-api";
+import { APPS_PATH, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  botAppPath,
+  GIVEABLE_APPS_PATH,
+  giveableAppsResponse,
+} from "./bot-grants-api";
+import {
+  BOTS_PATH,
+  connectionTestResponse,
+  type SentRequest,
+  sentRequest,
+  TEST_CONNECTION_PATH,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -66,12 +83,18 @@ afterAll(async () => {
 });
 
 const originalFetch = global.fetch;
+let edition: "team" | "personal" = "team";
 let builtInAvailable = true;
 /** Whether the deployment can make a computer for one Bot, and whether the person holds the switch. */
 let isolationAvailable = true;
 let mayIsolate = true;
-/** What the server says when asked to reach an address. */
-let verdict: { ok: true; events: string[] } | { ok: false; reason: string };
+/** What the server says when asked to reach an address, or the Response it answers instead. */
+let verdict:
+  | { ok: true; events: string[] }
+  | { ok: false; reason: string }
+  | (() => Response);
+/** Every request to try an address, as sent. */
+let tests: SentRequest[] = [];
 /** Every create sent, with its body. */
 let creates: Record<string, unknown>[] = [];
 /** Every address the server was asked to reach. */
@@ -84,8 +107,8 @@ let giveable: {
   account: string;
 }[] = [];
 let given: string[] = [];
-/** Every app that is turned on, as `GET /api/plugins` lists them, and every path the sheet asked for. */
-let servers: { id: string; title: string; logo: null }[] = [];
+/** Every app that is turned on, as listApps lists them, and every path the sheet asked for. */
+let servers: TodayServer[] = [];
 let requested: string[] = [];
 
 beforeEach(() => {
@@ -93,6 +116,7 @@ beforeEach(() => {
   isolationAvailable = true;
   mayIsolate = true;
   verdict = { ok: true, events: ["RUN_STARTED"] };
+  tests = [];
   creates = [];
   dialled = [];
   giveable = [];
@@ -103,33 +127,43 @@ beforeEach(() => {
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       requested.push(String(path));
-      if (path === "/api/agents/capabilities") {
-        return Response.json({
-          capabilities: { builtInAvailable, isolationAvailable },
+      if (path === DEPLOYMENT_PATH) {
+        return deploymentResponse({
+          edition,
+          builtInBots: builtInAvailable,
+          isolatedBots: isolationAvailable,
         });
       }
-      // The switches as they apply to this person, shaped as `/api/admin/enterprise/me` answers.
-      if (path === "/api/admin/enterprise/me") {
+      // The switches as they apply to this person, shaped as the API's `people/me/capabilities` answers.
+      if (path === MY_CAPABILITIES_PATH) {
         return Response.json({
           capabilities: { isolatedComputers: mayIsolate },
           enforced: true,
         });
       }
-      if (path === "/api/agents/test-connection") {
+      if (path === TEST_CONNECTION_PATH) {
+        tests.push(sentRequest(path, init));
         dialled.push(body.endpoint);
-        return Response.json(verdict);
+        return typeof verdict === "function"
+          ? verdict()
+          : connectionTestResponse(verdict);
       }
       if (path === BOTS_PATH && init?.method === "POST") {
         creates.push(body);
         return Response.json({ bot: { id: "agent_new" } }, { status: 201 });
       }
-      if (path === "/api/plugins/giveable")
-        return Response.json({ apps: giveable });
-      if (path === "/api/plugins")
-        return Response.json({ catalogue: [], servers, skills: [] });
+      if (String(path).startsWith(GIVEABLE_APPS_PATH))
+        return giveableAppsResponse(
+          giveable.map((app) => ({
+            ...app,
+            account: app.account as "personal" | "shared" | "deployment",
+          })),
+        );
+      const apps = answerAppsApi(path, init, { servers });
+      if (apps) return apps;
       if (String(path).endsWith("/give") && init?.method === "POST") {
         given.push(String(path));
-        return Response.json({ granted: [] });
+        return Response.json({ given: [] });
       }
       return new Response(null, { status: 404 });
     },
@@ -141,11 +175,13 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
+async function draw(screen: ReactNode, drawn: "team" | "personal" = "team") {
+  edition = drawn;
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  queryClient.setQueryData(deploymentKeys.capabilities(), { edition });
+  // What this OpenBot offers, read before the sheet opens as the app has read it by then.
+  await queryClient.prefetchQuery(deploymentCapabilitiesQueryOptions());
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
@@ -162,7 +198,7 @@ function draw(screen: ReactNode, edition: "team" | "personal" = "team") {
 
 /** The sheet open, on its first step: where the Bot will run. */
 async function opened(onCreated: (id: string) => void = () => {}) {
-  const view = draw(
+  const view = await draw(
     <NewBotSheet onClose={() => {}} onCreated={onCreated} open />,
   );
   await view.findByLabelText("Name");
@@ -222,6 +258,9 @@ test("unavailable hosting still permits the custom path", async () => {
   builtInAvailable = false;
   const { view, user } = await opened();
   await settle();
+  // Whether a Bot can run here is the deployment's to say.
+  expect(requested).toContain(DEPLOYMENT_PATH);
+  expect(requested.filter((path) => path.includes("/api/agents"))).toEqual([]);
   expect(view.queryByRole("button", { name: /^Run here/ })).toBeNull();
   expect(
     view.queryByRole("button", { name: /^Bring your own agent/ }),
@@ -298,12 +337,55 @@ test("refuses an empty or unreachable custom endpoint without creating", async (
   expect(creates).toEqual([]);
 });
 
+test("a test the server refused says the server's own sentence, and creates nothing", async () => {
+  verdict = () =>
+    Response.json(
+      {
+        type: "about:blank",
+        title: "Forbidden",
+        status: 403,
+        detail: "You can't add Bots that run somewhere else.",
+      },
+      { status: 403, headers: { "content-type": "application/problem+json" } },
+    );
+  const { view, user } = await connected();
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(
+    await view.findByText("You can't add Bots that run somewhere else."),
+  ).toBeTruthy();
+  expect(creates).toEqual([]);
+});
+
+test("a test that never reached the server says it could not be tested, and creates nothing", async () => {
+  verdict = () => {
+    throw new TypeError("Failed to fetch");
+  };
+  const { view, user } = await connected();
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(
+    await view.findByText("The connection could not be tested."),
+  ).toBeTruthy();
+  expect(creates).toEqual([]);
+});
+
 test("checks the connection then creates with its saved name and key", async () => {
   const { view, user } = await connected();
   await user.type(view.getByLabelText(/Key/), "Bearer secret");
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   await view.findByText("Expense Review is ready");
   expect(dialled).toEqual(["https://agent.example.com/ag-ui"]);
+  // The address is tried at the API's address, with the unsaved key, as a write of its own.
+  expect(tests).toEqual([
+    {
+      method: "POST",
+      path: TEST_CONNECTION_PATH,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: {
+        endpoint: "https://agent.example.com/ag-ui",
+        headers: { Authorization: "Bearer secret" },
+      },
+    },
+  ]);
   expect(creates[0]).toMatchObject({
     name: "Expense Review",
     endpoint: "https://agent.example.com/ag-ui",
@@ -378,9 +460,7 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
   expect(routines.getAttribute("aria-checked")).toBe("false");
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(await view.findByText("Research is ready")).toBeTruthy();
-  expect(given).toEqual([
-    "/api/plugins/for/agent_new/apps/composio-gmail/give",
-  ]);
+  expect(given).toEqual([`${botAppPath("agent_new", "composio-gmail")}/give`]);
 });
 
 test("a person with no apps to give is asked nothing about apps", async () => {
@@ -474,7 +554,7 @@ test("custom-agent selection validates the name before advancing", async () => {
 });
 
 test("personal Bot creation hides team visibility and isolation controls and links to Business", async () => {
-  const view = draw(
+  const view = await draw(
     <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
     "personal",
   );
@@ -508,7 +588,7 @@ test("personal Bot creation hides team visibility and isolation controls and lin
  * from the start, and Routines. Only Routines is the person's to give, so the sheet listed only
  * Routines, and the Bot it made came out with all three.
  */
-const TURNED_ON = [
+const TURNED_ON: TodayServer[] = [
   { id: "composio-gmail", title: "Gmail", logo: null },
   { id: "parallel-search", title: "Parallel Search", logo: null },
   { id: "routines", title: "Routines", logo: null },
@@ -525,7 +605,7 @@ const ROUTINES_ONLY = [
 test("personal: the sheet lists every app that is turned on, with nothing to untick", async () => {
   servers = TURNED_ON;
   giveable = ROUTINES_ONLY;
-  const view = draw(
+  const view = await draw(
     <NewBotSheet open onClose={() => {}} onCreated={() => {}} />,
     "personal",
   );
@@ -560,7 +640,7 @@ test("team: the sheet offers only the apps the person can give, ticked", async (
   expect(
     view.getByText("It always uses the account of whoever is asking."),
   ).toBeTruthy();
-  expect(requested).not.toContain("/api/plugins");
+  expect(requested.filter((path) => path.startsWith(APPS_PATH))).toEqual([]);
 });
 
 test("the LangGraph harness is offered as LangChain, the name people know it by", async () => {

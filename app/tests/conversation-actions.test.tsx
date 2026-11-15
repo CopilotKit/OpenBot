@@ -4,6 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConversationActions } from "@/components/channels/conversation-actions";
 import type { ChannelSummary } from "@/lib/channels/queries";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  conversationPath,
+  noContent,
+  problem,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -46,18 +54,30 @@ function summary(
 }
 
 const requests: string[] = [];
+/** What each change to a conversation asked for, in order. */
+const changes: unknown[] = [];
 function serving(
   channels: ChannelSummary[],
   edition: "team" | "personal" = "team",
 ) {
   requests.length = 0;
+  changes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
-    if (String(input) === "/api/capabilities")
-      return Response.json({ edition });
+    if (String(input) === DEPLOYMENT_PATH) return Response.json({ edition });
     requests.push(`${method} ${String(input)}`);
-    if (method === "GET") return Response.json({ channels, nextCursor: null });
-    return new Response(null, { status: 204 });
+    const path = String(input).split("?")[0];
+    if (method === "GET" && path === CONVERSATIONS_PATH)
+      return Response.json(conversationPage(channels));
+    // A change answers with what it changed; a delete with nothing.
+    if (method === "PATCH" && path === conversationPath("c1")) {
+      const change = JSON.parse(String(init?.body)) as { pinned?: boolean };
+      changes.push(change);
+      return Response.json({ pinned: change.pinned });
+    }
+    if (method === "DELETE" && path === conversationPath("c1"))
+      return noContent();
+    return problem(404, "Not found.");
   }) as unknown as typeof fetch;
 }
 
@@ -80,7 +100,16 @@ test("a conversation that is not pinned offers Pin, and pinning asks for it", as
   await waitFor(() => expect(pin.hasAttribute("disabled")).toBe(false));
   fireEvent.click(pin);
 
-  await waitFor(() => expect(requests).toContain("PUT /api/channels/c1/pin"));
+  await waitFor(() =>
+    expect(requests).toContain(
+      "PATCH /api/v2/organizations/default/conversations/c1",
+    ),
+  );
+  expect(changes).toEqual([{ pinned: true }]);
+  // Nothing went to the address pinning used to have.
+  expect(
+    requests.filter((request) => request.includes("/api/channels")),
+  ).toEqual([]);
 });
 
 test("a pinned conversation offers Unpin", async () => {
@@ -102,11 +131,20 @@ test("Delete is confirmed, and leaves the conversation before deleting it", asyn
   fireEvent.click(
     await view.findByRole("button", { name: "Delete conversation…" }),
   );
-  expect(requests).not.toContain("DELETE /api/channels/c1");
+  expect(requests).not.toContain(
+    "DELETE /api/v2/organizations/default/conversations/c1",
+  );
 
   fireEvent.click(await view.findByRole("button", { name: "Delete" }));
 
-  await waitFor(() => expect(requests).toContain("DELETE /api/channels/c1"));
+  await waitFor(() =>
+    expect(requests).toContain(
+      "DELETE /api/v2/organizations/default/conversations/c1",
+    ),
+  );
+  expect(
+    requests.filter((request) => request.includes("/api/channels")),
+  ).toEqual([]);
   expect(order).toEqual(["leave after 1 requests"]);
 });
 

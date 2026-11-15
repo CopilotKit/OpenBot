@@ -6,7 +6,7 @@ const user: AuthenticatedUser = {
   id: "u",
   email: "user@example.test",
   name: "Sam Julien",
-  role: "user",
+  role: "member",
   onboarding: null,
   needsName: false,
 };
