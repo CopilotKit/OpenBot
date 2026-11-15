@@ -47,6 +47,7 @@ import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
+import { SteerLanded } from "@/components/tasks/task-steer";
 import {
   MessageReactions,
   SentFromBot,
@@ -870,6 +871,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
    */
   const answerer = isUser ? null : answeredBy(messageId);
   const report = isUser ? null : readTaskReport(messageId);
+  /*
+   * What the person told a task in its own thread, written here so the Bot knows of it. The person
+   * reads it on the line under the task's card, once, so the transcript draws no message for it.
+   */
+  if (report?.kind === "steer") return <SteerLanded taskId={report.taskId} />;
 
   return (
     <MessageRow

@@ -12,6 +12,7 @@ import {
 import { useEffect } from "react";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
+import { TaskSteer } from "@/components/tasks/task-steer";
 import { TaskCard, ThreadLinks } from "@/components/tasks/task-thread";
 import { asText, refusalOf } from "@/lib/plugins/tool-result";
 import { taskKeys } from "@/lib/tasks/queries";
@@ -19,7 +20,8 @@ import { queryClient } from "@/query-client";
 
 /*
  * How a Bot's orchestration calls read in the conversation: `delegate` is the task's card, updated in
- * place; `react` draws nothing of its own, since the reaction is drawn under the person's message;
+ * place, with the latest thing the person told the task in its thread on a line under it; `react`
+ * draws nothing of its own, since the reaction is drawn under the person's message;
  * `link_to_thread` is the list of threads it found, each a way in.
  *
  * RENDER ONLY. The three run on the server, where the task is opened and
@@ -58,13 +60,17 @@ export function OrchestrationTools() {
       const refusal =
         answer !== undefined && !started ? refusalOf(answer) : undefined;
       return (
-        <TaskCard
-          brief={given?.brief}
-          channelId={started?.channelId}
-          refusal={refusal}
-          taskId={started?.taskId}
-          title={started?.title ?? given?.title?.trim() ?? "New task"}
-        />
+        <>
+          <TaskCard
+            brief={given?.brief}
+            channelId={started?.channelId}
+            refusal={refusal}
+            taskId={started?.taskId}
+            title={started?.title ?? given?.title?.trim() ?? "New task"}
+          />
+          {/* What the person has told the task in its thread since, under its card. */}
+          {started ? <TaskSteer taskId={started.taskId} /> : null}
+        </>
       );
     },
   });
