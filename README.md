@@ -13,6 +13,7 @@ Choose your models. Bring your agents. Own your infrastructure.
 
 [![GitHub Trending: #3 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
 [![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
+<a href="https://www.producthunt.com/products/copilotkit?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-openbot-3" target="_blank" rel="noopener noreferrer"><img alt="OpenBot - Grok Bot alternative: free, open-source, self-hostable | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1232008&amp;theme=light&amp;t=1794785577522"></a>
 
 <br>
 
