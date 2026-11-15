@@ -1,5 +1,5 @@
 import { translateCapabilityChanges as translate } from "@/lib/api/generated/capabilities/capabilities";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 
 /** One switch to set: the organization's, a role's or a group's, for one permission. */
@@ -50,7 +50,7 @@ export async function translateCapabilityChanges(
   text: string,
 ): Promise<CapabilityTranslation> {
   const translation = await translate(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     {

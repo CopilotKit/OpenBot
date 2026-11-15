@@ -201,6 +201,31 @@ export function browserCallFailed(result: string | undefined): boolean {
   );
 }
 
+/**
+ * How a call's answer begins when its run was cut off before the result was recorded: the server
+ * restarted, or the run crashed, with the step under way. The rest of that answer tells the Bot how
+ * to carry on safely, and is for the Bot.
+ */
+const CUT_OFF_ANSWER =
+  "Outcome unknown: this call was started, and the run was cut off before its result was recorded";
+
+/** What a cut-off step says, opened. Its Bot was told, and carried on. */
+export const CUT_OFF_SENTENCE =
+  "This step was interrupted before its result came back. The Bot carried on from here.";
+
+/**
+ * Whether a call was cut off with its outcome unknown. Not a failure, since nothing is known to
+ * have gone wrong, and not still running: the step reads as interrupted.
+ */
+export function cutOffStep(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  return (flaggedFailure(answer) ?? answer)
+    .trimStart()
+    .replace(/^Error: /, "")
+    .startsWith(CUT_OFF_ANSWER);
+}
+
 /** What a step says, opened, when its Bot asked for a tool it doesn't have. */
 export const UNOFFERED_TOOL_SENTENCE =
   "This Bot asked for a tool it doesn't have, so it carried on without it.";

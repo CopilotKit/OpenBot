@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { updateStandingInstructions } from "@/lib/api/generated/people/people";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { settingsKeys } from "./queries";
 
 /**
@@ -16,7 +16,7 @@ export function saveInstructionsMutationOptions(queryClient: QueryClient) {
     mutationFn: async (instructions: string): Promise<string> =>
       (
         await updateStandingInstructions(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { instructions },
           { "Idempotency-Key": idempotencyKey() },

@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { batchUpdateBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import {
   type SharedUseApproval,
@@ -30,7 +30,7 @@ export const saveAppGrantsMutationOptions = (queryClient: QueryClient) =>
       approval?: SharedUseApproval;
     }) =>
       batchUpdateBotGrants(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.agentId,
         {
           appId: variables.app,

@@ -1,7 +1,7 @@
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { queryOptions } from "@tanstack/react-query";
 import { getBotBrowser } from "@/lib/api/generated/browsers/browsers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { BROWSER_POLL_MS } from "@/lib/browser/queries";
 
 export const botBrowserKeys = {
@@ -22,7 +22,7 @@ export function botBrowserStateQueryOptions(botId: string) {
   return queryOptions({
     queryKey: botBrowserKeys.state(botId),
     queryFn: (): Promise<BotBrowserApiState> =>
-      getBotBrowser(ORGANIZATION_ID, botId, {
+      getBotBrowser(organizationId(), botId, {
         fallback: "Couldn't load the Bot's browser.",
       }),
     refetchInterval: BROWSER_POLL_MS,

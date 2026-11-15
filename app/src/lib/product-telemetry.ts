@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { recordProductEvent } from "@/lib/api/generated/product-events/product-events";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { organizationId } from "@/lib/organizations/current";
 
 export type ResultReference = { threadId: string; messageId: string };
 type ResultAction = "result_viewed" | "result_copied";
@@ -11,7 +12,8 @@ type ResultAction = "result_viewed" | "result_copied";
  *
  * Through the API (recordProductEvent), with keepalive, so an event still leaves when the page
  * closes; the person never waits on it. Its Idempotency-Key is the event's own, so a retry of the
- * same request would be counted once.
+ * same request would be counted once. An event is about an answer drawn in a conversation, so it
+ * is only ever sent by a signed-in person, to the organization they are working in.
  */
 export async function recordResultAction(
   kind: ResultAction,
@@ -19,7 +21,7 @@ export async function recordResultAction(
 ): Promise<void> {
   try {
     await recordProductEvent(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         kind,
         threadId: reference.threadId,

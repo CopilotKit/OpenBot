@@ -41,6 +41,7 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
@@ -388,7 +389,7 @@ function Granted({
       </p>
     );
   }
-  const admin = me?.role === "admin";
+  const admin = isOrganizationAdmin(me?.role);
   const tools = connectorTools(plugins.data);
   const states = apps.data ?? [];
   /*

@@ -29,6 +29,7 @@ export * from "./models/models.zod";
 export * from "./network-policies/network-policies.zod";
 export * from "./notification-settings/notification-settings.zod";
 export * from "./organization-settings/organization-settings.zod";
+export * from "./organizations/organizations.zod";
 export * from "./people/people.zod";
 export * from "./product-events/product-events.zod";
 export * from "./reactions/reactions.zod";

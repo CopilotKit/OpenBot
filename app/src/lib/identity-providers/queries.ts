@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { listIdentityProviders } from "@/lib/api/generated/identity-providers/identity-providers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * An identity provider a company registered, rather than one this deployment was configured with.
@@ -50,7 +50,7 @@ export function identityProviderListQueryOptions() {
       // Every page: an organization registers a handful, and the screen lists them all.
       do {
         const page = await listIdentityProviders(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { signal, fallback: "Could not load identity providers" },
         );

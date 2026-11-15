@@ -21,6 +21,10 @@ import {
   type BotTask,
   type Reaction,
   reactionsQueryOptions,
+  stoppedByYou,
+  TASK_DONE_LABEL,
+  TASK_STOPPED,
+  TASK_STOPPED_LABEL,
   type TaskStatus,
   taskListQueryOptions,
   taskQueryOptions,
@@ -52,7 +56,7 @@ function cardState(
 ): CardState {
   const status = task?.status;
   if (status === "needs_input") return "needs";
-  if (status === "failed") return task?.stoppedAt ? "stopped" : "failed";
+  if (status === "failed") return stoppedByYou(task) ? "stopped" : "failed";
   if (status === "ready_for_review" || status === "resolved") return "done";
   return "working";
 }
@@ -74,7 +78,7 @@ const STATE: Record<
     text: "text-amber-700 dark:text-amber-400",
   },
   done: {
-    label: "Done",
+    label: TASK_DONE_LABEL,
     icon: IconCircleCheck,
     dot: "bg-emerald-500",
     text: "text-emerald-700 dark:text-emerald-400",
@@ -86,15 +90,12 @@ const STATE: Record<
     text: "text-destructive",
   },
   stopped: {
-    label: "Stopped",
+    label: TASK_STOPPED_LABEL,
     icon: IconPlayerStop,
     dot: "bg-muted-foreground",
     text: "text-muted-foreground",
   },
 };
-
-/** What a stopped task's card says under its state. Stopping never undoes what was already done. */
-const STOPPED = "You stopped this. Anything it had already done stays done.";
 
 /**
  * When a working task's turn is tried again, while that is still ahead of this clock: its turn hit
@@ -280,7 +281,7 @@ export function TaskCard({
     state === "failed"
       ? (task.data?.failure ?? null)
       : state === "stopped"
-        ? STOPPED
+        ? TASK_STOPPED
         : state === "working" && !taskId
           ? "Starting…"
           : null;

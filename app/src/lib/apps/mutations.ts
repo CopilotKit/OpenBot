@@ -8,7 +8,7 @@ import {
   updateApp,
 } from "@/lib/api/generated/apps/apps";
 import type { App } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { invalidatePlugins } from "@/lib/plugins/mutations";
 import type { SharedUseApproval } from "@/lib/plugins/shared-use";
@@ -38,7 +38,7 @@ export function addCuratedServerMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: CuratedServerInput): Promise<App> =>
       createApp(
-        ORGANIZATION_ID,
+        organizationId(),
         {
           from: "directory",
           directoryEntryId: `catalogue:${input.key}`,
@@ -88,7 +88,7 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
     ): Promise<AddServerByUrlOutcome> => {
       try {
         const server = await createApp(
-          ORGANIZATION_ID,
+          organizationId(),
           {
             from: "address",
             title: input.title,
@@ -130,7 +130,7 @@ export function addDirectoryAppMutationOptions(queryClient: QueryClient) {
       directoryEntryId: string;
     }): Promise<string> => {
       const app = await createApp(
-        ORGANIZATION_ID,
+        organizationId(),
         { from: "directory", directoryEntryId: input.directoryEntryId },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "That app could not be added." },
@@ -149,7 +149,7 @@ export function refreshPluginServerMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (serverId: string) => {
       await refreshApp(
-        ORGANIZATION_ID,
+        organizationId(),
         serverId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -164,7 +164,7 @@ export function removePluginServerMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (serverId: string) => {
       await deleteApp(
-        ORGANIZATION_ID,
+        organizationId(),
         serverId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -193,7 +193,7 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: OAuthClientInput) => {
       await setAppOAuthClient(
-        ORGANIZATION_ID,
+        organizationId(),
         input.serverId,
         { clientId: input.clientId, clientSecret: input.clientSecret },
         { "Idempotency-Key": idempotencyKey() },
@@ -214,7 +214,7 @@ export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
       ownerGrants: "any" | "admin";
     }) => {
       await updateApp(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.serverId,
         { ownerGrants: variables.ownerGrants },
         { "Idempotency-Key": idempotencyKey() },
@@ -249,7 +249,7 @@ export async function accountModePreview(
   mode: "personal" | "shared",
 ): Promise<AccountModePreview> {
   const change = await setAppAccountMode(
-    ORGANIZATION_ID,
+    organizationId(),
     serverId,
     { mode, validateOnly: true },
     { "Idempotency-Key": idempotencyKey() },
@@ -277,7 +277,7 @@ export function setAccountModeMutationOptions(queryClient: QueryClient) {
       approvals?: Record<string, SharedUseApproval>;
     }) => {
       await setAppAccountMode(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.serverId,
         {
           mode: variables.mode,

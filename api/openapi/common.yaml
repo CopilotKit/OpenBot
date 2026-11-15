@@ -26,10 +26,11 @@ info:
     limit, and every write takes an Idempotency-Key.
 
 
-    Until multi-organization lands, an OpenBot install has exactly one
-    organization, and organizationId is that organization. Clients address it
-    as `default`; the server treats any other value as an organization that
-    does not exist.
+    An OpenBot install holds one or more organizations, and a person may be a
+    member of several. Every install has the organization `default`, which is
+    where everybody starts. organizationId is an organization's id or its
+    slug, and the caller must be a member of it: an organization the caller
+    is not in answers exactly as one that does not exist.
 
 
     This file is the single source of truth: the clients, the server's types,
@@ -70,6 +71,7 @@ tags:
   - { name: Check-ins, description: "A Bot's check-ins: quiet looks through what a person connected, the items a check-in raised for them, and an administrator's numbers for how check-ins are going." }
   - { name: Goals, description: "A person's goals: an outcome a Bot works toward, run on request, on a routine's schedule or when an outside event arrives through one of the goal's triggers." }
   - { name: Follow-ups, description: "Work a Bot scheduled for itself to come back to later in a conversation." }
+  - { name: Organizations, description: "The organizations the caller is a member of, and each one's members. An organization keeps its own Bots and conversations, apart from every other's." }
   - { name: Approvals, description: "What a person's Bots are waiting on them for: the actions that ask before they run, the questions a Bot asked, and what the person set for themselves about asking (their preferences, their own rules, and what they allowed for one conversation). Each person's are theirs alone." }
   - { name: Approval rules, description: "The organization's approval rules: which actions every member's Bots take without asking, ask a person about first, or hand to the person. An administrator can describe rules in English, test them against what Bots already did, and save several as one change." }
   - { name: Reviewer guidance, description: "What an administrator tells auto-review, in plain English: what to ask about and what is routine for the organization. Checked by an independent reading before it is saved, and never able to switch built-in safety off." }
@@ -253,6 +255,8 @@ paths:
   /api/v2/organizations/{organizationId}/github-event-sources: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources' }
   /api/v2/organizations/{organizationId}/github-event-sources/{githubEventSourceId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources~1{githubEventSourceId}' }
   /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1follow-ups~1{followUpId}~1cancel' }
+  /api/v2/people/me/organizations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1organizations' }
+  /api/v2/organizations/{organizationId}/members: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
   /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
@@ -483,6 +487,8 @@ components:
             check-ins:write: Turn the signed-in person's check-ins on and off, change and run them, and start or hide the items they raised.
             goals:read: Read the signed-in person's goals, their runs, their triggers and their GitHub event sources. Reading a trigger's secret needs goals:write.
             goals:write: Create, change, pause, resume, complete, run and delete the signed-in person's goals, their triggers and their GitHub event sources.
+            organizations:read: Read the organizations the signed-in person is a member of, and their members.
+            organizations:write: Create organizations and add members to them, where the signed-in person may.
             approvals:read: Read what the signed-in person's Bots are waiting on them for, and their own approval preferences and rules.
             approvals:write: Decide the signed-in person's approvals, answer their Bots' questions, and change their own approval preferences and rules.
             approval-rules:read: Read the organization's approval rules and its guidance for auto-review, and describe, check and test them, when the signed-in person is an administrator.
@@ -528,7 +534,7 @@ components:
       in: path
       required: true
       description: >-
-        The organization. Until multi-organization lands every install has one,
+        The organization, by its id or its slug. Every install has one
         addressed as `default`.
       schema:
         type: string
@@ -706,8 +712,8 @@ components:
       description: >-
         The person's role as a member of the organization. An owner or an
         admin governs it: its people, its sign-in and its policy. A member
-        uses it. Nobody is an owner yet; the role is listed so that a client
-        reads it when it arrives.
+        uses it. The owner is whoever created the organization; `default`
+        has admins and no owner.
     AssignableRole: { $ref: './accounts.yaml#/components/schemas/AssignableRole' }
     OnboardingStatus: { $ref: './accounts.yaml#/components/schemas/OnboardingStatus' }
     Person: { $ref: './accounts.yaml#/components/schemas/Person' }

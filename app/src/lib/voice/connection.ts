@@ -1,5 +1,5 @@
 import { getVoiceConfiguration } from "@/lib/api/generated/voice/voice";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import type { ConnectVoice } from "./types";
 import { connectWebRtc } from "./webrtc";
 import { connectWebSocket } from "./websocket";
@@ -16,7 +16,7 @@ export const connectVoice: ConnectVoice = async (options) => {
     throw new Error(
       "Voice calls need a supported browser and HTTPS or localhost.",
     );
-  const config: unknown = await getVoiceConfiguration(ORGANIZATION_ID, {
+  const config: unknown = await getVoiceConfiguration(organizationId(), {
     signal: options.signal,
   }).catch((error: unknown) => {
     // A call that was hung up while this was asked is not a fault to report.

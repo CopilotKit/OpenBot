@@ -3,7 +3,7 @@ import {
   listLinkedAccountProviders,
   listLinkedAccounts,
 } from "@/lib/api/generated/linked-accounts/linked-accounts";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 export type LinkedAccount = {
@@ -47,7 +47,7 @@ async function allLinks(signal?: AbortSignal): Promise<LinkedAccount[]> {
   let cursor: string | undefined;
   do {
     const page = await listLinkedAccounts(
-      ORGANIZATION_ID,
+      organizationId(),
       "me",
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { ...(signal ? { signal } : {}), fallback: LOAD_FALLBACK },
@@ -81,7 +81,7 @@ export function identityProvidersQueryOptions() {
     queryFn: async ({ signal }): Promise<IdentityProviders> => {
       try {
         const page = await listLinkedAccountProviders(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100 },
           { signal, fallback: PROVIDERS_FALLBACK },
         );

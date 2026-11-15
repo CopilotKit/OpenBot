@@ -5,6 +5,7 @@ import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
+  useStoppedTasks,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import { LoadingRows } from "@/components/layout/loading-rows";
@@ -209,8 +210,9 @@ function RosterRow({
   agent: AgentProfile;
   state: BotAttention | undefined;
 }) {
+  const stopped = useStoppedTasks();
   const summary = state
-    ? [state.paused ? "Paused" : "", attentionSummary(state)]
+    ? [state.paused ? "Paused" : "", attentionSummary(state, stopped(agent.id))]
         .filter(Boolean)
         .join(" · ")
     : "";

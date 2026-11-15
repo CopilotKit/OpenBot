@@ -12,7 +12,7 @@ import {
   updateBot,
 } from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
 import { type AgentProfile, agentKeys } from "./queries";
@@ -41,7 +41,7 @@ export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
       (
-        await createBot(ORGANIZATION_ID, input, once(), {
+        await createBot(organizationId(), input, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -57,7 +57,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
     }): Promise<AgentProfile> =>
       (
         await updateBot(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.agentId,
           variables.input,
           once(),
@@ -77,7 +77,7 @@ export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string): Promise<AgentProfile> =>
       (
-        await duplicateBot(ORGANIZATION_ID, agentId, once(), {
+        await duplicateBot(organizationId(), agentId, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -89,7 +89,7 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
       const write = variables.hidden ? hideBot : unhideBot;
-      await write(ORGANIZATION_ID, variables.agentId, once(), {
+      await write(organizationId(), variables.agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -101,7 +101,7 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
       const write = variables.pinned ? pinBot : unpinBot;
-      await write(ORGANIZATION_ID, variables.agentId, once(), {
+      await write(organizationId(), variables.agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -122,7 +122,7 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationKey: deleteAgentMutationKey,
     mutationFn: async (agentId: string) => {
-      await deleteBot(ORGANIZATION_ID, agentId, once(), {
+      await deleteBot(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -155,7 +155,7 @@ export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string): Promise<string> =>
       (
-        await issueBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
+        await issueBotCallbackToken(organizationId(), agentId, once(), {
           fallback: FALLBACK,
         })
       ).token,
@@ -167,7 +167,7 @@ export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
 export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await revokeBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
+      await revokeBotCallbackToken(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },

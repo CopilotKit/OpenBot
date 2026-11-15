@@ -1,7 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { batchCreateApprovalRules } from "@/lib/api/generated/approval-rules/approval-rules";
 import type { ApprovalRuleDraftAuthoring } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ApprovalRuleInput, approvalsKey } from "@/lib/approvals";
 import { approvalRuleKeys } from "./queries";
 
@@ -22,7 +22,7 @@ export const saveTeamRulesMutationOptions = (queryClient: QueryClient) =>
       authoring?: ApprovalRuleAuthoring;
     }) =>
       batchCreateApprovalRules(
-        ORGANIZATION_ID,
+        organizationId(),
         variables,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },

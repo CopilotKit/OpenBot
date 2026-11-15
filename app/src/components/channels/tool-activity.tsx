@@ -49,6 +49,8 @@ import {
 } from "@/lib/plugins/research-results";
 import {
   asText,
+  CUT_OFF_SENTENCE,
+  cutOffStep,
   forDisplay,
   REFUSAL_MARKER,
   refusalOf,
@@ -293,6 +295,11 @@ export type StepDetails = {
   pending: boolean;
   failed: boolean;
   refused: boolean;
+  /**
+   * Under way when its run was cut off, so nobody knows how it ended. Neither done, failed nor still
+   * running: it is named as it was while under way, and counted apart from what the run did.
+   */
+  interrupted?: boolean;
   reason?: string;
   /** Pages a browser step opened, or a fetch read; zero for anything else. */
   pages: number;
@@ -390,6 +397,20 @@ export function stepDetailsIn(
 }
 
 function detailsOf(step: ToolItem, folders: FolderNames): StepDetails {
+  if (cutOffStep(step.result)) {
+    // Read as the step it was while under way, then marked: what the Bot was told is not shown.
+    const { result: _told, ...underWay } = step;
+    const { subtask: _subtask, ...details } = detailsOf(underWay, folders);
+    return {
+      ...details,
+      // A subtask's own row reads its result; a cut-off one has none, so it is an ordinary step.
+      kind: details.kind === "subtask" ? "tool" : details.kind,
+      pending: false,
+      interrupted: true,
+      pages: 0,
+      output: CUT_OFF_SENTENCE,
+    };
+  }
   const args = objectOf(step.toolCall.function.arguments);
   const inputs = readableInputs(step.toolCall.function.name, args);
   if (isBrowserStep(step)) {
@@ -598,7 +619,13 @@ function siteOf(href: string | undefined): string {
  * never attributed to a provider; a connector is named, because which system was reached is the
  * person's own fact.
  */
-export function summarise(steps: readonly StepDetails[]): string {
+export function summarise(all: readonly StepDetails[]): string {
+  // A step cut off under way is not something the run did. The line counts it beside this.
+  const steps = all.filter((step) => !step.interrupted);
+  if (steps.length === 0 && all.length > 0)
+    return all.length === 1
+      ? "1 step interrupted"
+      : `${all.length} steps interrupted`;
   const of = (kind: StepKind) => steps.filter((step) => step.kind === kind);
   const phrases: string[] = [];
   // Claude Code's own words for a run of reads and searches.
@@ -707,6 +734,8 @@ export function StepStatus({
         {active ? "In progress" : "Not completed"}
       </span>
     );
+  if (step.interrupted)
+    return <span className="shrink-0 text-muted-foreground">Interrupted</span>;
   if (step.refused)
     return <span className="shrink-0 text-destructive">Blocked</span>;
   if (step.failed)
@@ -884,6 +913,14 @@ export function ToolActivity({
     (step) => step.pending && step.kind === "subtask",
   ).length;
   const issues = steps.filter((step) => step.failed || step.refused).length;
+  // Said beside what the run did, unless the line itself already says every step was interrupted.
+  const interrupted = steps.every((step) => step.interrupted)
+    ? 0
+    : steps.filter((step) => step.interrupted).length;
+  const asides = [
+    issues ? plural(issues, "issue", "issues") : null,
+    interrupted ? `${interrupted} interrupted` : null,
+  ].filter(Boolean);
   const kinds = [...new Set(steps.map((step) => step.kind))];
   // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
@@ -900,7 +937,7 @@ export function ToolActivity({
               ? `${current.label}…`
               : summarise(steps)
         }
-        detail={issues ? plural(issues, "issue", "issues") : undefined}
+        detail={asides.length ? asides.join(" · ") : undefined}
         running={running}
       >
         <ol className="space-y-2 py-1">

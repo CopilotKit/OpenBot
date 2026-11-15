@@ -4,7 +4,7 @@ import type {
   ApprovalRuleDraftReplayChange,
   ApprovalRuleDraftReplayReport,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ApprovalRuleInput } from "@/lib/approvals";
 import type { RuleRowsCheck } from "./translate";
 
@@ -46,7 +46,7 @@ export function approvalRulesBacktestQueryOptions(
     queryKey: approvalRuleKeys.backtest(rules),
     queryFn: async ({ signal }): Promise<ApprovalRulesPreview> =>
       (await replayApprovalRules(
-        ORGANIZATION_ID,
+        organizationId(),
         { rules: [...rules] },
         { "Idempotency-Key": idempotencyKey() },
         {

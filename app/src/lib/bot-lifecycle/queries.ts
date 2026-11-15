@@ -15,7 +15,7 @@ import type {
   BotResetCounts,
 } from "@/lib/api/generated/model";
 import { getNotificationSettings } from "@/lib/api/generated/notification-settings/notification-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /** How loudly one Bot may reach the signed-in person. Badges on the web always show. */
 export type BotNotify = BotNotifyModel;
@@ -72,7 +72,7 @@ async function everyAttention(): Promise<AttentionBody> {
   let cursor: string | undefined;
   do {
     const page = await listBotAttention(
-      ORGANIZATION_ID,
+      organizationId(),
       "me",
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { fallback: "Could not load what your Bots need" },
@@ -124,7 +124,7 @@ export function botLifecycleQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: botLifecycleKeys.lifecycle(agentId),
     queryFn: (): Promise<BotLifecycle> =>
-      getBotLifecycle(ORGANIZATION_ID, agentId, {
+      getBotLifecycle(organizationId(), agentId, {
         fallback: "Could not load this Bot's state",
       }),
   });
@@ -134,7 +134,7 @@ export function botActivityQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: botLifecycleKeys.activity(agentId),
     queryFn: (): Promise<BotActivity> =>
-      getBotActivity(ORGANIZATION_ID, agentId, {
+      getBotActivity(organizationId(), agentId, {
         fallback: "Could not load this Bot's activity",
       }),
     refetchInterval: 10_000,
@@ -151,7 +151,7 @@ export function botResetPlanQueryOptions(agentId: string) {
     queryFn: async (): Promise<ResetPlan> =>
       (
         await resetBot(
-          ORGANIZATION_ID,
+          organizationId(),
           agentId,
           { validateOnly: true },
           { "Idempotency-Key": idempotencyKey() },
@@ -169,7 +169,7 @@ export function updateRoutingQueryOptions() {
     queryKey: botLifecycleKeys.routing,
     queryFn: async ({ signal }): Promise<UpdateRouting> =>
       (
-        await getNotificationSettings(ORGANIZATION_ID, "me", {
+        await getNotificationSettings(organizationId(), "me", {
           signal,
           fallback: "Could not load where your updates go",
         })

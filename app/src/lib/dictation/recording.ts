@@ -1,5 +1,5 @@
 import { createTranscription } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   DICTATION_TIMEOUT_MS,
   dictationExtension,
@@ -118,7 +118,7 @@ export async function transcribeRecording(
     );
   }
   const result = await createTranscription(
-    ORGANIZATION_ID,
+    organizationId(),
     { file: new File([audio], `recording.${extension}`, { type: audio.type }) },
     { "Idempotency-Key": idempotencyKey() },
     {

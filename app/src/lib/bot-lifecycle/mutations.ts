@@ -10,7 +10,7 @@ import {
   updateBotNotificationSettings,
   updateNotificationSettings,
 } from "@/lib/api/generated/notification-settings/notification-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import {
   type BotLifecycle,
@@ -39,11 +39,11 @@ export function setBotPausedMutationOptions(queryClient: QueryClient) {
     }): Promise<BotLifecycle> =>
       variables.paused
         ? (
-            await pauseBot(ORGANIZATION_ID, variables.agentId, once(), {
+            await pauseBot(organizationId(), variables.agentId, once(), {
               fallback: FALLBACK,
             })
           ).lifecycle
-        : resumeBot(ORGANIZATION_ID, variables.agentId, once(), {
+        : resumeBot(organizationId(), variables.agentId, once(), {
             fallback: FALLBACK,
           }),
     onSuccess: () => invalidateLifecycle(queryClient),
@@ -55,7 +55,7 @@ export function setBotNotifyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: { agentId: string; notify: BotNotify }) =>
       updateBotNotificationSettings(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         variables.agentId,
         { notify: variables.notify },
@@ -71,7 +71,7 @@ export function resetBotMutationOptions(queryClient: QueryClient) {
     mutationFn: async (agentId: string): Promise<ResetPlan> =>
       (
         await resetBot(
-          ORGANIZATION_ID,
+          organizationId(),
           agentId,
           { validateOnly: false },
           once(),
@@ -92,7 +92,7 @@ export function stopHandoffMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; id: string }) => {
       await stopBotHandoff(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.agentId,
         { handoffId: variables.id },
         once(),
@@ -107,7 +107,7 @@ export function cancelFollowUpMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; id: string }) => {
       await cancelFollowUp(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.agentId,
         variables.id,
         { "Idempotency-Key": idempotencyKey() },
@@ -126,7 +126,7 @@ export function setUpdateRoutingMutationOptions(queryClient: QueryClient) {
     }) => {
       // One kind at a time, so a change on one device keeps the kinds another changed.
       await updateNotificationSettings(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         { routing: { [variables.kind]: variables.transports } },
         { "Idempotency-Key": idempotencyKey() },

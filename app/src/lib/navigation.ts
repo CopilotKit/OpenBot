@@ -8,6 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   deploymentCapabilitiesQueryOptions,
   offersMemory,
@@ -152,7 +153,8 @@ export function navigationFor(
     (item) =>
       item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
   ).filter(
-    (item) => item.kind === "dialog" || !item.adminOnly || role === "admin",
+    (item) =>
+      item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),
   );
   if (edition !== "personal") return offered;
   const settings = offered.findIndex((item) => item.id === "settings");

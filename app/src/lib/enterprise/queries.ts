@@ -14,7 +14,7 @@ import {
   getOrganizationSettings,
   listComputerActions,
 } from "@/lib/api/generated/organization-settings/organization-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 export type CapabilityKey =
   | "useBots"
@@ -212,7 +212,7 @@ export function networkReplayQueryOptions(candidate: NetworkCandidate) {
     queryFn: ({ signal }): Promise<NetworkReplayReport> =>
       // An action that saves nothing: each ask is its own, so each gets its own key.
       replayNetworkPolicy(
-        ORGANIZATION_ID,
+        organizationId(),
         candidate,
         { "Idempotency-Key": idempotencyKey() },
         {
@@ -252,10 +252,10 @@ export function enterpriseOverviewQueryOptions() {
     queryFn: async ({ signal }): Promise<EnterpriseOverview> => {
       const options = { signal, fallback: OVERVIEW_FALLBACK };
       const [settings, capabilities, network] = await Promise.all([
-        getOrganizationSettings(ORGANIZATION_ID, options),
+        getOrganizationSettings(organizationId(), options),
         everyPage(async (cursor) => {
           const page = await listCapabilities(
-            ORGANIZATION_ID,
+            organizationId(),
             { limit: 100, ...(cursor ? { cursor } : {}) },
             options,
           );
@@ -263,7 +263,7 @@ export function enterpriseOverviewQueryOptions() {
         }),
         everyPage(async (cursor) => {
           const page = await listNetworkPolicies(
-            ORGANIZATION_ID,
+            organizationId(),
             { limit: 100, ...(cursor ? { cursor } : {}) },
             options,
           );
@@ -300,7 +300,7 @@ export function modelUsageQueryOptions(days = 30) {
       recent: ModelUsageRow[];
     }> => {
       const usage = await getModelUsage(
-        ORGANIZATION_ID,
+        organizationId(),
         { days },
         { signal, fallback: "Could not load model usage" },
       );
@@ -318,7 +318,7 @@ export function checkInMetricsQueryOptions(days: 7 | 30) {
     queryKey: enterpriseKeys.checkIns(days),
     queryFn: ({ signal }): Promise<CheckInMetrics> =>
       getCheckInUsage(
-        ORGANIZATION_ID,
+        organizationId(),
         { days },
         { signal, fallback: "Couldn't load check-ins" },
       ),
@@ -332,7 +332,7 @@ export function actionRecordsQueryOptions() {
     queryFn: async ({ signal }): Promise<ActionRecord[]> =>
       (
         await listComputerActions(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 50 },
           { signal, fallback: "Could not load recorded actions" },
         )
@@ -356,7 +356,7 @@ export function myCapabilitiesQueryOptions() {
   return queryOptions({
     queryKey: ["enterprise", "me"] as const,
     queryFn: ({ signal }): Promise<MyCapabilities> =>
-      getPersonCapabilities(ORGANIZATION_ID, "me", {
+      getPersonCapabilities(organizationId(), "me", {
         signal,
         fallback: "Couldn't load what OpenBot allows.",
       }),
