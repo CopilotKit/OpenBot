@@ -28,7 +28,11 @@
   },
   "overrides": [
     {
-      "includes": ["app/src/lib/api/generated/**"],
+      "includes": [
+        "app/src/lib/api/generated/**",
+        "mobile/src/api/generated/**",
+        "extension/src/shared/generated/**"
+      ],
       "linter": {
         "enabled": false
       }
@@ -141,7 +145,7 @@
         "app/src/components/computer/live-screen.tsx",
         "app/src/components/computer/live-terminal.tsx",
         "app/src/lib/voice/websocket.ts",
-        "mobile/src/api.ts",
+        "mobile/src/api/request.ts",
         "mobile/app/computer.tsx",
         "extension/src/shared/openbot-client.ts",
         "extension/src/main-world/network-hook.ts"

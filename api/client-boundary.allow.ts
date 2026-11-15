@@ -19,9 +19,9 @@
  *   the client resolves to the API's address before it reads it.
  * - installed-client: an address that clients already installed, which update on their own
  *   schedule, still call. Retiring one is David's call.
- * - hand-built-v2: an address in the API's place, built by a client that has no generated client.
- *   Desktop's native side is Rust; mobile and the Recorder move onto generated clients of their own.
- *   A whole one must be an operation or a channel the API describes.
+ * - hand-built-v2: an address in the API's place, built by a client that has no generated client:
+ *   Desktop's native side, which is Rust. A whole one must be an operation or a channel the API
+ *   describes.
  * - server-routes: a path table in shared/ that the server registers today's routes from, which no
  *   client calls. It goes when those addresses are retired.
  * - third-party: another service's address, not OpenBot's server.
@@ -174,16 +174,16 @@ export const ALLOWED: Allowed[] = [
     why: "asks with HEAD whether a sent document is still there, at the address the generated client builds (getGetAttachmentUrl)",
   },
   {
-    file: "mobile/src/api.ts",
+    file: "mobile/src/api/request.ts",
     what: /^(fetch\(\)|\/api\/|\/api\/v2\/)$/,
     rule: "transport",
-    why: "mobile's one request function, which checks it is given an address of the API",
+    why: "mobile's one request function, the generated client's mutator, which checks it is given an address of the server and keys the API's writes",
   },
   {
     file: "extension/src/shared/openbot-client.ts",
     what: "fetch()",
     rule: "transport",
-    why: "the Recorder's one request function, with its bearer and no cookies",
+    why: "the Recorder's one request function, the generated client's mutator, with its bearer and no cookies",
   },
   // Sign-in.
   {
@@ -298,22 +298,6 @@ export const ALLOWED: Allowed[] = [
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
   },
-  // Addresses of the API that mobile and the Recorder build by hand. A whole one must be an
-  // operation or a channel the API describes; generated clients of their own replace these.
-  ...[
-    "mobile/src/api.ts",
-    "mobile/src/notifications.ts",
-    "mobile/app/computer.tsx",
-    "mobile/app/plugins.tsx",
-    "shared/recorder-api.ts",
-  ].map(
-    (file): Allowed => ({
-      file,
-      what: /^\/api\/v2\/organizations\/default(\/|$)(?!.*\/screen$)/,
-      rule: "hand-built-v2",
-      why: "addresses of the API that mobile and the Recorder build by hand until each has a generated client of its own",
-    }),
-  ),
   // Path tables the server registers today's routes from.
   ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
     (file): Allowed => ({

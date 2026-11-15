@@ -55,9 +55,10 @@ jobs:
   #   collide, and api/openapi.yaml is the bundle of them, checked in so every consumer reads one file;
   # - it keeps OpenBot's API conventions (redocly.yaml, api/redocly/rules.mjs), which are Intelligence
   #   v2's, and takes no address Intelligence already serves (api/intelligence-reserved.yaml);
-  # - the client generated from it is the one committed (app/src/lib/api/generated): generated code
-  #   is checked in, so the app builds from what review saw, and this fails when somebody edited the
-  #   spec without regenerating or edited the output by hand;
+  # - the clients generated from it are the ones committed (the app's app/src/lib/api/generated, the
+  #   phone app's mobile/src/api/generated and the Recorder's extension/src/shared/generated):
+  #   generated code is checked in, so each builds from what review saw, and this fails when somebody
+  #   edited the spec without regenerating or edited the output by hand;
   # - on a pull request, it breaks nothing a client of the base branch relies on. oasdiff compares the
   #   base branch's spec with this one and fails on any breaking change, warnings included: a field a
   #   client reads going away is a warning to oasdiff and a broken screen to a person. A change that
@@ -94,15 +95,16 @@ jobs:
           fi
       - name: Lint the spec
         run: bun run api:lint
-      - name: The generated client matches the spec
+      - name: The generated clients match the spec
         run: |
           set -euo pipefail
           bun run api:generate
-          changed="$(git status --porcelain -- app/src/lib/api/generated)"
+          generated=(app/src/lib/api/generated mobile/src/api/generated extension/src/shared/generated)
+          changed="$(git status --porcelain -- "${generated[@]}")"
           if [ -n "$changed" ]; then
             echo "$changed"
-            git --no-pager diff -- app/src/lib/api/generated | head -n 200
-            echo "::error::app/src/lib/api/generated is not what api/openapi.yaml generates. Run bun run api:generate and commit the result."
+            git --no-pager diff -- "${generated[@]}" | head -n 200
+            echo "::error::A generated client (${generated[*]}) is not what api/openapi.yaml generates. Run bun run api:generate and commit the result."
             exit 1
           fi
       - name: No breaking change against the base branch

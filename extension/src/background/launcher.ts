@@ -19,10 +19,10 @@ import {
 import {
   joinedLearningContainer,
   type RecorderMe,
-  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import type { PageResponse, RecorderState } from "../protocol/messages";
-import { OpenBotError, openbotJson } from "../shared/openbot-client";
+import { getRecorderIdentity } from "../shared/generated/recorder";
+import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import { allowsOpenBot, readPolicy } from "../shared/policy";
 import { narrationLanguage } from "../shared/speech-language";
@@ -286,13 +286,10 @@ export function createLauncher(
     | { kind: "unknown" }
   > {
     try {
-      const value = await openbotJson<RecorderMe>(
-        connection,
-        recorderApiPaths.me,
-        {
-          signal: AbortSignal.timeout(ME_WAIT_MS),
-        },
-      );
+      const value = await getRecorderIdentity(ORGANIZATION_ID, {
+        target: connection,
+        signal: AbortSignal.timeout(ME_WAIT_MS),
+      });
       return { kind: "ok", value };
     } catch (error) {
       if (error instanceof OpenBotError && error.signedOut)
