@@ -846,7 +846,7 @@ export const getRemoveOrganizationMemberUrl = (
 };
 
 /**
- * End somebody's membership of the organization. An owner or an admin of it can remove anybody but its owner, and any member can leave by naming themselves or `me`. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
+ * End somebody's membership of the organization. An owner or an admin of it can remove anybody whose membership can end, and any such member can leave by naming themselves or `me`. The owner stays, so nobody leaves their own organization, and so does somebody this OpenBot's settings keep as an admin of it. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
  * @summary Remove a member, or leave an organization
  */
 export const removeOrganizationMember = async (

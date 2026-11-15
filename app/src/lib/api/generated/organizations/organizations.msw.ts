@@ -65,6 +65,7 @@ export const getListOrganizationMembersResponseMock =
         image: null,
         role: "owner",
         joinedAt: "2026-11-14T09:12:40.000Z",
+        removable: false,
       },
       {
         id: "2fn8w1c6y4tq7h0mbe3s",
@@ -73,6 +74,7 @@ export const getListOrganizationMembersResponseMock =
         image: null,
         role: "member",
         joinedAt: "2026-11-14T09:20:05.000Z",
+        removable: true,
       },
     ],
     nextCursor: null,

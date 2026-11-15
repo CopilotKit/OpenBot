@@ -114,6 +114,8 @@ const member = (
   image: null,
   role,
   joinedAt: "2026-11-01T09:00:00.000Z",
+  // As the server answers it: the owner stays.
+  removable: role !== "owner",
 });
 
 const sent = (
@@ -503,11 +505,21 @@ describe("the words and the controls", () => {
     );
   });
 
-  test("a member's row offers leaving on your own, removing to an owner or admin, and nothing on the owner's", () => {
-    const row = (id: string, role: OrganizationMemberSummary["role"]) => ({
-      id,
-      role,
-    });
+  test("a member's row offers leaving on your own, removing to an owner or admin, and nothing where the membership cannot end", () => {
+    // `removable` is the server's verdict: false for the owner, and for somebody OpenBot's
+    // settings keep as an admin.
+    const row = (
+      id: string,
+      role: OrganizationMemberSummary["role"],
+      removable = role !== "owner",
+    ) => ({ id, role, removable });
+    // An admin the settings keep is offered no Leave, and nobody is offered to remove them.
+    expect(
+      memberControl(row("dana", "admin", false), { id: "dana", role: "admin" }),
+    ).toBeNull();
+    expect(
+      memberControl(row("lee", "admin", false), { id: "dana", role: "admin" }),
+    ).toBeNull();
     for (const role of ["owner", "admin"]) {
       const viewer = { id: "dana", role };
       expect(memberControl(row("sam", "member"), viewer)).toBe("remove");

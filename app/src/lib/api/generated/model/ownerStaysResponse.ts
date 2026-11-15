@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The person owns the organization, so they stay in it.
+ * The person stays in the organization: they own it, or this OpenBot's settings keep them as an admin of it. The members list says who, as removable.
  */
 export type OwnerStaysResponse = Problem;

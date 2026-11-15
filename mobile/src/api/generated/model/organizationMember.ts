@@ -7,6 +7,8 @@ import type { PersonRole } from "./personRole";
  * One member of an organization.
  */
 export interface OrganizationMember {
+  /** Whether this membership can end: an admin can remove them and they can leave. The server's verdict. False for the organization's owner, who stays in it, and for somebody this OpenBot's settings keep as an admin of the organization. */
+  removable: boolean;
   /** The person's id. */
   id: string;
   /** Their address. */

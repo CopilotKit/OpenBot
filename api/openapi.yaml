@@ -9996,7 +9996,7 @@ paths:
         - Organizations
       operationId: removeOrganizationMember
       summary: Remove a member, or leave an organization
-      description: End somebody's membership of the organization. An owner or an admin of it can remove anybody but its owner, and any member can leave by naming themselves or `me`. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
+      description: End somebody's membership of the organization. An owner or an admin of it can remove anybody whose membership can end, and any such member can leave by naming themselves or `me`. The owner stays, so nobody leaves their own organization, and so does somebody this OpenBot's settings keep as an admin of it. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
       security:
         - webSession: []
         - appOAuth:
@@ -27753,7 +27753,11 @@ components:
         - image
         - role
         - joinedAt
+        - removable
       properties:
+        removable:
+          type: boolean
+          description: 'Whether this membership can end: an admin can remove them and they can leave. The server''s verdict. False for the organization''s owner, who stays in it, and for somebody this OpenBot''s settings keep as an admin of the organization.'
         id:
           type: string
           description: The person's id.
@@ -36609,7 +36613,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     OwnerStays:
-      description: The person owns the organization, so they stay in it.
+      description: 'The person stays in the organization: they own it, or this OpenBot''s settings keep them as an admin of it. The members list says who, as removable.'
       content:
         application/problem+json:
           schema:
@@ -41070,12 +41074,14 @@ components:
             image: null
             role: owner
             joinedAt: '2026-11-14T09:12:40.000Z'
+            removable: false
           - id: 2fn8w1c6y4tq7h0mbe3s
             email: sam.ortiz@acme.com
             name: Sam Ortiz
             image: null
             role: member
             joinedAt: '2026-11-14T09:20:05.000Z'
+            removable: true
         nextCursor: null
     RenamedOrganization:
       summary: An organization with its new name.
