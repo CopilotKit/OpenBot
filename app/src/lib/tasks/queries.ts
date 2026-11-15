@@ -48,6 +48,8 @@ export type BotTask = {
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
   resolvedAt: string | null;
+  /** The latest thing the person told it directly in its conversation, unasked. See `TaskSteer`. */
+  steer?: { text: string; at: string } | null;
   createdAt: string;
   updatedAt: string;
 };
