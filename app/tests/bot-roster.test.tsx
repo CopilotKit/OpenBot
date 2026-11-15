@@ -16,6 +16,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
@@ -406,4 +407,89 @@ test("with every Bot hidden it doesn't claim there are none", async () => {
   expect(await view.findByText("No Bots on your list")).toBeTruthy();
   expect(view.queryByText("No Bots yet")).toBeNull();
   expect(view.getByText("Hidden")).toBeTruthy();
+});
+
+test("search and ownership combine, empty results can be cleared", async () => {
+  serving(
+    [
+      bot({ id: "zoe", name: "Zoe", roleDescription: "Reviews invoices" }),
+      bot({
+        id: "ada",
+        name: "Ada",
+        title: "Writer",
+        mine: false,
+        canManage: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Zoe");
+  const search = view.getByRole("searchbox", { name: "Search Bots" });
+  await userEvent.setup({ document }).type(search, "  INVOICES ");
+  expect(view.queryByText("Ada")).toBeNull();
+  expect(view.getByText("Zoe")).toBeTruthy();
+  fireEvent.change(view.getByLabelText("Show Bots"), {
+    target: { value: "shared" },
+  });
+  expect(view.getByText("No matching Bots")).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Clear filters" }));
+  expect(view.getByText("Ada")).toBeTruthy();
+  expect(view.getByText("Zoe")).toBeTruthy();
+});
+
+test("sort changes DOM order within groups while pinned Bots stay first", async () => {
+  serving(
+    [
+      bot({ id: "pinned", name: "Pinned Bot", pinned: true }),
+      bot({ id: "zoe", name: "Zoe" }),
+      bot({ id: "ada", name: "Ada" }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Zoe");
+  fireEvent.change(view.getByLabelText("Sort Bots"), {
+    target: { value: "name-asc" },
+  });
+  const names = () =>
+    [...view.container.querySelectorAll('a[href^="/bots/"]')].map(
+      (a) => a.textContent,
+    );
+  expect(names().map((name) => name?.replace("Title", ""))).toEqual([
+    "Pinned Bot",
+    "Ada",
+    "Zoe",
+  ]);
+  fireEvent.change(view.getByLabelText("Sort Bots"), {
+    target: { value: "name-desc" },
+  });
+  expect(names().map((name) => name?.replace("Title", ""))).toEqual([
+    "Pinned Bot",
+    "Zoe",
+    "Ada",
+  ]);
+});
+
+test("search reaches hidden Bots without unfolding them or showing a false empty account", async () => {
+  serving(
+    [bot({ id: "visible", name: "Visible" })],
+    [
+      bot({ id: "hidden", name: "Archived Analyst", hidden: true }),
+      bot({ id: "other", name: "Other Hidden", hidden: true }),
+    ],
+  );
+  const view = draw();
+  await view.findByText("Hidden");
+  await userEvent
+    .setup({ document })
+    .type(view.getByRole("searchbox"), "analyst");
+  expect(view.queryByText("No matching Bots")).toBeNull();
+  expect(view.queryByText("Archived Analyst")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Show" }));
+  expect(view.getByText("Archived Analyst")).toBeTruthy();
+  expect(view.queryByText("Other Hidden")).toBeNull();
+  expect(view.queryByText("Visible")).toBeNull();
+  expect(view.getByRole("status").textContent).toContain("1 hidden");
 });

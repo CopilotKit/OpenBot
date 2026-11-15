@@ -1,4 +1,5 @@
 import type { AgentProfile } from "./queries";
+import { shownSubtitle } from "./subtitle";
 
 /**
  * The sections of the Bots roster, from the visible list (`agentListQueryOptions()`).
@@ -31,4 +32,50 @@ export function groupRoster(
     yours: rest.filter((agent) => agent.mine),
     shared: rest.filter((agent) => !agent.mine),
   };
+}
+
+export type RosterFilters = {
+  query: string;
+  scope: "all" | "yours" | "shared" | "pinned";
+  sort:
+    | "default"
+    | "name-asc"
+    | "name-desc"
+    | "title-asc"
+    | "title-desc"
+    | "description-asc"
+    | "description-desc";
+};
+
+/** Filter the complete roster before grouping; never sort React Query's array in place. */
+export function filterRoster(
+  agents: readonly AgentProfile[],
+  { query, scope, sort }: RosterFilters,
+): AgentProfile[] {
+  const needle = query.trim().toLocaleLowerCase();
+  const filtered = agents.filter((agent) => {
+    if (scope === "yours" && !agent.mine) return false;
+    if (scope === "shared" && agent.mine) return false;
+    if (scope === "pinned" && !agent.pinned && !agent.assignedToMe)
+      return false;
+    return [agent.name, shownSubtitle(agent.title), agent.roleDescription].some(
+      (value) => (value ?? "").toLocaleLowerCase().includes(needle),
+    );
+  });
+  if (sort === "default") return filtered;
+  const value = (agent: AgentProfile) =>
+    sort.startsWith("name-")
+      ? agent.name
+      : sort.startsWith("title-")
+        ? (shownSubtitle(agent.title) ?? "")
+        : (agent.roleDescription ?? "");
+  const direction = sort.endsWith("-desc") ? -1 : 1;
+  return filtered.sort(
+    (a, b) =>
+      direction *
+      value(a).localeCompare(value(b), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+  );
 }

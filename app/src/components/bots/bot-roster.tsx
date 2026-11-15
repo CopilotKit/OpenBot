@@ -1,7 +1,7 @@
 import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
@@ -24,15 +24,24 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { groupRoster } from "@/lib/agents/roster";
+import {
+  filterRoster,
+  groupRoster,
+  type RosterFilters,
+} from "@/lib/agents/roster";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import {
   type BotAttention,
   botAttentionQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+
+/** Native selects keep these compact, wrapping controls keyboard accessible on small screens. */
+const ROSTER_SELECT_CLASS =
+  "h-9 max-w-full rounded-lg border border-input bg-card px-2.5 text-base text-foreground focus-visible:outline-2 focus-visible:outline-ring md:text-sm";
 
 /**
  * Every Bot the person can reach, in the one place they are listed: what needs the person first,
@@ -46,6 +55,13 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
  * This replaces three screens (Bots, Agents and Team Bots) that listed the same Bots three ways.
  */
 export function BotRoster() {
+  const [filters, setFilters] = useState<RosterFilters>({
+    query: "",
+    scope: "all",
+    sort: "default",
+  });
+  const controlId = useId();
+  const filtering = filters.query.trim() !== "" || filters.scope !== "all";
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());
@@ -69,8 +85,10 @@ export function BotRoster() {
     );
   }
   // Every Bot stays in its own section; what it waits on is on the board above, by name.
-  const { pinned, yours, shared } = groupRoster(agents.data);
-  const available = pinned.length + yours.length + shared.length;
+  const visible = filterRoster(agents.data, filters);
+  const hiddenMatches = filterRoster(hidden.data ?? [], filters);
+  const { pinned, yours, shared } = groupRoster(visible);
+  const available = agents.data.length;
   const hiddenCount = hidden.data?.length ?? 0;
   const newBot = (
     <Button
@@ -90,6 +108,104 @@ export function BotRoster() {
        * A Bot waiting on them stays in its own section below too, with its badge.
        */}
       <NeedsYouBoard />
+      <search aria-label="Find Bots" className="mt-6 space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label
+            className="flex min-w-48 flex-1 flex-col gap-1 text-sm"
+            htmlFor={`${controlId}-query`}
+          >
+            Search Bots
+            <Input
+              id={`${controlId}-query`}
+              type="search"
+              name="query"
+              autoComplete="off"
+              placeholder="Name, title or description"
+              value={filters.query}
+              onChange={(event) =>
+                setFilters({ ...filters, query: event.target.value })
+              }
+            />
+          </label>
+          <label
+            className="flex flex-col gap-1 text-sm"
+            htmlFor={`${controlId}-scope`}
+          >
+            Show Bots
+            <select
+              id={`${controlId}-scope`}
+              name="scope"
+              className={ROSTER_SELECT_CLASS}
+              value={filters.scope}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  scope: event.target.value as RosterFilters["scope"],
+                })
+              }
+            >
+              <option value="all">All Bots</option>
+              <option value="yours">Yours</option>
+              <option value="shared">
+                {personal ? "Included with OpenBot" : "Shared with you"}
+              </option>
+              <option value="pinned">Pinned</option>
+            </select>
+          </label>
+          <label
+            className="flex flex-col gap-1 text-sm"
+            htmlFor={`${controlId}-sort`}
+          >
+            Sort Bots
+            <select
+              id={`${controlId}-sort`}
+              name="sort"
+              className={ROSTER_SELECT_CLASS}
+              value={filters.sort}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  sort: event.target.value as RosterFilters["sort"],
+                })
+              }
+            >
+              <option value="default">Default order</option>
+              <option value="name-asc">Name: A–Z</option>
+              <option value="name-desc">Name: Z–A</option>
+              <option value="title-asc">Title: A–Z</option>
+              <option value="title-desc">Title: Z–A</option>
+              <option value="description-asc">Description: A–Z</option>
+              <option value="description-desc">Description: Z–A</option>
+            </select>
+          </label>
+          {filtering || filters.sort !== "default" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setFilters({ query: "", scope: "all", sort: "default" })
+              }
+            >
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-muted-foreground text-sm" role="status">
+          {visible.length} of {available} Bots
+          {hiddenMatches.length ? ` · ${hiddenMatches.length} hidden` : ""}
+        </p>
+      </search>
+      {filtering &&
+      visible.length === 0 &&
+      hiddenMatches.length === 0 &&
+      !hidden.isPending ? (
+        <PageSection>
+          <PageEmpty icon={IconBolt} title="No matching Bots">
+            Try another search or clear the filters.
+          </PageEmpty>
+        </PageSection>
+      ) : null}
       {/*
        * AVAILABLE BOTS FIRST, AND ONLY SECTIONS WITH BOTS IN THEM. An empty Yours used to sit above
        * the assistant OpenBot includes, so the first thing a new person read was "No Bots yet" over
@@ -113,7 +229,7 @@ export function BotRoster() {
           <RosterRows agents={shared} byId={byId} />
         </PageSection>
       ) : null}
-      {available === 0 ? (
+      {!filtering && available === 0 ? (
         // Waits for the hidden list, so it never says "No Bots yet" to someone who hid theirs.
         hidden.isPending ? null : (
           <PageSection>
@@ -128,7 +244,7 @@ export function BotRoster() {
             </PageEmpty>
           </PageSection>
         )
-      ) : yours.length === 0 ? (
+      ) : !filtering && yours.length === 0 ? (
         <p className="mt-12 text-muted-foreground text-sm">
           Create a Bot for a specific job.{" "}
           <Link
@@ -141,8 +257,8 @@ export function BotRoster() {
         </p>
       ) : null}
       <DoneTasks done={list.done} />
-      {hidden.data?.length ? (
-        <HiddenSection agents={hidden.data} byId={byId} personal={personal} />
+      {hiddenMatches.length ? (
+        <HiddenSection agents={hiddenMatches} byId={byId} personal={personal} />
       ) : null}
     </>
   );
