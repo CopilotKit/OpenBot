@@ -83,6 +83,8 @@ let insights: TestInsight[] = [];
 /** The person's recordings' titles, as the recording-titles read answers them. */
 let recordingTitles: { id: string; title: string | null }[] = [];
 let detailOperation: LearningProposal["operation"] = "add";
+/** While set, reading the review answers 429, as the backend does when the shared project key is over its limit. */
+let busy = false;
 const posts: string[] = [];
 const patches: { url: string; body: unknown }[] = [];
 
@@ -147,6 +149,7 @@ beforeEach(() => {
   insights = [];
   recordingTitles = [];
   detailOperation = "add";
+  busy = false;
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
@@ -155,10 +158,13 @@ beforeEach(() => {
         return Response.json({ edition: "personal" });
       if (request.method === "GET") {
         if (request.path === ME.review)
-          return served(
-            learningContract.GetPersonLearningReviewResponse,
-            review,
-          );
+          return busy
+            ? problem(
+                429,
+                "The backend is busy. Try again in a minute.",
+                "RATE_LIMITED",
+              )
+            : served(learningContract.GetPersonLearningReviewResponse, review);
         if (request.path === ME.settings)
           return served(
             learningContract.GetPersonLearningSettingsResponse,
@@ -695,9 +701,11 @@ test("a source that failed to read still alerts next to one that is unavailable"
   );
 });
 
-test("the review is read again every ten seconds only while a run is going", () => {
+// Every person's review reads through the one project key, and reading every ten seconds while a run went was enough to
+// have the backend answer 429.
+test("the review is read again every thirty seconds while a run is going, once a minute after a failed read, and not otherwise", () => {
   const options = personalReviewQueryOptions();
-  const interval = (status: string | null) => {
+  const interval = (status: string | null, failed = false) => {
     const data = {
       canReview: true,
       autoApprove: false,
@@ -715,13 +723,57 @@ test("the review is read again every ten seconds only while a run is going", () 
     const refetchInterval = options.refetchInterval as (
       query: unknown,
     ) => unknown;
-    return refetchInterval({ state: { data } });
+    return refetchInterval({
+      state: { data, error: failed ? new Error("busy") : null },
+    });
   };
-  expect(interval("batching")).toBe(10_000);
-  expect(interval("queued")).toBe(10_000);
+  expect(interval("batching")).toBe(30_000);
+  expect(interval("queued")).toBe(30_000);
+  expect(interval("batching", true)).toBe(60_000);
   expect(interval("succeeded")).toBe(false);
   expect(interval("failed")).toBe(false);
   expect(interval(null)).toBe(false);
+});
+
+// Seen on the live review: the backend answered 429 while a run was polled, and the page dropped what it had shown.
+test("a busy backend keeps the last review on screen and says the backend is busy", async () => {
+  review = body(true);
+  const first = review.spaces[0];
+  if (first) first.latestRun = run("run-1", "2026-11-01T00:00:00Z");
+  const view = draw();
+  await view.findByText("Latest run finished.");
+  busy = true;
+  await queryClient
+    .refetchQueries({ queryKey: ["learning", "review"] })
+    .catch(() => {});
+  expect(
+    await view.findByText(
+      "The backend is busy, so this may be out of date. OpenBot checks again in a minute.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByText("Latest run finished.")).toBeTruthy();
+  expect(view.getByText("Refund order")).toBeTruthy();
+  expect(view.queryByText("No run yet.")).toBeNull();
+  // Once the backend answers again, the notice goes.
+  busy = false;
+  await queryClient.refetchQueries({ queryKey: ["learning", "review"] });
+  await waitFor(() =>
+    expect(view.queryByText(/The backend is busy/)).toBeNull(),
+  );
+});
+
+test("a review that comes back without the run a space had still shows that run", async () => {
+  review = body(true);
+  const first = review.spaces[0];
+  if (first) first.latestRun = run("run-1", "2026-11-01T00:00:00Z");
+  const view = draw();
+  await view.findByText("Latest run finished.");
+  // A read that came back short: the space's run is missing, though runs are never taken away.
+  if (first) first.latestRun = null;
+  await queryClient.refetchQueries({ queryKey: ["learning", "review"] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(view.getByText("Latest run finished.")).toBeTruthy();
+  expect(view.queryByText("No run yet.")).toBeNull();
 });
 
 test("when a refetch finds fewer proposals waiting, Your skills is refreshed", async () => {

@@ -15,6 +15,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type {
   LearningEvidence,
   LearningProposal,
@@ -105,8 +106,13 @@ test("an administrator excludes a Bot and saves without losing the default or pa
     { preconnect: originalFetch.preconnect },
   );
   const view = page();
-  const participation = await view.findByLabelText("bot participation");
-  fireEvent.change(participation, { target: { value: "exclude" } });
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("combobox", { name: "bot participation" }),
+  );
+  await user.click(
+    await view.findByRole("option", { name: "Leave out of Learning" }),
+  );
   fireEvent.click(view.getByRole("button", { name: "Save Learning settings" }));
   await waitFor(() =>
     expect(saved).toEqual({
@@ -172,6 +178,34 @@ test("active and hidden Bots both have participation controls", async () => {
   const view = page();
   await view.findByLabelText("hidden-bot participation");
   expect(view.queryByLabelText("active-bot participation")).not.toBeNull();
+});
+
+// Seen in WebKit: the page's native select and checkbox drew as grey system boxes, unlike every other control.
+test("Automatic learning draws OpenBot's own controls, not the browser's", async () => {
+  serve(
+    {
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      bots: { bot: { containerId: "sales" } },
+    },
+    { state: "saved" },
+  );
+  const view = page();
+  const participation = await view.findByRole("combobox", {
+    name: "bot participation",
+  });
+  expect(participation.getAttribute("data-slot")).toBe("select-trigger");
+  expect(
+    view
+      .getByRole("combobox", { name: "Show the container for" })
+      .getAttribute("data-slot"),
+  ).toBe("select-trigger");
+  expect(
+    view
+      .getByRole("checkbox", { name: /Turn on automatic learning/ })
+      .getAttribute("data-slot"),
+  ).toBe("checkbox");
+  expect(view.container.querySelector("select")).toBeNull();
 });
 
 function serve(
@@ -816,6 +850,38 @@ describe("reviewing proposed skills", () => {
     expect([...posts]).toEqual([`${LEARNING.proposal(PROPOSAL)}/reject`]);
   });
 
+  // Seen live: Why read "Supported by final Insights: agui-structured-component-report.", which names the insights
+  // Learned from already shows, by their slugs.
+  test("Why shows a reason in words, and is left out where the reason only names insights", async () => {
+    serveLearning();
+    const view = shared();
+    fireEvent.click(await view.findByRole("button", { name: /Refund triage/ }));
+    await view.findByText("Read the order date from the conversation.");
+    expect(view.getByText("Why")).not.toBeNull();
+    expect(
+      view.getByText(
+        "Three support conversations checked the order date by hand.",
+      ),
+    ).not.toBeNull();
+    cleanup();
+    queryClient.clear();
+    serveLearning();
+    override((request) =>
+      request.path === LEARNING.proposal(PROPOSAL)
+        ? served(learningContract.GetLearningProposalResponse, {
+            ...detail,
+            reason:
+              "Supported by final Insights: refund-triage, order-date-check.",
+          })
+        : undefined,
+    );
+    const raw = shared();
+    fireEvent.click(await raw.findByRole("button", { name: /Refund triage/ }));
+    await raw.findByText("Read the order date from the conversation.");
+    expect(raw.queryByText("Why")).toBeNull();
+    expect(raw.queryByText(/Supported by final Insights/)).toBeNull();
+  });
+
   test("a failed approve of a proposed skill shows why and leaves the choice open", async () => {
     serveLearning();
     override((request) =>
@@ -1026,8 +1092,8 @@ describe("reviewing proposed skills", () => {
   test("runs are polled while one is queued or running, and not otherwise", () => {
     const run = (status: LearningRunSummary["status"]) =>
       ({ status }) as LearningRunSummary;
-    expect(runPollInterval([run("succeeded"), run("queued")])).toBe(10_000);
-    expect(runPollInterval([run("batching")])).toBe(10_000);
+    expect(runPollInterval([run("succeeded"), run("queued")])).toBe(30_000);
+    expect(runPollInterval([run("batching")])).toBe(30_000);
     expect(runPollInterval([run("succeeded"), run("failed")])).toBe(false);
     expect(runPollInterval([])).toBe(false);
     expect(runPollInterval(undefined)).toBe(false);
@@ -1119,7 +1185,11 @@ describe("reviewing proposed skills", () => {
       );
     });
     const view = shared();
-    fireEvent.click(await view.findByLabelText(/Turn on automatic learning/));
+    await userEvent.setup({ document }).click(
+      await view.findByRole("checkbox", {
+        name: /Turn on automatic learning/,
+      }),
+    );
     fireEvent.click(
       await view.findByRole("button", {
         name: /Who approves skills learned from people's recordings/,
@@ -1186,6 +1256,15 @@ describe("reviewing proposed skills", () => {
           "Learning has no model to think with. Sign OpenBot in to a model, then choose Learn now.",
         createdAt: "2026-11-04T10:00:00.000Z",
       }),
+      // Seen live as "1 proposed, 1 insights".
+      runBody({
+        id: "0198a012-a20f-77c0-9e33-8992f18e74c5",
+        status: "succeeded",
+        triggerSource: "automatic",
+        proposalCount: 1,
+        insightCount: 1,
+        createdAt: "2026-11-03T10:00:00.000Z",
+      }),
     ];
     serveLearning({
       ...noDashboard,
@@ -1211,6 +1290,7 @@ describe("reviewing proposed skills", () => {
     expect(view.getByText("Finished · Manual")).not.toBeNull();
     expect(view.getByText("Failed · Automatic")).not.toBeNull();
     expect(view.getByText("2 proposed, 5 insights")).not.toBeNull();
+    expect(view.getByText("1 proposed, 1 insight")).not.toBeNull();
     await view.findByText("Manage Learning in the backend dashboard");
     const anchors = Array.from(view.container.querySelectorAll("a"));
     expect(anchors.some((a) => a.getAttribute("href") === runsLink)).toBe(

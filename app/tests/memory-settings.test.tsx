@@ -137,6 +137,17 @@ test("each memory's switch is named for the memory it turns on or off", async ()
   ).toBeTruthy();
 });
 
+// Seen live: the dialog's only line under its title was the memory's provenance, "You".
+test("Edit memory says what the dialog is for", async () => {
+  serving();
+  const view = draw(<MemoryList />);
+  await view.findByText("I prefer mornings.");
+  fireEvent.click(view.getAllByRole("button", { name: "Edit" })[0]!);
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.textContent).toContain("Change what your Bots remember.");
+  expect(view.queryByText("You told a Bot", { exact: true })).toBeNull();
+});
+
 test("reopening Remember a fact after a failure starts clean", async () => {
   serving();
   refuseWrite = "Memory is full.";

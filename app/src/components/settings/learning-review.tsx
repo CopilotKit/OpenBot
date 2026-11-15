@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { ClientError } from "@/lib/client";
 import { skillTitle } from "@/lib/learning/display";
 import {
   reviewPersonalProposalMutationOptions,
@@ -77,6 +78,16 @@ function learningInProgress(
 }
 
 /** Why Learn now couldn't start Learning for one group. */
+/**
+ * What the review says over what it last read, when reading it again failed. The backend refuses with 429 when the
+ * organization's one project key is over its limit, which every person's reads share: that is a wait, not a fault.
+ */
+function staleSentence(error: Error): string {
+  return error instanceof ClientError && error.status === 429
+    ? "The backend is busy, so this may be out of date. OpenBot checks again in a minute."
+    : error.message;
+}
+
 function GroupError({ state }: { state: StartState | undefined }) {
   if (!state || state.pending || !state.error) return null;
   return (
@@ -158,17 +169,19 @@ export function LearningReview() {
   const refetchReview = review.refetch;
   useEffect(() => {
     if (!awaitingRun) return;
-    const timer = setInterval(() => void refetchReview(), 10_000);
+    const timer = setInterval(() => void refetchReview(), 30_000);
     return () => clearInterval(timer);
   }, [awaitingRun, refetchReview]);
   if (review.isPending) return null;
-  if (review.error) {
+  // A read that failed after one that answered leaves what that one said on screen, with why it may be out of date.
+  if (!review.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        {review.error.message}
+        {review.error?.message}
       </p>
     );
   }
+  const stale = review.error ? staleSentence(review.error) : null;
   const { canReview, spaces: sources, autoApprove } = review.data;
   // Shown at once while the save is on its way, as a switch is.
   const autoApproveOn =
@@ -256,6 +269,11 @@ export function LearningReview() {
 
   return (
     <PageSection title={heading.title} description={heading.description}>
+      {stale ? (
+        <p className="mt-4 text-muted-foreground text-sm" role="status">
+          {stale}
+        </p>
+      ) : null}
       {autoApproveOn !== null && (
         <PageRows>
           <Item size="sm">

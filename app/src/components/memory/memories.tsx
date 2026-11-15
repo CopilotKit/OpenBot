@@ -324,7 +324,7 @@ function EditMemoryDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit memory</DialogTitle>
-          <DialogDescription>{memory.provenance}</DialogDescription>
+          <DialogDescription>Change what your Bots remember.</DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
           <Field>

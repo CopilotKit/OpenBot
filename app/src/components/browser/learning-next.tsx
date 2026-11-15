@@ -78,7 +78,7 @@ export function savedToLearning(stopped: Stopped | undefined): boolean {
  * they or an admin approve) and the skills proposed from that recording since it stopped. Learn now starts the same
  * run as Skills on each of the person's recording spaces.
  *
- * While nothing has come of it yet the review is read again, every 10 seconds during a run and every 30 otherwise, so
+ * While nothing has come of it yet the review is read again, every 30 seconds during a run and every minute otherwise, so
  * an automatic run is seen too. Once a skill from it is there, the page tells the person, and the browser does too
  * (a notification, where they allowed them) when they are looking at something else.
  */
@@ -86,7 +86,7 @@ export function useLearningNext(stopped: Stopped) {
   const since = stopped.stoppedAt;
   const [started, setStarted] = useState<{ from: string | null } | null>(null);
   // How often the review is read again, set from what the last read said (below).
-  const pace = useRef<number | false>(30_000);
+  const pace = useRef<number | false>(60_000);
   const review = useQuery({
     ...personalReviewQueryOptions(),
     refetchInterval: () => pace.current,
@@ -140,14 +140,16 @@ export function useLearningNext(stopped: Stopped) {
   const proposed = found.find((skill) => skill.status === "pending_review");
 
   let next: LearningNext;
-  if (review.error) next = { kind: "unreadable", reason: review.error.message };
+  // A read that failed after one that answered keeps what that one said: a busy backend is not news about the skill.
+  if (review.error && !review.data)
+    next = { kind: "unreadable", reason: review.error.message };
   else if (learned) next = { kind: "learned", skill: learned };
   else if (proposed) next = { kind: "proposed", skill: proposed };
   else if (review.data?.modelProblem)
     next = { kind: "model", reason: review.data.modelProblem };
   else if (off) next = { kind: "off" };
   else if (running) next = { kind: "learning" };
-  else if (skills.error)
+  else if (skills.error && !skills.data)
     next = { kind: "unreadable", reason: skills.error.message };
   else if (runSince?.status === "failed")
     next = {
@@ -170,8 +172,8 @@ export function useLearningNext(stopped: Stopped) {
       kind === "learned" || kind === "model" || kind === "off"
         ? false
         : kind === "learning"
-          ? 10_000
-          : 30_000;
+          ? 30_000
+          : 60_000;
   }, [kind]);
 
   useSkillNotice(stopped.title, next);

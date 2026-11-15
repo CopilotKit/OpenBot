@@ -4,7 +4,7 @@ import {
   type LearningAutoAssignState,
   type LearningProposalDetail,
 } from "@openbot/shared/learning";
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, replaceEqualDeep } from "@tanstack/react-query";
 import {
   getBotLearningStatus,
   getLearnedSkill,
@@ -362,16 +362,50 @@ export function personalReviewQueryOptions() {
         signal,
         fallback: "Couldn't load your skills to review. Reload the page.",
       }),
-    // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload.
+    // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload, and
+    // after a read that failed it is read again until one answers. Every person's reads go through the one project key,
+    // which the backend limits: so every thirty seconds while a run goes, and once a minute after a failed read.
     refetchInterval: (query) =>
-      query.state.data?.spaces.some(
-        (space) =>
-          space.latestRun &&
-          !["succeeded", "failed"].includes(space.latestRun.status),
-      )
-        ? 10_000
-        : false,
+      query.state.error
+        ? 60_000
+        : query.state.data?.spaces.some(
+              (space) =>
+                space.latestRun &&
+                !["succeeded", "failed"].includes(space.latestRun.status),
+            )
+          ? 30_000
+          : false,
+    structuralSharing: (previous, next) =>
+      replaceEqualDeep(
+        previous,
+        keepSeenRuns(
+          previous as PersonalReview | undefined,
+          next as PersonalReview,
+        ),
+      ),
   });
+}
+
+/**
+ * The review read again, with each space's latest run kept where the new answer has none but the last one did. A
+ * space's runs are never taken away, so an answer without one for a space that had one is a read that came back
+ * short, and saying "No run yet" over a run that finished would be wrong.
+ */
+export function keepSeenRuns(
+  previous: PersonalReview | undefined,
+  next: PersonalReview,
+): PersonalReview {
+  if (!previous) return next;
+  return {
+    ...next,
+    spaces: next.spaces.map((space) => {
+      if (space.latestRun) return space;
+      const seen = previous.spaces.find(
+        (before) => before.containerId === space.containerId,
+      )?.latestRun;
+      return seen ? { ...space, latestRun: seen } : space;
+    }),
+  };
 }
 
 /**

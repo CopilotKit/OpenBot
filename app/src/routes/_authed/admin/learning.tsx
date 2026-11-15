@@ -28,6 +28,7 @@ import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
 import { ProposalDialog } from "@/components/learning/proposal-dialog";
 import { skillTitle } from "@/lib/learning/display";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -37,6 +38,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
@@ -63,7 +71,12 @@ import { queryClient as appQueryClient } from "@/query-client";
 export const Route = createFileRoute("/_authed/admin/learning")({
   component: LearningPageInEveryEdition,
 });
-const selectClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
+/** How one Bot takes part in Learning: the default space, none, or a space of its own. */
+const PARTICIPATION = [
+  { value: "inherit", label: "Use deployment default" },
+  { value: "exclude", label: "Leave out of Learning" },
+  { value: "container", label: "Use a specific container" },
+];
 
 /** What automatic assignment found, in words, or nothing when there is nothing to say. */
 function automaticMessage(
@@ -190,6 +203,7 @@ function ContainerSetup({
 
 export function LearningPage() {
   const queryClient = useQueryClient();
+  const formId = useId();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
   const automatic = useQuery(learningAutomaticQueryOptions());
   const agents = useQuery(agentListQueryOptions());
@@ -257,12 +271,15 @@ export function LearningPage() {
               save.mutate(settings);
             }}
           >
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <label
+              className="flex items-center gap-2 text-sm"
+              htmlFor={`${formId}-enabled`}
+            >
+              <Checkbox
+                id={`${formId}-enabled`}
                 checked={settings.enabled}
-                onChange={(event) =>
-                  change({ ...settings, enabled: event.target.checked })
+                onCheckedChange={(checked) =>
+                  change({ ...settings, enabled: checked === true })
                 }
               />
               Turn on automatic learning and skill delivery
@@ -306,19 +323,20 @@ export function LearningPage() {
                     : "container";
                 return (
                   <div key={id} className="grid gap-3 rounded-lg border p-4">
-                    <label className="grid gap-2 text-sm font-medium">
-                      {nameFor(id)}
-                      <select
-                        className={selectClass}
-                        aria-label={`${nameFor(id)} participation`}
+                    <label
+                      className="grid gap-2 text-sm"
+                      htmlFor={`${formId}-bot-${id}`}
+                    >
+                      <span className="font-medium">{nameFor(id)}</span>
+                      <Select
+                        items={PARTICIPATION}
                         value={mode}
-                        onChange={(event) => {
+                        onValueChange={(value) => {
                           const mappings = { ...settings.bots };
-                          if (event.target.value === "inherit")
-                            delete mappings[id];
+                          if (value === "inherit") delete mappings[id];
                           else
                             mappings[id] =
-                              event.target.value === "exclude"
+                              value === "exclude"
                                 ? null
                                 : {
                                     containerId:
@@ -327,12 +345,21 @@ export function LearningPage() {
                           change({ ...settings, bots: mappings });
                         }}
                       >
-                        <option value="inherit">Use deployment default</option>
-                        <option value="exclude">Leave out of Learning</option>
-                        <option value="container">
-                          Use a specific container
-                        </option>
-                      </select>
+                        <SelectTrigger
+                          aria-label={`${nameFor(id)} participation`}
+                          className="w-full"
+                          id={`${formId}-bot-${id}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PARTICIPATION.map((choice) => (
+                            <SelectItem key={choice.value} value={choice.value}>
+                              {choice.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </label>
                     {mode === "container" && (
                       <TargetFields
@@ -376,20 +403,33 @@ export function LearningPage() {
         description="OpenBot studies finished conversations and proposes skills. Review and publish them below. Bots only use published skills."
       >
         <div className="grid gap-4">
-          <label className="grid gap-2 text-sm">
+          <label className="grid gap-2 text-sm" htmlFor={`${formId}-shown`}>
             Show the container for
-            <select
-              className={selectClass}
+            {/* "" is the deployment default: a Bot's id is never empty. */}
+            <Select
+              items={[
+                { value: "", label: "Deployment default" },
+                ...botIds.map((id) => ({ value: id, label: nameFor(id) })),
+              ]}
               value={selected}
-              onChange={(event) => setSelected(event.target.value)}
+              onValueChange={(value) => setSelected(value ?? "")}
             >
-              <option value="">Deployment default</option>
-              {botIds.map((id) => (
-                <option key={id} value={id}>
-                  {nameFor(id)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-label="Show the container for"
+                className="w-full"
+                id={`${formId}-shown`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Deployment default</SelectItem>
+                {botIds.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {nameFor(id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           {overview.isPending && <p role="status">Checking the backend…</p>}
           {overview.error && (
@@ -670,9 +710,13 @@ function failureSentence(code: string | null): string {
   return (code && FAILURES[code]) || "The run failed.";
 }
 
-const RUN_POLL_MS = 10_000;
+/**
+ * How often the runs are read while one is going. A run takes minutes, and every read goes through the organization's
+ * one project key, which the backend limits, so this is unhurried.
+ */
+const RUN_POLL_MS = 30_000;
 
-/** Re-read the runs every few seconds while one is still going, so Queued does not outlive the run. */
+/** Re-read the runs every so often while one is still going, so Queued does not outlive the run. */
 export function runPollInterval(
   runs: Pick<LearningRunSummary, "status">[] | undefined,
 ): number | false {
@@ -687,7 +731,9 @@ export function runPollInterval(
 function runCounts(run: LearningRunSummary): string | null {
   const counts = [
     run.proposalCount !== null ? `${run.proposalCount} proposed` : null,
-    run.insightCount !== null ? `${run.insightCount} insights` : null,
+    run.insightCount !== null
+      ? `${run.insightCount} ${run.insightCount === 1 ? "insight" : "insights"}`
+      : null,
   ].filter((count) => count !== null);
   return counts.length > 0 ? counts.join(", ") : null;
 }
