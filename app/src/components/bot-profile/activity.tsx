@@ -45,11 +45,10 @@ import {
   cancelFollowUpMutationOptions,
   stopHandoffMutationOptions,
 } from "@/lib/bot-lifecycle/mutations";
-import {
-  type ActivityItem,
-  type ActivityKind,
-  type BotActivity,
-  botActivityQueryOptions,
+import type {
+  ActivityItem,
+  ActivityKind,
+  BotActivity,
 } from "@/lib/bot-lifecycle/queries";
 import { conversationTitle } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
@@ -61,6 +60,7 @@ import { orderTasks } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { useBotActivity } from "./use-bot-reads";
 
 const ICONS: Record<ActivityKind, typeof IconBell> = {
   routine: IconCalendarRepeat,
@@ -216,7 +216,7 @@ function upcomingOf(activity: BotActivity | undefined) {
  * least urgent, so it lives only on the Activity page.
  */
 export function BotActivityGlance({ agentId }: { agentId: string }) {
-  const activity = useQuery(botActivityQueryOptions(agentId));
+  const activity = useBotActivity(agentId);
   const upcoming = upcomingOf(activity.data);
   if (activity.isPending || upcoming.length === 0) return null;
   return (
@@ -240,7 +240,7 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
  * card's other rows.
  */
 export function BotActivityRow({ agentId }: { agentId: string }) {
-  const activity = useQuery(botActivityQueryOptions(agentId));
+  const activity = useBotActivity(agentId);
   if (activity.isPending || upcomingOf(activity.data).length > 0) return null;
   return (
     <>
@@ -411,7 +411,7 @@ export function BotActivitySections({
   /** The Needs you board sits above, so tasks and what the Bot asked are not listed twice. */
   boardAbove?: boolean;
 }) {
-  const activity = useQuery(botActivityQueryOptions(agentId));
+  const activity = useBotActivity(agentId);
   const taskList = useQuery(taskListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   // What the Routines page reads, to count its rows as it draws them (`routinesSummary`).
