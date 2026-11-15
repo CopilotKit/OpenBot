@@ -4,9 +4,6 @@ import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
 
-/** OpenBot's one booking link. */
-export const BOOK_A_DEMO = "https://open.bot/business";
-
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
  * is the shell's, shown as given.
@@ -283,10 +280,6 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
           {phase === "checking" && (
             <StatusLine>Checking the address…</StatusLine>
           )}
-          <p className="fallback">
-            Don't have one yet?{" "}
-            <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink>.
-          </p>
           <button
             type="button"
             className="text-link"

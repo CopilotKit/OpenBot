@@ -6,9 +6,11 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
+import { ExternalLink } from "./ExternalLink";
 import type { Problem } from "./Problem";
 
-export { BOOK_A_DEMO } from "./ConnectToOpenBot";
+/** OpenBot's one booking link. */
+export const BOOK_A_DEMO = "https://open.bot/business";
 
 /**
  * The least a computer needs to run every part of OpenBot itself.
@@ -36,7 +38,8 @@ export type Hosting = "self-hosted" | "connect";
  * runs, at its address. OpenBot Cloud is shown greyed. Then what the choice needs. For Self-hosted
  * that is what this computer needs and why, which is that every part of OpenBot runs on it, how
  * long setup takes, and Install. For OpenBot for Business it is the address and Connect
- * (`ConnectToOpenBot`), with the one booking link for a company that has no OpenBot yet. Either
+ * (`ConnectToOpenBot`). The one booking link, for a company that has no OpenBot yet, is under the
+ * Business row whichever choice is picked. Either
  * way it fits the window's default size (1000×800, less a title bar) with no scrollbar. Usage data
  * is not said here: it is the last screen's choice (`UsageDataChoice`).
  *
@@ -149,6 +152,12 @@ export function Welcome({
             For your whole team. Connect to the OpenBot your company runs.
           </span>
         </label>
+        {/* Under the Business row and not part of it: a company with no OpenBot of its own has no
+            address to type, and opening the link does not pick the row. */}
+        <p className="tile-aside">
+          No OpenBot at your company yet?{" "}
+          <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink>.
+        </p>
       </fieldset>
       {connect ? (
         <ConnectToOpenBot connecting={connecting} />

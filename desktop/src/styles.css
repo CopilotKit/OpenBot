@@ -766,6 +766,19 @@ fieldset.picker.hosting .tile.unavailable .mark-tile {
   opacity: 0.45;
 }
 
+/*
+ * Under the Business row and belonging to it: the booking link for a company with no OpenBot of
+ * its own, in the row summary's size and colour, starting where the row's text does. Close under
+ * the row, so it reads as that row's and the first screen still fits the window's default size.
+ */
+fieldset.picker.hosting .tile-aside {
+  margin: -6px 0 0;
+  padding-left: 65px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
 /* Not choosable for now, while an address is checked or the browser is waited on: Cancel is. */
 fieldset.picker.hosting .tile.held,
 fieldset.picker.hosting .tile.held:hover,
@@ -840,16 +853,16 @@ a.button-link:hover {
   margin-bottom: 6px;
 }
 
-/* The setup-time line under the needs, a little closer to Install. */
+/* The setup-time line under the needs: Install's own gap is all there is between them. */
 .needs + .lede {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .needs-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
   gap: 2px 16px;
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   padding-left: 20px;
   color: var(--text-primary);
   font-size: var(--text-sm);
