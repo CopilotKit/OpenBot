@@ -1,8 +1,9 @@
+import { IconUsersGroup } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { TeamPage } from "@/components/edition/for-a-team";
-import { PageCard, PageShell } from "@/components/layout/page-shell";
+import { PageCard, PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -33,7 +34,7 @@ import { queryClient } from "@/query-client";
 
 const BACK = {
   label: "Teams",
-  linkProps: { to: "/admin/teams" as const },
+  linkProps: { to: "/teams" as const },
 };
 const DESCRIPTION = "Name the team. You add its people on the next screen.";
 
@@ -67,11 +68,25 @@ function NewTeam() {
     onSubmit: async ({ value }) => {
       const team = await createTeam.mutateAsync(teamInputFrom(value));
       await navigate({
-        to: "/admin/teams/$teamId",
+        to: "/teams/$teamId",
         params: { teamId: team.id },
       });
     },
   });
+
+  // Reached by its address by somebody the server would refuse: say so before they fill it in.
+  if (list.data && !list.data.canCreate) {
+    return (
+      <PageShell backButton={BACK} title="New team">
+        <PageEmpty
+          icon={IconUsersGroup}
+          title="Only an admin can create a team"
+        >
+          Ask an admin of your organization to create it.
+        </PageEmpty>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell backButton={BACK} description={DESCRIPTION} title="New team">
@@ -86,7 +101,7 @@ function NewTeam() {
           footer={
             <>
               <Button
-                render={(props) => <Link {...props} to="/admin/teams" />}
+                render={(props) => <Link {...props} to="/teams" />}
                 variant="outline"
               >
                 Cancel

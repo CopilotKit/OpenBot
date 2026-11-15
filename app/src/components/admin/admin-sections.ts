@@ -165,7 +165,8 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         title: "Teams",
         description: "Put people in teams, and give a team its own Bots.",
         icon: IconUsersGroup,
-        linkOptions: { to: "/admin/teams" },
+        /* Everybody's page, outside Admin: an admin does there what the server lets an admin do. */
+        linkOptions: { to: "/teams" },
       },
       {
         title: "Permissions",

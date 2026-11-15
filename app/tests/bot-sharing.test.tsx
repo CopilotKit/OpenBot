@@ -85,6 +85,8 @@ const team = (id: string, name: string): Team => ({
   memberCount: 3,
   role: null,
   canManage: false,
+  canMove: false,
+  canDelete: false,
   createdAt: "2026-11-15T09:12:40.000Z",
 });
 const SALES = team("Tm4Qx8LpV2nWc7RbY1sKd0Ze", "Sales");
@@ -278,7 +280,7 @@ test("with no teams yet, the publish dialog says where they are made", async () 
   );
   expect(
     await view.findByText(
-      "There are no teams yet. An admin creates them in Admin, under Teams.",
+      "There are no teams yet. An admin creates them on the Teams page.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("checkbox")).toBeNull();

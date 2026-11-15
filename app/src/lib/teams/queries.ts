@@ -15,13 +15,14 @@ import { organizationId } from "@/lib/api/request";
 
 /**
  * One team of the organization the person is working in: the API's `Team`. `role` is their own role
- * in it (null when they are not in it) and `canManage` is the server's verdict on whether they may
- * rename it and add and remove its people. A team whose `source` is `directory` takes its name and
- * its people from the company's directory, so nothing about it is changed here.
+ * in it (null when they are not in it). `canManage`, `canMove` and `canDelete` are the server's
+ * verdicts on whether they may rename it and add and remove its people, change the team it is
+ * under, and delete it; the screens draw these and work none of them out. A team whose `source` is
+ * `directory` takes its name and its people from the company's directory.
  */
 export type TeamSummary = Team;
 
-/** One person in a team: the API's `TeamMember`. */
+/** One person in a team: the API's `TeamMember`. `isCaller` marks the person who is asking. */
 export type TeamPerson = TeamMember;
 
 /** One member of the organization, for choosing who to add to a team. */
@@ -32,9 +33,8 @@ export type TeamList = {
   /** In the order they were created. */
   teams: TeamSummary[];
   /**
-   * Whether this person may create a team: the server's verdict. Only an owner or an admin of the
-   * organization may, and the same people are the ones who may delete a team or move it under
-   * another, so the screens read this for those too.
+   * Whether this person may create a team: the server's verdict, and read for nothing else. What
+   * they may do to a team that exists is on the team.
    */
   canCreate: boolean;
 };

@@ -26,6 +26,7 @@ import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/
 import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
 import { Route as AuthedAppTeamBotsRouteImport } from './routes/_authed/_app/team-bots'
+import { Route as AuthedAppTeamsRouteImport } from './routes/_authed/_app/teams'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminApprovalsRouteImport } from './routes/_authed/admin/approvals'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
@@ -75,6 +76,8 @@ import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$s
 import { Route as AuthedAppSkillsSlugRouteImport } from './routes/_authed/_app/skills_.$slug'
 import { Route as AuthedAppSkillsNewRouteImport } from './routes/_authed/_app/skills_.new'
 import { Route as AuthedAppStartStartIdRouteImport } from './routes/_authed/_app/start.$startId'
+import { Route as AuthedAppTeamsTeamIdRouteImport } from './routes/_authed/_app/teams_.$teamId'
+import { Route as AuthedAppTeamsNewRouteImport } from './routes/_authed/_app/teams_.new'
 import { Route as AuthedAdminApprovalsDescribeRouteImport } from './routes/_authed/admin/approvals_.describe'
 import { Route as AuthedAdminApprovalsGuidanceRouteImport } from './routes/_authed/admin/approvals_.guidance'
 import { Route as AuthedAdminBoundariesIndexRouteImport } from './routes/_authed/admin/boundaries_.$index'
@@ -206,6 +209,11 @@ const AuthedAppSkillsRoute = AuthedAppSkillsRouteImport.update({
 const AuthedAppTeamBotsRoute = AuthedAppTeamBotsRouteImport.update({
   id: '/team-bots',
   path: '/team-bots',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppTeamsRoute = AuthedAppTeamsRouteImport.update({
+  id: '/teams',
+  path: '/teams',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAdminIndexRoute = AuthedAdminIndexRouteImport.update({
@@ -459,6 +467,16 @@ const AuthedAppSkillsNewRoute = AuthedAppSkillsNewRouteImport.update({
 const AuthedAppStartStartIdRoute = AuthedAppStartStartIdRouteImport.update({
   id: '/start/$startId',
   path: '/start/$startId',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppTeamsTeamIdRoute = AuthedAppTeamsTeamIdRouteImport.update({
+  id: '/teams_/$teamId',
+  path: '/teams/$teamId',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppTeamsNewRoute = AuthedAppTeamsNewRouteImport.update({
+  id: '/teams_/new',
+  path: '/teams/new',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAdminApprovalsDescribeRoute =
@@ -760,6 +778,7 @@ export interface FileRoutesByFullPath {
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/team-bots': typeof AuthedAppTeamBotsRoute
+  '/teams': typeof AuthedAppTeamsRoute
   '/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -804,6 +823,8 @@ export interface FileRoutesByFullPath {
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
   '/skills/new': typeof AuthedAppSkillsNewRoute
   '/start/$startId': typeof AuthedAppStartStartIdRoute
+  '/teams/$teamId': typeof AuthedAppTeamsTeamIdRoute
+  '/teams/new': typeof AuthedAppTeamsNewRoute
   '/admin/approvals/describe': typeof AuthedAdminApprovalsDescribeRoute
   '/admin/approvals/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
@@ -871,6 +892,7 @@ export interface FileRoutesByTo {
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/team-bots': typeof AuthedAppTeamBotsRoute
+  '/teams': typeof AuthedAppTeamsRoute
   '/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -915,6 +937,8 @@ export interface FileRoutesByTo {
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
   '/skills/new': typeof AuthedAppSkillsNewRoute
   '/start/$startId': typeof AuthedAppStartStartIdRoute
+  '/teams/$teamId': typeof AuthedAppTeamsTeamIdRoute
+  '/teams/new': typeof AuthedAppTeamsNewRoute
   '/admin/approvals/describe': typeof AuthedAdminApprovalsDescribeRoute
   '/admin/approvals/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/admin/boundaries/$index': typeof AuthedAdminBoundariesIndexRoute
@@ -986,6 +1010,7 @@ export interface FileRoutesById {
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
   '/_authed/_app/team-bots': typeof AuthedAppTeamBotsRoute
+  '/_authed/_app/teams': typeof AuthedAppTeamsRoute
   '/_authed/admin/approvals': typeof AuthedAdminApprovalsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -1032,6 +1057,8 @@ export interface FileRoutesById {
   '/_authed/_app/skills_/$slug': typeof AuthedAppSkillsSlugRoute
   '/_authed/_app/skills_/new': typeof AuthedAppSkillsNewRoute
   '/_authed/_app/start/$startId': typeof AuthedAppStartStartIdRoute
+  '/_authed/_app/teams_/$teamId': typeof AuthedAppTeamsTeamIdRoute
+  '/_authed/_app/teams_/new': typeof AuthedAppTeamsNewRoute
   '/_authed/admin/approvals_/describe': typeof AuthedAdminApprovalsDescribeRoute
   '/_authed/admin/approvals_/guidance': typeof AuthedAdminApprovalsGuidanceRoute
   '/_authed/admin/boundaries_/$index': typeof AuthedAdminBoundariesIndexRoute
@@ -1103,6 +1130,7 @@ export interface FileRouteTypes {
     | '/routines'
     | '/skills'
     | '/team-bots'
+    | '/teams'
     | '/admin/approvals'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -1147,6 +1175,8 @@ export interface FileRouteTypes {
     | '/skills/$slug'
     | '/skills/new'
     | '/start/$startId'
+    | '/teams/$teamId'
+    | '/teams/new'
     | '/admin/approvals/describe'
     | '/admin/approvals/guidance'
     | '/admin/boundaries/$index'
@@ -1214,6 +1244,7 @@ export interface FileRouteTypes {
     | '/routines'
     | '/skills'
     | '/team-bots'
+    | '/teams'
     | '/admin/approvals'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -1258,6 +1289,8 @@ export interface FileRouteTypes {
     | '/skills/$slug'
     | '/skills/new'
     | '/start/$startId'
+    | '/teams/$teamId'
+    | '/teams/new'
     | '/admin/approvals/describe'
     | '/admin/approvals/guidance'
     | '/admin/boundaries/$index'
@@ -1328,6 +1361,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/routines'
     | '/_authed/_app/skills'
     | '/_authed/_app/team-bots'
+    | '/_authed/_app/teams'
     | '/_authed/admin/approvals'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
@@ -1374,6 +1408,8 @@ export interface FileRouteTypes {
     | '/_authed/_app/skills_/$slug'
     | '/_authed/_app/skills_/new'
     | '/_authed/_app/start/$startId'
+    | '/_authed/_app/teams_/$teamId'
+    | '/_authed/_app/teams_/new'
     | '/_authed/admin/approvals_/describe'
     | '/_authed/admin/approvals_/guidance'
     | '/_authed/admin/boundaries_/$index'
@@ -1552,6 +1588,13 @@ declare module '@tanstack/react-router' {
       path: '/team-bots'
       fullPath: '/team-bots'
       preLoaderRoute: typeof AuthedAppTeamBotsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/teams': {
+      id: '/_authed/_app/teams'
+      path: '/teams'
+      fullPath: '/teams'
+      preLoaderRoute: typeof AuthedAppTeamsRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/': {
@@ -1895,6 +1938,20 @@ declare module '@tanstack/react-router' {
       path: '/start/$startId'
       fullPath: '/start/$startId'
       preLoaderRoute: typeof AuthedAppStartStartIdRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/teams_/$teamId': {
+      id: '/_authed/_app/teams_/$teamId'
+      path: '/teams/$teamId'
+      fullPath: '/teams/$teamId'
+      preLoaderRoute: typeof AuthedAppTeamsTeamIdRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/teams_/new': {
+      id: '/_authed/_app/teams_/new'
+      path: '/teams/new'
+      fullPath: '/teams/new'
+      preLoaderRoute: typeof AuthedAppTeamsNewRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/approvals_/describe': {
@@ -2400,6 +2457,7 @@ interface AuthedAppRouteChildren {
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppTeamBotsRoute: typeof AuthedAppTeamBotsRoute
+  AuthedAppTeamsRoute: typeof AuthedAppTeamsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
   AuthedAppCapabilitiesMemoryRoute: typeof AuthedAppCapabilitiesMemoryRoute
   AuthedAppCapabilitiesSkillsRoute: typeof AuthedAppCapabilitiesSkillsRoute
@@ -2414,6 +2472,8 @@ interface AuthedAppRouteChildren {
   AuthedAppSkillsSlugRoute: typeof AuthedAppSkillsSlugRoute
   AuthedAppSkillsNewRoute: typeof AuthedAppSkillsNewRoute
   AuthedAppStartStartIdRoute: typeof AuthedAppStartStartIdRoute
+  AuthedAppTeamsTeamIdRoute: typeof AuthedAppTeamsTeamIdRoute
+  AuthedAppTeamsNewRoute: typeof AuthedAppTeamsNewRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
   AuthedAppCapabilitiesIndexRoute: typeof AuthedAppCapabilitiesIndexRoute
@@ -2450,6 +2510,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppTeamBotsRoute: AuthedAppTeamBotsRoute,
+  AuthedAppTeamsRoute: AuthedAppTeamsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
   AuthedAppCapabilitiesMemoryRoute: AuthedAppCapabilitiesMemoryRoute,
   AuthedAppCapabilitiesSkillsRoute: AuthedAppCapabilitiesSkillsRoute,
@@ -2464,6 +2525,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppSkillsSlugRoute: AuthedAppSkillsSlugRoute,
   AuthedAppSkillsNewRoute: AuthedAppSkillsNewRoute,
   AuthedAppStartStartIdRoute: AuthedAppStartStartIdRoute,
+  AuthedAppTeamsTeamIdRoute: AuthedAppTeamsTeamIdRoute,
+  AuthedAppTeamsNewRoute: AuthedAppTeamsNewRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
   AuthedAppCapabilitiesIndexRoute: AuthedAppCapabilitiesIndexRoute,

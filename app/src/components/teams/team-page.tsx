@@ -54,7 +54,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
 import {
   deleteTeamMutationOptions,
@@ -77,16 +76,17 @@ import { ROLE_WORDS, TEAMS_DESCRIPTION } from "./team-words";
 
 const BACK = {
   label: "Teams",
-  linkProps: { to: "/admin/teams" as const },
+  linkProps: { to: "/teams" as const },
 };
 
 /**
  * One team: what it is called and for, the team it is under, and its people.
  *
- * What is offered follows the server's verdicts. `canManage` (an admin of the organization, or one
- * of the team's maintainers) changes its name and its people. The list's `canCreate` (an admin of
- * the organization) moves it under another team and deletes it. Anybody in it may leave. A team
- * from the company's directory offers none of these: its name and people are the directory's.
+ * What is offered is the server's verdict on this person and this team, and the page works none of
+ * it out: `canManage` changes its name and its people, `canMove` the team it is under, `canDelete`
+ * deletes it, and the member the server marks `isCaller` is "you", who may leave. So the one page
+ * serves a member, a maintainer and an admin. A team from the company's directory keeps the
+ * directory's name and people, and nobody leaves it here.
  */
 function Team({ teamId }: { teamId: string }) {
   const team = useQuery(teamQueryOptions(teamId));
@@ -102,31 +102,23 @@ function Team({ teamId }: { teamId: string }) {
       </PageShell>
     );
   }
-  return (
-    <TeamDetail
-      isAdmin={list.data?.canCreate === true}
-      team={team.data}
-      teams={list.data?.teams ?? []}
-    />
-  );
+  return <TeamDetail team={team.data} teams={list.data?.teams ?? []} />;
 }
 
 function TeamDetail({
   team,
   teams,
-  isAdmin,
 }: {
   team: TeamSummary;
+  /** The organization's teams, to name this one's parent and to choose another from. */
   teams: readonly TeamSummary[];
-  /** The server's verdict that this person administers the organization's teams. */
-  isAdmin: boolean;
 }) {
   const [open, setOpen] = useState<"details" | "parent" | "delete" | null>(
     null,
   );
   const fromDirectory = team.source === "directory";
-  const canEdit = team.canManage && !fromDirectory;
-  const canMove = isAdmin && !fromDirectory;
+  const canEdit = team.canManage;
+  const canMove = team.canMove;
   const parent = teams.find((other) => other.id === team.parentTeamId);
   const close = () => setOpen(null);
 
@@ -209,7 +201,7 @@ function TeamDetail({
 
       <People canEdit={canEdit} team={team} />
 
-      {canMove ? (
+      {team.canDelete ? (
         <PageSection
           description="Its people stay in the organization and lose what the team was given. Teams under it move up a level."
           title="Delete"
@@ -241,7 +233,6 @@ function TeamDetail({
  */
 function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
   const members = useQuery(teamMembersQueryOptions(team.id));
-  const me = useQuery(currentUserQueryOptions()).data;
   const putMember = useMutation(putTeamMemberMutationOptions(queryClient));
   const removeMember = useMutation(
     removeTeamMemberMutationOptions(queryClient),
@@ -252,6 +243,8 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
   const busy = putMember.isPending || removeMember.isPending;
   const failure = putMember.error ?? removeMember.error;
   const rows = members.data ?? [];
+  // The person reading, as the server marks them among the team's people.
+  const self = rows.find((person) => person.isCaller);
 
   const addPerson = (variant: "ghost" | "outline") => (
     <Button onClick={() => setAdding(true)} size="sm" variant={variant}>
@@ -282,12 +275,14 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
         >
           {fromDirectory
             ? "People show here once the directory puts them in it."
-            : "People you add can use everything the team is given."}
+            : canEdit
+              ? "People you add can use everything the team is given."
+              : "A maintainer or an admin adds its people."}
         </PageEmpty>
       ) : (
         <PageRows>
           {rows.map((person, index) => {
-            const isSelf = person.id === me?.id;
+            const isSelf = person.isCaller;
             return (
               <div key={person.id}>
                 <Item size="sm">
@@ -312,9 +307,15 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
                   {/*
                    * A role and a button are too much beside a name on a phone, so there they take
                    * a line of their own under the name, where the People page puts its own on a
-                   * phone.
+                   * phone. A role that is only read stays beside the name.
                    */}
-                  <ItemActions className="max-sm:basis-full">
+                  <ItemActions
+                    className={
+                      canEdit || (isSelf && !fromDirectory)
+                        ? "max-sm:basis-full"
+                        : undefined
+                    }
+                  >
                     {canEdit ? (
                       <Select
                         items={ROLE_WORDS}
@@ -391,9 +392,9 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
           team={team}
         />
       ) : null}
-      {leaving && me ? (
+      {leaving && self ? (
         <LeaveDialog
-          memberId={me.id}
+          memberId={self.id}
           onClose={() => setLeaving(false)}
           team={team}
         />
@@ -767,7 +768,7 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate({ to: "/admin/teams" }),
+                onSuccess: () => void navigate({ to: "/teams" }),
               })
             }
             size="sm"

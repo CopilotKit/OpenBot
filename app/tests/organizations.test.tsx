@@ -657,7 +657,8 @@ test("somebody with one organization who may not create one sees the account men
   server.organizations = [ONLY];
   server.active = ONLY.id;
   const before = await accountMenuMarkup(await open());
-  expect(before.words).toEqual(["Admin", "Settings", "Sign out"]);
+  // Teams are the one organization's own, so they are there with or without others to switch to.
+  expect(before.words).toEqual(["Teams", "Admin", "Settings", "Sign out"]);
   cleanup();
   queryClient.clear();
   setCurrentOrganization(undefined);

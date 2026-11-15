@@ -405,8 +405,8 @@ function PublishDialog({
                       </p>
                     ) : teams.data.teams.length === 0 ? (
                       <p className="text-muted-foreground text-sm">
-                        There are no teams yet. An admin creates them in Admin,
-                        under Teams.
+                        There are no teams yet. An admin creates them on the
+                        Teams page.
                       </p>
                     ) : (
                       <div className="max-h-48 space-y-2 overflow-y-auto">

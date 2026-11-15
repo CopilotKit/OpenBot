@@ -1,8 +1,11 @@
 import type { TeamSummary } from "@/lib/teams/queries";
 
-/** What the Teams pages say they are for, in the list's header and in the personal edition. */
+/**
+ * What the Teams pages say they are for, in the list's header and in the personal edition. Read by
+ * everybody in the organization, most of whom change nothing here, so it says what a team is.
+ */
 export const TEAMS_DESCRIPTION =
-  "Put people in teams, then give a team its own Bots.";
+  "Teams group the people in your organization. A Bot shared with a team is there for everyone in it.";
 
 /** What a team from the company's directory says about itself, wherever one is drawn. */
 export const FROM_DIRECTORY = "From your company's directory";

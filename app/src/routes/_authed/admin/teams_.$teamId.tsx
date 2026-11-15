@@ -1,12 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { TeamDetailPage } from "@/components/teams/team-page";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** Teams moved out of Admin, and each team's page with them. */
 export const Route = createFileRoute("/_authed/admin/teams_/$teamId")({
-  component: RouteComponent,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/teams/$teamId",
+      params: { teamId: params.teamId },
+      replace: true,
+    });
+  },
 });
-
-function RouteComponent() {
-  const { teamId } = Route.useParams();
-  // Keyed by the team, so moving from one team to another starts its dialogs afresh.
-  return <TeamDetailPage key={teamId} teamId={teamId} />;
-}

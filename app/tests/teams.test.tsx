@@ -21,16 +21,21 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
+import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
 import { NewTeamPage } from "@/components/teams/new-team-page";
 import { TeamDetailPage } from "@/components/teams/team-page";
 import { TeamsPage } from "@/components/teams/teams-page";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import type {
   OrganizationMember,
   Team,
   TeamMember,
 } from "@/lib/api/generated/model";
-import { getListOrganizationMembersMockHandler } from "@/lib/api/generated/organizations/organizations.msw";
+import {
+  getListOrganizationMembersMockHandler,
+  getListOrganizationsMockHandler,
+} from "@/lib/api/generated/organizations/organizations.msw";
 import {
   getGetPersonMockHandler,
   getGetPersonResponseMock,
@@ -46,7 +51,10 @@ import {
   getUpdateTeamMockHandler,
 } from "@/lib/api/generated/teams/teams.msw";
 import { deploymentKeys } from "@/lib/deployment/queries";
-import { setCurrentOrganization } from "@/lib/organizations/current";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
 import {
   possibleParents,
   teamKeys,
@@ -86,7 +94,10 @@ const INES: Person = {
 const ACME = "org_acme";
 const HARBOR = "org_harbor";
 
-type StoredTeam = Omit<Team, "memberCount" | "role" | "canManage"> & {
+type StoredTeam = Omit<
+  Team,
+  "memberCount" | "role" | "canManage" | "canMove" | "canDelete"
+> & {
   members: { id: string; role: "maintainer" | "member" }[];
 };
 type Organization = {
@@ -129,13 +140,15 @@ function seen(organization: Organization, team: StoredTeam): Team {
   const { members, ...rest } = team;
   const own = members.find((member) => member.id === me.id);
   const fromDirectory = team.source === "directory";
+  const admin = organization.admins.includes(me.id);
   return {
     ...rest,
     memberCount: members.length,
     role: own?.role ?? null,
-    canManage:
-      !fromDirectory &&
-      (organization.admins.includes(me.id) || own?.role === "maintainer"),
+    canManage: !fromDirectory && (admin || own?.role === "maintainer"),
+    // Only an admin of the organization moves a team or deletes one, and never the directory's.
+    canMove: admin,
+    canDelete: admin && !fromDirectory,
   };
 }
 
@@ -170,6 +183,7 @@ const memberOf = (
   name: person.name,
   image: null,
   role,
+  isCaller: person.id === me.id,
   joinedAt: "2026-11-15T09:13:02.000Z",
 });
 
@@ -246,6 +260,22 @@ const server = setupServer(
       (member) => member.id !== params.memberId,
     );
   }),
+  // The person's own organizations, the one the app works in marked, as the sidebar asks for them.
+  getListOrganizationsMockHandler(() => ({
+    organizations: Object.entries(organizations)
+      .filter(([, one]) => one.people.some((person) => person.id === me.id))
+      .map(([id, one]) => ({
+        id,
+        slug: id,
+        name: id,
+        role: one.admins.includes(me.id)
+          ? ("admin" as const)
+          : ("member" as const),
+        active: id === currentOrganizationId(),
+      })),
+    canCreate: false,
+    nextCursor: null,
+  })),
   getListOrganizationMembersMockHandler(({ params }) => {
     const organization = organizationOf(params.organizationId);
     return {
@@ -291,9 +321,27 @@ server.events.on("request:start", async ({ request }) => {
   });
 });
 
+/** The sidebar keeps a socket open for its conversations, which are not these screens' business. */
+class OfflineWebSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = 0;
+  onclose = null;
+  onerror = null;
+  onmessage = null;
+  onopen = null;
+  close() {}
+  send() {}
+}
+const originalWebSocket = globalThis.WebSocket;
+
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
   server.listen({ onUnhandledRequest: "error" });
+  // After the server is listening, which puts its own socket in the window's place.
+  globalThis.WebSocket = OfflineWebSocket as unknown as typeof WebSocket;
 });
 beforeEach(() => {
   me = DANA;
@@ -348,6 +396,7 @@ afterEach(() => {
 afterAll(async () => {
   server.close();
   await settleReactWork();
+  globalThis.WebSocket = originalWebSocket;
   GlobalRegistrator.unregister();
 });
 
@@ -356,13 +405,25 @@ function Detail() {
   return <TeamDetailPage key={teamId} teamId={teamId} />;
 }
 
-/** Admin's three team screens at their own addresses, opened at `start`. */
-function open(start = "/admin/teams") {
+/**
+ * The three team screens at their own addresses, opened at `start`. With `sidebar`, they sit in the
+ * app's frame beside its real sidebar, whose menu under the person's name is how Teams is reached.
+ */
+function open(start = "/teams", { sidebar = false } = {}) {
   const rootRoute = createRootRoute({
     // The app's own boundary: a switch builds every screen again for the new organization.
     component: () => (
       <OrganizationBoundary>
-        <Outlet />
+        {sidebar ? (
+          <SidebarProvider>
+            <AppSidebar />
+            <main>
+              <Outlet />
+            </main>
+          </SidebarProvider>
+        ) : (
+          <Outlet />
+        )}
       </OrganizationBoundary>
     ),
   });
@@ -371,9 +432,10 @@ function open(start = "/admin/teams") {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: [start] }),
     routeTree: rootRoute.addChildren([
-      page("/admin/teams", TeamsPage),
-      page("/admin/teams/new", NewTeamPage),
-      page("/admin/teams/$teamId", Detail),
+      page("/", () => null),
+      page("/teams", TeamsPage),
+      page("/teams/new", NewTeamPage),
+      page("/teams/$teamId", Detail),
     ]),
   });
   const view = render(
@@ -413,7 +475,7 @@ test("the list names each team, what it is for, how many people it has, where it
     "1 person · From your company's directory",
   );
   expect(view.getByRole("link", { name: /Finance/ }).getAttribute("href")).toBe(
-    "/admin/teams/team_finance",
+    "/teams/team_finance",
   );
   expect(requests).toContain(`GET ${teamsPath(ACME)}`);
 });
@@ -422,7 +484,7 @@ test("an admin creates a team on its own screen and lands on the new team's page
   const { view, router, person } = open();
   await person.click(await view.findByRole("button", { name: "New team" }));
   await view.findByRole("heading", { level: 1, name: "New team" });
-  expect(router.state.location.pathname).toBe("/admin/teams/new");
+  expect(router.state.location.pathname).toBe("/teams/new");
 
   // A team needs a name before anything is sent.
   await person.click(view.getByRole("button", { name: "Create team" }));
@@ -442,7 +504,7 @@ test("an admin creates a team on its own screen and lands on the new team's page
   await person.click(view.getByRole("button", { name: "Create team" }));
 
   await view.findByRole("heading", { level: 1, name: "Support" });
-  expect(router.state.location.pathname).toBe("/admin/teams/team_4");
+  expect(router.state.location.pathname).toBe("/teams/team_4");
   expect(writes).toEqual([
     {
       method: "POST",
@@ -493,10 +555,29 @@ test("somebody who may not create a team is not offered New team, and an empty l
   );
 });
 
-test("a member who can't manage a team reads it, changes nothing, and can leave", async () => {
+test("a member who isn't an admin opens Teams from the menu under their name, sees which teams they're in, reads one and can leave it", async () => {
   me = SAM;
-  const { view, person } = open("/admin/teams/team_sales");
+  const { view, router, person } = open("/", { sidebar: true });
+  await person.click(await view.findByRole("button", { name: /Sam Ortiz/ }));
+  const menu = await view.findByRole("menu");
+  // No Admin for them, and Teams all the same.
+  expect(within(menu).queryByRole("menuitem", { name: "Admin" })).toBeNull();
+  const entry = within(menu).getByRole("menuitem", { name: "Teams" });
+  expect(entry.getAttribute("href")).toBe("/teams");
+  await person.click(entry);
+  await view.findByRole("heading", { level: 1, name: "Teams" });
+  expect(router.state.location.pathname).toBe("/teams");
+
+  // Every team of the organization, and their own role on the ones they are in.
+  await view.findByRole("link", { name: /Finance/ });
+  expect(row(view, "Sales").textContent).toContain("You're a member");
+  expect(row(view, "Sales EMEA").textContent).toContain("You're a maintainer");
+  expect(row(view, "Finance").textContent).not.toContain("You're");
+  expect(view.queryByRole("button", { name: "New team" })).toBeNull();
+
+  await person.click(view.getByRole("link", { name: /^Sales\b(?! EMEA)/ }));
   await view.findByRole("heading", { level: 1, name: "Sales" });
+  expect(router.state.location.pathname).toBe("/teams/team_sales");
   await view.findByText("Dana Whitfield");
   // Roles are read, not chosen; nobody is added or removed; the team is not renamed or deleted.
   expect(
@@ -521,7 +602,10 @@ test("a member who can't manage a team reads it, changes nothing, and can leave"
   await person.click(
     within(dialog).getByRole("button", { name: "Leave team" }),
   );
-  await waitFor(() => expect(view.queryByText("Sam Ortiz")).toBeNull());
+  // Gone from the team's people (the sidebar still names them, as the person signed in).
+  const page = within(view.getByRole("main"));
+  await waitFor(() => expect(page.queryByText("Sam Ortiz")).toBeNull());
+  expect(page.getByText("Dana Whitfield")).toBeTruthy();
   expect(writes).toEqual([
     {
       method: "DELETE",
@@ -533,8 +617,199 @@ test("a member who can't manage a team reads it, changes nothing, and can leave"
   expect(view.queryByRole("button", { name: "Leave team" })).toBeNull();
 });
 
+test("a maintainer who isn't an admin renames their team, adds a person, makes them a maintainer and removes another, and is offered nothing else", async () => {
+  me = SAM;
+  (organizations[ACME] as Organization).teams
+    .find((team) => team.id === "team_emea")
+    ?.members.push({ id: TOM.id, role: "member" });
+  const { view, person } = open("/teams/team_emea");
+  await view.findByRole("heading", { level: 1, name: "Sales EMEA" });
+  await view.findByText("Tom Becker");
+  // The team's parent is read, not changed, and the team is not deleted: those are an admin's.
+  expect(row(view, "Parent team").textContent).toContain("Sales.");
+  expect(view.queryByRole("button", { name: /Parent team/ })).toBeNull();
+  expect(view.queryByRole("button", { name: "Delete team" })).toBeNull();
+  expect(view.queryByRole("heading", { name: "Delete" })).toBeNull();
+
+  await person.click(
+    view.getByRole("button", { name: /Name and description/ }),
+  );
+  const details = await view.findByRole("dialog", {
+    name: "Name and description",
+  });
+  const name = within(details).getByLabelText("Name");
+  await person.clear(name);
+  await person.type(name, "Sales Europe");
+  await person.click(within(details).getByRole("button", { name: "Save" }));
+  await view.findByRole("heading", { level: 1, name: "Sales Europe" });
+
+  await person.click(view.getByRole("button", { name: "Add person" }));
+  const dialog = await view.findByRole("dialog", {
+    name: "Add people to Sales Europe",
+  });
+  await person.click(
+    await within(dialog).findByRole("button", { name: "Add Priya Nair" }),
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: "Add Priya Nair" }),
+    ).toBeNull(),
+  );
+  await person.click(within(dialog).getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+
+  await person.click(
+    await view.findByRole("combobox", { name: "Role of Priya Nair" }),
+  );
+  await person.click(await view.findByRole("option", { name: "Maintainer" }));
+  await waitFor(() =>
+    expect(
+      view.getByRole("combobox", { name: "Role of Priya Nair" }).textContent,
+    ).toContain("Maintainer"),
+  );
+  await person.click(view.getByRole("button", { name: "Remove Tom Becker" }));
+  await waitFor(() => expect(view.queryByText("Tom Becker")).toBeNull());
+  // Their own row offers leaving, never removing.
+  expect(view.queryByRole("button", { name: "Remove Sam Ortiz" })).toBeNull();
+  expect(view.getAllByRole("button", { name: "Leave team" })).toHaveLength(1);
+
+  const team = `${teamsPath(ACME)}/team_emea`;
+  expect(writes).toEqual([
+    {
+      method: "PATCH",
+      path: team,
+      key: KEY,
+      body: { name: "Sales Europe", description: null },
+    },
+    {
+      method: "PUT",
+      path: `${team}/members/priya`,
+      key: KEY,
+      body: { role: "member" },
+    },
+    {
+      method: "PUT",
+      path: `${team}/members/priya`,
+      key: KEY,
+      body: { role: "maintainer" },
+    },
+    {
+      method: "DELETE",
+      path: `${team}/members/tom`,
+      key: KEY,
+      body: undefined,
+    },
+  ]);
+
+  // Back on the list, creating a team is still not theirs.
+  await person.click(view.getByRole("button", { name: "Teams" }));
+  await view.findByRole("link", { name: /Sales Europe/ });
+  expect(view.queryByRole("button", { name: "New team" })).toBeNull();
+});
+
+test("what a team's page offers is the server's verdict on it, whoever the person is", async () => {
+  // An admin the server lets do nothing to this team is offered nothing.
+  server.use(
+    getGetTeamMockHandler(({ params }) => {
+      const { organization, team } = teamOf(
+        params.organizationId,
+        params.teamId,
+      );
+      return {
+        team: {
+          ...seen(organization, team),
+          canManage: false,
+          canMove: false,
+          canDelete: false,
+        },
+      };
+    }),
+  );
+  const admin = open("/teams/team_emea");
+  await admin.view.findByText("Sam Ortiz");
+  expect(
+    admin.view.queryByRole("button", { name: /Name and description/ }),
+  ).toBeNull();
+  expect(admin.view.queryByRole("button", { name: "Add person" })).toBeNull();
+  expect(admin.view.queryByRole("combobox")).toBeNull();
+  expect(admin.view.queryByRole("button", { name: /Parent team/ })).toBeNull();
+  expect(admin.view.queryByRole("button", { name: "Delete team" })).toBeNull();
+  cleanup();
+  queryClient.removeQueries({ queryKey: teamKeys.all });
+
+  // Somebody who creates no teams, let to move and delete this one, is offered exactly those; and
+  // "you" is the person the server says is asking, whoever is signed in.
+  me = SAM;
+  server.use(
+    getGetTeamMockHandler(({ params }) => {
+      const { organization, team } = teamOf(
+        params.organizationId,
+        params.teamId,
+      );
+      return {
+        team: {
+          ...seen(organization, team),
+          canManage: false,
+          canMove: true,
+          canDelete: true,
+        },
+      };
+    }),
+    getListTeamMembersMockHandler(() => ({
+      members: [
+        { ...memberOf(DANA, "maintainer"), isCaller: false },
+        { ...memberOf(SAM, "member"), isCaller: false },
+        { ...memberOf(TOM, "member"), isCaller: true },
+      ],
+      nextCursor: null,
+    })),
+  );
+  const { view, person } = open("/teams/team_sales");
+  await view.findByText("Tom Becker");
+  expect(view.getByRole("button", { name: /Parent team/ })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Delete team" })).toBeTruthy();
+  expect(
+    view.queryByRole("button", { name: /Name and description/ }),
+  ).toBeNull();
+  expect(view.queryByRole("button", { name: "Add person" })).toBeNull();
+  expect(row(view, "Tom Becker").textContent).toContain("You");
+  expect(row(view, "Sam Ortiz").textContent).not.toContain("You");
+  await person.click(
+    within(row(view, "Tom Becker")).getByRole("button", { name: "Leave team" }),
+  );
+  const leave = await view.findByRole("dialog", { name: "Leave “Sales”?" });
+  await person.click(within(leave).getByRole("button", { name: "Leave team" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    method: "DELETE",
+    path: `${teamsPath(ACME)}/team_sales/members/tom`,
+  });
+});
+
+test("an admin has Teams in the same menu, beside Admin, and is offered New team there", async () => {
+  const { view, router, person } = open("/", { sidebar: true });
+  await person.click(
+    await view.findByRole("button", { name: /Dana Whitfield/ }),
+  );
+  const menu = await view.findByRole("menu");
+  expect(within(menu).getByRole("menuitem", { name: "Admin" })).toBeTruthy();
+  await person.click(within(menu).getByRole("menuitem", { name: "Teams" }));
+  await view.findByRole("link", { name: /Sales EMEA/ });
+  expect(router.state.location.pathname).toBe("/teams");
+  expect(view.getByRole("button", { name: "New team" })).toBeTruthy();
+});
+
+test("somebody who may not create a team and opens New team by its address is told an admin does", async () => {
+  me = SAM;
+  const { view } = open("/teams/new");
+  await view.findByRole("heading", { level: 1, name: "New team" });
+  expect(await view.findByText("Only an admin can create a team")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Create team" })).toBeNull();
+  expect(view.queryByLabelText("Name")).toBeNull();
+});
+
 test("somebody who manages a team adds a person from the organization, makes them a maintainer and removes another", async () => {
-  const { view, person } = open("/admin/teams/team_sales");
+  const { view, person } = open("/teams/team_sales");
   await view.findByText("Sam Ortiz");
   await person.click(view.getByRole("button", { name: "Add person" }));
   const dialog = await view.findByRole("dialog", {
@@ -597,8 +872,8 @@ test("somebody who manages a team adds a person from the organization, makes the
   expect(new Set(writes.map((write) => write.key)).size).toBe(3);
 });
 
-test("a team from the company's directory says so and offers no editing, even to an admin", async () => {
-  const { view } = open("/admin/teams/team_finance");
+test("a team from the company's directory says so, and an admin changes nothing about it but the team it is under", async () => {
+  const { view } = open("/teams/team_finance");
   await view.findByRole("heading", { level: 1, name: "Finance" });
   await view.findByText("Tom Becker");
   expect(view.getByText("From your company's directory")).toBeTruthy();
@@ -614,21 +889,22 @@ test("a team from the company's directory says so and offers no editing, even to
   expect(
     view.queryByRole("button", { name: /Name and description/ }),
   ).toBeNull();
-  expect(view.queryByRole("button", { name: /Parent team/ })).toBeNull();
+  // The server lets an admin put it under another team, and never delete it.
+  expect(view.getByRole("button", { name: /Parent team/ })).toBeTruthy();
   expect(view.queryByRole("button", { name: "Delete team" })).toBeNull();
   expect(view.queryByRole("heading", { name: "Delete" })).toBeNull();
 });
 
 test("somebody in a directory team can't leave it here: the directory decides", async () => {
   me = TOM;
-  const { view } = open("/admin/teams/team_finance");
+  const { view } = open("/teams/team_finance");
   await view.findByText("Tom Becker");
   expect(row(view, "Tom Becker").textContent).toContain("You");
   expect(view.queryByRole("button", { name: "Leave team" })).toBeNull();
 });
 
 test("an admin renames a team, moves it under another, and deletes it only after confirming", async () => {
-  const { view, router, person } = open("/admin/teams/team_emea");
+  const { view, router, person } = open("/teams/team_emea");
   await view.findByRole("heading", { level: 1, name: "Sales EMEA" });
 
   await person.click(
@@ -667,9 +943,7 @@ test("an admin renames a team, moves it under another, and deletes it only after
   await person.click(
     within(confirm).getByRole("button", { name: "Delete team" }),
   );
-  await waitFor(() =>
-    expect(router.state.location.pathname).toBe("/admin/teams"),
-  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/teams"));
   await view.findByRole("link", { name: /^Sales\b/ });
   expect(view.queryByText("Sales Europe")).toBeNull();
 
@@ -696,6 +970,8 @@ test("a team is never offered itself, a team under it, or a directory team as it
     memberCount: 0,
     role: null,
     canManage: true,
+    canMove: true,
+    canDelete: true,
     createdAt: "2026-11-15T09:12:40.000Z",
     ...rest,
   });
@@ -756,7 +1032,7 @@ test("switching organization drops the other organization's teams, and a team of
 
   // An Acme team opened by its address while working in Harbor Legal is not found, as one that
   // does not exist is.
-  const other = open("/admin/teams/team_sales");
+  const other = open("/teams/team_sales");
   // The app asks once more before it gives up, as it does for every read.
   const refused = { timeout: 5_000 };
   expect((await other.view.findByRole("alert", {}, refused)).textContent).toBe(
@@ -764,7 +1040,7 @@ test("switching organization drops the other organization's teams, and a team of
   );
   expect(document.body.textContent).not.toContain("Everybody who sells.");
   cleanup();
-  const missing = open("/admin/teams/team_nowhere");
+  const missing = open("/teams/team_nowhere");
   expect(
     (await missing.view.findByRole("alert", {}, refused)).textContent,
   ).toBe("Couldn't find that team.");

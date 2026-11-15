@@ -33,7 +33,7 @@ function Teams() {
 
   const newTeam = (variant: "ghost" | "outline") => (
     <Button
-      render={(props) => <Link {...props} to="/admin/teams/new" />}
+      render={(props) => <Link {...props} to="/teams/new" />}
       size="sm"
       variant={variant}
     >
@@ -75,7 +75,7 @@ function Teams() {
                   <Link
                     {...props}
                     params={{ teamId: team.id }}
-                    to="/admin/teams/$teamId"
+                    to="/teams/$teamId"
                   />
                 )}
                 size="sm"
