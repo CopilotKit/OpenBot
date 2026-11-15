@@ -168,6 +168,15 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.provisioned": "Add a person",
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
+  // What happened to an organization itself, each on that organization's own trail.
+  "organization.created": "Create an organization",
+  "organization.renamed": "Rename an organization",
+  "organization.member_invited": "Invite a person to an organization",
+  "organization.invitation_canceled": "Cancel an invitation to an organization",
+  "organization.member_joined": "Join an organization",
+  "organization.member_removed": "Remove a person from an organization",
+  "organization.member_role_changed":
+    "Change a person's role in an organization",
   "audit.exported": "Export events",
   "audit.asked": "Ask the audit trail",
   "what_if.asked": "Ask what would happen",

@@ -26,6 +26,11 @@ export interface Bot {
   /** Whether it comes with OpenBot rather than belonging to a person. */
   systemOwned: boolean;
   /**
+   * Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.
+   * @nullable
+   */
+  readonly packageBotId?: string | null;
+  /**
    * The AG-UI address it runs at, as it was stored. Null for a Bot that runs inside OpenBot. Every address saved through this API is an absolute http or https address (see the request's endpoint), but one saved by an older release is returned as it is, so this field states no format.
    * @nullable
    */

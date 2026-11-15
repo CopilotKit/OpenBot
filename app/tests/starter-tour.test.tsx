@@ -19,6 +19,7 @@ import {
   INTERACTIVE_STARTER,
   STARTER_SUGGESTIONS,
 } from "@/components/starter-tour/suggestions";
+import { isStarterTourAgent } from "@openbot/shared/starter-tour";
 import { authKeys } from "@/lib/auth/queries";
 import {
   ME_PATH,
@@ -84,8 +85,29 @@ function server(initial: Preferences = {}, available = true) {
   return state;
 }
 
+/**
+ * Bots as the API lists them in two organizations. In the first, a Bot OpenBot starts with has its
+ * package id as its own. In a new organization the same Bots are copies under generated ids, and
+ * `packageBotId` still says which one each is. A Bot somebody made has none.
+ */
+const ROSTER = [
+  { id: "picked-harness", packageBotId: "picked-harness" },
+  { id: "personal-assistant", packageBotId: "personal-assistant" },
+  { id: "bot_9c2e7d", packageBotId: "picked-harness" },
+  { id: "bot_51ab03", packageBotId: "personal-assistant" },
+  { id: "custom-bot", packageBotId: null },
+];
+
+const STARTING_BOTS = ROSTER.filter((bot) => bot.packageBotId !== null).map(
+  (bot) => bot.id,
+);
+
 function draw(
-  props: {
+  {
+    agentId,
+    ...props
+  }: {
+    /** The Bot the composer is for, by its id in {@link ROSTER}. */
     agentId: string | undefined;
     channelId?: string;
     disabled?: boolean;
@@ -93,6 +115,7 @@ function draw(
   },
   existing?: QueryClient,
 ) {
+  const bot = ROSTER.find((candidate) => candidate.id === agentId);
   const client =
     existing ??
     new QueryClient({
@@ -105,7 +128,9 @@ function draw(
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({
-      component: () => <StarterSuggestions onSelect={() => {}} {...props} />,
+      component: () => (
+        <StarterSuggestions bot={bot} onSelect={() => {}} {...props} />
+      ),
     }),
   });
   return {
@@ -118,7 +143,17 @@ function draw(
   };
 }
 
-for (const agentId of ["picked-harness", "personal-assistant"]) {
+test("the Bots OpenBot starts with are recognised by what they were made from, never by their own id", () => {
+  for (const bot of ROSTER)
+    expect(isStarterTourAgent(bot.packageBotId)).toBe(
+      bot.packageBotId !== null,
+    );
+  expect(isStarterTourAgent(undefined)).toBe(false);
+  // A new organization's copy has a generated id, which says nothing about what it is.
+  expect(isStarterTourAgent("bot_9c2e7d")).toBe(false);
+});
+
+for (const agentId of STARTING_BOTS) {
   test(`${agentId}: an existing user with no tour preference can send each real SDK suggestion`, async () => {
     server();
     const sent: string[] = [];

@@ -89,7 +89,7 @@ export const getListAppAccessRequestsUrl = (
 };
 
 /**
- * Return one page of the requests waiting for an administrator: all of them for an administrator, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's requests waiting for an administrator: all of them for an administrator of the organization, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List requests for apps
  */
 export const listAppAccessRequests = async (

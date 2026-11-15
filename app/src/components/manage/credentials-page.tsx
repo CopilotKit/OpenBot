@@ -44,7 +44,7 @@ export function CredentialsPage() {
           Add {noun}
         </Button>
       }
-      description="Manage this deployment’s keys and tokens. Saved secrets cannot be viewed again."
+      description="Manage this organization’s keys and tokens. Saved secrets cannot be viewed again."
       title={paths.credentialsLabel}
     >
       <PageSection title={`Saved ${noun}s`}>

@@ -437,7 +437,7 @@ function NewConversation({ composition }: { composition: string }) {
         starterSuggestions={
           !group && !sent ? (
             <StarterSuggestions
-              agentId={recipients[0]?.id}
+              bot={selected[0]}
               disabled={pending || Boolean(loadError) || waitingForUrlAgent}
               onSelect={(text) =>
                 submit({

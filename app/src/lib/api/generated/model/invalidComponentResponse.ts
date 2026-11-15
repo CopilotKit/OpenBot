@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * A field is missing or blank once trimmed, holds text that can't be kept, or doesn't fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn't custom_ and lower-case letters, numbers and underscores, or a data function this OpenBot doesn't ship.
+ * A field is missing or blank once trimmed, holds text that can't be kept, or doesn't fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn't custom_ and lower-case letters, numbers and underscores, an announced name that starts with @, or a data function this OpenBot doesn't ship.
  */
 export type InvalidComponentResponse = Problem;

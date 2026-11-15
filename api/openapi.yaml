@@ -46,11 +46,11 @@ tags:
   - name: Voice
     description: 'Voice calls with a conversation''s Bot: how a call connects, and the calls a person saved in a conversation with their transcripts.'
   - name: Credentials
-    description: 'The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
+    description: 'The organization''s vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
   - name: Models
     description: The models Bots can run on, and the one a person chose for each of their conversations.
   - name: Apps
-    description: The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here.
+    description: The apps the organization has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here.
   - name: Connections
     description: 'A person''s connections to apps: the accounts they signed in with so their Bots can act there for them, and an app''s one shared account when an administrator connects it for everybody.'
   - name: Bot grants
@@ -412,7 +412,7 @@ paths:
         - Audit events
       operationId: listAuditEvents
       summary: List audit events
-      description: Return one page of the audit trail, newest first, narrowed by the filters given. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator may read the trail.
+      description: 'Return one page of the organization''s audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.'
       security:
         - webSession: []
         - appOAuth:
@@ -469,7 +469,7 @@ paths:
         - Audit events
       operationId: exportAuditEvents
       summary: Export audit events as CSV
-      description: 'Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator may export the trail.'
+      description: 'Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator of the organization may export its trail.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1704,7 +1704,7 @@ paths:
         - Organization settings
       operationId: getOrganizationSettings
       summary: Read the organization's settings
-      description: 'Return the settings an administrator sets for everybody: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator may read them.'
+      description: 'Return the settings the organization''s administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot''s defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization''s members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1739,7 +1739,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Only an administrator may change them.
+      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
       security:
         - webSession: []
         - appOAuth:
@@ -2099,7 +2099,7 @@ paths:
         - Capabilities
       operationId: getPersonCapabilities
       summary: Read what a person may do
-      description: Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator reads anybody's. enforced is false where the deployment keeps no switches and every default applies.
+      description: Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator of the organization reads any member's. enforced is false where this OpenBot keeps no switches and every default applies.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -2140,7 +2140,7 @@ paths:
         - Capabilities
       operationId: stopPersonComputers
       summary: Stop a person's computers
-      description: Stop every Bot computer running for one person now, and record it on the audit trail. Their Bots start a computer again when they next need one. Only an administrator may do this.
+      description: Stop the computers of the organization's Bots that one person owns, now, and record it on the audit trail. Their Bots start a computer again when they next need one. A person's own computer is stopped only from the organization `default`. A person who is not a member of the organization is not found (PERSON_NOT_FOUND). Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth:
@@ -2421,7 +2421,7 @@ paths:
         - Organization settings
       operationId: getModelUsage
       summary: Read which models Bots ran on
-      description: Return which models Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator may read it.
+      description: Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -2470,7 +2470,7 @@ paths:
         - Organization settings
       operationId: listComputerActions
       summary: List recorded computer actions
-      description: Return one page of the actions recorded on Bot computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator may read them. A missing cursor starts at the newest and nextCursor null ends the list.
+      description: Return one page of the actions recorded on the organization's Bots' computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator of the organization may read them. A missing cursor starts at the newest and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth:
@@ -3945,7 +3945,7 @@ paths:
         - Credentials
       operationId: listCredentials
       summary: List the credentials in the vault
-      description: 'Return one page of the credentials the vault keeps, live and revoked, oldest first. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the credentials the organization''s vault keeps, live and revoked, oldest first. Each organization has its own vault, and another organization''s credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -3986,7 +3986,7 @@ paths:
         - Credentials
       operationId: createCredential
       summary: Add a credential to the vault
-      description: 'Encrypt a secret and keep it in the vault under one key: a kind, a provider and a key id. A key holds one live credential, so adding one for a key that already has one replaces it, and the one it replaces is revoked in the same write. A model key sent without a key id is filed under the name OpenBot''s own Bots read (getModelKey). The secret is write-only: no answer includes it, now or later. Recorded on the audit trail. Only an administrator may add one.'
+      description: 'Encrypt a secret and keep it in the organization''s vault under one key: a kind, a provider and a key id. A key holds one live credential, so adding one for a key that already has one replaces it, and the one it replaces is revoked in the same write. A model key sent without a key id is filed under the name OpenBot''s own Bots read (getModelKey). The secret is write-only: no answer includes it, now or later. Recorded on the audit trail. Only an administrator of the organization may add one.'
       security:
         - webSession: []
         - appOAuth:
@@ -4044,7 +4044,7 @@ paths:
         - Credentials
       operationId: revokeCredential
       summary: Revoke a credential
-      description: Stop a live credential being used, and keep its record. Nothing reads a revoked credential again. Recorded on the audit trail. Only an administrator may revoke one. One that does not exist, or is revoked already, is not found.
+      description: Stop a live credential being used, and keep its record. Nothing reads a revoked credential again. Recorded on the audit trail. Only an administrator of the organization may revoke one. One that does not exist, is in another organization's vault, or is revoked already, is not found.
       security:
         - webSession: []
         - appOAuth:
@@ -4089,7 +4089,7 @@ paths:
         - Credentials
       operationId: getModelKey
       summary: Read where the Bots find their model key
-      description: Return the provider OpenBot's own Bots run on, the key id their model key is filed under in the vault, and whether a live key is kept there. Never the key. A model key added without a key id is filed here. Only an administrator may read it.
+      description: Return the provider OpenBot's own Bots run on, the key id their model key is filed under in the organization's vault, and whether a live key is kept there. Never the key. A model key added without a key id is filed here. Only an administrator of the organization may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -4269,7 +4269,7 @@ paths:
         - Apps
       operationId: listApps
       summary: List the apps added here
-      description: 'Return one page of the apps this OpenBot has added for its Bots: the ones from its catalogue, the ones added from the app directory, and servers added by their address. Each app comes with the actions it offers and the Bots that may use each one. Anybody signed in may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the apps the organization has added for its Bots: the ones from OpenBot''s catalogue, the ones added from the app directory, and servers added by their address. Each organization has its own apps, and an app added in one is not in another. Each app comes with the actions it offers and the Bots that may use each one. Any member of the organization may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -4533,7 +4533,7 @@ paths:
         - Apps
       operationId: deleteApp
       summary: Remove an app
-      description: Remove an app for everybody. Every person's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator may.
+      description: Remove an app for everybody in the organization. Every member's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator of the organization may.
       security:
         - webSession: []
         - appOAuth:
@@ -4615,7 +4615,7 @@ paths:
         - Apps
       operationId: setAppAccountMode
       summary: Choose whose account an app acts in
-      description: 'Choose whose account an app from the directory acts in: each person''s own (personal), or one account OpenBot holds for everybody (shared). Every account the switch leaves behind is ended at the app''s service first. Nothing changes unless all of them ended, and the problem''s problems then names each account that didn''t. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.'
+      description: 'Choose whose account an app from the directory acts in: each person''s own (personal), or one account OpenBot holds for everybody in the organization (shared). Every account the switch leaves behind is ended at the app''s service first. Nothing changes unless all of them ended, and the problem''s problems then names each account that didn''t. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.'
       security:
         - webSession: []
         - appOAuth:
@@ -5463,7 +5463,7 @@ paths:
         - Connections
       operationId: getSharedConnection
       summary: Read an app's shared account
-      description: 'Return the one account an app in Shared mode acts as for everybody: whether it is connected, who connected it, and the app''s own name for the account. Anybody signed in may read it. Not found when the app is connected by each person instead, as getConnection reads.'
+      description: 'Return the one account an app in Shared mode acts as for everybody in the organization: whether it is connected, who connected it, and the app''s own name for the account. Each organization connects its own, and one organization''s shared account is never used in another. Any member of the organization may read it. Not found when the app is connected by each person instead, as getConnection reads.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -5504,7 +5504,7 @@ paths:
         - Connections
       operationId: connectSharedApp
       summary: Start connecting an app's shared account
-      description: 'Start connecting the one account an app in Shared mode acts as for everybody, and say what happens next, as connectApp does: consent answers the address of the app''s sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app''s page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator may connect it. The address and the values are never logged.'
+      description: 'Start connecting the one account an app in Shared mode acts as for everybody in the organization, and say what happens next, as connectApp does: consent answers the address of the app''s sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app''s page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator of the organization may connect it. The address and the values are never logged.'
       security:
         - webSession: []
         - appOAuth:
@@ -6390,7 +6390,7 @@ paths:
         - App access requests
       operationId: listAppAccessRequests
       summary: List requests for apps
-      description: 'Return one page of the requests waiting for an administrator: all of them for an administrator, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the organization''s requests waiting for an administrator: all of them for an administrator of the organization, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -6649,7 +6649,7 @@ paths:
         - Components
       operationId: listComponents
       summary: List components
-      description: 'Return one page of the components Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. An admin sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the components the organization''s Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. Each organization has its own: what a component tells the model, whether it is published, which Bots may draw it and which data it may read are decided in one organization and change nothing in another. An admin of the organization sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -6692,7 +6692,7 @@ paths:
         - Components
       operationId: announceComponents
       summary: Announce the components the app can draw
-      description: 'Tell OpenBot which components this version of the app can draw. A component OpenBot has not seen before is added and published, so every Bot can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field.'
+      description: 'Tell OpenBot which components this version of the app can draw. A component the organization has not seen before is added and published, so every one of its Bots can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field or has a name that starts with @.'
       security:
         - webSession: []
         - appOAuth:
@@ -6720,7 +6720,7 @@ paths:
                       description: Show how many actions each Bot took recently.
       responses:
         '200':
-          description: The components this announcement added. Empty when OpenBot had them all.
+          description: The components this announcement added. Empty when the organization had them all.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
@@ -7335,7 +7335,7 @@ paths:
         - Skills
       operationId: listSkills
       summary: List skills
-      description: 'Return one page of the skills the caller can see: the organization''s and their own. An admin sees everybody''s. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the skills the caller can see: the organization''s and their own. An admin of the organization sees every member''s. Another organization''s skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -7632,7 +7632,7 @@ paths:
         - Destinations
       operationId: listDestinations
       summary: List where a person's Bots reach them
-      description: 'Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the places outside OpenBot a person continues their conversations with Bots: a Slack or Microsoft Teams chat, or a phone number for text messages, each tied to one conversation with one Bot. A Slack account, a Teams account or a phone number is connected in one organization at a time: connecting one that is connected in another organization answers 400 until it is disconnected there. The first connected first. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -8817,7 +8817,7 @@ paths:
         - Check-ins
       operationId: getCheckInUsage
       summary: Read how check-ins are going
-      description: 'Return, per Bot, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the daily limit in force. Counts only: no item''s title, source or person. Only an administrator may read it.'
+      description: 'Return, per Bot in the organization, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the organization''s daily limit in force. Counts only: no item''s title, source or person. Only an administrator of the organization may read it.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -13332,7 +13332,7 @@ paths:
         - Computers
       operationId: listComputers
       summary: List the organization's computers
-      description: 'Return one page of the computers Bots run on: each person''s, and each isolated Bot''s. Where every person''s Bots share one computer, each entry is one person''s seat on one Bot there. Ordered by whose computer it is, then by Bot. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the computers the organization''s Bots run on: each person''s, and each isolated Bot''s. Where every person''s Bots share one computer, each entry is one person''s seat on one Bot there. A computer another organization''s Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -13376,7 +13376,7 @@ paths:
         - Computers
       operationId: stopComputer
       summary: Stop a computer
-      description: Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+      description: Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth:
@@ -13414,7 +13414,7 @@ paths:
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
-          $ref: '#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -13431,7 +13431,7 @@ paths:
         - Computers
       operationId: resetComputer
       summary: Reset a computer
-      description: Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+      description: Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth:
@@ -13469,7 +13469,7 @@ paths:
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
-          $ref: '#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -13486,7 +13486,7 @@ paths:
         - Computers
       operationId: updateComputer
       summary: Update a computer
-      description: Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. Only an administrator may do this.
+      description: Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth:
@@ -13524,7 +13524,7 @@ paths:
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
-          $ref: '#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -15646,7 +15646,7 @@ paths:
         - Sign-in requests
       operationId: getSignInRequest
       summary: Read a sign-in request
-      description: 'Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person''s saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else''s is not found.'
+      description: 'Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person''s saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else''s is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.'
       security:
         - webSession: []
         - appOAuth:
@@ -16299,7 +16299,7 @@ paths:
         - Recorder
       operationId: deleteCurrentRecorderConnection
       summary: Disconnect this browser's Recorder
-      description: 'End the connection the request is signed with: the Recorder''s own Disconnect. Signed with the Recorder''s connection token and nothing else.'
+      description: 'End the connection the request is signed with: the Recorder''s own Disconnect. Signed with the Recorder''s connection token and nothing else. organizationId is `default` or the connection''s own organization, and either way the call acts in the connection''s organization.'
       security:
         - recorderConnection: []
       parameters:
@@ -16331,7 +16331,7 @@ paths:
         - Recorder
       operationId: getRecorderIdentity
       summary: Read who a Recorder is connected as
-      description: Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. A connection that has ended is refused as signed out, with why.
+      description: Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization. A connection that has ended is refused as signed out, with why.
       x-openbot-singleton: true
       security:
         - recorderConnection: []
@@ -16368,7 +16368,7 @@ paths:
         - Recorder
       operationId: getRecorderLearning
       summary: Read where a Recorder's recordings are learned from
-      description: Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else.
+      description: Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization.
       x-openbot-singleton: true
       security:
         - recorderConnection: []
@@ -16405,7 +16405,7 @@ paths:
         - Recorder
       operationId: reportRecorderActivity
       summary: Say what a Recorder is doing now
-      description: 'Report what this browser''s Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder''s connection token and nothing else.'
+      description: 'Report what this browser''s Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder''s connection token and nothing else. organizationId is `default` or the connection''s own organization, and either way the report is kept in the connection''s organization.'
       security:
         - recorderConnection: []
       parameters:
@@ -18523,7 +18523,7 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
-            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
             connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
@@ -18709,7 +18709,7 @@ components:
     AuditEventTypes:
       name: eventType
       in: query
-      description: Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected.
+      description: Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected or organization.member_invited,organization.member_removed.
       schema:
         $ref: '#/components/schemas/AuditFilterText'
     AuditExcludedEventTypes:
@@ -19326,6 +19326,12 @@ components:
         systemOwned:
           type: boolean
           description: Whether it comes with OpenBot rather than belonging to a person.
+        packageBotId:
+          type:
+            - string
+            - 'null'
+          readOnly: true
+          description: 'Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package''s id on another organization''s copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.'
         endpoint:
           type:
             - string
@@ -20603,7 +20609,7 @@ components:
           readOnly: true
         ssoRequired:
           type: boolean
-          description: Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.
+          description: Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.
         actionRecording:
           type: boolean
           description: Whether what Bots do on their computers is recorded, to read in computer actions.
@@ -20688,7 +20694,7 @@ components:
           description: The model OpenBot's own Bots run on, when one is set.
         directoryGroups:
           type: array
-          description: The directory groups people belong to, by name.
+          description: The directory groups the organization's members belong to, by name.
           items:
             type: string
         apps:
@@ -21788,7 +21794,7 @@ components:
         - mcp_user_token
     Credential:
       type: object
-      description: 'A credential in the vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.'
+      description: 'A credential in the organization''s vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.'
       required:
         - id
         - kind
@@ -23040,7 +23046,7 @@ components:
       enum:
         - personal
         - shared
-      description: Each person's own account, or one account OpenBot holds for everybody.
+      description: Each person's own account, or one account OpenBot holds for everybody in the organization.
     AppOwnerGrants:
       type: string
       enum:
@@ -23102,7 +23108,7 @@ components:
             type: string
     App:
       type: object
-      description: 'An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.'
+      description: 'An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.'
       required:
         - id
         - title
@@ -23187,7 +23193,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppAccountMode'
             - type: 'null'
-          description: 'Whose account an app from the directory acts in: each person''s own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.'
+          description: 'Whose account an app from the directory acts in: each person''s own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.'
         sharedAccountConnected:
           type: boolean
           description: Whether a shared app's one account is connected. False for any other app.
@@ -23420,7 +23426,7 @@ components:
               enum:
                 - person
                 - deployment
-              description: 'Whose accounts they are: people''s own (person), or the one OpenBot holds for everybody (deployment).'
+              description: 'Whose accounts they are: people''s own (person), or the one OpenBot holds for everybody in the organization (deployment).'
             count:
               type: integer
               minimum: 0
@@ -25135,7 +25141,7 @@ components:
           type: string
           minLength: 1
           pattern: \S
-          description: The tool name a Bot draws it by. Trimmed.
+          description: The tool name a Bot draws it by. Trimmed. It can't start with @.
         title:
           type: string
           minLength: 1
@@ -30379,7 +30385,7 @@ components:
           description: 'allow_once: this time. allow_always: always, for this Team Bot. allow_all_team_bots: always, for every Team Bot. skip: not now, taking back an earlier answer for this Team Bot.'
     Computer:
       type: object
-      description: 'One computer as an administrator sees it: a person''s, or an isolated Bot''s. Where every person''s Bots share one computer, one person''s seat on one Bot there.'
+      description: 'One of the organization''s computers as its administrator sees it: a person''s, or an isolated Bot''s. Where every person''s Bots share one computer, one person''s seat on one Bot there.'
       required:
         - id
         - computer
@@ -34096,12 +34102,23 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SettingsConflict:
-      description: Single sign-on can't be required before an identity provider is registered, or the Idempotency-Key was used for a different request.
+      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than `default`, or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
+            notTheFirstOrganization:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Requiring SSO applies to signing in to this OpenBot as a whole, so it can't be set for one organization.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             noProvider:
               value:
                 type: https://open.bot/errors/conflict
@@ -35485,12 +35502,23 @@ components:
                 requestId: req_example
                 traceId: trace_example
     InvalidComponent:
-      description: 'A field is missing or blank once trimmed, holds text that can''t be kept, or doesn''t fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn''t custom_ and lower-case letters, numbers and underscores, or a data function this OpenBot doesn''t ship.'
+      description: 'A field is missing or blank once trimmed, holds text that can''t be kept, or doesn''t fit this kind of component: a title or source for one that comes with OpenBot, a Playground name that isn''t custom_ and lower-case letters, numbers and underscores, an announced name that starts with @, or a data function this OpenBot doesn''t ship.'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
+            nameStartsWithAt:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Component at index 0 has a name that starts with @, which a component's name can't.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             announcement:
               value:
                 type: https://open.bot/errors/validation-error
@@ -35749,12 +35777,23 @@ components:
                 requestId: req_example
                 traceId: trace_example
     InvalidDestination:
-      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, or the phone is connected to another person.
+      description: The request doesn't match the API, the conversation isn't the person's or the Bot isn't in it, a phone's verification expired, was used already or its code was wrong, the phone is connected to another person, or the Slack account, Teams account or phone is connected in another organization.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
+            connectedInAnotherOrganization:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That account is already connected to OpenBot in another organization. Disconnect it there, then connect it here.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             notTheirs:
               value:
                 type: https://open.bot/errors/validation-error
@@ -36812,6 +36851,35 @@ components:
                 code: SERVICE_UNAVAILABLE
                 category: dependency
                 retryable: true
+                requestId: req_example
+                traceId: trace_example
+    OrganizationComputerNotFound:
+      description: The computer named is not one of the organization's Bots' computers, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            computer:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: Couldn't find that computer.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
                 requestId: req_example
                 traceId: trace_example
     ComputerBotNotFound:

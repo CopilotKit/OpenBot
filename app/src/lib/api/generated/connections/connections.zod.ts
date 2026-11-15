@@ -1062,7 +1062,7 @@ export const DisconnectConnectedAccountResponse = zod.object({
 });
 
 /**
- * Return the one account an app in Shared mode acts as for everybody: whether it is connected, who connected it, and the app's own name for the account. Anybody signed in may read it. Not found when the app is connected by each person instead, as getConnection reads.
+ * Return the one account an app in Shared mode acts as for everybody in the organization: whether it is connected, who connected it, and the app's own name for the account. Each organization connects its own, and one organization's shared account is never used in another. Any member of the organization may read it. Not found when the app is connected by each person instead, as getConnection reads.
  * @summary Read an app's shared account
  */
 
@@ -1152,7 +1152,7 @@ export const GetSharedConnectionResponse = zod
   );
 
 /**
- * Start connecting the one account an app in Shared mode acts as for everybody, and say what happens next, as connectApp does: consent answers the address of the app's sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app's page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator may connect it. The address and the values are never logged.
+ * Start connecting the one account an app in Shared mode acts as for everybody in the organization, and say what happens next, as connectApp does: consent answers the address of the app's sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app's page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator of the organization may connect it. The address and the values are never logged.
  * @summary Start connecting an app's shared account
  */
 

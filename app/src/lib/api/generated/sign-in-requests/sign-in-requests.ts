@@ -504,7 +504,7 @@ export const getGetSignInRequestUrl = (
 };
 
 /**
- * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found.
+ * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
  * @summary Read a sign-in request
  */
 export const getSignInRequest = async (

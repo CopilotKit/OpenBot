@@ -400,7 +400,7 @@ function PlaygroundPage() {
           <DialogHeader>
             <DialogTitle>Delete {deleting}?</DialogTitle>
             <DialogDescription>
-              It's removed from this deployment, and no Bot can draw it. You
+              It's removed from this organization, and no Bot can draw it. You
               can't undo this.
             </DialogDescription>
           </DialogHeader>

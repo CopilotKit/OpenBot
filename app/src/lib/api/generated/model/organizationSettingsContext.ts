@@ -14,7 +14,7 @@ export interface OrganizationSettingsContext {
    * @nullable
    */
   readonly builtInModel: string | null;
-  /** The directory groups people belong to, by name. */
+  /** The directory groups the organization's members belong to, by name. */
   readonly directoryGroups: string[];
   /** The apps an allowlist can name. */
   readonly apps: OrganizationSettingsContextAppsItem[];

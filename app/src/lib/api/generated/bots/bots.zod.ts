@@ -82,6 +82,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
+        packageBotId: zod
+          .string()
+          .nullish()
+          .describe(
+            "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+          ),
         endpoint: zod
           .string()
           .nullable()
@@ -322,6 +328,12 @@ export const CreateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -444,6 +456,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()
@@ -657,6 +675,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()
@@ -923,6 +947,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1057,6 +1087,12 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()
@@ -1193,6 +1229,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1328,6 +1370,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1462,6 +1510,12 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()
@@ -1639,6 +1693,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()

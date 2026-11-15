@@ -332,7 +332,7 @@ export function ComputersPage({
                 : "Its computer"
               : personal
                 ? "Your Bots' browsers"
-                : "Computers in this deployment"
+                : "Computers in this organization"
           }
         >
           {setState.error ? (

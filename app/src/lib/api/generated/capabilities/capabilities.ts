@@ -995,7 +995,7 @@ export const getGetPersonCapabilitiesUrl = (
 };
 
 /**
- * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator reads anybody's. enforced is false where the deployment keeps no switches and every default applies.
+ * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator of the organization reads any member's. enforced is false where this OpenBot keeps no switches and every default applies.
  * @summary Read what a person may do
  */
 export const getPersonCapabilities = async (
@@ -1231,7 +1231,7 @@ export const getStopPersonComputersUrl = (
 };
 
 /**
- * Stop every Bot computer running for one person now, and record it on the audit trail. Their Bots start a computer again when they next need one. Only an administrator may do this.
+ * Stop the computers of the organization's Bots that one person owns, now, and record it on the audit trail. Their Bots start a computer again when they next need one. A person's own computer is stopped only from the organization `default`. A person who is not a member of the organization is not found (PERSON_NOT_FOUND). Only an administrator of the organization may do this.
  * @summary Stop a person's computers
  */
 export const stopPersonComputers = async (

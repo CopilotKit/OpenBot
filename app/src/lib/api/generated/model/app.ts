@@ -9,7 +9,7 @@ import type { AppTool } from "./appTool";
 import type { AppWithdrawnGrant } from "./appWithdrawnGrant";
 
 /**
- * An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.
+ * An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.
  */
 export interface App {
   /** The app's id: a catalogue entry's key, the id a server was given when it was added by its address, or the id an app from the directory was given when it was added. */
@@ -54,7 +54,7 @@ export interface App {
    * @nullable
    */
   entraScope: string | null;
-  /** Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app. */
+  /** Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app. */
   accountMode: AppAccountMode | null;
   /** Whether a shared app's one account is connected. False for any other app. */
   sharedAccountConnected: boolean;

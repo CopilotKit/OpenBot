@@ -1,4 +1,4 @@
-# Apps: the apps this OpenBot has added for its Bots to use, the directory of apps it can add, and
+# Apps: the apps an organization has added for its Bots to use, the directory of apps it can add, and
 # how apps are set up here. Also the parts every apps area shares (an app's id, the shared-account
 # approval, and the refusals about an app), listed in common.yaml for the connections and Bot grants
 # areas to use.
@@ -14,11 +14,12 @@ paths:
       operationId: listApps
       summary: List the apps added here
       description: >-
-        Return one page of the apps this OpenBot has added for its Bots: the
-        ones from its catalogue, the ones added from the app directory, and
-        servers added by their address. Each app comes with the actions it
-        offers and the Bots that may use each one. Anybody signed in may read
-        them. Ordered by title, ignoring case, then by id. A missing cursor
+        Return one page of the apps the organization has added for its Bots:
+        the ones from OpenBot's catalogue, the ones added from the app
+        directory, and servers added by their address. Each organization has
+        its own apps, and an app added in one is not in another. Each app
+        comes with the actions it offers and the Bots that may use each one.
+        Any member of the organization may read them. Ordered by title, ignoring case, then by id. A missing cursor
         starts at the first page and nextCursor null ends the list.
       security:
         - webSession: []
@@ -309,12 +310,14 @@ paths:
       operationId: deleteApp
       summary: Remove an app
       description: >-
-        Remove an app for everybody. Every person's connection to it is ended,
+        Remove an app for everybody in the organization. Every member's
+        connection to it is ended,
         at the app's own service too, every Bot stops being able to use its
         actions, and a server's key is retired. Recorded on the audit trail.
         Removing can stop partway when the service behind the app doesn't
         answer. The app then stays, and removing it again is safe and finishes
-        the job. Routines can't be removed. Only an administrator may.
+        the job. Routines can't be removed. Only an administrator of the
+        organization may.
       security:
         - webSession: []
         - appOAuth: [apps:write]
@@ -401,7 +404,8 @@ paths:
       summary: Choose whose account an app acts in
       description: >-
         Choose whose account an app from the directory acts in: each person's
-        own (personal), or one account OpenBot holds for everybody (shared).
+        own (personal), or one account OpenBot holds for everybody in the
+        organization (shared).
         Every account the switch leaves behind is ended at the app's service
         first. Nothing changes unless all of them ended, and the problem's
         problems then names each account that didn't. Switching to shared
@@ -815,7 +819,8 @@ components:
     App:
       type: object
       description: >-
-        An app this OpenBot has added for its Bots, with the actions it offers.
+        An app the organization has added for its Bots, with the actions it
+        offers.
         No secret is ever part of an app: hasCredential says whether a key or
         client is kept for it.
       required:
@@ -909,7 +914,8 @@ components:
             - type: 'null'
           description: >-
             Whose account an app from the directory acts in: each person's own,
-            or one account OpenBot holds for everybody. Null for an app with no
+            or one account OpenBot holds for everybody in the organization.
+            Null for an app with no
             account at all, and for any other app.
         sharedAccountConnected:
           type: boolean
@@ -1095,7 +1101,7 @@ components:
     AppAccountMode:
       type: string
       enum: [personal, shared]
-      description: Each person's own account, or one account OpenBot holds for everybody.
+      description: Each person's own account, or one account OpenBot holds for everybody in the organization.
     AppAccountModeRequest:
       type: object
       additionalProperties: false
@@ -1138,7 +1144,7 @@ components:
               enum: [person, deployment]
               description: >-
                 Whose accounts they are: people's own (person), or the one
-                OpenBot holds for everybody (deployment).
+                OpenBot holds for everybody in the organization (deployment).
             count:
               type: integer
               minimum: 0

@@ -136,7 +136,7 @@ const whyFor = (event: AuditEvent) =>
 
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
-  "Review Bot actions and actions blocked by this deployment’s policy.";
+  "Review Bot actions and actions blocked by this organization’s policy.";
 
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's

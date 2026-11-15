@@ -157,6 +157,7 @@ const scout = agent({ id: "scout", name: "Scout", title: "Research" });
 // OpenBot's default Bot: `defaultAgentProfile` prefers the picked harness over list order.
 const fuse = agent({
   id: "picked-harness",
+  packageBotId: "picked-harness",
   name: "Fuse",
   title: "Your helper",
 });
