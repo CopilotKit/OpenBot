@@ -53,7 +53,8 @@ export type NetworkMode =
   | "allowlist_only";
 
 export type NetworkPolicy = {
-  scopeKind: "organization" | "group";
+  /** `team` is a team's, named by its id; `group` a directory group's, by its name. */
+  scopeKind: "organization" | "group" | "team";
   scopeId: string;
   mode: NetworkMode;
   rules: EgressRule[];

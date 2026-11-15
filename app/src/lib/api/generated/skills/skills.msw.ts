@@ -4,7 +4,13 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { Skill, SkillInput, SkillPage } from "../model";
+import type {
+  Skill,
+  SkillInput,
+  SkillPage,
+  SkillTeamGrants,
+  SkillTeamGrantsInput,
+} from "../model";
 
 export const getListSkillsResponseMock = (): SkillPage => ({
   skills: [
@@ -52,6 +58,14 @@ export const getReplaceSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+});
+
+export const getGetSkillTeamGrantsResponseMock = (): SkillTeamGrants => ({
+  teams: ["Tm4Qx8LpV2nWc7RbY1sKd0Ze"],
+});
+
+export const getReplaceSkillTeamGrantsResponseMock = (): SkillTeamGrants => ({
+  teams: ["Tm4Qx8LpV2nWc7RbY1sKd0Ze"],
 });
 
 export const getListSkillsMockHandler = (
@@ -172,9 +186,80 @@ export const getDeleteSkillMockHandler = (
     options,
   );
 };
+
+export const getGetSkillTeamGrantsMockHandler = (
+  overrideResponse?:
+    | SkillTeamGrants
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; skillId: string }>
+        >[0],
+      ) => Promise<SkillTeamGrants> | SkillTeamGrants),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; skillId: string }>(
+    "*/api/v2/organizations/:organizationId/skills/:skillId/team-grants",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; skillId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetSkillTeamGrantsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceSkillTeamGrantsMockHandler = (
+  overrideResponse?:
+    | SkillTeamGrants
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; skillId: string },
+            SkillTeamGrantsInput
+          >
+        >[0],
+      ) => Promise<SkillTeamGrants> | SkillTeamGrants),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; skillId: string },
+    SkillTeamGrantsInput
+  >(
+    "*/api/v2/organizations/:organizationId/skills/:skillId/team-grants",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; skillId: string },
+          SkillTeamGrantsInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceSkillTeamGrantsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getSkillsMock = () => [
   getListSkillsMockHandler(),
   getGetSkillMockHandler(),
   getReplaceSkillMockHandler(),
   getDeleteSkillMockHandler(),
+  getGetSkillTeamGrantsMockHandler(),
+  getReplaceSkillTeamGrantsMockHandler(),
 ];

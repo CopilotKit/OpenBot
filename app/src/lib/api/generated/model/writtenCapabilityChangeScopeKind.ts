@@ -3,7 +3,7 @@
  */
 
 /**
- * Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.
+ * Whose switch: the organization's, a member role's, a team's, or a directory group's.
  */
 export type WrittenCapabilityChangeScopeKind =
   (typeof WrittenCapabilityChangeScopeKind)[keyof typeof WrittenCapabilityChangeScopeKind];
@@ -12,4 +12,5 @@ export const WrittenCapabilityChangeScopeKind = {
   organization: "organization",
   role: "role",
   group: "group",
+  team: "team",
 } as const;

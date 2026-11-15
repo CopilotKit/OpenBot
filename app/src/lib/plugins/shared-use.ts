@@ -13,7 +13,11 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 export type SharedAudience = "owner" | "people" | "team";
-export type ApprovalMember = { kind: "user" | "group"; value: string };
+/** A person by id, a team by id, or a directory group by its name. */
+export type ApprovalMember = {
+  kind: "user" | "group" | "team";
+  value: string;
+};
 export type SharedUseApproval = {
   audience: SharedAudience;
   outsideInput: boolean;

@@ -6,6 +6,8 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   AppAccessApproval,
+  AppTeamGrants,
+  AppTeamGrantsInput,
   BotApp,
   BotAppGiven,
   BotAppPage,
@@ -223,6 +225,14 @@ export const getApproveBotAppResponseMock = (): AppAccessApproval => ({
   },
   enabled: false,
   granted: ["notion/notion-fetch", "notion/notion-search"],
+});
+
+export const getGetAppTeamGrantsResponseMock = (): AppTeamGrants => ({
+  teams: ["Tm4Qx8LpV2nWc7RbY1sKd0Ze"],
+});
+
+export const getReplaceAppTeamGrantsResponseMock = (): AppTeamGrants => ({
+  teams: ["Tm4Qx8LpV2nWc7RbY1sKd0Ze"],
 });
 
 export const getListGiveableAppsResponseMock = (): GiveableAppPage => ({
@@ -637,6 +647,75 @@ export const getApproveBotAppMockHandler = (
   );
 };
 
+export const getGetAppTeamGrantsMockHandler = (
+  overrideResponse?:
+    | AppTeamGrants
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; appId: string }>
+        >[0],
+      ) => Promise<AppTeamGrants> | AppTeamGrants),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; appId: string }>(
+    "*/api/v2/organizations/:organizationId/apps/:appId/team-grants",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; appId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetAppTeamGrantsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceAppTeamGrantsMockHandler = (
+  overrideResponse?:
+    | AppTeamGrants
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; appId: string },
+            AppTeamGrantsInput
+          >
+        >[0],
+      ) => Promise<AppTeamGrants> | AppTeamGrants),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; appId: string },
+    AppTeamGrantsInput
+  >(
+    "*/api/v2/organizations/:organizationId/apps/:appId/team-grants",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; appId: string },
+          AppTeamGrantsInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceAppTeamGrantsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getListGiveableAppsMockHandler = (
   overrideResponse?:
     | GiveableAppPage
@@ -678,5 +757,7 @@ export const getBotGrantsMock = () => [
   getGiveBotAppMockHandler(),
   getTakeBackBotAppMockHandler(),
   getApproveBotAppMockHandler(),
+  getGetAppTeamGrantsMockHandler(),
+  getReplaceAppTeamGrantsMockHandler(),
   getListGiveableAppsMockHandler(),
 ];

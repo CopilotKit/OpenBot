@@ -5,10 +5,10 @@ import type { CapabilityChangeToCheckScopeKind } from "./capabilityChangeToCheck
 import type { SwitchValue } from "./switchValue";
 
 export interface CapabilityChangeToCheck {
-  /** Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive. */
+  /** Whose switch: the organization's, a member role's, a team's, or a directory group's. */
   scopeKind: CapabilityChangeToCheckScopeKind;
   /**
-   * Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+   * Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
    * @maxLength 200
    * @pattern ^[^\x00]*$
    */

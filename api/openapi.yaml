@@ -6341,6 +6341,98 @@ paths:
           $ref: '#/components/responses/AppDirectoryUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/team-grants:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/AppId'
+    get:
+      tags:
+        - Bot grants
+      operationId: getAppTeamGrants
+      summary: Read the teams the app is granted to
+      description: Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin of the organization may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - bot-grants:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The teams the app is granted to.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/AppTeamGrantsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppOrTeamNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    put:
+      tags:
+        - Bot grants
+      operationId: replaceAppTeamGrants
+      summary: Grant an app to teams
+      description: Grant the app to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth:
+            - bot-grants:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppTeamGrantsInput'
+            examples:
+              oneTeam:
+                value:
+                  teams:
+                    - Tm4Qx8LpV2nWc7RbY1sKd0Ze
+      responses:
+        '200':
+          description: The teams the app is now granted to.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/AppTeamGrantsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppOrTeamNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -7489,6 +7581,98 @@ paths:
           $ref: '#/components/responses/SkillForbidden'
         '404':
           $ref: '#/components/responses/SkillNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/{skillId}/team-grants:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillId'
+    get:
+      tags:
+        - Skills
+      operationId: getSkillTeamGrants
+      summary: Read the teams the skill is granted to
+      description: Return the teams the skill is granted to, by id. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. Only an admin of the organization may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - skills:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The teams the skill is granted to.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    put:
+      tags:
+        - Skills
+      operationId: replaceSkillTeamGrants
+      summary: Grant a skill to teams
+      description: Grant the skill to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth:
+            - skills:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillTeamGrantsInput'
+            examples:
+              oneTeam:
+                value:
+                  teams:
+                    - Tm4Qx8LpV2nWc7RbY1sKd0Ze
+      responses:
+        '200':
+          description: The teams the skill is now granted to.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
@@ -19000,12 +19184,12 @@ components:
       name: networkPolicyId
       in: path
       required: true
-      description: organization, or group:<name> for a directory group's.
+      description: organization, team:<id> for a team's, or group:<name> for a directory group's.
       schema:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -21210,7 +21394,12 @@ components:
               type: boolean
         groups:
           type: object
-          description: What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.
+          description: What each directory group is set to, by the group's name. A group absent sets nothing.
+          additionalProperties:
+            type: boolean
+        teams:
+          type: object
+          description: What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.
           additionalProperties:
             type: boolean
     CapabilityPage:
@@ -21257,7 +21446,18 @@ components:
           type: object
           minProperties: 1
           maxProperties: 100
-          description: By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.
+          description: By directory group name, 1 to 200 characters.
+          propertyNames:
+            minLength: 1
+            maxLength: 200
+            pattern: ^[^\x00]*\S[^\x00]*$
+          additionalProperties:
+            $ref: '#/components/schemas/SwitchValue'
+        teams:
+          type: object
+          minProperties: 1
+          maxProperties: 100
+          description: By team id. A team that is not one of this organization's is not found.
           propertyNames:
             minLength: 1
             maxLength: 200
@@ -21278,12 +21478,13 @@ components:
             - organization
             - role
             - group
-          description: 'Whose switch: the organization''s, a member role''s, or a directory group''s. Team scopes will be added when teams arrive.'
+            - team
+          description: 'Whose switch: the organization''s, a member role''s, a team''s, or a directory group''s.'
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           $ref: '#/components/schemas/CapabilityId'
         allowed:
@@ -21331,12 +21532,13 @@ components:
             - organization
             - role
             - group
-          description: 'Whose switch: the organization''s, a member role''s, or a directory group''s. Team scopes will be added when teams arrive.'
+            - team
+          description: 'Whose switch: the organization''s, a member role''s, a team''s, or a directory group''s.'
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
           maxLength: 100
@@ -21435,10 +21637,11 @@ components:
             - organization
             - role
             - group
-          description: 'Whose switch: the organization''s, a member role''s, or a directory group''s. Team scopes will be added when teams arrive.'
+            - team
+          description: 'Whose switch: the organization''s, a member role''s, a team''s, or a directory group''s.'
         scopeId:
           type: string
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
         allowed:
@@ -21459,9 +21662,10 @@ components:
             - organization
             - role
             - group
+            - team
         scopeId:
           type: string
-          description: The role or group that decided it. Empty otherwise.
+          description: The role, the group's name or the team's id that decided it. Empty otherwise.
     CapabilityPreview:
       type: object
       required:
@@ -21647,16 +21851,17 @@ components:
       properties:
         id:
           type: string
-          description: organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.
+          description: organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
           enum:
             - organization
             - group
-          description: 'Whose policy: the organization''s, or a directory group''s. Team scopes will be added when teams arrive.'
+            - team
+          description: 'Whose policy: the organization''s, a team''s, or a directory group''s.'
         scopeId:
           type: string
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -21723,12 +21928,13 @@ components:
           enum:
             - organization
             - group
-          description: 'Whose policy: the organization''s, or a directory group''s. Team scopes will be added when teams arrive.'
+            - team
+          description: 'Whose policy: the organization''s, a team''s, or a directory group''s.'
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -22384,7 +22590,7 @@ components:
     SharedAccountApproval:
       type: object
       additionalProperties: false
-      description: 'Who may have a Bot use an app''s one shared account, approved by an administrator: only the Bot''s owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.'
+      description: 'Who may have a Bot use an app''s one shared account, approved by an administrator: only the Bot''s owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization''s teams by id; a team of another organization is not found.'
       required:
         - audience
         - outsideInput
@@ -22413,6 +22619,7 @@ components:
                 enum:
                   - user
                   - group
+                  - team
               value:
                 type: string
                 minLength: 1
@@ -25234,6 +25441,32 @@ components:
           description: The actions given to the Bot, written <app id>/<action name>.
           items:
             type: string
+    AppTeamGrants:
+      type: object
+      description: The teams the app is granted to.
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          description: Each team's id, in order.
+          items:
+            type: string
+    AppTeamGrantsInput:
+      type: object
+      additionalProperties: false
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          maxItems: 100
+          description: The id of each team of this organization to grant it to.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     GiveableApp:
       type: object
       description: An app a person could give Bots they own.
@@ -25778,6 +26011,32 @@ components:
           type: boolean
           default: false
           description: 'Make a new skill the organization''s. Only an admin may. It applies when the skill is made: rewriting one keeps whose it is.'
+    SkillTeamGrants:
+      type: object
+      description: The teams the skill is granted to.
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          description: Each team's id, in order.
+          items:
+            type: string
+    SkillTeamGrantsInput:
+      type: object
+      additionalProperties: false
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          maxItems: 100
+          description: The id of each team of this organization to grant it to.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     DevicePlatform:
       type: string
       enum:
@@ -29760,6 +30019,19 @@ components:
           description: The directory groups, by name.
           items:
             type: string
+        teams:
+          type: array
+          description: The organization's teams. An action names one in group, as team:<id>.
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: string
+              name:
+                type: string
         apps:
           type: array
           items:
@@ -29817,7 +30089,7 @@ components:
     WhatIfAction:
       type: object
       additionalProperties: false
-      description: 'One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app''s tool, or something on the Bot''s computer. A field that does not apply is empty.'
+      description: 'One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app''s tool, or something on the Bot''s computer. A field that does not apply is empty.'
       required:
         - bot
         - person
@@ -29840,7 +30112,7 @@ components:
           description: The person's id. Empty when a group is named.
         group:
           type: string
-          description: A directory group's name. Empty when a person is named.
+          description: A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.
         initiator:
           $ref: '#/components/schemas/WhatIfInitiator'
         surface:
@@ -30118,10 +30390,10 @@ components:
         - owner
         - people
         - team
-      description: 'Who may steer a Bot that uses a shared app''s account: only the Bot''s owner, the people and directory groups named, or everybody in the organization.'
+      description: 'Who may steer a Bot that uses a shared app''s account: only the Bot''s owner, the people, teams and directory groups named, or everyone in the organization (team).'
     SharedUseMember:
       type: object
-      description: One person or directory group an audience names.
+      description: One person, team or directory group an audience names.
       required:
         - kind
         - value
@@ -30131,9 +30403,10 @@ components:
           enum:
             - user
             - group
+            - team
         value:
           type: string
-          description: The person's id, or the directory group's name.
+          description: The person's id, the team's id, or the directory group's name.
     SharedUseApproval:
       type: object
       description: 'An audience for a Bot''s use of a shared app''s account: who may steer the Bot there, and whether a run started by outside input (an email, a webhook) may use the account too.'
@@ -30149,7 +30422,7 @@ components:
           description: Whether runs started by outside input are covered.
         members:
           type: array
-          description: The people and groups named, when the audience is people. Empty otherwise.
+          description: The people, teams and groups named, when the audience is people. Empty otherwise.
           items:
             $ref: '#/components/schemas/SharedUseMember'
     SharedUseRequest:
@@ -36019,6 +36292,35 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    AppOrTeamNotFound:
+      description: OpenBot has no app by that id, a team named is not one of this organization's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            app:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: OpenBot has no app called asana.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     TooManyPendingRequests:
       description: The person already has as many requests waiting as they may.
       content:
@@ -36280,6 +36582,35 @@ components:
                 detail: standup is somebody else's skill.
                 code: PERMISSION_DENIED
                 category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SkillOrTeamNotFound:
+      description: There is no skill by that slug, a team named is not one of this organization's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            skill:
+              value:
+                type: https://open.bot/errors/skill-not-found
+                title: Skill not found.
+                status: 404
+                detail: There is no skill called standup.
+                code: SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
+                category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
@@ -40460,6 +40791,11 @@ components:
         granted:
           - notion/notion-fetch
           - notion/notion-search
+    AppTeamGrantsExample:
+      summary: Granted to one team.
+      value:
+        teams:
+          - Tm4Qx8LpV2nWc7RbY1sKd0Ze
     GiveableAppPageExample:
       summary: Two apps the person could give their Bots.
       value:
@@ -40761,6 +41097,11 @@ components:
         ownerId: user_3f1c9a
         botIds:
           - general-assistant
+    SkillTeamGrantsExample:
+      summary: Granted to one team.
+      value:
+        teams:
+          - Tm4Qx8LpV2nWc7RbY1sKd0Ze
     DevicePageLast:
       summary: A person's iPhone, on one page.
       value:
