@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_page;
@@ -126,6 +127,9 @@ struct Shell {
     app_update: app_update::Known,
     /// Wakes the thread that gets a newer version ready when the feed names one.
     update_ready: update_ready::Nudge,
+    /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
+    /// window shows it. See `desktop_connected`.
+    connected: desktop_connected::State,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -483,6 +487,7 @@ answers.
 */
 #[tauri::command]
 async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
+    desktop_connected::local_only(&app)?;
     let root = stack::root_from(&root);
     let shell_app = app.clone();
     let up = tauri::async_runtime::spawn_blocking(move || {
@@ -1919,6 +1924,7 @@ async fn upgrade_and_start(
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<upgrade::Outcome, Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
     let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
@@ -2194,6 +2200,12 @@ fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let mut next = BEHIND_TICK;
             loop {
                 handle.state::<Shell>().update_ready.wait(next);
+                // Connected to an OpenBot that runs elsewhere: nothing is downloaded for an
+                // installation here. The app's own update is not this thread's.
+                if desktop_connected::is_connected(&handle) {
+                    next = app_update::TICK;
+                    continue;
+                }
                 let behind = try_getting_own_release_ready(&handle, &mut own, &mut own_said);
                 if fed {
                     try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
@@ -2921,6 +2933,7 @@ async fn install_app_update(app: tauri::AppHandle) -> Result<(), Problem> {
 
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     let saved = {
         let shell = app.state::<Shell>();
@@ -2936,6 +2949,10 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
 /// the installation in `root`. Once per run of the app. See `early_downloads`.
 #[tauri::command]
 fn start_early_downloads(app: tauri::AppHandle, root: String) {
+    // Nothing is downloaded for this computer while the app is connected to another OpenBot.
+    if desktop_connected::is_connected(&app) {
+        return;
+    }
     let telemetry_app = app.clone();
     early_downloads::start(
         stack::root_from(&root),
@@ -2978,6 +2995,7 @@ async fn prepare_installation(
     root: String,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<(), Problem> {
+    desktop_connected::local_only(&app)?;
     if app
         .state::<Shell>()
         .updating
@@ -4143,6 +4161,7 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     // The choices, never the values: which provider and how, not the key or the address.
     log::info!(
@@ -5024,6 +5043,13 @@ the same cleanup runs in the same order and the exit follows.
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
     // A setup window that stopped answering and still has not: said before the flush below.
     desktop_stall::at_quit(app);
+    // Connected to an OpenBot that runs elsewhere: Quit closes. Nothing on this computer runs
+    // because of it, so there is nothing to stop and no Shutting down screen to show.
+    if desktop_connected::is_connected(app) {
+        desktop_telemetry::shutdown(app);
+        desktop_connected::quit(app);
+        return Vec::new();
+    }
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
     let shell = app.state::<Shell>();
@@ -6476,6 +6502,11 @@ where
 async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
     let asked = std::time::Instant::now();
     log::info!("[show] asked");
+    // Connected to an OpenBot that runs elsewhere, this computer's own is not looked for.
+    if let Err(problem) = desktop_connected::local_only(&app) {
+        logging::outcome("show", asked, &Err::<(), _>(problem.clone()));
+        return Err(problem);
+    }
     let shown = tauri::async_runtime::spawn_blocking(move || {
         let ports = ports_for_shell(&app)?;
         show_openbot_on(app, &ports)
@@ -6990,6 +7021,10 @@ fn saved_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Pla
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
     if on_setup_page(app, url) {
         WindowPage::Setup
+    } else if desktop_connected::is_relay_page(app, url) {
+        // OpenBot from the OpenBot the app is connected to, through the relay: its own page, from
+        // a release that makes room for the window buttons. No installation here is asked.
+        WindowPage::OwnedApp
     } else if url.scheme() == "http"
         && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
         && is_owned_app_origin(app, url)
@@ -8111,6 +8146,10 @@ Its own window rather than a page of the main one, so looking at it never takes 
 screen. Closing it hides it, as the main window does; it reads everything again when shown.
 */
 fn show_status_window(app: &tauri::AppHandle) {
+    // Status is about OpenBot on this computer; a connected app has none to report on.
+    if desktop_connected::is_connected(app) {
+        return;
+    }
     if show_status_in_app(app) {
         return;
     }
@@ -8218,12 +8257,43 @@ pub(crate) struct DesktopStatus {
     log_folder: Option<String>,
 }
 
+impl DesktopStatus {
+    /// What there is to say with no OpenBot on this computer in the picture: the app's version,
+    /// its build and its log folder. Nothing of an installation here is read to answer.
+    fn of_the_app_alone<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Self {
+        DesktopStatus {
+            openbot_running: false,
+            openbot_held: false,
+            processes: Vec::new(),
+            containers: Vec::new(),
+            intelligence_stack: None,
+            intelligence_containers: Vec::new(),
+            engine: None,
+            root: String::new(),
+            app_port: None,
+            version: desktop_version(app),
+            build: build_description(
+                env!("OPENBOT_BUILD_COMMIT"),
+                env!("OPENBOT_BUILD_BRANCH"),
+                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+            ),
+            log_folder: logging::folder(app)
+                .ok()
+                .map(|folder| folder.display().to_string()),
+        }
+    }
+}
+
 #[tauri::command]
 async fn desktop_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     memory: Option<bool>,
 ) -> Result<DesktopStatus, String> {
     let memory = memory.unwrap_or(true);
+    // Connected to an OpenBot that runs elsewhere: the app's own facts, and no engine asked.
+    if desktop_connected::is_connected(&app) {
+        return Ok(desktop_connected::status(&app));
+    }
     tauri::async_runtime::spawn_blocking(move || read_desktop_status(&app, memory))
         .await
         .map_err(|error| format!("the status could not be read: {error}"))
@@ -8579,6 +8649,10 @@ where
 /// there froze the window until the download finished.
 #[tauri::command]
 async fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) -> bool {
+    // Connected to an OpenBot that runs elsewhere, none here is looked for.
+    if desktop_connected::is_connected(&app) {
+        return false;
+    }
     tauri::async_runtime::spawn_blocking(move || already_running_now(&app, &root))
         .await
         .unwrap_or(false)
@@ -10788,6 +10862,11 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
 /// Used by the tray and by a second launch, both of which happen at moments when the caller has no
 /// idea which of the two the person should be looking at.
 fn show_whichever_applies(app: &tauri::AppHandle) {
+    // Connected to an OpenBot that runs elsewhere: that one, or setup to sign in to it.
+    if desktop_connected::is_connected(app) {
+        desktop_connected::show_window(app);
+        return;
+    }
     match ports_for_shell(app) {
         Ok(ports) => restore_window_on(app, &ports),
         Err(problem) => {
@@ -11060,14 +11139,21 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 /// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
 /// Settings > This computer's, which `from` tells apart in the log.
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
-    stop_then_show_setup(app, from, false);
+    stop_then_show_setup(app, from, false, false);
+}
+
+/// Settings' Change on where OpenBot runs, while it runs on this computer: the same Stop, then the
+/// setup window at its choice of where OpenBot runs. The choice on record is not changed by
+/// asking. A Stop that failed shows setup with its failure, as any failed Stop does.
+pub(crate) fn change_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    stop_then_show_setup(app, AskedFrom::Settings, false, true);
 }
 
 /// Settings' Change on the AI model row: the same Stop, then the setup window at its AI screen,
 /// where the setup window's own Change AI connection goes. A Stop that failed shows setup as any
 /// failed Stop does, with its failure and Start, since OpenBot may still be running.
 pub(crate) fn change_ai_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    stop_then_show_setup(app, AskedFrom::Settings, true);
+    stop_then_show_setup(app, AskedFrom::Settings, true, false);
 }
 
 /// The setup page's one question on load: was it opened to change the AI connection? Answered
@@ -11103,6 +11189,7 @@ fn stop_then_show_setup<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     from: AskedFrom,
     change_ai_connection: bool,
+    choose_connection: bool,
 ) {
     std::thread::spawn(move || {
         let asked = std::time::Instant::now();
@@ -11117,6 +11204,10 @@ fn stop_then_show_setup<R: tauri::Runtime>(
         };
         logging::outcome("stop", asked, &settled);
         settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
+        // Asked for only once everything stopped, as the AI screen is.
+        if choose_connection && settled.is_ok() {
+            desktop_connected::ask_to_choose(&app);
+        }
         match settled {
             Ok(()) => report_plain(&app, "stopped", true, "OpenBot has stopped."),
             // Said rather than swallowed. A menu item that fails silently is worse than one
@@ -11159,6 +11250,14 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
 fn chose(app: &tauri::AppHandle, item: &str) {
     match item {
         "open" => show_whichever_applies(app),
+        // The two a connected app's menus carry in place of Status and the troubleshooting logs.
+        CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),
+        CONNECTED_LOG_FOLDER_MENU_ID => {
+            let _ = open_log_folder_now(app);
+        }
+        // Stop, Status and the engine's logs are about OpenBot on this computer. A connected app's
+        // menus do not carry them, and a shortcut or a stale menu does not reach them either.
+        "stop" | "status" | "logs" if desktop_connected::is_connected(app) => {}
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
@@ -11418,6 +11517,13 @@ const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 /// The same item while the logs it asked for are being gathered, which can't be chosen.
 const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
 
+/// The menus' Sign Out and Open Log Folder while the app is connected to an OpenBot that runs
+/// elsewhere. See `desktop_connected`.
+const CONNECTED_SIGN_OUT_MENU_ID: &str = "sign-out";
+const CONNECTED_SIGN_OUT_MENU_LABEL: &str = "Sign Out";
+const CONNECTED_LOG_FOLDER_MENU_ID: &str = "log-folder";
+const CONNECTED_LOG_FOLDER_MENU_LABEL: &str = "Open Log Folder";
+
 /// The troubleshooting item's label, and whether it can be chosen.
 fn troubleshooting_menu_item(gathering: bool) -> (&'static str, bool) {
     if gathering {
@@ -11439,6 +11545,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
+    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, Sign Out and
+    // Quit. Nothing here starts, stops or reports on OpenBot, because none runs on this computer.
+    let connected = desktop_connected::is_connected(app);
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
     let (logs_label, logs_enabled) =
@@ -11465,6 +11574,50 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      */
     let tray_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
         let icon = |name: &str| menu_icon(name, dark);
+        if connected {
+            let mut entries = vec![
+                MenuEntry::Icon(IconMenuItem::with_id(
+                    app,
+                    "open",
+                    "Show Window",
+                    true,
+                    icon("open"),
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    CONNECTED_LOG_FOLDER_MENU_ID,
+                    CONNECTED_LOG_FOLDER_MENU_LABEL,
+                    true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    CONNECTED_SIGN_OUT_MENU_ID,
+                    CONNECTED_SIGN_OUT_MENU_LABEL,
+                    true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Native(PredefinedMenuItem::separator(app)?),
+                MenuEntry::Native(PredefinedMenuItem::about(
+                    app,
+                    Some("About"),
+                    Some(about_openbot(desktop_version(app))),
+                )?),
+            ];
+            // The app itself still updates.
+            entries.extend(updates.then(check_for_updates).transpose()?);
+            entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
+            entries.push(MenuEntry::Icon(IconMenuItem::with_id(
+                app,
+                "quit",
+                "Quit",
+                true,
+                icon("quit"),
+                quit_menu_accelerator(),
+            )?));
+            return Ok(entries);
+        }
         let mut entries = vec![
             MenuEntry::Icon(IconMenuItem::with_id_and_native_icon(
                 app,
@@ -11546,6 +11699,30 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             true,
             None::<&str>,
         )?));
+        if connected {
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                CONNECTED_LOG_FOLDER_MENU_ID,
+                CONNECTED_LOG_FOLDER_MENU_LABEL,
+                true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                CONNECTED_SIGN_OUT_MENU_ID,
+                CONNECTED_SIGN_OUT_MENU_LABEL,
+                true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "quit",
+                "Quit",
+                true,
+                quit_menu_accelerator(),
+            )?));
+            return Ok(entries);
+        }
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
@@ -12151,6 +12328,15 @@ fn main() {
             open_log_folder,
             troubleshooting_logs,
             save_troubleshooting_logs,
+            // The app connected to an OpenBot that runs elsewhere. See `desktop_connected`.
+            desktop_connected::connection,
+            desktop_connected::check_openbot_address,
+            desktop_connected::connect_to_openbot,
+            desktop_connected::cancel_connect,
+            desktop_connected::show_connected,
+            desktop_connected::sign_out_of_openbot,
+            desktop_connected::use_this_computer,
+            desktop_connected::take_connection_notice,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
@@ -12300,10 +12486,16 @@ fn main() {
             get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
             desktop_stall::initialize(app.handle());
+            // Connected to an OpenBot that runs elsewhere, no installation here is looked for.
+            let connected = desktop_connected::is_connected(app.handle());
+            if connected {
+                log::info!("[launch] connected to an OpenBot that runs elsewhere");
+            }
             if let Some(root) = app
                 .path()
                 .app_config_dir()
                 .ok()
+                .filter(|_| !connected)
                 .and_then(|config| preparation::selected_root(&config))
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
@@ -13149,6 +13341,7 @@ mod tests {
     include!("composio_ipc_tests.rs");
     include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
+    include!("connected_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]

@@ -1,0 +1,617 @@
+/*!
+The app connected to an OpenBot that runs somewhere else: what the setup window and OpenBot's own
+page may ask, and what the window, the menus and Quit do differently while it is.
+
+The work is in `openbot_desktop_lib::connected`. This is the wiring: the choice read from
+`connection.json`, the sign-in started and cancelled, the relay started and stopped with the window
+pointed at it, and the sentence kept for the setup window when a sign-in ends.
+
+While the choice is to be connected, nothing of an installation on this computer is started, read
+or written: `is_connected` is what every such path asks first.
+*/
+
+use crate::{Problem, Shell};
+use openbot_desktop_lib::connected::{address, choice, credentials, relay, sign_in, Kind};
+use serde::Serialize;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
+
+/// What a page that asks for something of this computer's own OpenBot is told while connected.
+pub const NOTHING_HERE: &str = "This app is connected to an OpenBot that runs somewhere else, so \
+                                there's nothing to do here on this computer.";
+
+/// Told to the setup window while OpenBot shows in connected mode: `{ kind, message }`.
+pub const ENDED_EVENT: &str = "connection-ended";
+
+/// The connection this session holds, and what the setup window is to be told next.
+#[derive(Default)]
+pub struct State {
+    /// The relay the window shows OpenBot through, and its sign-in. None while not showing.
+    live: Mutex<Option<Live>>,
+    /// A sign-in waiting for the browser, for Cancel.
+    attempt: Mutex<Option<Arc<sign_in::Attempt>>>,
+    /// Kept for the setup page that has not loaded yet, and given once (`take_connection_notice`).
+    notice: Mutex<Option<Notice>>,
+    /// In place of the app's configuration folder, in a test.
+    config_dir: Mutex<Option<PathBuf>>,
+    /// In place of the system's credential store, in a test.
+    store: Mutex<Option<credentials::Store>>,
+    /// The origin of a relay taken to be showing, in a test of the window's own rules: a real one
+    /// needs an OpenBot to sign in to, which the library's tests have and these do not.
+    #[cfg(test)]
+    relay_for_test: Mutex<Option<String>>,
+}
+
+struct Live {
+    relay: relay::Relay,
+    session: Arc<sign_in::Session>,
+}
+
+/// What the setup window shows when it loads after a connection ended, or after Settings asked to
+/// change it (`choose`, with no sentence).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Notice {
+    pub kind: &'static str,
+    pub message: Option<String>,
+}
+
+/// The choice, as the setup window and OpenBot's page are told it.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Connection {
+    pub mode: choice::Mode,
+    pub address: Option<String>,
+    pub organization_id: Option<String>,
+    /// Whether a sign-in for that address is in the credential store. Only the setup window asks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_in: Option<bool>,
+}
+
+fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_, Shell> {
+    app.state::<Shell>()
+}
+
+fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    let given = state(app).connected.config_dir.lock().unwrap().clone();
+    // A test never reads the choice of whoever runs it: only the folder it was given.
+    if cfg!(test) {
+        return given;
+    }
+    given.or_else(|| app.path().app_config_dir().ok())
+}
+
+fn store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> credentials::Store {
+    let given = state(app).connected.store.lock().unwrap().clone();
+    given.unwrap_or_else(credentials::Store::system)
+}
+
+/// The person's choice on record: on this computer unless `connection.json` says otherwise.
+pub fn chosen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> choice::Choice {
+    config_dir(app)
+        .map(|dir| choice::read(&dir))
+        .unwrap_or_default()
+}
+
+fn keep<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    chosen: &choice::Choice,
+) -> Result<(), Problem> {
+    let written = config_dir(app)
+        .ok_or_else(|| "the app has no configuration folder".to_owned())
+        .and_then(|dir| choice::write(&dir, chosen).map_err(|error| error.to_string()));
+    written.map_err(|detail| {
+        Problem::with(
+            "OpenBot couldn't save your choice on this computer. Try again.",
+            detail,
+        )
+    })
+}
+
+/// Whether the app is connected to an OpenBot that runs elsewhere: it shows one now, or the choice
+/// on record is to. Then nothing of this computer's own installation is touched.
+pub fn is_connected<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    state(app).connected.live.lock().unwrap().is_some()
+        || chosen(app).mode == choice::Mode::Connected
+}
+
+/// The relay's origin, `http://127.0.0.1:<port>`, while the window shows OpenBot through it.
+pub fn relay_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    #[cfg(test)]
+    if let Some(origin) = state(app).connected.relay_for_test.lock().unwrap().clone() {
+        return Some(origin);
+    }
+    state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.relay.origin())
+}
+
+/// Whether `url` is a page the relay serves: OpenBot's own, from the OpenBot it is connected to.
+pub fn is_relay_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
+    relay_origin(app).is_some_and(|origin| origin == url.origin().ascii_serialization())
+}
+
+/// Refuse something that is about this computer's own OpenBot, while connected to another.
+pub fn nothing_here<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    if is_connected(app) {
+        Err(NOTHING_HERE.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// The same refusal, for the setup window's commands that start or install something here.
+pub fn local_only<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
+    nothing_here(app).map_err(Problem::plain)
+}
+
+pub fn connection_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, for_setup: bool) -> Connection {
+    let chosen = chosen(app);
+    let connected = chosen.mode == choice::Mode::Connected;
+    let signed_in = for_setup.then(|| {
+        chosen.connected_to().is_some_and(|address| {
+            state(app).connected.live.lock().unwrap().is_some()
+                || store(app).get(address).is_ok_and(|saved| saved.is_some())
+        })
+    });
+    Connection {
+        mode: chosen.mode,
+        // The setup window is given a remembered address to offer again; OpenBot's page is told
+        // of one only while connected to it.
+        address: chosen.address.filter(|_| connected || for_setup),
+        organization_id: chosen.organization_id.filter(|_| connected),
+        signed_in,
+    }
+}
+
+/// The setup window's first question: which of the two, where, and whether it is signed in.
+#[tauri::command]
+pub async fn connection<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Connection {
+    tauri::async_runtime::spawn_blocking(move || connection_now(&app, true))
+        .await
+        .unwrap_or(Connection {
+            mode: choice::Mode::Local,
+            address: None,
+            organization_id: None,
+            signed_in: Some(false),
+        })
+}
+
+#[derive(Serialize)]
+pub struct Checked {
+    address: String,
+}
+
+/// Whether there is an OpenBot this app can connect to at `address`, and the address as kept.
+#[tauri::command]
+pub async fn check_openbot_address(address: String) -> Result<Checked, Problem> {
+    let asked = std::time::Instant::now();
+    let checked =
+        blocking(move || address::check(&address).map(|(address, _)| Checked { address })).await;
+    openbot_desktop_lib::logging::outcome("connect check", asked, &checked);
+    checked
+}
+
+/// Connect: check the address, sign in through the browser, start the relay and show OpenBot.
+/// The choice is kept only once all of that has worked.
+#[tauri::command]
+pub async fn connect_to_openbot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    address: String,
+) -> Result<(), Problem> {
+    let asked = std::time::Instant::now();
+    log::info!("[connect] asked");
+    let connected = blocking(move || connect_now(&app, &address)).await;
+    openbot_desktop_lib::logging::outcome("connect", asked, &connected);
+    connected
+}
+
+/// Stop a sign-in that is waiting for the browser.
+#[tauri::command]
+pub async fn cancel_connect<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    if let Some(attempt) = state(&app).connected.attempt.lock().unwrap().as_ref() {
+        attempt.cancel();
+    }
+}
+
+/// At launch, connected and signed in: the saved sign-in made current, the relay started, and the
+/// window on OpenBot. `session-ended` when the saved sign-in no longer works.
+#[tauri::command]
+pub async fn show_connected<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
+    let asked = std::time::Instant::now();
+    log::info!("[connect] asked to show the connected OpenBot");
+    let shown = blocking(move || show_connected_now(&app)).await;
+    openbot_desktop_lib::logging::outcome("connect show", asked, &shown);
+    shown
+}
+
+/// Sign out, and the setup window. The address stays remembered.
+#[tauri::command]
+pub async fn sign_out_of_openbot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), Problem> {
+    blocking(move || {
+        sign_out_now(&app);
+        crate::show_setup(app).map_err(Problem::from)
+    })
+    .await
+}
+
+/// Back to OpenBot on this computer: signed out, the choice switched, and the setup window, which
+/// carries on as it does for an installation here.
+#[tauri::command]
+pub async fn use_this_computer<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
+    blocking(move || {
+        sign_out_now(&app);
+        let mut chosen = chosen(&app);
+        chosen.mode = choice::Mode::Local;
+        chosen.organization_id = None;
+        keep(&app, &chosen)?;
+        log::info!("[connect] the choice is OpenBot on this computer");
+        crate::refresh_menus(&app);
+        crate::show_setup(app).map_err(Problem::from)
+    })
+    .await
+}
+
+/// What the setup window is to show after a connection ended or was asked to change. Once.
+#[tauri::command]
+pub async fn take_connection_notice<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Option<Notice> {
+    state(&app).connected.notice.lock().unwrap().take()
+}
+
+/// The setup window's next `take_connection_notice` says to open at the choice of where OpenBot
+/// runs, showing no failure.
+pub fn ask_to_choose<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    *state(app).connected.notice.lock().unwrap() = Some(Notice {
+        kind: "choose",
+        message: None,
+    });
+}
+
+/// Settings' Change on where OpenBot runs, and the setup window at that choice.
+///
+/// Connected: signed out, still connected to the address on record. On this computer: OpenBot
+/// stopped, exactly as Settings' Stop stops it, and the choice on record left as it is.
+pub fn change_connection_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    if !is_connected(app) {
+        crate::change_connection_from_settings(app.clone());
+        return Ok(());
+    }
+    sign_out_now(app);
+    ask_to_choose(app);
+    crate::show_setup(app.clone())
+}
+
+/// The organisation the person picked in OpenBot's switcher, kept beside the address and named by
+/// the relay on every request from now on. None clears it.
+pub fn set_organization_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    organization_id: Option<String>,
+) -> Result<(), String> {
+    if let Some(id) = &organization_id {
+        if !choice::valid_organization(id) {
+            return Err("That isn't an organization OpenBot knows.".into());
+        }
+    }
+    let mut chosen = chosen(app);
+    if chosen.connected_to().is_none() {
+        return Err("OpenBot isn't connected to an address.".into());
+    }
+    chosen.organization_id = organization_id;
+    keep(app, &chosen).map_err(|problem| problem.said)?;
+    if let Some(live) = state(app).connected.live.lock().unwrap().as_ref() {
+        live.relay
+            .set_organization(chosen.organization_id.as_deref());
+    }
+    Ok(())
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, Problem> + Send + 'static,
+) -> Result<T, Problem> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| Problem::with("OpenBot couldn't do that. Try again.", error.to_string()))
+        .and_then(|done| done)
+}
+
+fn connect_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, typed: &str) -> Result<(), Problem> {
+    let (address, metadata) = address::check(typed)?;
+    let attempt = Arc::new(sign_in::Attempt::default());
+    if let Some(earlier) = state(app)
+        .connected
+        .attempt
+        .lock()
+        .unwrap()
+        .replace(attempt.clone())
+    {
+        earlier.cancel();
+    }
+    let signed_in = sign_in::sign_in(
+        &address,
+        &metadata,
+        store(app),
+        &attempt,
+        sign_in::WAIT,
+        // The person's own browser, where they are signed in to their accounts.
+        |authorize| {
+            tauri_plugin_opener::open_url(authorize, None::<&str>)
+                .map_err(|error| error.to_string())
+        },
+    );
+    {
+        let shell = state(app);
+        let mut waiting = shell.connected.attempt.lock().unwrap();
+        if waiting
+            .as_ref()
+            .is_some_and(|waiting| Arc::ptr_eq(waiting, &attempt))
+        {
+            *waiting = None;
+        }
+    }
+    let session = Arc::new(signed_in?);
+
+    // An OpenBot running on this computer is stopped first, as Stop stops it.
+    if let Err(problem) = stop_local_first(app) {
+        let _ = session.sign_out();
+        return Err(problem);
+    }
+    let earlier = chosen(app);
+    let chosen = choice::Choice {
+        mode: choice::Mode::Connected,
+        // An organisation belongs to the OpenBot it was picked at.
+        organization_id: earlier
+            .organization_id
+            .filter(|_| earlier.address.as_deref() == Some(address.as_str())),
+        address: Some(address),
+    };
+    let shown = show(app, session.clone(), chosen.organization_id.as_deref())
+        .and_then(|()| keep(app, &chosen));
+    if shown.is_err() {
+        stop_relay(app);
+        let _ = session.sign_out();
+    }
+    shown
+}
+
+fn show_connected_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
+    // Already showing in this session: the window goes back to it.
+    if let Some(origin) = relay_origin(app) {
+        return navigate(app, &origin);
+    }
+    let chosen = chosen(app);
+    let Some(address) = chosen.connected_to() else {
+        return Err(Problem::plain(
+            "OpenBot isn't connected to an address. Choose where OpenBot runs.",
+        ));
+    };
+    let metadata = address::probe(address)?;
+    let session = sign_in::resume(address, &metadata, store(app))?;
+    show(app, Arc::new(session), chosen.organization_id.as_deref())
+}
+
+/// Start the relay for `session` and point the window at it.
+fn show<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    session: Arc<sign_in::Session>,
+    organization: Option<&str>,
+) -> Result<(), Problem> {
+    let host = session.host().to_owned();
+    let listening = app.clone();
+    let listening_host = host.clone();
+    let relay = relay::Relay::start(session.clone(), organization, move |why| match why {
+        relay::Ended::SessionEnded => session_ended(&listening, &listening_host),
+        relay::Ended::Unreachable => {
+            let _ = listening.emit(
+                ENDED_EVENT,
+                Notice {
+                    kind: Kind::Unreachable.id(),
+                    message: Some(Kind::Unreachable.said(&listening_host)),
+                },
+            );
+        }
+    })
+    .map_err(|detail| {
+        Problem::with(
+            "OpenBot couldn't open its connection on this computer. Try again.",
+            detail,
+        )
+    })?;
+    let origin = relay.origin();
+    let entry = relay.entry();
+    stop_relay(app);
+    *state(app).connected.live.lock().unwrap() = Some(Live { relay, session });
+    // The relay's pages are OpenBot's own: the window's controls, theme, notifications and the
+    // rest, exactly as for an OpenBot this computer runs.
+    crate::trust_owned_app(app, &origin);
+    crate::refresh_menus(app);
+    log::info!("[connect] showing the OpenBot at {host}");
+    // First to the relay's entry, which gives the window this run's cookie and sends it on.
+    navigate(app, &entry)?;
+    crate::bring_to_front(app, "OpenBot is showing");
+    Ok(())
+}
+
+fn navigate<R: tauri::Runtime>(app: &tauri::AppHandle<R>, to: &str) -> Result<(), Problem> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there to show it in")?;
+    let destination: tauri::Url = to
+        .parse()
+        .map_err(|_| Problem::plain("OpenBot could not navigate to its app."))?;
+    window
+        .navigate(destination)
+        .map_err(|_| Problem::plain("OpenBot could not navigate to its app."))
+}
+
+/// Stop the relay, if one runs. The sign-in is left as it is.
+pub fn stop_relay<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let live = state(app).connected.live.lock().unwrap().take();
+    if let Some(live) = live {
+        forget_origin(app, &live.relay.origin());
+        drop(live);
+    }
+}
+
+/// A relay that has stopped is no longer OpenBot's page: its port is anybody's again.
+fn forget_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, origin: &str) {
+    state(app)
+        .owned_app_origins
+        .lock()
+        .unwrap()
+        .retain(|trusted| trusted != origin);
+}
+
+/// Sign out of the OpenBot on record: revoked there as far as it answers, forgotten here, the
+/// relay stopped, and the organisation picked there cleared. The address stays.
+pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(attempt) = state(app).connected.attempt.lock().unwrap().take() {
+        attempt.cancel();
+    }
+    let live = state(app).connected.live.lock().unwrap().take();
+    let mut chosen = chosen(app);
+    match live {
+        Some(live) => {
+            forget_origin(app, &live.relay.origin());
+            if let Err(problem) = live.session.sign_out() {
+                log::warn!(
+                    "[connect] could not forget the sign-in: {}",
+                    problem.detail.unwrap_or(problem.said)
+                );
+            }
+        }
+        None => {
+            if let Some(address) = chosen.connected_to() {
+                let metadata = address::probe(address).ok();
+                if let Err(problem) =
+                    sign_in::sign_out_saved(address, metadata.as_ref(), &store(app))
+                {
+                    log::warn!(
+                        "[connect] could not forget the sign-in: {}",
+                        problem.detail.unwrap_or(problem.said)
+                    );
+                }
+            }
+        }
+    }
+    if chosen.organization_id.take().is_some() {
+        if let Err(problem) = keep(app, &chosen) {
+            log::warn!(
+                "[connect] could not clear the organization: {}",
+                problem.detail.unwrap_or(problem.said)
+            );
+        }
+    }
+    crate::refresh_menus(app);
+}
+
+/// The relay said the sign-in is over: it is stopped, the setup window comes back, and the
+/// sentence waits for it.
+pub(crate) fn session_ended<R: tauri::Runtime>(app: &tauri::AppHandle<R>, host: &str) {
+    stop_relay(app);
+    let notice = Notice {
+        kind: Kind::SessionEnded.id(),
+        message: Some(Kind::SessionEnded.said(host)),
+    };
+    *state(app).connected.notice.lock().unwrap() = Some(notice.clone());
+    crate::refresh_menus(app);
+    if let Err(error) = crate::show_setup(app.clone()) {
+        log::warn!("[connect] could not show setup after the sign-in ended: {error}");
+    }
+    let _ = app.emit(ENDED_EVENT, notice);
+}
+
+/// An OpenBot running on this computer when the person connects to another: stopped, the way Stop
+/// stops it, before the app is connected. One that is not running is left exactly as it is.
+fn stop_local_first<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
+    let shell = state(app);
+    let held = shell.root.lock().unwrap().is_some() || shell.containers.lock().unwrap().is_some();
+    let root = crate::cleanup_root(&shell, &openbot_desktop_lib::stack::default_root());
+    let running = held
+        || (openbot_desktop_lib::deployment::installed(&root).is_some()
+            && crate::already_running_now(app, &root.to_string_lossy()));
+    if !running {
+        return Ok(());
+    }
+    log::info!("[connect] stopping OpenBot on this computer first");
+    crate::stop_everything(app, &root)
+        .into_result()
+        .map_err(|detail| {
+            Problem::with(
+                "OpenBot on this computer couldn't finish stopping, so the app didn't connect. \
+                 Try again.",
+                detail,
+            )
+        })
+}
+
+/// Show Window, from the tray or a second launch, while connected: OpenBot through the relay when
+/// it is showing, and the setup window otherwise, which signs in or shows why it can't.
+pub fn show_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let current = window.url().ok();
+    let destination = match relay_origin(app) {
+        Some(origin) => origin.parse::<tauri::Url>().ok(),
+        None => crate::setup_destination(app).ok(),
+    };
+    if let Some(destination) = destination {
+        let already_showing = current
+            .as_ref()
+            .is_some_and(|current| crate::same_window_app(current, &destination));
+        if !already_showing {
+            let _ = window.navigate(destination);
+        }
+    }
+    let _ = window.show();
+    let _ = window.unminimize();
+    crate::focus(&window, "OpenBot is showing");
+}
+
+/// What `status` answers OpenBot's page while connected: the app's own version, build and log
+/// folder, and nothing of this computer's own OpenBot, which is not asked.
+pub fn status<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::DesktopStatus {
+    crate::DesktopStatus::of_the_app_alone(app)
+}
+
+/// Quit while connected: only the relay stops. Nothing on this computer runs because of it.
+pub fn quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(attempt) = state(app).connected.attempt.lock().unwrap().take() {
+        attempt.cancel();
+    }
+    stop_relay(app);
+    log::info!("[quit] connected to an OpenBot that runs elsewhere; nothing to stop here");
+}
+
+/// Sign Out in the tray and the window menu.
+pub fn sign_out_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    std::thread::spawn(move || {
+        sign_out_now(&app);
+        if let Err(error) = crate::show_setup_and_focus(app) {
+            log::warn!("[connect] could not show setup after signing out: {error}");
+        }
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn use_for_test<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    config_dir: PathBuf,
+    store: credentials::Store,
+) {
+    *state(app).connected.config_dir.lock().unwrap() = Some(config_dir);
+    *state(app).connected.store.lock().unwrap() = Some(store);
+}
+
+/// As `show` leaves things once a relay is up at `origin`: taken to be showing, and trusted.
+#[cfg(test)]
+pub(crate) fn showing_for_test<R: tauri::Runtime>(app: &tauri::AppHandle<R>, origin: &str) {
+    *state(app).connected.relay_for_test.lock().unwrap() = Some(origin.to_owned());
+    crate::trust_owned_app(app, origin);
+}

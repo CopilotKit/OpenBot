@@ -9,13 +9,50 @@ behind the design. The code comments named here hold the details; this page is t
 The desktop app installs and runs OpenBot for one person on one computer, with CopilotKit
 Intelligence running on the same computer. The person needs no terminal, no developer tools and no
 container engine of their own. The app is standalone: there is no hosted or self-hosted
-Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot.
+Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot. The
+one other thing it can do is show an OpenBot that already runs somewhere else, described next.
 
 Installers are published for Apple silicon and Intel Macs and for Windows x64. On an Intel Mac the
 app cannot install Podman, because Podman publishes its Mac installer for Apple silicon only, so
 that person needs Docker Desktop or Podman Desktop first (`install::podman_download`). Windows on
 ARM cannot run WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64
 machine.
+
+## On this computer, or connected to an OpenBot
+
+At setup, and later from Settings, a person chooses where OpenBot runs. **On this computer** is
+everything the rest of this page describes. **Connect to an OpenBot** takes one address, such as
+`https://openbot.example.com`, and shows that OpenBot in the app's window. Nothing is installed or
+started on the computer, and no account, license or model key is asked for. The choice is kept in
+`connection.json` in the app's configuration folder (`connected/choice.rs`), and switching back
+leaves a local installation, its folder and its data exactly as they were.
+
+The person signs in to that OpenBot in their own browser: OAuth 2.1 authorization code with PKCE
+and a redirect to `http://127.0.0.1:<port>/callback` (`connected/sign_in.rs`). The refresh token is
+kept in the operating system's credential store (Keychain, Credential Manager or the Secret
+Service) and the access token only in memory; neither is written to a file or a log, and the page
+never holds one. The window loads the app from a relay on `127.0.0.1` (`connected/relay.rs`), which
+passes each request on to the one address the person typed with the access token added, and
+refreshes the token before it ends. The relay answers only its own `127.0.0.1:<port>`, only to the
+window (a secret made for each run, carried in a cookie the relay sets), and never follows a
+redirect to another host.
+
+What is about OpenBot on this computer is not there while the app is connected:
+
+| On this computer | Connected to an OpenBot |
+|---|---|
+| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Sign Out and Quit. |
+| Installing and updating OpenBot's services (downloads, the engine, the upgrade at Start) | Never run. The app still updates itself. |
+| The local Intelligence, the account sign-in and the 30-day license | Not asked for. The OpenBot it connects to has its own. |
+| Model keys and model sign-ins kept on this computer | Not shown. That OpenBot's admin sets its models. |
+| Settings, Computer: services, memory and the engine | One Connection section: the address, Sign out, and using OpenBot on this computer. The app's version, updates and log folder stay. |
+| Local folder access for Bots, and this computer as a Bot's computer | Not started. Bots use the computers that OpenBot gives them. |
+| The connection watcher and Learning's model on this computer | Not started. |
+| Quit stopping everything | Quit closes the app. Nothing on the computer runs because of it. |
+
+Dictation, notifications, zoom, the window's place, the theme, `openbot://` links and outside
+links opening in the browser work the same either way. An OpenBot running on this computer when
+the person connects to another is stopped first, as Stop stops it.
 
 ## The flow
 
