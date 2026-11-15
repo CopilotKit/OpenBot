@@ -79,11 +79,14 @@ function serving() {
         ? Response.json({ detail: "Routine not found." }, { status: 404 })
         : Response.json({ runs: [], nextCursor: null });
     }
-    if (path === ROUTINES_PATH)
+    if (path === ROUTINES_PATH) {
+      // A real list takes a moment to come back, and the page is still up until it does.
+      if (deleted) await new Promise((resolve) => setTimeout(resolve, 150));
       return Response.json({
         routines: deleted ? [] : [ROUTINE],
         nextCursor: null,
       });
+    }
     const bots = answerBotsList(path, init, {
       visible: [
         { id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" },
