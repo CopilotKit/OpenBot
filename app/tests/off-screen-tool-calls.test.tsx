@@ -26,8 +26,8 @@ import { CopilotProvider } from "@/lib/copilot/provider";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { COMPUTER_STEPS_PATH } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import {
   ANNOUNCE_COMPONENTS_PATH,
   announcedResponse,
@@ -37,6 +37,7 @@ import {
   checkComponentPath,
   checkResponse,
 } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A tool call that arrives after its person has left the conversation acts for the Bot that made it.
@@ -372,8 +373,8 @@ beforeAll(() => {
           },
         });
       // Only the other Bot makes coworkers.
-      if (url.pathname === `/api/plugins/for/${OTHER}`)
-        return NativeResponse.json({
+      if (url.pathname === botGrantsPath(OTHER))
+        return botGrantsResponse({
           skills: [
             {
               slug: "bot-creator",

@@ -30,6 +30,8 @@ import { SkillPage } from "@/components/manage/skill-page";
 import { SkillsPage } from "@/components/manage/skills-page";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { skillKeys } from "@/lib/skills/queries";
+import { answerAppsApi } from "./apps-api";
+import { botGrantPath } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import {
@@ -102,6 +104,31 @@ beforeEach(() => {
         hidden: [],
       });
       if (bots) return bots;
+      const apps = answerAppsApi(input, init, {
+        servers: [
+          {
+            id: "notion",
+            title: "Notion",
+            logo: null,
+            tools: [
+              {
+                name: "search_pages",
+                description: "Search pages by title. Returns ids.",
+                ref: "notion/search_pages",
+                effect: "read",
+              },
+              {
+                name: "create_page",
+                description: "Create a page.",
+                ref: "notion/create_page",
+                effect: "write",
+              },
+            ],
+          },
+        ],
+        botsMayCallBack: true,
+      });
+      if (apps) return apps;
       if (path === SKILLS_PATH) {
         const cursor = new URL(url, "http://localhost").searchParams.get(
           "cursor",
@@ -111,37 +138,6 @@ beforeEach(() => {
           ? skillsResponse(skills.slice(0, firstPage), "next")
           : skillsResponse(skills);
       }
-      if (path === "/api/plugins")
-        return json({
-          catalogue: [],
-          servers: [
-            {
-              id: "notion",
-              title: "Notion",
-              logo: null,
-              tools: [
-                {
-                  name: "search_pages",
-                  description: "Search pages by title. Returns ids.",
-                  ref: "notion/search_pages",
-                  effect: "read",
-                },
-                {
-                  name: "create_page",
-                  description: "Create a page.",
-                  ref: "notion/create_page",
-                  effect: "write",
-                },
-              ],
-            },
-          ],
-          // Skills are read from their own list, never from here.
-          skills: [],
-          botsMayCallBack: true,
-          redirectUri: null,
-          composioConfigured: false,
-          authorizesPerAction: false,
-        });
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -305,18 +301,16 @@ describe("a skill's page", () => {
     fireEvent.click(grace);
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toEqual({
-      method: "POST",
-      path: "/api/plugins/grants",
-      body: { kind: "skill", ref: "triage", agentId: "bot-grace" },
+      method: "PUT",
+      path: botGrantPath("bot-grace", "skill:triage"),
+      body: {},
     });
     fireEvent.click(
       view.getByRole("switch", { name: "Ada offers Triage the inbox" }),
     );
     await waitFor(() => expect(writes).toHaveLength(2));
     expect(writes[1]?.method).toBe("DELETE");
-    expect(writes[1]?.path).toBe(
-      "/api/plugins/grants?kind=skill&ref=triage&agentId=bot-ada",
-    );
+    expect(writes[1]?.path).toBe(botGrantPath("bot-ada", "skill:triage"));
   });
 
   test("deleting asks first, then goes back to the list", async () => {

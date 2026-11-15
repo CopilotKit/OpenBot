@@ -11,7 +11,6 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { agentKeys } from "@/lib/agents/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
-import { pluginKeys } from "@/lib/plugins/queries";
 import { Route as ActivityRoute } from "@/routes/_authed/settings/_personal/activity";
 import { AUDIT_PATH, auditPage } from "./audit-api";
 import { settleReactWork } from "./settle-react-work";
@@ -95,11 +94,6 @@ test("Activity names what it shows as the newest events, and Show older events r
     selfHostBanner: false,
     localEvaluation: true,
     edition: "personal",
-  });
-  queryClient.setQueryData(pluginKeys.page(), {
-    catalogue: [],
-    servers: [],
-    skills: [],
   });
   queryClient.setQueryData(agentKeys.list(false), [
     { id: "personal-assistant", name: "Personal Assistant" },

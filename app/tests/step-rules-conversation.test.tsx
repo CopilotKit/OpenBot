@@ -35,8 +35,8 @@ import {
   COMPUTER_STEPS_PATH,
   computerStepResponse,
 } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import {
   ANNOUNCE_COMPONENTS_PATH,
   announcedResponse,
@@ -45,6 +45,7 @@ import {
   CHECK_COMPONENT,
   checkResponse,
 } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A step: the tool calls a Bot asks for in one response. Claude asks for several at once by default,
@@ -295,8 +296,7 @@ beforeAll(() => {
         return NativeResponse.json({ botId: bot, state: "ready" });
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${bot}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(bot)) return botGrantsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,

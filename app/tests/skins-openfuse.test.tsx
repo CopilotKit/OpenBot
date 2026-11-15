@@ -32,7 +32,6 @@ import type { ChannelSummary } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
 import { isNavigationLink, navigationFor } from "@/lib/navigation";
-import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -59,6 +58,7 @@ import {
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
+import { type AppsFixture, answerAppsApi } from "./apps-api";
 import {
   activityOf,
   answerBotAttention,
@@ -387,7 +387,7 @@ const memories: MemoryRecord[] = [
   },
 ];
 
-const plugins: PluginsPage = {
+const plugins: AppsFixture = {
   catalogue: [
     {
       key: "notion",
@@ -409,10 +409,9 @@ const plugins: PluginsPage = {
     },
   ],
   servers: [
-    { id: "notion" },
-    { id: "google-drive" },
-  ] as unknown as PluginsPage["servers"],
-  skills: [],
+    { id: "notion", title: "Notion", provenance: "first-party" },
+    { id: "google-drive", title: "Google Drive", provenance: "first-party" },
+  ],
   botsMayCallBack: false,
   redirectUri: null,
   composioConfigured: false,
@@ -448,7 +447,6 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     [`${ROUTINES_PATH}?limit=100`]: { routines, nextCursor: null },
     [`${GOALS_PATH}?limit=100`]: { goals: responsibilities, nextCursor: null },
     "/api/memory": { memories },
-    "/api/plugins": plugins,
     "/api/plugins/connections": {
       connections: [{ serverId: "notion", holder: "person" }],
       redirectUri: null,
@@ -487,6 +485,8 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         );
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
+      const apps = answerAppsApi(input, init, plugins);
+      if (apps) return apps;
       const waiting = answerBotAttention(input, init, { bots: attention });
       if (waiting) return waiting;
       const detail = path.match(

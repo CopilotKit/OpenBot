@@ -14,6 +14,7 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { botComponentsPath, botComponentsResponse } from "./components-api";
 
@@ -199,8 +200,8 @@ beforeAll(() => {
         input instanceof Request ? input : new Request(url, init);
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/failed-run-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("failed-run-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("failed-run-bot"))
         return NativeResponse.json({
           bot: {

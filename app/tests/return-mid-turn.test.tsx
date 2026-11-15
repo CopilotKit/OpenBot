@@ -22,9 +22,10 @@ import {
 } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import { botComponentsPath, botComponentsResponse } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * Switching away from a conversation the Bot is working in, and straight back.
@@ -214,8 +215,7 @@ beforeAll(() => {
         return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,

@@ -29,8 +29,14 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
+  directoryProvider,
   moreAppsRow,
   moreAppsSectionDescription,
 } from "@/lib/plugins/provider-vocabulary";
@@ -39,8 +45,6 @@ import {
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { toolsListError } from "@/lib/plugins/tools-error";
 
@@ -126,7 +130,9 @@ export function PluginsListPage({
   children?: React.ReactNode;
 } = {}) {
   const paths = useManagePaths();
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
   /*
    * Requests waiting per app, so an administrator sees which app somebody is asking about from the
@@ -134,10 +140,10 @@ export function PluginsListPage({
    */
   const requestCounts = usePendingRequestCounts();
   // A NAME for the "More apps" row, which cannot be read off a row that may not exist yet.
-  const provider = pluginsProvider(plugins.data);
+  const provider = directoryProvider(setup.data);
   const moreApps = moreAppsRow(
     provider,
-    plugins.data?.composioConfigured ?? false,
+    setup.data?.directoryAvailable ?? false,
   );
 
   /*
@@ -150,13 +156,13 @@ export function PluginsListPage({
       (row) => row.serverId,
     ),
   );
-  const added = new Set((plugins.data?.servers ?? []).map((s) => s.id));
-  const explore = (plugins.data?.catalogue ?? []).filter(
+  const added = new Set((plugins.data ?? []).map((s) => s.id));
+  const explore = (catalogue.data ?? []).filter(
     (entry) => !added.has(entry.key),
   );
   /** Keyed by catalogue key, which is also the server id, so a row can ask how it is reached. */
   const authByKey = new Map(
-    (plugins.data?.catalogue ?? []).map((entry) => [entry.key, entry.auth]),
+    (catalogue.data ?? []).map((entry) => [entry.key, entry.auth]),
   );
 
   return (
@@ -165,7 +171,8 @@ export function PluginsListPage({
       title="Apps"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
-      {plugins.isPending ? null : plugins.error ? (
+      {plugins.isPending || catalogue.isPending ? null : plugins.error ||
+        catalogue.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
           Couldn't load apps. Reload the page.
         </p>
@@ -181,13 +188,13 @@ export function PluginsListPage({
             description="Added for everybody. Open one to set it up and choose which Bots get its tools."
             title="Connected"
           >
-            {plugins.data?.servers.length === 0 ? (
+            {plugins.data?.length === 0 ? (
               <PageEmpty icon={IconPlug} title="Nothing connected yet">
                 Pick one from the list below.
               </PageEmpty>
             ) : (
               <PageRows>
-                {plugins.data?.servers.map((server, index) => {
+                {plugins.data?.map((server, index) => {
                   return (
                     <React.Fragment key={server.id}>
                       {/*
@@ -239,7 +246,7 @@ export function PluginsListPage({
                           <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                         </ItemActions>
                       </Item>
-                      {index !== (plugins.data?.servers.length ?? 0) - 1 && (
+                      {index !== (plugins.data?.length ?? 0) - 1 && (
                         <Separator />
                       )}
                     </React.Fragment>

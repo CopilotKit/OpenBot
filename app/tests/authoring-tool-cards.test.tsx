@@ -13,6 +13,7 @@ import { skillListQueryOptions } from "@/lib/skills/queries";
 import { SKILL_CREATOR_SLUG } from "@/lib/skills/proposal";
 import { queryClient } from "@/query-client";
 import { ME_PATH, meResponse } from "./accounts-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import { SKILLS_PATH, skillsResponse, type TodaySkill } from "./skills-api";
@@ -86,8 +87,8 @@ function serving(grant: string) {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://127.0.0.1").pathname;
-      if (path === `/api/plugins/for/${BOT}`)
-        return Response.json({
+      if (path === botGrantsPath(BOT))
+        return botGrantsResponse({
           tools: [],
           skills: [
             { slug: grant, title: grant, summary: "", instructions: "" },

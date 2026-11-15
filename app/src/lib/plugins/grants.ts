@@ -1,13 +1,18 @@
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
-import { desktopConsentQuery } from "@/lib/desktop/shell";
+import {
+  authorizeConnectionAction,
+  authorizeSharedConnectionAction,
+  getConnectionAuthorizations,
+  getSharedConnectionAuthorizations,
+} from "@/lib/api/generated/connections/connections";
+import type { ActionAuthorizations } from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { desktopShell } from "@/lib/desktop/shell";
 import type { ConsentAction } from "./enablement-notes";
 
 /**
- * What one account holds at one app, action by action, as `GET /servers/:id/grants` answers it.
- *
- * The same four states the server's `GrantState` names. Declared here rather than imported because
- * `app/` never imports from `server/`; the route's own docblock is the contract.
+ * What one account holds at one app, action by action, as getConnectionAuthorizations (a person's
+ * own) or getSharedConnectionAuthorizations (an app's shared account) answers it.
  */
 export type GrantState =
   | {
@@ -22,24 +27,51 @@ export type GrantState =
       authorization: "held" | "not-required";
     }
   | { action: string; state: "needs-consent"; scopes: string[] }
-  | { action: string; state: "needs-operator"; missing: string[] }
+  | { action: string; state: "needs-admin"; missing: string[] }
   | { action: string; state: "unknown"; reason: string };
 
 export const grantKeys = {
-  forServer: (serverId: string) => ["plugins", "grants", serverId] as const,
+  forServer: (serverId: string, shared = false) =>
+    ["plugins", "grants", serverId, { shared }] as const,
 };
 
-export function grantsQueryOptions(serverId: string, enabled: boolean) {
+/**
+ * The account's actions in the shape the list draws. An answer the app couldn't give is the one
+ * `unknown` entry named for the app, which {@link couldNotRead} recognises and never draws as an action.
+ */
+function grantsOf(
+  serverId: string,
+  answer: ActionAuthorizations,
+): GrantState[] {
+  if (!answer.readable)
+    return [
+      {
+        action: serverId,
+        state: "unknown",
+        reason: answer.reason ?? "Couldn't read what this account allows.",
+      },
+    ];
+  return answer.actions as GrantState[];
+}
+
+export function grantsQueryOptions(
+  serverId: string,
+  enabled: boolean,
+  shared = false,
+) {
   return queryOptions({
-    queryKey: grantKeys.forServer(serverId),
+    queryKey: grantKeys.forServer(serverId, shared),
     enabled,
     queryFn: async (): Promise<GrantState[]> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/grants`,
-        { fallback: "Couldn't read what this account allows." },
-      );
-      const body: { actions?: unknown } = await response.json();
-      return Array.isArray(body.actions) ? (body.actions as GrantState[]) : [];
+      const fallback = "Couldn't read what this account allows.";
+      const answer = shared
+        ? await getSharedConnectionAuthorizations(ORGANIZATION_ID, serverId, {
+            fallback,
+          })
+        : await getConnectionAuthorizations(ORGANIZATION_ID, "me", serverId, {
+            fallback,
+          });
+      return grantsOf(serverId, answer);
     },
   });
 }
@@ -51,22 +83,40 @@ export function grantsQueryOptions(serverId: string, enabled: boolean) {
  */
 export function authorizeActionMutationOptions(
   returnTo: "settings" | "admin" = "settings",
+  shared = false,
 ) {
   return mutationOptions({
     mutationFn: async (variables: {
       serverId: string;
       action: string;
     }): Promise<string | null> => {
-      const authorizationUrl = await client<string | undefined>(
-        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/authorize?returnTo=${returnTo}${desktopConsentQuery()}`,
-        "authorizationUrl",
-        {
-          method: "POST",
-          body: { action: variables.action },
-          fallback: "Couldn't authorize that action.",
-        },
-      );
-      return authorizationUrl ?? null;
+      const body = {
+        action: variables.action,
+        returnTo: desktopShell()
+          ? ("desktop" as const)
+          : returnTo === "admin"
+            ? ("apps" as const)
+            : ("connections" as const),
+      };
+      const headers = { "Idempotency-Key": idempotencyKey() };
+      const options = { fallback: "Couldn't authorize that action." };
+      const started = shared
+        ? await authorizeSharedConnectionAction(
+            ORGANIZATION_ID,
+            variables.serverId,
+            body,
+            headers,
+            options,
+          )
+        : await authorizeConnectionAction(
+            ORGANIZATION_ID,
+            "me",
+            variables.serverId,
+            body,
+            headers,
+            options,
+          );
+      return started.authorizationUrl ?? null;
     },
   });
 }
@@ -109,7 +159,7 @@ export function couldNotRead(
  * than `unknown`, every such action silently joined this count. So the decision is made HERE, on the
  * field that says why an action is authorized, and never on `state` alone.
  *
- * `needs-operator` and `unknown` are not in it either: whether an approval would reach them cannot
+ * `needs-admin` and `unknown` are not in it either: whether an approval would reach them cannot
  * be read off the answer, so they are left out of the number rather than guessed into it.
  */
 export function coveredByApproval(
@@ -157,7 +207,7 @@ function scopesOf(grant: GrantState): string[] {
 export const RANK: Record<GrantState["state"], number> = {
   authorized: 0,
   "needs-consent": 1,
-  "needs-operator": 2,
+  "needs-admin": 2,
   unknown: 3,
 };
 

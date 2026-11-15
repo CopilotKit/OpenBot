@@ -14,6 +14,12 @@ import { ConnectAppCard } from "@/components/channels/connect-app-card";
 import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  connectionsCall,
+  connectionsProblem,
+  startResponse,
+} from "./connections-api";
 
 /**
  * The card a Bot's refusal turns into when the app it needed is one this person can connect.
@@ -57,7 +63,7 @@ function mounted(
   options: {
     connections?: Row[];
     /**
-     * What `POST /connect` answers: a page to visit, a form to fill in, or an account the vendor
+     * What connectApp answers: a page to visit, a form to fill in, or an account the vendor
      * already held, which the route records on the press and lists from then on.
      */
     answers?: "url" | "fields" | "failure" | "connected";
@@ -100,25 +106,37 @@ function mounted(
         status,
         headers: { "content-type": "application/json" },
       });
-    if (url.includes("/api/plugins/connections"))
-      return json({
-        connections: recorded
+    const call = connectionsCall(url, init);
+    // A person's own connections. A Shared app's one account is never among them.
+    if (call?.operation === "list")
+      return connectionPage(
+        (recorded
           ? [...connections, { serverId: "srv_notion", holder: "person" }]
-          : connections,
-        redirectUri: null,
-      });
-    if (url.includes("/connect") && init?.method === "POST") {
+          : connections
+        ).filter((row) => row.holder !== "deployment"),
+      );
+    if (call?.operation === "connect") {
       if (answers === "failure")
-        return json({ error: "That account could not be connected." }, 502);
+        return connectionsProblem(502, "That account could not be connected.");
       // What a key-entry app answers: a form to fill in, and no page to visit.
       if (answers === "fields")
-        return json({ fields: [{ name: "api_key", type: "string" }] });
+        return startResponse({
+          fields: [
+            {
+              name: "api_key",
+              label: "API key",
+              help: "",
+              required: true,
+              secret: true,
+            },
+          ],
+        });
       // What the route answers once it has recorded an account the vendor already held.
       if (answers === "connected") {
         recorded = true;
-        return json({ connected: true });
+        return startResponse({ connected: true });
       }
-      return json({ authorizationUrl: "https://notion.test/consent" });
+      return startResponse({ authorizationUrl: "https://notion.test/consent" });
     }
     return json({});
   }) as unknown as typeof fetch;

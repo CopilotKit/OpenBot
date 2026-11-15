@@ -306,9 +306,13 @@ export type ApprovalSettings = {
   preferences?: { enabled: boolean; autoReview: boolean };
   team?: { enforceAutoReview: boolean; customRulesEnabled: boolean };
 };
-export type GrantedPlugins = {
-  tools: { ref: string; description: string }[];
-  skills: { slug: string; title: string; summary: string }[];
+/** One thing a Bot was given, as `GET .../bots/{botId}/grants` lists it. */
+export type BotGrant = {
+  id: string;
+  kind: "action" | "skill" | "bot";
+  ref: string;
+  action: { description: string } | null;
+  skill: { slug: string; title: string; summary: string } | null;
 };
 export type SkillSummary = { slug: string; title: string; summary: string };
 /** Who drives a Bot's computer: the API's ComputerControl, as `GET .../computers/{botId}/control` answers. */

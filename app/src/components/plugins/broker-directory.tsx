@@ -25,6 +25,13 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
+import {
+  appsQueryOptions,
+  type DirectoryApp,
+  directoryAppsQueryOptions,
+  directorySlug,
+} from "@/lib/apps/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   consentBreadth,
@@ -32,10 +39,7 @@ import {
   keyNeededLine,
   matchingApps,
 } from "@/lib/plugins/enablement-notes";
-import {
-  enableComposioAppMutationOptions,
-  invalidatePlugins,
-} from "@/lib/plugins/mutations";
+import { invalidatePlugins } from "@/lib/plugins/mutations";
 import {
   directoryDescriptions,
   directoryReadFailure,
@@ -47,12 +51,7 @@ import {
   directoryAppState,
   directoryConnect,
 } from "@/lib/plugins/directory-state";
-import {
-  type ComposioApp,
-  composioAppsQueryOptions,
-  connectionsQueryOptions,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { connectionsQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * The active broker's directory, searched rather than listed.
@@ -93,7 +92,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const apps = useQuery(composioAppsQueryOptions(query, provider));
+  const apps = useQuery(directoryAppsQueryOptions(query));
   /*
    * WHAT A FAILED ADD SAID, KEPT WHERE A SECOND ADD CANNOT ERASE IT.
    *
@@ -114,7 +113,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   /*
    * AND WHICH ROWS ARE IN FLIGHT, FOR THE SAME REASON AND OUT OF THE SAME HOOKS.
    *
-   * `enable.isPending && enable.variables?.slug === entry.slug` is the observer again: it names the
+   * `enable.isPending && enable.variables?.directoryEntryId === entry.id` is the observer again: it names the
    * most recent press and no other, so pressing Add on a second app put the FIRST row back to "Add"
    * with its request still open — an invitation to press it again, which asks the server to enable
    * an app it is already enabling. A set of slugs is what survives the rebuild, added in `onMutate`
@@ -127,7 +126,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    * added, and adding records the app without signing anybody in to it. These are the reads the
    * Connections list and the app's page answer the same question from.
    */
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
   /*
    * ONE SIGN-IN AT A TIME, IN A NEW TAB, the way a Bot's Connect card starts one
@@ -137,10 +136,10 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   const [signingIn, setSigningIn] = React.useState<string | null>(null);
   const navigate = useNavigate();
   const enable = useMutation({
-    ...enableComposioAppMutationOptions(queryClient),
-    onMutate: (input: { slug: string }) => {
+    ...addDirectoryAppMutationOptions(queryClient),
+    onMutate: (input: { directoryEntryId: string }) => {
       setEnableError(null);
-      setAdding((held) => new Set(held).add(input.slug));
+      setAdding((held) => new Set(held).add(input.directoryEntryId));
     },
     onError: (thrown: Error) => setEnableError(thrown.message),
     /*
@@ -152,17 +151,16 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
     onSettled: (_data, _error, input) => {
       setAdding((held) => {
         const left = new Set(held);
-        left.delete(input.slug);
+        left.delete(input.directoryEntryId);
         return left;
       });
       return invalidatePlugins(queryClient);
     },
   });
-  const listed = matchingApps(apps.data?.apps ?? []);
-  const stateOf = (entry: ComposioApp) =>
+  const listed = matchingApps(apps.data ?? []);
+  const stateOf = (entry: DirectoryApp) =>
     directoryAppState(entry, {
-      provider,
-      servers: plugins.data?.servers,
+      servers: plugins.data,
       connections: connections.data?.connections,
     });
 
@@ -184,8 +182,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   const signedIn =
     signingIn !== null &&
     listed.some(
-      (entry) =>
-        entry.slug === signingIn && stateOf(entry).kind === "connected",
+      (entry) => entry.id === signingIn && stateOf(entry).kind === "connected",
     );
   React.useEffect(() => {
     if (!signedIn) return;
@@ -213,10 +210,10 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   }, [tab.needsKey, personal, openKeyForm]);
 
   /** Start this person's own sign-in to an app that is already added. */
-  const connect = (slug: string, serverId: string) => {
+  const connect = (entryId: string, serverId: string) => {
     setEnableError(null);
     stopWaiting();
-    setSigningIn(slug);
+    setSigningIn(entryId);
     signingInServer.current = serverId;
     tab.open(serverId);
   };
@@ -229,26 +226,30 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    * edition Add stays the admin's act for everybody, and the row then says the admin's own account
    * isn't connected.
    */
-  const add = (entry: ComposioApp) => {
+  const add = (entry: DirectoryApp) => {
     const how = directoryConnect(entry);
     if (personal && how === "sign-in") {
       stopWaiting();
-      setSigningIn(entry.slug);
+      setSigningIn(entry.id);
       signingInServer.current = null;
       tab.openAfter(async () => {
-        const serverId = await enable.mutateAsync({ slug: entry.slug });
+        const serverId = await enable.mutateAsync({
+          directoryEntryId: entry.id,
+        });
         signingInServer.current = serverId;
         return serverId;
       });
       return;
     }
     if (personal && how === "key") {
-      enable.mutateAsync({ slug: entry.slug }).then(openKeyForm, () => {
-        // Said by the mutation's own `onError`.
-      });
+      enable
+        .mutateAsync({ directoryEntryId: entry.id })
+        .then(openKeyForm, () => {
+          // Said by the mutation's own `onError`.
+        });
       return;
     }
-    enable.mutate({ slug: entry.slug });
+    enable.mutate({ directoryEntryId: entry.id });
   };
   const tabError = signingIn ? tab.error : null;
 
@@ -331,32 +332,39 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
               {listed.map((entry, index) => {
                 // One mutation serves every row, so which rows are mid-request is tracked beside it
                 // rather than read off it. See `adding` above.
-                const isAdding = adding.has(entry.slug);
+                const isAdding = adding.has(entry.id);
                 const state = stateOf(entry);
-                const mine = signingIn === entry.slug;
+                const mine = signingIn === entry.id;
 
                 return (
-                  <React.Fragment key={entry.slug}>
+                  <React.Fragment key={entry.id}>
                     {/* The test id names the screen, not the vendor: this module draws whichever
                       broker is active, and the id is not user-visible. */}
-                    <Item data-testid={`directory-${entry.slug}`} size="sm">
+                    <Item
+                      data-testid={`directory-${directorySlug(entry.id) ?? entry.id}`}
+                      size="sm"
+                    >
                       {/* The vendor's own mark where the broker supplies one, and its initial where it
                         does not, so a list of third parties still has a fixed left edge. */}
                       <ItemMedia variant={entry.logo ? "image" : "icon"}>
                         {entry.logo ? (
                           <img alt="" src={entry.logo} />
                         ) : (
-                          <AppInitial name={entry.name} />
+                          <AppInitial name={entry.title} />
                         )}
                       </ItemMedia>
                       <ItemContent>
-                        <ItemTitle>{entry.name}</ItemTitle>
-                        <ItemDescription>{entry.description}</ItemDescription>
+                        <ItemTitle>{entry.title}</ItemTitle>
+                        <ItemDescription>{entry.summary}</ItemDescription>
                         <KeyNeededNote app={entry} />
-                        {entry.enabled ? null : <CoverageNote app={entry} />}
-                        {entry.enabled ? null : <BreadthNote app={entry} />}
+                        {entry.appId !== null ? null : (
+                          <CoverageNote app={entry} />
+                        )}
+                        {entry.appId !== null ? null : (
+                          <BreadthNote app={entry} />
+                        )}
                         {mine ? (
-                          <SignInNote name={entry.name} tab={tab} />
+                          <SignInNote name={entry.title} tab={tab} />
                         ) : null}
                       </ItemContent>
                       <ItemActions>
@@ -394,10 +402,10 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                                   : paths.plugin(state.serverId)
                                 : null
                             }
-                            name={entry.name}
+                            name={entry.title}
                             onConnect={
                               state.kind === "not_connected"
-                                ? () => connect(entry.slug, state.serverId)
+                                ? () => connect(entry.id, state.serverId)
                                 : undefined
                             }
                             opening={mine && tab.pending}
@@ -425,7 +433,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
  * sign-in is surprised at Connect. Drawn whether or not the app is added: the person connecting
  * reads this list too. Draws nothing for an app you sign in to.
  */
-export function KeyNeededNote({ app }: { app: ComposioApp }) {
+export function KeyNeededNote({ app }: { app: DirectoryApp }) {
   const line = keyNeededLine(app);
   if (!line) return null;
   return (
@@ -440,7 +448,7 @@ export function KeyNeededNote({ app }: { app: ComposioApp }) {
 }
 
 /** The warning on a row, shown before Add is pressed. Draws nothing when there is none. */
-export function CoverageNote({ app }: { app: ComposioApp }) {
+export function CoverageNote({ app }: { app: DirectoryApp }) {
   const warning = coverageWarning(app);
   if (!warning) return null;
   return (
@@ -451,7 +459,7 @@ export function CoverageNote({ app }: { app: ComposioApp }) {
 }
 
 /** The breadth line on a row, shown before Add is pressed. Draws nothing when there is none. */
-export function BreadthNote({ app }: { app: ComposioApp }) {
+export function BreadthNote({ app }: { app: DirectoryApp }) {
   const breadth = consentBreadth(app);
   if (!breadth) return null;
   return (

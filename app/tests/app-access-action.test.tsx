@@ -25,7 +25,22 @@ import type { AppAccess } from "@/lib/app-access/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  APP_SETUP_PATH,
+  appAccessApprovalResponse,
+  appAccessRequest,
+  appAccessRequestPath,
+  appAccessRequestResponse,
+  appSetupResponse,
+  botAppPath,
+} from "./bot-grants-api";
 import { botPath } from "./bots-api";
+import {
+  connectionsCall,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -64,6 +79,8 @@ function mounted(
     personal?: boolean;
     /** Holds the connect route's answer until it settles, so a test can refetch first. */
     connectGate?: Promise<void>;
+    /** The service this OpenBot's directory comes from, as app-setup says. Composio's unless named. */
+    directory?: "composio" | "arcade";
   } = {},
 ) {
   const sent: Sent[] = [];
@@ -94,13 +111,21 @@ function mounted(
       return Response.json({ edition: "personal" });
     if (options.admin && url === botPath("expenses"))
       return Response.json({ bot: { id: "expenses", name: "Expenses" } });
+    if (url === APP_SETUP_PATH)
+      return appSetupResponse(options.directory ?? "composio");
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
-    if (url.endsWith("/connect?returnTo=settings")) {
+    if (connectionsCall(url, { method })?.operation === "connect") {
       await options.connectGate;
-      return Response.json({ authorizationUrl: "https://gmail.test/consent" });
+      return startResponse({ authorizationUrl: "https://gmail.test/consent" });
     }
-    return Response.json({ request: { id: "req_1" }, created: true });
+    // Each write answers as the API does: the approval, the actions given, or the request filed.
+    if (url.endsWith("/approve"))
+      return appAccessApprovalResponse({
+        request: appAccessRequest({ status: "approved" }),
+      });
+    if (url.endsWith("/give")) return Response.json({ given: [] });
+    return appAccessRequestResponse(appAccessRequest());
   }) as unknown as typeof fetch;
 
   const client = new QueryClient({
@@ -205,8 +230,8 @@ const COPY: [string, Partial<AppAccess>, RegExp][] = [
     /^Gmail isn't turned on yet\./,
   ],
   [
-    "disabled, with no Composio key",
-    { state: "disabled", unavailable: "composio_unconfigured" },
+    "disabled, with no directory set up",
+    { state: "disabled", unavailable: "directory_unavailable" },
     /^Gmail isn't set up yet\. An admin has to turn it on\.$/,
   ],
   ...(
@@ -244,7 +269,7 @@ test("not connected offers Connect, which starts the person's own consent in a n
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
   expect(sent.map((call) => `${call.method} ${call.url}`)).toContain(
-    "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
+    `POST ${myConnectionPath("composio-gmail", "connect")}`,
   );
   await view.findByText("Finish in the tab that opened.");
 });
@@ -270,7 +295,7 @@ test("a brokered app to reconnect goes to its page in Settings, on Composio and 
   cleanup();
 
   const arcade = mounted(
-    appAccess({ key: "arcade-Gmail", provider: "arcade", state: "reconnect" }),
+    appAccess({ key: "arcade-Gmail", state: "reconnect" }),
   );
   const toArcade = (await arcade.view.findByText("Reconnect")).closest("a");
   expect(toArcade?.getAttribute("href")).toBe("/connections/arcade-Gmail");
@@ -282,7 +307,7 @@ test("this deployment's own OAuth app reconnects in place, with a fresh consent"
     appAccess({
       key: "notion",
       displayName: "Notion",
-      provider: "catalogue",
+      source: "catalogue",
       connect: "oauth",
       state: "reconnect",
     }),
@@ -357,7 +382,6 @@ test("a Shared app waiting on an admin's approval offers nothing: the refused ca
     appAccess({
       state: "shared_not_approved",
       account: "shared",
-      accountMode: "shared",
     }),
   );
   await view.findByText(/Only an admin can approve it/);
@@ -390,8 +414,8 @@ test.each([
     await waitFor(() =>
       expect(sent.find((call) => call.method === "POST")).toEqual({
         method: "POST",
-        url: "/api/plugins/access-requests",
-        body: { agentId: "expenses", app: "composio-gmail" },
+        url: APP_ACCESS_REQUESTS_PATH,
+        body: { botId: "expenses", appId: "composio-gmail" },
       }),
     );
   },
@@ -421,7 +445,7 @@ test("a pending request reads Requested, and Withdraw cancels it", async () => {
       sent.some(
         (call) =>
           call.method === "DELETE" &&
-          call.url === "/api/plugins/access-requests/req_9",
+          call.url === appAccessRequestPath("req_9"),
       ),
     ).toBe(true),
   );
@@ -511,7 +535,7 @@ test.each([
     await waitFor(() =>
       expect(sent.find((call) => call.method === "POST")).toStrictEqual({
         method: "POST",
-        url: "/api/plugins/for/expenses/apps/composio-gmail/approve",
+        url: `${botAppPath("expenses", "composio-gmail")}/approve`,
         body: undefined,
       }),
     );
@@ -536,8 +560,8 @@ test.each(["disabled", "not_granted"] as const)(
     expect(
       sent.filter((call) => call.method === "POST").map((call) => call.url),
     ).toEqual([
-      "/api/plugins/for/expenses/apps/composio-gmail/approve",
-      "/api/plugins/servers/composio-gmail/connect?returnTo=settings",
+      `${botAppPath("expenses", "composio-gmail")}/approve`,
+      myConnectionPath("composio-gmail", "connect"),
     ]);
   },
 );
@@ -555,7 +579,9 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
   fireEvent.click(await view.findByRole("button", { name: "Connect Gmail" }));
   await waitFor(() =>
     expect(
-      sent.some((call) => call.url.endsWith("/connect?returnTo=settings")),
+      sent.some(
+        (call) => call.url === myConnectionPath("composio-gmail", "connect"),
+      ),
     ).toBe(true),
   );
   // The refetch after turning it on: the app is on now, and only this person's sign-in is missing.
@@ -571,7 +597,7 @@ test("in the personal edition, Connect still opens the sign-in when turning the 
 test("in the personal edition, an app that isn't set up says what is missing, not who to ask", () => {
   expect(
     appAccessSentence(
-      appAccess({ state: "disabled", unavailable: "composio_unconfigured" }),
+      appAccess({ state: "disabled", unavailable: "directory_unavailable" }),
       undefined,
       "personal",
     ),
@@ -589,7 +615,7 @@ test("in the personal edition, Set it up for an app with no broker key opens the
   const { view } = mounted(
     appAccess({
       state: "disabled",
-      unavailable: "composio_unconfigured",
+      unavailable: "directory_unavailable",
       requestKind: "enable",
     }),
     undefined,
@@ -638,7 +664,7 @@ test.each([
   [
     {
       state: "disabled",
-      unavailable: "composio_unconfigured",
+      unavailable: "directory_unavailable",
       requestKind: "enable",
     },
     "Set up Gmail",
@@ -653,6 +679,25 @@ test.each([
     expect(link.getAttribute("target")).toBe("_blank");
   },
 );
+
+test("an admin on an OpenBot whose directory is Arcade's is sent to Arcade's page to set it up", async () => {
+  const { view } = mounted(
+    appAccess({
+      state: "disabled",
+      unavailable: "directory_unavailable",
+      requestKind: "enable",
+    }),
+    undefined,
+    { admin: true, directory: "arcade" },
+  );
+  await waitFor(async () =>
+    expect(
+      (await view.findByRole("button", { name: "Set up Gmail" })).getAttribute(
+        "href",
+      ),
+    ).toBe("/admin/plugins/arcade"),
+  );
+});
 
 test("an owner is asked about their own app, by the Bot's name where the caller has it", () => {
   const owners = appAccess({ state: "owner_grantable", granted: false });
@@ -681,7 +726,7 @@ test("an owner's Allow gives the app in one press, naming the Bot and the app an
     expect(sent.filter((call) => call.method === "POST")).toStrictEqual([
       {
         method: "POST",
-        url: "/api/plugins/for/expenses/apps/composio-gmail/give",
+        url: `${botAppPath("expenses", "composio-gmail")}/give`,
         body: undefined,
       },
     ]),
