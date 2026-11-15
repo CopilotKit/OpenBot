@@ -124,9 +124,16 @@ export function TaskRow({
           <ItemDescription className="text-foreground">{next}</ItemDescription>
         ) : null}
         {askedIn ? (
-          <ItemDescription className="line-clamp-1" data-slot="task-asked-in">
+          /*
+           * Not clamped: a clamped line cuts the underline off, and the link then reads as plain
+           * text. The underline sits close, as on the task's own "Sent from" label.
+           */
+          <ItemDescription
+            className="line-clamp-none [&>a]:underline-offset-2"
+            data-slot="task-asked-in"
+          >
             <Link
-              className="rounded-sm underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="rounded-sm outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
               params={{ channelId: askedIn.channelId }}
               to="/channel/$channelId"
             >
