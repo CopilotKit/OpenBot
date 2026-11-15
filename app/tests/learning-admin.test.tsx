@@ -7,13 +7,6 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type {
-  LearningOverview,
-  LearningProposal,
-  LearningProposalDetail,
-  LearningRunSummary,
-  LearningSettings,
-} from "@openbot/shared/learning";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -22,9 +15,29 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import type {
+  LearningEvidence,
+  LearningProposal,
+  LearningProposalDetail,
+} from "@/lib/api/generated/model";
+import type {
+  LearningOverview,
+  LearningRunSummary,
+} from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import { LearningPage, runPollInterval } from "@/routes/_authed/admin/learning";
 import { answerBotsList } from "./bots-api";
+import {
+  LEARNING,
+  learningConfigurationBody,
+  learningContract,
+  page as listPage,
+  personLearning,
+  problem,
+  requestOf,
+  runBody,
+  served,
+} from "./learning-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -50,28 +63,43 @@ function page() {
   );
 }
 
+/** Learning's settings and what automatic assignment found, as reading them answers. */
+const configuration = (
+  settings: Record<string, unknown>,
+  automatic: Record<string, unknown> | null = null,
+) =>
+  served(
+    learningContract.GetLearningSettingsResponse,
+    learningConfigurationBody({ settings, automatic }),
+  );
+
 test("an administrator excludes a Bot and saves without losing the default or pause state", async () => {
-  let settings: LearningSettings = {
+  let settings: Record<string, unknown> = {
     enabled: false,
     defaultTarget: { containerId: "support" },
-    agents: { bot: { containerId: "sales" } },
+    bots: { bot: { containerId: "sales" } },
   };
-  let saved: LearningSettings | undefined;
+  let saved: Record<string, unknown> | null = null;
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.endsWith("/settings")) {
-        if (init?.method === "PUT") {
-          saved = JSON.parse(String(init.body));
-          settings = saved!;
+      const request = requestOf(input, init);
+      if (request.path === LEARNING.settings) {
+        if (request.method === "PATCH") {
+          saved = request.body;
+          settings = { ...settings, ...saved };
+          return served(
+            learningContract.UpdateLearningSettingsResponse,
+            learningConfigurationBody({ settings }),
+          );
         }
-        return Response.json({ settings });
+        return configuration(settings);
       }
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return Response.json(
-        { error: "Learning in the backend is unavailable." },
-        { status: 502 },
+      return problem(
+        502,
+        "Learning in the backend is unavailable.",
+        "LEARNING_UNREACHABLE",
       );
     },
     { preconnect: originalFetch.preconnect },
@@ -84,7 +112,7 @@ test("an administrator excludes a Bot and saves without losing the default or pa
     expect(saved).toEqual({
       enabled: false,
       defaultTarget: { containerId: "support" },
-      agents: { bot: null },
+      bots: { bot: null },
     }),
   );
   await view.findByText("Settings saved.");
@@ -93,9 +121,10 @@ test("an administrator excludes a Bot and saves without losing the default or pa
 test("an unavailable settings store shows an error instead of an editable empty configuration", async () => {
   global.fetch = Object.assign(
     async () =>
-      Response.json(
-        { error: "Learning settings could not be accessed." },
-        { status: 503 },
+      problem(
+        503,
+        "Learning settings could not be accessed.",
+        "LEARNING_UNAVAILABLE",
       ),
     { preconnect: originalFetch.preconnect },
   );
@@ -129,17 +158,14 @@ test("active and hidden Bots both have participation controls", async () => {
   });
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.endsWith("/settings"))
-        return Response.json({
-          settings: { enabled: false, defaultTarget: null, agents: {} },
-        });
+      if (requestOf(input, init).path === LEARNING.settings)
+        return configuration({ enabled: false });
       const bots = answerBotsList(input, init, {
         visible: [bot("active-bot")],
         hidden: [bot("hidden-bot")],
       });
       if (bots) return bots;
-      return Response.json({ error: "Unavailable" }, { status: 502 });
+      return problem(502, "Unavailable", "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -148,14 +174,17 @@ test("active and hidden Bots both have participation controls", async () => {
   expect(view.queryByLabelText("active-bot participation")).not.toBeNull();
 });
 
-function serve(body: unknown) {
+function serve(
+  settings: Record<string, unknown>,
+  automatic: Record<string, unknown> | null,
+) {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.endsWith("/settings")) return Response.json(body);
+      if (requestOf(input, init).path === LEARNING.settings)
+        return configuration(settings, automatic);
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return Response.json({ error: "unavailable" }, { status: 502 });
+      return problem(502, "unavailable", "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -163,38 +192,34 @@ function serve(body: unknown) {
 
 test.each([
   [
-    { enabled: true, defaultTarget: null, agents: {} },
+    { enabled: true, defaultTarget: null },
     { state: "absent", containerId: "openbot" },
     'This project has no "openbot" Learning container yet',
   ],
   [
-    { enabled: true, defaultTarget: { containerId: "openbot" }, agents: {} },
+    { enabled: true, defaultTarget: { containerId: "openbot" } },
     { state: "assigned", containerId: "openbot" },
     'OpenBot assigned this project\'s "openbot" container automatically',
   ],
   [
-    { enabled: true, defaultTarget: null, agents: {} },
+    { enabled: true, defaultTarget: null },
     { state: "not_entitled" },
     "plan doesn't include Learning",
   ],
 ] as const)(
   "the page says what automatic assignment found (%#)",
   async (settings, automatic, expected) => {
-    serve({ settings, automatic });
+    serve(settings, automatic);
     const view = page();
     await view.findByText(expected, { exact: false });
   },
 );
 
 test("a deployment that chose its own container hears nothing about automatic assignment", async () => {
-  serve({
-    settings: {
-      enabled: true,
-      defaultTarget: { containerId: "support" },
-      agents: {},
-    },
-    automatic: { state: "saved" },
-  });
+  serve(
+    { enabled: true, defaultTarget: { containerId: "support" } },
+    { state: "saved" },
+  );
   const view = page();
   await view.findByLabelText("Default container ID");
   await waitFor(() =>
@@ -209,10 +234,10 @@ test("a deployment that chose its own container hears nothing about automatic as
 test("a missing container shows exactly what to run, and a Create button only when the deployment can", async () => {
   const instructions =
     "Sign in once with npx --yes copilotkit@latest login, then run bun scripts/setup-learning.ts.";
-  serve({
-    settings: { enabled: true, defaultTarget: null, agents: {} },
-    automatic: { state: "absent", containerId: "openbot", instructions },
-  });
+  serve(
+    { enabled: true, defaultTarget: null },
+    { state: "absent", containerId: "openbot", instructions },
+  );
   const cannot = page();
   await cannot.findByText(instructions, { exact: false });
   expect(
@@ -221,35 +246,36 @@ test("a missing container shows exactly what to run, and a Create button only wh
   cleanup();
 
   let created = 0;
-  const settings = { enabled: true, defaultTarget: null, agents: {} };
+  const settings = { enabled: true, defaultTarget: null };
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.endsWith("/container") && init?.method === "POST") {
+      const request = requestOf(input, init);
+      if (
+        request.path === LEARNING.createContainer &&
+        request.method === "POST"
+      ) {
         created++;
-        return Response.json({
+        return served(learningContract.CreateAutomaticLearningSpaceResponse, {
           automatic: { state: "assigned", containerId: "openbot" },
         });
       }
-      if (path.endsWith("/settings"))
-        return Response.json({
-          settings:
-            created > 0
-              ? { ...settings, defaultTarget: { containerId: "openbot" } }
-              : settings,
-          automatic:
-            created > 0
-              ? { state: "assigned", containerId: "openbot" }
-              : {
-                  state: "absent",
-                  containerId: "openbot",
-                  instructions,
-                  canCreate: true,
-                },
-        });
+      if (request.path === LEARNING.settings)
+        return configuration(
+          created > 0
+            ? { ...settings, defaultTarget: { containerId: "openbot" } }
+            : settings,
+          created > 0
+            ? { state: "assigned", containerId: "openbot" }
+            : {
+                state: "absent",
+                containerId: "openbot",
+                instructions,
+                canCreate: true,
+              },
+        );
       const bots = answerBotsList(input, init, { visible: [] });
       if (bots) return bots;
-      return Response.json({ error: "unavailable" }, { status: 502 });
+      return problem(502, "unavailable", "LEARNING_UNREACHABLE");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -270,10 +296,12 @@ test("a missing container shows exactly what to run, and a Create button only wh
 
 describe("reviewing proposed skills", () => {
   const PROPOSAL = "0198a012-a20f-77c0-9e33-8992f18e74d1";
+  const INSIGHT = "0198a012-a20f-77c0-9e33-8992f18e74a9";
   const SKILL_MD =
     "---\nname: Refund triage\ndescription: Sort refund requests.\n---\n\n# Refund triage\n\n1. Read the order date from the conversation.\n";
   const pending: LearningProposal = {
     id: PROPOSAL,
+    runId: "0198a012-a20f-77c0-9e33-8992f18e74c0",
     title: "Refund triage",
     description:
       "Sort refund requests by whether they are inside the 30-day window.",
@@ -282,9 +310,13 @@ describe("reviewing proposed skills", () => {
     status: "pending_review",
     createdAt: "2026-11-04T12:00:00.000Z",
     reviewedAt: null,
+    publishedSkillId: null,
   };
   const PERSON = "user-dana";
+  /** The Learning space Dana's recordings join. */
+  const PERSON_SPACE = "user-dana";
   const PERSON_PROPOSAL = "0198a012-a20f-77c0-9e33-8992f18e74d2";
+  const DANA = personLearning(PERSON);
   const personPending: LearningProposal = {
     ...pending,
     id: PERSON_PROPOSAL,
@@ -294,32 +326,43 @@ describe("reviewing proposed skills", () => {
   const detail: LearningProposalDetail = {
     ...pending,
     files: [
-      { path: "SKILL.md", content: SKILL_MD },
       { path: "references/policy.md", content: "Refunds inside 30 days." },
+      { path: "SKILL.md", content: SKILL_MD },
     ],
     insights: [
       {
-        id: "0198a012-a20f-77c0-9e33-8992f18e74a9",
+        id: INSIGHT,
         statement: "Agents look up the order date before every refund answer.",
         impact: "Answers refund questions without a hand check.",
-        evidence: [
-          {
-            kind: "conversation",
-            id: "thread-1",
-            title: "Refund for order 1182",
-            available: true,
-            messages: [
-              {
-                id: "message-1",
-                role: "user",
-                content: "Can I get a refund on order 1182?",
-              },
-            ],
-          },
-        ],
       },
     ],
   };
+  const evidence: LearningEvidence[] = [
+    {
+      kind: "conversation",
+      threadId: "thread-1",
+      threadName: "Refund for order 1182",
+      threadPresent: true,
+      unavailable: null,
+      messageCount: 1,
+      cited: [
+        {
+          id: "message-1",
+          role: "user",
+          content: "Can I get a refund on order 1182?",
+        },
+      ],
+    },
+  ];
+  /** The one sharing request waiting, by the id an admin decides it with. */
+  const REQUEST = "sharing-request-1";
+  const sharingRequest = (requestedAt: string) => ({
+    id: REQUEST,
+    personId: PERSON,
+    name: "Dana Reyes",
+    skillName: "quote-follow-up",
+    requestedAt,
+  });
   const noDashboard: LearningOverview = {
     configuration: "configured",
     container: { id: "openbot", name: "OpenBot" },
@@ -330,6 +373,10 @@ describe("reviewing proposed skills", () => {
     hasActiveRun: false,
     latestRunStatus: null,
     links: { learning: null, candidates: null, runs: null },
+  };
+  const settings = {
+    enabled: true,
+    defaultTarget: { containerId: "openbot" },
   };
   afterEach(() => queryClient.clear());
 
@@ -347,7 +394,20 @@ describe("reviewing proposed skills", () => {
     );
   }
 
-  function intelligence(overview: LearningOverview = noDashboard) {
+  /** A review as approving or rejecting a proposal answers it. */
+  const reviewed = (proposalId: string, status: "approved" | "rejected") =>
+    served(learningContract.ApproveLearningProposalResponse, {
+      proposalId,
+      operation: "add",
+      status,
+      publishedSkillId: status === "approved" ? "skill-1" : null,
+    });
+
+  /**
+   * OpenBot's Learning API for the page, as the server answers it. Records each write (its address,
+   * with any query, and its body) and each read's path.
+   */
+  function serveLearning(overview: LearningOverview = noDashboard) {
     let status: LearningProposal["status"] = "pending_review";
     let personStatus: LearningProposal["status"] = "pending_review";
     let sharingDecided = false;
@@ -356,116 +416,105 @@ describe("reviewing proposed skills", () => {
     const gets: string[] = [];
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input);
-        if (init?.method === "POST") {
-          posts.push(path);
-          bodies.push(init.body);
-        } else if (!init?.method) gets.push(path);
-        if (path.endsWith("/settings"))
-          return Response.json({
-            settings: {
-              enabled: true,
-              defaultTarget: { containerId: "openbot" },
-              agents: {},
-            },
-            automatic: { state: "saved" },
-          });
+        const url = String(input);
+        const request = requestOf(input, init);
+        if (request.method === "GET") gets.push(request.path);
+        else {
+          posts.push(url);
+          bodies.push(request.body);
+        }
+        if (request.path === LEARNING.settings && request.method === "GET")
+          return configuration(settings, { state: "saved" });
         const bots = answerBotsList(input, init, { visible: [] });
         if (bots) return bots;
-        if (path === "/api/admin/learning/people/proposals")
-          return Response.json({
-            people: [
+        if (request.path === LEARNING.peopleProposals)
+          return listPage(
+            learningContract.ListPersonalLearningProposalsResponse,
+            "people",
+            [
               {
-                userId: PERSON,
+                personId: PERSON,
                 name: "Dana Reyes",
+                containerId: PERSON_SPACE,
                 proposals: [{ ...personPending, status: personStatus }],
               },
-              { userId: "user-unreadable", name: "Sam Ortiz", proposals: null },
+              {
+                personId: "user-unreadable",
+                name: "Sam Ortiz",
+                containerId: "user-unreadable",
+                proposals: null,
+              },
+            ],
+          );
+        if (request.path === `${DANA.proposal(PERSON_PROPOSAL)}/reject`) {
+          personStatus = "rejected";
+          return reviewed(PERSON_PROPOSAL, personStatus);
+        }
+        if (request.path === `${DANA.proposal(PERSON_PROPOSAL)}/approve`) {
+          personStatus = "approved";
+          return reviewed(PERSON_PROPOSAL, personStatus);
+        }
+        if (request.path === DANA.proposal(PERSON_PROPOSAL))
+          return served(learningContract.GetPersonLearningProposalResponse, {
+            ...detail,
+            ...personPending,
+            status: personStatus,
+          });
+        if (request.path === DANA.evidence(INSIGHT))
+          return served(learningContract.GetPersonLearningEvidenceResponse, {
+            evidence,
+          });
+        if (request.path === LEARNING.sharingRequests)
+          return listPage(
+            learningContract.ListSkillSharingRequestsResponse,
+            "requests",
+            sharingDecided ? [] : [sharingRequest("2026-11-05T09:00:00.000Z")],
+          );
+        if (request.path === LEARNING.sharingDecision(REQUEST, "approve")) {
+          sharingDecided = true;
+          return served(learningContract.ApproveSkillSharingResponse, {
+            skillName: "quote-follow-up",
+            sharing: "approved",
+          });
+        }
+        if (request.path === DANA.learnedSkill("quote-follow-up"))
+          return served(learningContract.GetLearnedSkillResponse, {
+            name: "quote-follow-up",
+            description: "Follow up on a quiet quote.",
+            files: [
+              {
+                path: "SKILL.md",
+                text: "---\nname: quote-follow-up\n---\n\nAsk whether the quote still fits.\n",
+              },
             ],
           });
-        if (
-          path ===
-          `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/reject`
-        ) {
-          personStatus = "rejected";
-          return Response.json({
-            proposal: { id: PERSON_PROPOSAL, status: personStatus },
-          });
-        }
-        if (
-          path ===
-          `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`
-        ) {
-          personStatus = "approved";
-          return Response.json({
-            proposal: { id: PERSON_PROPOSAL, status: personStatus },
-          });
-        }
-        if (
-          path ===
-          `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}`
-        )
-          return Response.json({
-            proposal: {
-              ...detail,
-              ...personPending,
-              status: personStatus,
-            },
-          });
-        if (path === "/api/admin/learning/sharing-requests")
-          return Response.json({
-            requests: sharingDecided
-              ? []
-              : [
-                  {
-                    userId: PERSON,
-                    name: "Dana Reyes",
-                    skillName: "quote-follow-up",
-                    requestedAt: "2026-11-05T09:00:00.000Z",
-                  },
-                ],
-          });
-        if (
-          path ===
-          `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up/approve`
-        ) {
-          sharingDecided = true;
-          return Response.json({ sharing: "approved" });
-        }
-        if (
-          path === `/api/admin/learning/people/${PERSON}/skills/quote-follow-up`
-        )
-          return Response.json({
-            skill: {
-              name: "quote-follow-up",
-              description: "Follow up on a quiet quote.",
-              files: [
-                {
-                  path: "SKILL.md",
-                  text: "---\nname: quote-follow-up\n---\n\nAsk whether the quote still fits.\n",
-                },
-              ],
-            },
-          });
-        if (path.startsWith("/api/admin/learning/overview"))
-          return Response.json({ overview });
-        if (path === `/api/admin/learning/proposals/${PROPOSAL}/reject`) {
+        if (request.path === LEARNING.overview)
+          return served(learningContract.GetLearningOverviewResponse, overview);
+        if (request.path === `${LEARNING.proposal(PROPOSAL)}/reject`) {
           status = "rejected";
-          return Response.json({ proposal: { id: PROPOSAL, status } });
+          return reviewed(PROPOSAL, status);
         }
-        if (path === `/api/admin/learning/proposals/${PROPOSAL}/approve`) {
+        if (request.path === `${LEARNING.proposal(PROPOSAL)}/approve`) {
           status = "approved";
-          return Response.json({ proposal: { id: PROPOSAL, status } });
+          return reviewed(PROPOSAL, status);
         }
-        if (path === `/api/admin/learning/proposals/${PROPOSAL}`)
-          return Response.json({ proposal: { ...detail, status } });
-        if (path === "/api/admin/learning/proposals")
-          return Response.json({
-            containerId: "openbot",
-            proposals: [{ ...pending, status }],
+        if (request.path === LEARNING.proposal(PROPOSAL))
+          return served(learningContract.GetLearningProposalResponse, {
+            ...detail,
+            status,
           });
-        if (path === "/api/admin/learning/skills")
-          return Response.json({
+        if (request.path === LEARNING.evidence(INSIGHT))
+          return served(learningContract.GetLearningEvidenceResponse, {
+            evidence,
+          });
+        if (request.path === LEARNING.proposals)
+          return listPage(
+            learningContract.ListLearningProposalsResponse,
+            "proposals",
+            [{ ...pending, status }],
+          );
+        if (request.path === LEARNING.skills)
+          return served(learningContract.ListPublishedSkillsResponse, {
             containerId: "openbot",
             skills: [
               {
@@ -473,53 +522,63 @@ describe("reviewing proposed skills", () => {
                 description: "Find an invoice by number.",
               },
             ],
+            nextCursor: null,
           });
-        if (path === "/api/admin/learning/skills/invoice-lookup")
-          return Response.json({
-            skill: {
-              name: "invoice-lookup",
-              description: "Find an invoice by number.",
-              files: [
-                {
-                  path: "SKILL.md",
-                  text: "---\nname: invoice-lookup\n---\n\nSearch billing for the invoice number.\n",
-                },
-              ],
-            },
+        if (request.path === LEARNING.skill("invoice-lookup"))
+          return served(learningContract.GetPublishedSkillResponse, {
+            name: "invoice-lookup",
+            description: "Find an invoice by number.",
+            files: [
+              {
+                path: "SKILL.md",
+                text: "---\nname: invoice-lookup\n---\n\nSearch billing for the invoice number.\n",
+              },
+            ],
           });
-        if (path === "/api/admin/learning/runs" && init?.method !== "POST")
-          return Response.json({ containerId: "openbot", runs: [] });
-        if (path === "/api/admin/learning/runs")
-          return Response.json({
-            run: {
+        if (request.path === LEARNING.runs && request.method === "GET")
+          return listPage(
+            learningContract.ListOrganizationLearningRunsResponse,
+            "runs",
+            [],
+          );
+        if (request.path === LEARNING.runs)
+          return served(
+            learningContract.StartOrganizationLearningRunResponse,
+            runBody({
               id: "0198a012-a20f-77c0-9e33-8992f18e74c1",
               status: "queued",
-            },
-          });
-        return Response.json({ error: "unexpected" }, { status: 500 });
+            }),
+            202,
+          );
+        return problem(500, "unexpected", "INTERNAL_ERROR");
       },
       { preconnect: originalFetch.preconnect },
     );
     const recorded = Object.assign(posts, { bodies, gets });
-    record = (path, init) => {
-      if (init?.method === "POST") {
-        posts.push(path);
-        bodies.push(init.body);
-      } else if (!init?.method) gets.push(path);
+    record = (input, init) => {
+      const request = requestOf(input, init);
+      if (request.method === "GET") gets.push(request.path);
+      else {
+        posts.push(String(input));
+        bodies.push(request.body);
+      }
     };
     return recorded;
   }
 
-  let record: (path: string, init?: RequestInit) => void = () => {};
+  let record: (input: string, init?: RequestInit) => void = () => {};
 
-  /** Answer some paths yourself and leave the rest to what `intelligence()` installed. */
+  /** Answer some requests yourself and leave the rest to what `serveLearning()` installed. */
   function override(
-    handler: (path: string, init?: RequestInit) => Response | undefined,
+    handler: (
+      request: ReturnType<typeof requestOf>,
+      init?: RequestInit,
+    ) => Response | undefined,
   ) {
     const base = global.fetch;
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        const answer = handler(String(input), init);
+        const answer = handler(requestOf(input, init), init);
         if (answer) record(String(input), init);
         return answer ?? base(input, init);
       },
@@ -528,7 +587,7 @@ describe("reviewing proposed skills", () => {
   }
 
   test("lists proposed skills, opens one with its SKILL.md and evidence, and approves it", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     fireEvent.click(await view.findByRole("button", { name: /Refund triage/ }));
     await view.findByText("Read the order date from the conversation.");
@@ -538,9 +597,7 @@ describe("reviewing proposed skills", () => {
     await view.findByText("Published. Bots on this container use it", {
       exact: false,
     });
-    expect([...posts]).toEqual([
-      `/api/admin/learning/proposals/${PROPOSAL}/approve`,
-    ]);
+    expect([...posts]).toEqual([`${LEARNING.proposal(PROPOSAL)}/approve`]);
     fireEvent.click(view.getByRole("button", { name: "Done" }));
     // The list refreshed from the server, not from a guess.
     await waitFor(() =>
@@ -551,7 +608,7 @@ describe("reviewing proposed skills", () => {
   });
 
   test("an admin approves a person's proposal", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     const row = await view.findByRole("button", { name: /Quote follow-up/ });
     expect(row.textContent).toContain("Dana Reyes");
@@ -560,17 +617,18 @@ describe("reviewing proposed skills", () => {
     });
     fireEvent.click(row);
     await view.findByText("Read the order date from the conversation.");
+    expect(view.getByText("Can I get a refund on order 1182?")).not.toBeNull();
     fireEvent.click(view.getByRole("button", { name: "Approve and publish" }));
     await view.findByText("Their Bots use it from their next conversation.", {
       exact: false,
     });
     expect([...posts]).toEqual([
-      `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`,
+      `${DANA.proposal(PERSON_PROPOSAL)}/approve?containerId=${PERSON_SPACE}`,
     ]);
   });
 
   test("an admin approves a sharing request", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     const row = await view.findByRole("button", { name: /Quote follow up/ });
     expect(row.textContent).toContain("Dana Reyes");
@@ -579,10 +637,10 @@ describe("reviewing proposed skills", () => {
     fireEvent.click(view.getByRole("button", { name: "Approve sharing" }));
     await waitFor(() =>
       expect([...posts]).toEqual([
-        `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up/approve`,
+        LEARNING.sharingDecision(REQUEST, "approve"),
       ]),
     );
-    expect(JSON.parse(String(posts.bodies.at(-1)))).toEqual({
+    expect(posts.bodies.at(-1)).toEqual({
       requestedAt: "2026-11-05T09:00:00.000Z",
     });
     await waitFor(() =>
@@ -592,15 +650,17 @@ describe("reviewing proposed skills", () => {
     );
   });
 
-  const SHARING = `/api/admin/learning/sharing-requests/${PERSON}/quote-follow-up`;
   const CHANGED =
     "This skill changed after you opened it. Open it again to see the new version.";
 
   test("an admin declines a sharing request", async () => {
-    const posts = intelligence();
-    override((path) =>
-      path === `${SHARING}/decline`
-        ? Response.json({ sharing: "declined" })
+    const posts = serveLearning();
+    override((request) =>
+      request.path === LEARNING.sharingDecision(REQUEST, "decline")
+        ? served(learningContract.DeclineSkillSharingResponse, {
+            skillName: "quote-follow-up",
+            sharing: "declined",
+          })
         : undefined,
     );
     const view = shared();
@@ -609,8 +669,12 @@ describe("reviewing proposed skills", () => {
     );
     await view.findByText("Ask whether the quote still fits.");
     fireEvent.click(view.getByRole("button", { name: "Decline" }));
-    await waitFor(() => expect([...posts]).toEqual([`${SHARING}/decline`]));
-    expect(JSON.parse(String(posts.bodies.at(-1)))).toEqual({
+    await waitFor(() =>
+      expect([...posts]).toEqual([
+        LEARNING.sharingDecision(REQUEST, "decline"),
+      ]),
+    );
+    expect(posts.bodies.at(-1)).toEqual({
       requestedAt: "2026-11-05T09:00:00.000Z",
     });
   });
@@ -619,30 +683,26 @@ describe("reviewing proposed skills", () => {
     let requestedAt = "2026-11-05T09:00:00.000Z";
     let decided = false;
     const sent: string[] = [];
-    const posts = intelligence();
-    override((path, init) => {
-      if (path === "/api/admin/learning/sharing-requests")
-        return Response.json({
-          requests: decided
-            ? []
-            : [
-                {
-                  userId: PERSON,
-                  name: "Dana Reyes",
-                  skillName: "quote-follow-up",
-                  requestedAt,
-                },
-              ],
-        });
-      if (path === `${SHARING}/approve`) {
-        const sentAt = JSON.parse(String(init?.body)).requestedAt;
+    const posts = serveLearning();
+    override((request) => {
+      if (request.path === LEARNING.sharingRequests)
+        return listPage(
+          learningContract.ListSkillSharingRequestsResponse,
+          "requests",
+          decided ? [] : [sharingRequest(requestedAt)],
+        );
+      if (request.path === LEARNING.sharingDecision(REQUEST, "approve")) {
+        const sentAt = String(request.body?.requestedAt);
         sent.push(sentAt);
         if (sentAt !== "2026-11-06T08:00:00.000Z") {
           requestedAt = "2026-11-06T08:00:00.000Z";
-          return Response.json({ error: CHANGED }, { status: 409 });
+          return problem(409, CHANGED, "SHARING_REQUEST_CHANGED");
         }
         decided = true;
-        return Response.json({ sharing: "approved" });
+        return served(learningContract.ApproveSkillSharingResponse, {
+          skillName: "quote-follow-up",
+          sharing: "approved",
+        });
       }
       return undefined;
     });
@@ -682,13 +742,12 @@ describe("reviewing proposed skills", () => {
   });
 
   test("a sharing decision waits for the skill to be shown", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     let release: (response: Response) => void = () => {};
     const base = global.fetch;
     global.fetch = Object.assign(
       (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) ===
-        `/api/admin/learning/people/${PERSON}/skills/quote-follow-up`
+        requestOf(input, init).path === DANA.learnedSkill("quote-follow-up")
           ? new Promise<Response>((resolve) => {
               release = resolve;
             })
@@ -706,14 +765,12 @@ describe("reviewing proposed skills", () => {
     expect((approve as HTMLButtonElement).disabled).toBe(true);
     expect((decline as HTMLButtonElement).disabled).toBe(true);
     release(
-      Response.json({
-        skill: {
-          name: "quote-follow-up",
-          description: "Follow up on a quiet quote.",
-          files: [
-            { path: "SKILL.md", text: "Ask whether the quote still fits.\n" },
-          ],
-        },
+      served(learningContract.GetLearnedSkillResponse, {
+        name: "quote-follow-up",
+        description: "Follow up on a quiet quote.",
+        files: [
+          { path: "SKILL.md", text: "Ask whether the quote still fits.\n" },
+        ],
       }),
     );
     await view.findByText("Ask whether the quote still fits.");
@@ -724,10 +781,10 @@ describe("reviewing proposed skills", () => {
   });
 
   test("a sharing decision stays off when the skill could not be read", async () => {
-    const posts = intelligence();
-    override((path) =>
-      path === `/api/admin/learning/people/${PERSON}/skills/quote-follow-up`
-        ? Response.json({ error: "Couldn't read this skill." }, { status: 503 })
+    const posts = serveLearning();
+    override((request) =>
+      request.path === DANA.learnedSkill("quote-follow-up")
+        ? problem(503, "Couldn't read this skill.", "LEARNING_UNAVAILABLE")
         : undefined,
     );
     const view = shared();
@@ -750,25 +807,20 @@ describe("reviewing proposed skills", () => {
   });
 
   test("an admin rejects a proposed skill", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     fireEvent.click(await view.findByRole("button", { name: /Refund triage/ }));
     await view.findByText("Read the order date from the conversation.");
     fireEvent.click(view.getByRole("button", { name: "Reject" }));
     await view.findByText("Rejected. It won't be published.");
-    expect([...posts]).toEqual([
-      `/api/admin/learning/proposals/${PROPOSAL}/reject`,
-    ]);
+    expect([...posts]).toEqual([`${LEARNING.proposal(PROPOSAL)}/reject`]);
   });
 
   test("a failed approve of a proposed skill shows why and leaves the choice open", async () => {
-    intelligence();
-    override((path) =>
-      path === `/api/admin/learning/proposals/${PROPOSAL}/approve`
-        ? Response.json(
-            { error: "Couldn't publish this skill." },
-            { status: 502 },
-          )
+    serveLearning();
+    override((request) =>
+      request.path === `${LEARNING.proposal(PROPOSAL)}/approve`
+        ? problem(502, "Couldn't publish this skill.", "LEARNING_UNREACHABLE")
         : undefined,
     );
     const view = shared();
@@ -783,7 +835,7 @@ describe("reviewing proposed skills", () => {
   });
 
   test("an admin rejects a person's proposal", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     fireEvent.click(
       await view.findByRole("button", { name: /Quote follow-up/ }),
@@ -792,19 +844,15 @@ describe("reviewing proposed skills", () => {
     fireEvent.click(view.getByRole("button", { name: "Reject" }));
     await view.findByText("Rejected. It won't be published.");
     expect([...posts]).toEqual([
-      `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/reject`,
+      `${DANA.proposal(PERSON_PROPOSAL)}/reject?containerId=${PERSON_SPACE}`,
     ]);
   });
 
   test("a failed approve of a person's proposal shows why", async () => {
-    intelligence();
-    override((path) =>
-      path ===
-      `/api/admin/learning/people/${PERSON}/proposals/${PERSON_PROPOSAL}/approve`
-        ? Response.json(
-            { error: "Couldn't publish this skill." },
-            { status: 502 },
-          )
+    serveLearning();
+    override((request) =>
+      request.path === `${DANA.proposal(PERSON_PROPOSAL)}/approve`
+        ? problem(502, "Couldn't publish this skill.", "LEARNING_UNREACHABLE")
         : undefined,
     );
     const view = shared();
@@ -820,15 +868,20 @@ describe("reviewing proposed skills", () => {
   });
 
   test("when settings fail to load, each approval section says so instead of vanishing", async () => {
-    intelligence();
-    override((path) =>
-      path.endsWith("/settings")
-        ? Response.json(
-            { error: "Learning settings could not be accessed." },
-            { status: 503 },
+    serveLearning();
+    override((request) =>
+      request.path === LEARNING.settings
+        ? problem(
+            503,
+            "Learning settings could not be accessed.",
+            "LEARNING_UNAVAILABLE",
           )
-        : path === "/api/admin/learning/sharing-requests"
-          ? Response.json({ requests: [] })
+        : request.path === LEARNING.sharingRequests
+          ? listPage(
+              learningContract.ListSkillSharingRequestsResponse,
+              "requests",
+              [],
+            )
           : undefined,
     );
     const view = shared();
@@ -843,14 +896,21 @@ describe("reviewing proposed skills", () => {
   });
 
   test("Nothing to review is not said while someone's skills could not be read", async () => {
-    intelligence();
-    override((path) =>
-      path === "/api/admin/learning/people/proposals"
-        ? Response.json({
-            people: [
-              { userId: "user-unreadable", name: "Sam Ortiz", proposals: null },
+    serveLearning();
+    override((request) =>
+      request.path === LEARNING.peopleProposals
+        ? listPage(
+            learningContract.ListPersonalLearningProposalsResponse,
+            "people",
+            [
+              {
+                personId: "user-unreadable",
+                name: "Sam Ortiz",
+                containerId: "user-unreadable",
+                proposals: null,
+              },
             ],
-          })
+          )
         : undefined,
     );
     const view = shared();
@@ -861,16 +921,18 @@ describe("reviewing proposed skills", () => {
   });
 
   test("Who approves cannot be closed while it saves, so the result stays in view", async () => {
-    intelligence();
+    serveLearning();
     let release: (response: Response) => void = () => {};
     const base = global.fetch;
     global.fetch = Object.assign(
-      (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) === "/api/admin/learning/personal-review"
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init);
+        return request.path === LEARNING.settings && request.method === "PATCH"
           ? new Promise<Response>((resolve) => {
               release = resolve;
             })
-          : base(input, init),
+          : base(input, init);
+      },
       { preconnect: originalFetch.preconnect },
     );
     const view = shared();
@@ -890,66 +952,52 @@ describe("reviewing proposed skills", () => {
       name: "Cancel",
     }) as HTMLButtonElement;
     expect(cancel.disabled).toBe(true);
-    release(
-      Response.json({ error: "Couldn't save who approves." }, { status: 500 }),
-    );
+    release(problem(500, "Couldn't save who approves.", "INTERNAL_ERROR"));
     await view.findByText("Couldn't save who approves.");
   });
 
   test("Refresh status also reads proposed skills, analysis runs and published skills again", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     await view.findByRole("button", { name: /Invoice lookup/ });
+    const lists = [LEARNING.runs, LEARNING.proposals, LEARNING.skills];
     const count = (path: string) =>
       posts.gets.filter((get) => get === path).length;
-    const before = [
-      "/api/admin/learning/runs",
-      "/api/admin/learning/proposals",
-      "/api/admin/learning/skills",
-    ].map(count);
+    const before = lists.map(count);
     fireEvent.click(view.getByRole("button", { name: "Refresh status" }));
     await waitFor(() =>
-      expect(
-        [
-          "/api/admin/learning/runs",
-          "/api/admin/learning/proposals",
-          "/api/admin/learning/skills",
-        ].map(count),
-      ).toEqual(before.map((n) => n + 1)),
+      expect(lists.map(count)).toEqual(before.map((n) => n + 1)),
     );
   });
 
   test("a run that failed says so in plain words, and with no container says so like the sections beside it", async () => {
-    intelligence();
-    override((path, init) =>
-      path === "/api/admin/learning/runs" && !init?.method
-        ? Response.json({
-            containerId: "openbot",
-            runs: [
-              {
+    serveLearning();
+    override((request) =>
+      request.path === LEARNING.runs && request.method === "GET"
+        ? listPage(
+            learningContract.ListOrganizationLearningRunsResponse,
+            "runs",
+            [
+              runBody({
                 id: "0198a012-a20f-77c0-9e33-8992f18e74c3",
                 status: "failed",
-                trigger: "automatic",
-                proposals: null,
-                insights: null,
+                triggerSource: "automatic",
                 failureCode: "LEARNING_MODEL_NOT_CONFIGURED",
+                failure:
+                  "Learning has no model to think with. Sign OpenBot in to a model, then choose Learn now.",
                 createdAt: "2026-11-04T10:00:00.000Z",
-                startedAt: null,
-                completedAt: null,
-              },
-              {
+              }),
+              runBody({
                 id: "0198a012-a20f-77c0-9e33-8992f18e74c4",
                 status: "failed",
-                trigger: "automatic",
-                proposals: null,
-                insights: null,
+                triggerSource: "automatic",
                 failureCode: "SOMETHING_NEW",
+                failure:
+                  "Learning stopped before it finished. Choose Learn now to try again.",
                 createdAt: "2026-11-03T10:00:00.000Z",
-                startedAt: null,
-                completedAt: null,
-              },
+              }),
             ],
-          })
+          )
         : undefined,
     );
     const view = shared();
@@ -958,15 +1006,20 @@ describe("reviewing proposed skills", () => {
     expect(view.queryByText("LEARNING_MODEL_NOT_CONFIGURED")).toBeNull();
     cleanup();
     queryClient.clear();
-    intelligence();
-    override((path, init) =>
-      path === "/api/admin/learning/runs" && !init?.method
-        ? Response.json({ containerId: null, runs: [] })
+    serveLearning();
+    // No space is assigned: the runs list is empty, and the section says why, as Proposed skills does.
+    override((request) =>
+      request.path === LEARNING.settings && request.method === "GET"
+        ? configuration({ enabled: true, defaultTarget: null })
         : undefined,
     );
     const none = shared();
     await none.findByText("Analysis runs");
-    await none.findByText("No container");
+    await waitFor(() =>
+      expect(none.getAllByText("No container").length).toBeGreaterThanOrEqual(
+        2,
+      ),
+    );
     expect(none.queryByText("No analysis runs yet")).toBeNull();
   });
 
@@ -981,11 +1034,12 @@ describe("reviewing proposed skills", () => {
   });
 
   test("a failed sharing requests read shows its error instead of hiding the section", async () => {
-    intelligence();
+    serveLearning();
     const base = global.fetch;
     global.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) === "/api/admin/learning/sharing-requests"
+        // A server that broke and said nothing: the screen's own sentence is what reaches the person.
+        requestOf(input, init).path === LEARNING.sharingRequests
           ? new Response("{}", { status: 500 })
           : base(input, init),
       { preconnect: originalFetch.preconnect },
@@ -996,47 +1050,36 @@ describe("reviewing proposed skills", () => {
   });
 
   test("people's proposals are not listed once each person approves their own", async () => {
-    const posts = intelligence();
-    const base = global.fetch;
-    global.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith("/settings")
-          ? Response.json({
-              settings: {
-                enabled: true,
-                defaultTarget: { containerId: "openbot" },
-                agents: {},
-                personalReview: "people",
-              },
-              automatic: { state: "saved" },
-            })
-          : base(input, init),
-      { preconnect: originalFetch.preconnect },
+    const posts = serveLearning();
+    override((request) =>
+      request.path === LEARNING.settings && request.method === "GET"
+        ? configuration(
+            { ...settings, personalReview: "people" },
+            { state: "saved" },
+          )
+        : undefined,
     );
     const view = shared();
     await view.findByRole("button", { name: /Refund triage/ });
     expect(view.queryByRole("button", { name: /Quote follow-up/ })).toBeNull();
     await view.findByText("Sharing requests");
-    expect(posts.gets).not.toContain("/api/admin/learning/people/proposals");
+    expect(posts.gets).not.toContain(LEARNING.peopleProposals);
   });
 
   test("Who approves opens a dialog and saves people", async () => {
-    intelligence();
-    const base = global.fetch;
-    const puts: { path: string; body: unknown }[] = [];
-    global.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input);
-        if (path === "/api/admin/learning/personal-review") {
-          puts.push({ path, body: JSON.parse(String(init?.body)) });
-          return Response.json({
-            settings: { enabled: true, agents: {}, personalReview: "people" },
-          });
-        }
-        return base(input, init);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    serveLearning();
+    const patches: { path: string; body: unknown }[] = [];
+    override((request) => {
+      if (request.path !== LEARNING.settings || request.method !== "PATCH")
+        return undefined;
+      patches.push({ path: request.path, body: request.body });
+      return served(
+        learningContract.UpdateLearningSettingsResponse,
+        learningConfigurationBody({
+          settings: { ...settings, personalReview: "people" },
+        }),
+      );
+    });
     const view = shared();
     const row = await view.findByRole("button", {
       name: /Who approves skills learned from people's recordings/,
@@ -1050,43 +1093,31 @@ describe("reviewing proposed skills", () => {
     );
     fireEvent.click(view.getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(puts).toEqual([
-        {
-          path: "/api/admin/learning/personal-review",
-          body: { personalReview: "people" },
-        },
+      expect(patches).toEqual([
+        { path: LEARNING.settings, body: { personalReview: "people" } },
       ]),
     );
   });
 
   test("saving Participation leaves who approves alone", async () => {
-    intelligence();
-    const base = global.fetch;
-    const puts: { path: string; body: Record<string, unknown> }[] = [];
-    global.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input);
-        if (init?.method === "PUT") {
-          puts.push({ path, body: JSON.parse(String(init.body)) });
-          return Response.json({
-            settings: { enabled: false, agents: {}, personalReview: "people" },
-          });
-        }
-        if (path.endsWith("/settings"))
-          return Response.json({
-            settings: {
-              enabled: true,
-              defaultTarget: { containerId: "openbot" },
-              agents: {},
-              personalReview: "admins",
-              autoApprove: true,
-            },
-            automatic: { state: "saved" },
-          });
-        return base(input, init);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    serveLearning();
+    const patches: Record<string, unknown>[] = [];
+    override((request) => {
+      if (request.path !== LEARNING.settings) return undefined;
+      if (request.method === "PATCH") {
+        patches.push(request.body ?? {});
+        return served(
+          learningContract.UpdateLearningSettingsResponse,
+          learningConfigurationBody({
+            settings: { enabled: false, personalReview: "people" },
+          }),
+        );
+      }
+      return configuration(
+        { ...settings, personalReview: "admins" },
+        { state: "saved" },
+      );
+    });
     const view = shared();
     fireEvent.click(await view.findByLabelText(/Turn on automatic learning/));
     fireEvent.click(
@@ -1101,24 +1132,21 @@ describe("reviewing proposed skills", () => {
     );
     fireEvent.click(view.getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(puts.map((put) => put.path)).toContain(
-        "/api/admin/learning/personal-review",
-      ),
+      expect(patches).toContainEqual({ personalReview: "people" }),
     );
     fireEvent.click(
       view.getByRole("button", { name: "Save Learning settings" }),
     );
     await waitFor(() =>
-      expect(puts.some((put) => put.path.endsWith("/settings"))).toBe(true),
+      expect(patches.some((patch) => "enabled" in patch)).toBe(true),
     );
-    const settingsPut = puts.find((put) => put.path.endsWith("/settings"));
-    expect(settingsPut?.body.enabled).toBe(false);
-    expect("personalReview" in (settingsPut?.body ?? {})).toBe(false);
-    expect("autoApprove" in (settingsPut?.body ?? {})).toBe(false);
+    const participation = patches.find((patch) => "enabled" in patch);
+    expect(participation?.enabled).toBe(false);
+    expect("personalReview" in (participation ?? {})).toBe(false);
   });
 
   test("Published skills lists the container's skills and opens one", async () => {
-    intelligence();
+    serveLearning();
     const view = shared();
     await view.findByText("Published skills");
     fireEvent.click(
@@ -1128,41 +1156,38 @@ describe("reviewing proposed skills", () => {
   });
 
   test("Learn now starts Learning on the container shown", async () => {
-    const posts = intelligence();
+    const posts = serveLearning();
     const view = shared();
     await view.findByRole("button", { name: /Refund triage/ });
     fireEvent.click(view.getByRole("button", { name: "Learn now" }));
     await view.findByText("Learning started.", { exact: false });
-    expect([...posts]).toEqual(["/api/admin/learning/runs"]);
+    expect([...posts]).toEqual([LEARNING.runs]);
   });
 
   test("lists analysis runs and drops the link out to them", async () => {
     const runsLink = "https://app.intelligence.example/o/acme/support/runs";
-    const runs: LearningRunSummary[] = [
-      {
+    const runs = [
+      runBody({
         id: "0198a012-a20f-77c0-9e33-8992f18e74c2",
         status: "succeeded",
-        trigger: "manual",
-        proposals: 2,
-        insights: 5,
-        failureCode: null,
+        triggerSource: "manual",
+        proposalCount: 2,
+        insightCount: 5,
         createdAt: "2026-11-05T10:00:00.000Z",
         startedAt: "2026-11-05T10:00:01.000Z",
         completedAt: "2026-11-05T10:03:00.000Z",
-      },
-      {
+      }),
+      runBody({
         id: "0198a012-a20f-77c0-9e33-8992f18e74c3",
         status: "failed",
-        trigger: "automatic",
-        proposals: null,
-        insights: null,
+        triggerSource: "automatic",
         failureCode: "LEARNING_MODEL_NOT_CONFIGURED",
+        failure:
+          "Learning has no model to think with. Sign OpenBot in to a model, then choose Learn now.",
         createdAt: "2026-11-04T10:00:00.000Z",
-        startedAt: null,
-        completedAt: null,
-      },
+      }),
     ];
-    intelligence({
+    serveLearning({
       ...noDashboard,
       links: {
         learning: "https://app.intelligence.example/o/acme/support/learning",
@@ -1170,13 +1195,14 @@ describe("reviewing proposed skills", () => {
         runs: runsLink,
       },
     });
-    const fallback = global.fetch;
-    global.fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) === "/api/admin/learning/runs" && !init?.method
-          ? Response.json({ containerId: "openbot", runs })
-          : fallback(input, init),
-      { preconnect: originalFetch.preconnect },
+    override((request) =>
+      request.path === LEARNING.runs && request.method === "GET"
+        ? listPage(
+            learningContract.ListOrganizationLearningRunsResponse,
+            "runs",
+            runs,
+          )
+        : undefined,
     );
     const view = shared();
     await view.findByText("Analysis runs");
@@ -1184,6 +1210,7 @@ describe("reviewing proposed skills", () => {
     expect(view.queryByText("LEARNING_MODEL_NOT_CONFIGURED")).toBeNull();
     expect(view.getByText("Finished · Manual")).not.toBeNull();
     expect(view.getByText("Failed · Automatic")).not.toBeNull();
+    expect(view.getByText("2 proposed, 5 insights")).not.toBeNull();
     await view.findByText("Manage Learning in the backend dashboard");
     const anchors = Array.from(view.container.querySelectorAll("a"));
     expect(anchors.some((a) => a.getAttribute("href") === runsLink)).toBe(
@@ -1194,19 +1221,19 @@ describe("reviewing proposed skills", () => {
   test("a sign-in Learning can't use is said on the page, before anyone presses Learn now", async () => {
     const said =
       "Learning can't run on the model you signed in with. To use it, sign OpenBot in with an OpenAI or Anthropic API key, or a Claude or ChatGPT plan.";
-    intelligence({ ...noDashboard, modelProblem: said });
+    serveLearning({ ...noDashboard, modelProblem: said });
     const view = shared();
     expect((await view.findByText(said)).getAttribute("role")).toBe("alert");
     cleanup();
     queryClient.clear();
-    intelligence();
+    serveLearning();
     const fine = shared();
     await fine.findByText("OpenBot (openbot)");
     expect(fine.queryByText(said)).toBeNull();
   });
 
   test("with no dashboard there is no link into one, and with one the links stay", async () => {
-    intelligence();
+    serveLearning();
     const without = shared();
     await without.findByText("OpenBot (openbot)");
     expect(
@@ -1216,7 +1243,7 @@ describe("reviewing proposed skills", () => {
     expect(without.getByText("Candidates to review")).not.toBeNull();
     cleanup();
     queryClient.clear();
-    intelligence({
+    serveLearning({
       ...noDashboard,
       pendingThreadCount: 4,
       publishedSkillCount: 2,
@@ -1238,10 +1265,7 @@ describe("reviewing proposed skills", () => {
 });
 
 test("an Intelligence with Learning switched off says so, not that it can't be reached", async () => {
-  serve({
-    settings: { enabled: true, defaultTarget: null, agents: {} },
-    automatic: { state: "learning_off" },
-  });
+  serve({ enabled: true, defaultTarget: null }, { state: "learning_off" });
   const view = page();
   await view.findByText("Learning is switched off in the backend", {
     exact: false,

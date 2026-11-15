@@ -130,7 +130,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             "/bots/$agentId/memory",
             sources.data
               ? memorySummary(
-                  sources.data.filter((source) => source.agentId === agent.id)
+                  sources.data.filter((source) => source.botId === agent.id)
                     .length,
                 )
               : "",

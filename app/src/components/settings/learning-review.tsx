@@ -1,7 +1,4 @@
-import type {
-  LearningProposal,
-  LearningRunSummary,
-} from "@openbot/shared/learning";
+import type { LearningProposal } from "@openbot/shared/learning";
 import { IconChevronRight, IconSparkles } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -29,6 +26,7 @@ import {
   startPersonalLearningRunMutationOptions,
 } from "@/lib/learning/mutations";
 import {
+  type LearningRunSummary,
   learningKeys,
   personalProposalQueryOptions,
   personalReviewQueryOptions,
@@ -119,7 +117,7 @@ export function LearningReview() {
     >
   >({});
   // When a refetch finds fewer proposals waiting, some were approved on their own: Your skills shows them now.
-  const waitingCount = review.data?.sources.reduce(
+  const waitingCount = review.data?.spaces.reduce(
     (count, source) =>
       count +
       (source.proposals ?? []).filter(
@@ -146,7 +144,7 @@ export function LearningReview() {
   // A run Learn now started may not be listed at once; read the review again until it is, so the button comes back.
   const awaitingRun = Object.entries(starting).some(([label, state]) => {
     if (state.started === null) return false;
-    const runs = (review.data?.sources ?? [])
+    const runs = (review.data?.spaces ?? [])
       .filter((source) => source.label === label)
       .map((source) => source.latestRun)
       .filter((run) => run !== null);
@@ -171,7 +169,7 @@ export function LearningReview() {
       </p>
     );
   }
-  const { canReview, sources, autoApprove } = review.data;
+  const { canReview, spaces: sources, autoApprove } = review.data;
   // Shown at once while the save is on its way, as a switch is.
   const autoApproveOn =
     (saveAutoApprove.isPending ? saveAutoApprove.variables : undefined) ??

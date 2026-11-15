@@ -1,8 +1,6 @@
 import type {
   LearningAutoAssignState,
   LearningProposal,
-  LearningRunSummary,
-  LearningSettings,
   LearningTarget,
 } from "@openbot/shared/learning";
 import {
@@ -42,11 +40,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  createLearningContainer,
+  type LearningParticipation,
   reviewLearningProposalMutationOptions,
+  saveLearningSettings,
   startLearningRunMutationOptions,
 } from "@/lib/learning/mutations";
 import {
-  createLearningContainer,
+  type LearningRunSummary,
   learnedSkillsQueryOptions,
   learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
@@ -56,7 +57,6 @@ import {
   learningProposalsQueryOptions,
   learningRunsQueryOptions,
   learningSettingsQueryOptions,
-  saveLearningSettings,
 } from "@/lib/learning/queries";
 import { queryClient as appQueryClient } from "@/query-client";
 
@@ -68,7 +68,7 @@ const selectClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
 /** What automatic assignment found, in words, or nothing when there is nothing to say. */
 function automaticMessage(
   automatic: LearningAutoAssignState | null | undefined,
-  settings: LearningSettings,
+  settings: LearningParticipation,
 ): string | undefined {
   if (!automatic) return undefined;
   if (
@@ -188,16 +188,6 @@ function ContainerSetup({
   );
 }
 
-/**
- * Who approves is saved from its own dialog. A Participation draft copied the
- * whole object earlier, so sending those two keys back would overwrite a
- * newer choice; PUT /settings keeps the stored value when they are omitted.
- */
-function withoutReviewKeys(settings: LearningSettings): LearningSettings {
-  const { personalReview: _review, autoApprove: _auto, ...rest } = settings;
-  return rest;
-}
-
 export function LearningPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
@@ -205,7 +195,7 @@ export function LearningPage() {
   const agents = useQuery(agentListQueryOptions());
   const hiddenAgents = useQuery(agentListQueryOptions(true));
   const roster = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
-  const [draft, setDraft] = useState<LearningSettings | null>(null);
+  const [draft, setDraft] = useState<LearningParticipation | null>(null);
   const [selected, setSelected] = useState("");
   const [saved, setSaved] = useState(false);
   const overview = useQuery(
@@ -227,7 +217,7 @@ export function LearningPage() {
       await queryClient.invalidateQueries({ queryKey: learningKeys.all });
     },
   });
-  function change(next: LearningSettings) {
+  function change(next: LearningParticipation) {
     setDraft(next);
     setSaved(false);
     save.reset();
@@ -235,7 +225,7 @@ export function LearningPage() {
   const botIds = [
     ...new Set([
       ...roster.map((agent) => agent.id),
-      ...Object.keys(settings?.agents ?? {}),
+      ...Object.keys(settings?.bots ?? {}),
     ]),
   ];
   const nameFor = (id: string) =>
@@ -264,7 +254,7 @@ export function LearningPage() {
             className="grid gap-5"
             onSubmit={(event) => {
               event.preventDefault();
-              save.mutate(withoutReviewKeys(settings));
+              save.mutate(settings);
             }}
           >
             <label className="flex items-center gap-2 text-sm">
@@ -308,8 +298,8 @@ export function LearningPage() {
                 </p>
               )}
               {botIds.map((id) => {
-                const override = settings.agents[id];
-                const mode = !Object.hasOwn(settings.agents, id)
+                const override = settings.bots[id];
+                const mode = !Object.hasOwn(settings.bots, id)
                   ? "inherit"
                   : override === null
                     ? "exclude"
@@ -323,7 +313,7 @@ export function LearningPage() {
                         aria-label={`${nameFor(id)} participation`}
                         value={mode}
                         onChange={(event) => {
-                          const mappings = { ...settings.agents };
+                          const mappings = { ...settings.bots };
                           if (event.target.value === "inherit")
                             delete mappings[id];
                           else
@@ -334,7 +324,7 @@ export function LearningPage() {
                                     containerId:
                                       settings.defaultTarget?.containerId ?? "",
                                   };
-                          change({ ...settings, agents: mappings });
+                          change({ ...settings, bots: mappings });
                         }}
                       >
                         <option value="inherit">Use deployment default</option>
@@ -351,8 +341,8 @@ export function LearningPage() {
                         onChange={(target) =>
                           change({
                             ...settings,
-                            agents: {
-                              ...settings.agents,
+                            bots: {
+                              ...settings.bots,
                               [id]: target ?? { containerId: "" },
                             },
                           })
@@ -696,8 +686,8 @@ export function runPollInterval(
 /** One line saying how many skills and insights a run produced, for the counts it has. */
 function runCounts(run: LearningRunSummary): string | null {
   const counts = [
-    run.proposals !== null ? `${run.proposals} proposed` : null,
-    run.insights !== null ? `${run.insights} insights` : null,
+    run.proposalCount !== null ? `${run.proposalCount} proposed` : null,
+    run.insightCount !== null ? `${run.insightCount} insights` : null,
   ].filter((count) => count !== null);
   return counts.length > 0 ? counts.join(", ") : null;
 }
@@ -750,7 +740,7 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
                 <ItemContent>
                   <ItemTitle>
                     {RUN_STATUS[run.status]} ·{" "}
-                    {run.trigger === "manual" ? "Manual" : "Automatic"}
+                    {run.triggerSource === "manual" ? "Manual" : "Automatic"}
                   </ItemTitle>
                   {[runTimes(run), runCounts(run)]
                     .filter((line) => line !== null)

@@ -59,6 +59,7 @@ import {
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { type AppsFixture, answerAppsApi } from "./apps-api";
+import { MEMORY } from "./learning-api";
 import {
   activityOf,
   answerBotAttention,
@@ -379,10 +380,11 @@ const memories: MemoryRecord[] = [
     enabled: true,
     reviewState: "confirmed",
     formedBy: "person",
-    formedByAgentId: null,
+    formedByBotId: null,
     sourceApp: null,
     sourceLink: null,
     observedAt: null,
+    createdAt: earlier,
     updatedAt: earlier,
   },
 ];
@@ -446,7 +448,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     },
     [`${ROUTINES_PATH}?limit=100`]: { routines, nextCursor: null },
     [`${GOALS_PATH}?limit=100`]: { goals: responsibilities, nextCursor: null },
-    "/api/memory": { memories },
+    [`${MEMORY.memories}?limit=100`]: { memories, nextCursor: null },
     "/api/plugins/connections": {
       connections: [{ serverId: "notion", holder: "person" }],
       redirectUri: null,

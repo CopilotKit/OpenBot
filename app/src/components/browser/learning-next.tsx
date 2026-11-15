@@ -1,7 +1,3 @@
-import type {
-  LearningProposal,
-  LearningRunSummary,
-} from "@openbot/shared/learning";
 import {
   IconAlertTriangle,
   IconLoader2,
@@ -21,7 +17,9 @@ import {
 } from "@/components/ui/item";
 import { startPersonalLearningRunMutationOptions } from "@/lib/learning/mutations";
 import {
+  type LearningRunSummary,
   personalReviewQueryOptions,
+  type RecordingSkill,
   recordingSkillsQueryOptions,
 } from "@/lib/learning/queries";
 import { cn } from "@/lib/utils";
@@ -34,7 +32,7 @@ export const YOUR_SKILLS = "/skills";
 /** How much earlier than the recording's stop a run may be dated and still be after it: the two clocks can differ. */
 const CLOCK_SLACK_MS = 60_000;
 
-type Skill = LearningProposal & { container: string };
+type Skill = RecordingSkill;
 
 /** What has become of a saved recording in Learning, as Teach a Bot says it. */
 export type LearningNext =
@@ -97,7 +95,7 @@ export function useLearningNext(stopped: Stopped) {
     startPersonalLearningRunMutationOptions(queryClient),
   );
 
-  const sources = (review.data?.sources ?? []).filter(
+  const sources = (review.data?.spaces ?? []).filter(
     (source) => source.kind === "recordings",
   );
   const latest = sources

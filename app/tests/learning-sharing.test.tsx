@@ -7,15 +7,23 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type { PersonalLearningSharing } from "@openbot/shared/learning";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   LearningSharing,
   SHARING_CHOICES,
 } from "@/components/settings/learning-sharing";
+import type { PersonalLearningSharing } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  learningContract,
+  personLearning,
+  personLearningBody,
+  problem,
+  requestOf,
+  served,
+} from "./learning-api";
 
 let wasServer = true;
 beforeAll(() => {
@@ -29,7 +37,12 @@ afterAll(() => {
 });
 
 const originalFetch = global.fetch;
-let answer: PersonalLearningSharing;
+/** The person's own Learning, as the API answers it. Automatic approval is the personal edition's alone. */
+type Answer = Omit<PersonalLearningSharing, "autoApprove">;
+const ME = personLearning();
+/** Where each of the person's learned skills is read and opened, by its name after this. */
+const SKILLS = ME.learnedSkill("");
+let answer: Answer;
 let failRead = false;
 let failWrite = false;
 let edition: "team" | "personal" = "team";
@@ -66,52 +79,65 @@ beforeEach(() => {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
-      const method = init?.method ?? "GET";
-      if (method === "PUT") {
-        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-        sent.push({ path: url, method, body });
+      const request = requestOf(path, init);
+      const skill = request.path.startsWith(SKILLS)
+        ? decodeURIComponent(request.path.slice(SKILLS.length))
+        : null;
+      if (request.method === "PATCH") {
+        const body = request.body ?? {};
+        sent.push({ path: request.path, method: request.method, body });
         if (failWrite)
-          return Response.json(
-            { error: "Your Learning settings could not be saved." },
-            { status: 503 },
+          return problem(
+            503,
+            "Your Learning settings could not be saved.",
+            "LEARNING_UNAVAILABLE",
           );
-        if (url === "/api/settings/learning/mode")
-          answer = { ...answer, mode: body.mode };
-        const skill = /^\/api\/settings\/learning\/skills\/(.+)$/.exec(url);
-        if (skill && answer.skills)
+        if (request.path === ME.settings) {
+          answer = { ...answer, mode: body.mode as Answer["mode"] };
+          return served(learningContract.UpdatePersonLearningSettingsResponse, {
+            mode: answer.mode,
+            autoApprove: null,
+          });
+        }
+        if (skill !== null && answer.skills) {
           answer = {
             ...answer,
             skills: answer.skills.map((entry) =>
-              entry.name === decodeURIComponent(skill[1] ?? "")
-                ? { ...entry, open: body.open }
+              entry.name === skill
+                ? { ...entry, open: body.open as boolean }
                 : entry,
             ),
           };
-        return Response.json({ ok: true });
+          return served(learningContract.UpdateLearnedSkillResponse, {
+            name: skill,
+            open: body.open,
+          });
+        }
+        return problem(404, "This skill doesn't exist.", "NOT_FOUND");
       }
-      const detail = /^\/api\/settings\/learning\/skills\/(.+)$/.exec(url);
-      if (detail) {
-        const name = decodeURIComponent(detail[1] ?? "");
-        fetched.push(url);
-        return Response.json({
-          skill: {
-            name,
-            description: "Refunds an order.",
-            files: [
-              {
-                path: "SKILL.md",
-                text: `---\nname: ${name}\n---\nStep one: look up the order.`,
-              },
-            ],
-          },
+      if (skill !== null && request.method === "GET") {
+        fetched.push(request.path);
+        return served(learningContract.GetLearnedSkillResponse, {
+          name: skill,
+          description: "Refunds an order.",
+          files: [
+            {
+              path: "SKILL.md",
+              text: `---\nname: ${skill}\n---\nStep one: look up the order.`,
+            },
+          ],
         });
       }
       if (url === DEPLOYMENT_PATH) return Response.json({ edition });
-      if (url === "/api/settings/learning") {
+      if (request.path === ME.settings) {
+        // A server that broke and said nothing: the screen's own sentence is what reaches the person.
         if (failRead) return new Response(null, { status: 500 });
-        return Response.json(answer);
+        return served(
+          learningContract.GetPersonLearningSettingsResponse,
+          personLearningBody(answer),
+        );
       }
-      return new Response(null, { status: 404 });
+      return problem(404, "Not found.", "NOT_FOUND");
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -197,8 +223,8 @@ test("choosing Everyone's Bots saves open at once", async () => {
   fireEvent.click(choice(view, "Everyone's Bots"));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/settings/learning/mode",
-      method: "PUT",
+      path: ME.settings,
+      method: "PATCH",
       body: { mode: "open" },
     }),
   );
@@ -238,8 +264,8 @@ test("under The skills I choose, each skill in your space has a switch that open
   fireEvent.click(refund);
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/settings/learning/skills/refund-order",
-      method: "PUT",
+      path: ME.learnedSkill("refund-order"),
+      method: "PATCH",
       body: { open: true },
     }),
   );
@@ -275,8 +301,8 @@ test("Skills Intelligence did not deliver show a plain unavailable line, and the
   fireEvent.click(choice(view, "Only my Bots"));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/settings/learning/mode",
-      method: "PUT",
+      path: ME.settings,
+      method: "PATCH",
       body: { mode: "closed" },
     }),
   );
@@ -329,8 +355,8 @@ test("a choice made before sharing was turned off says it applies again, and an 
   await waitFor(() =>
     expect(sent).toEqual([
       {
-        path: "/api/settings/learning/skills/close-ticket",
-        method: "PUT",
+        path: ME.learnedSkill("close-ticket"),
+        method: "PATCH",
         body: { open: false },
       },
     ]),
@@ -367,7 +393,7 @@ test("each of Your skills opens its SKILL.md", async () => {
   // Pressing the row does.
   fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
-  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
+  expect(fetched).toEqual([ME.learnedSkill("refund-order")]);
 });
 
 test("pressing a Your skills row opens its SKILL.md where there is no switch", async () => {
@@ -377,7 +403,7 @@ test("pressing a Your skills row opens its SKILL.md where there is no switch", a
   expect(view.queryByRole("switch")).toBeNull();
   fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
-  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
+  expect(fetched).toEqual([ME.learnedSkill("refund-order")]);
 });
 
 /** Fetch stub that records POSTs, on top of the default one. */
@@ -387,8 +413,14 @@ function recordPosts() {
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       if (init?.method === "POST") {
-        posts.push(String(path));
-        return Response.json({ ok: true });
+        const request = requestOf(path, init);
+        posts.push(request.path);
+        return served(learningContract.RequestSkillSharingResponse, {
+          skillName: decodeURIComponent(
+            request.path.slice(SKILLS.length, -"/share".length),
+          ),
+          sharing: "requested",
+        });
       }
       return inner(path, init);
     },
@@ -440,11 +472,7 @@ test("under Everyone's Bots, a skill waiting for an admin has one control: Ask t
   expect(reopenRow.textContent).toContain("Reopens a ticket.");
   expect(reopenRow.textContent).not.toContain("Only your Bots use it.");
   fireEvent.click(view.getByRole("button", { name: "Ask to share" }));
-  await waitFor(() =>
-    expect(posts).toEqual([
-      "/api/settings/learning/skills/refund-order/share-request",
-    ]),
-  );
+  await waitFor(() => expect(posts).toEqual([ME.share("refund-order")]));
 });
 
 test("under The skills I choose, every skill keeps its switch, including ones waiting for an admin", async () => {
@@ -487,8 +515,8 @@ test("an open skill waiting for an admin can be closed", async () => {
   await waitFor(() =>
     expect(sent).toEqual([
       {
-        path: "/api/settings/learning/skills/close-ticket",
-        method: "PUT",
+        path: ME.learnedSkill("close-ticket"),
+        method: "PATCH",
         body: { open: false },
       },
     ]),
@@ -506,15 +534,11 @@ test("switching on a skill waiting for an admin opens it and asks to share", asy
   fireEvent.click(
     await view.findByRole("switch", { name: "Open Refund order to everyone" }),
   );
-  await waitFor(() =>
-    expect(posts).toEqual([
-      "/api/settings/learning/skills/refund-order/share-request",
-    ]),
-  );
+  await waitFor(() => expect(posts).toEqual([ME.share("refund-order")]));
   expect(sent).toEqual([
     {
-      path: "/api/settings/learning/skills/refund-order",
-      method: "PUT",
+      path: ME.learnedSkill("refund-order"),
+      method: "PATCH",
       body: { open: true },
     },
   ]);
@@ -589,5 +613,5 @@ test("the personal edition lists Your skills with no sharing choice and no switc
   ).toBeNull();
   fireEvent.click(view.getByRole("button", { name: /Refund order/ }));
   await view.findByText(/Step one: look up the order/);
-  expect(fetched).toEqual(["/api/settings/learning/skills/refund-order"]);
+  expect(fetched).toEqual([ME.learnedSkill("refund-order")]);
 });

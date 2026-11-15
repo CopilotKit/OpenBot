@@ -156,7 +156,7 @@ export function MemoryList({
             <Fragment key={memory.id}>
               {index > 0 ? <Separator /> : null}
               <MemoryRow
-                botName={botName(memory.formedByAgentId)}
+                botName={botName(memory.formedByBotId)}
                 memory={memory}
               />
             </Fragment>

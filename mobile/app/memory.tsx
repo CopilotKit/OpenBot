@@ -1,7 +1,7 @@
 import { Redirect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Button, Switch, Text, TextInput, View } from "react-native";
-import { api, type Memory } from "../src/api";
+import { api, everyPage, type Memory, ORGANIZATION } from "../src/api";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -20,6 +20,9 @@ const ORIGIN: Record<Memory["formedBy"], string> = {
   bot: "A Bot learned this",
 };
 
+/** The person's own memories in the API. A write there carries an Idempotency-Key, which `api` adds. */
+const MEMORIES = `${ORGANIZATION}/people/me/memories`;
+
 /** What your Bots remember about you: read, add, edit, switch off and delete. */
 export default function MemoryScreen() {
   const { data: session, isPending } = authClient.useSession();
@@ -27,7 +30,7 @@ export default function MemoryScreen() {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ id: string; content: string }>();
   const load = useCallback(
-    () => api<{ memories: Memory[] }>("/api/memory"),
+    async () => ({ memories: await everyPage<Memory>(MEMORIES, "memories") }),
     [],
   );
   const memories = useLoad(load, Boolean(session));
@@ -35,7 +38,7 @@ export default function MemoryScreen() {
 
   const change = (id: string, body: Record<string, unknown>) =>
     action.run(id, async () => {
-      await api(`/api/memory/${encodeURIComponent(id)}`, {
+      await api(`${MEMORIES}/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body,
       });
@@ -68,7 +71,7 @@ export default function MemoryScreen() {
           disabled={Boolean(action.busy) || !draft.trim()}
           onPress={() => {
             void action.run("add", async () => {
-              await api("/api/memory", {
+              await api(MEMORIES, {
                 method: "POST",
                 body: { content: draft.trim() },
               });
@@ -168,7 +171,7 @@ export default function MemoryScreen() {
                       onPress: () => {
                         void action.run(memory.id, async () => {
                           await api(
-                            `/api/memory/${encodeURIComponent(memory.id)}`,
+                            `${MEMORIES}/${encodeURIComponent(memory.id)}`,
                             { method: "DELETE" },
                           );
                           await memories.refresh();

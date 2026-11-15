@@ -1,7 +1,4 @@
-import type {
-  LearningSharingMode,
-  PersonalLearningSharing,
-} from "@openbot/shared/learning";
+import type { LearningSharingMode } from "@openbot/shared/learning";
 import {
   IconCheck,
   IconChevronRight,
@@ -36,7 +33,10 @@ import {
   setLearnedSkillOpenMutationOptions,
   setLearningSharingModeMutationOptions,
 } from "@/lib/learning/mutations";
-import { personalLearningQueryOptions } from "@/lib/learning/queries";
+import {
+  type PersonalLearningSharing,
+  personalLearningQueryOptions,
+} from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 
 /** The three choices, each with the one plain line that says who sees what. */
