@@ -46,6 +46,7 @@ import { Route as AuthedAdminTeamsRouteImport } from './routes/_authed/admin/tea
 import { Route as AuthedAdminWhatIfRouteImport } from './routes/_authed/admin/what-if'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
+import { Route as AuthedSettingsApiKeysRouteImport } from './routes/_authed/settings/api-keys'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
 import { Route as AuthedSettingsBrowsersRouteImport } from './routes/_authed/settings/browsers'
 import { Route as AuthedSettingsComputerRouteImport } from './routes/_authed/settings/computer'
@@ -312,6 +313,11 @@ const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
 } as any)
 const AuthedSettingsPersonalRoute = AuthedSettingsPersonalRouteImport.update({
   id: '/_personal',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
+const AuthedSettingsApiKeysRoute = AuthedSettingsApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
 const AuthedSettingsApprovalsRoute = AuthedSettingsApprovalsRouteImport.update({
@@ -816,6 +822,7 @@ export interface FileRoutesByFullPath {
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/admin/teams': typeof AuthedAdminTeamsRoute
   '/admin/what-if': typeof AuthedAdminWhatIfRoute
+  '/settings/api-keys': typeof AuthedSettingsApiKeysRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/settings/computer': typeof AuthedSettingsComputerRoute
@@ -934,6 +941,7 @@ export interface FileRoutesByTo {
   '/admin/teams': typeof AuthedAdminTeamsRoute
   '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings': typeof AuthedSettingsIndexRoute
+  '/settings/api-keys': typeof AuthedSettingsApiKeysRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/settings/computer': typeof AuthedSettingsComputerRoute
@@ -1055,6 +1063,7 @@ export interface FileRoutesById {
   '/_authed/admin/teams': typeof AuthedAdminTeamsRoute
   '/_authed/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
+  '/_authed/settings/api-keys': typeof AuthedSettingsApiKeysRoute
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/_authed/settings/browsers': typeof AuthedSettingsBrowsersRoute
   '/_authed/settings/computer': typeof AuthedSettingsComputerRoute
@@ -1177,6 +1186,7 @@ export interface FileRouteTypes {
     | '/admin/skills'
     | '/admin/teams'
     | '/admin/what-if'
+    | '/settings/api-keys'
     | '/settings/approvals'
     | '/settings/browsers'
     | '/settings/computer'
@@ -1295,6 +1305,7 @@ export interface FileRouteTypes {
     | '/admin/teams'
     | '/admin/what-if'
     | '/settings'
+    | '/settings/api-keys'
     | '/settings/approvals'
     | '/settings/browsers'
     | '/settings/computer'
@@ -1415,6 +1426,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/teams'
     | '/_authed/admin/what-if'
     | '/_authed/settings/_personal'
+    | '/_authed/settings/api-keys'
     | '/_authed/settings/approvals'
     | '/_authed/settings/browsers'
     | '/_authed/settings/computer'
@@ -1767,6 +1779,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/settings'
       preLoaderRoute: typeof AuthedSettingsPersonalRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/api-keys': {
+      id: '/_authed/settings/api-keys'
+      path: '/api-keys'
+      fullPath: '/settings/api-keys'
+      preLoaderRoute: typeof AuthedSettingsApiKeysRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
     '/_authed/settings/approvals': {
@@ -2458,6 +2477,7 @@ const AuthedSettingsPersonalRouteWithChildren =
 
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsPersonalRoute: typeof AuthedSettingsPersonalRouteWithChildren
+  AuthedSettingsApiKeysRoute: typeof AuthedSettingsApiKeysRoute
   AuthedSettingsApprovalsRoute: typeof AuthedSettingsApprovalsRoute
   AuthedSettingsBrowsersRoute: typeof AuthedSettingsBrowsersRoute
   AuthedSettingsComputerRoute: typeof AuthedSettingsComputerRoute
@@ -2481,6 +2501,7 @@ interface AuthedSettingsRouteRouteChildren {
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsPersonalRoute: AuthedSettingsPersonalRouteWithChildren,
+  AuthedSettingsApiKeysRoute: AuthedSettingsApiKeysRoute,
   AuthedSettingsApprovalsRoute: AuthedSettingsApprovalsRoute,
   AuthedSettingsBrowsersRoute: AuthedSettingsBrowsersRoute,
   AuthedSettingsComputerRoute: AuthedSettingsComputerRoute,

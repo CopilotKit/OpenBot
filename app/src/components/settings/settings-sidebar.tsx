@@ -2,6 +2,7 @@ import {
   IconArrowLeft,
   IconBell,
   IconBuilding,
+  IconKey,
   IconLayoutGrid,
   IconListCheck,
   IconSettings,
@@ -62,7 +63,8 @@ type SettingsSidebarItem = {
 /**
  * Settings, for every Bot at once (`docs/how-openbot-works.md`), in three groups:
  *
- * - You: your account, where updates reach you, your Vault, and the organization you work in.
+ * - You: your account, where updates reach you, your Vault, the organization you work in, and
+ *   your API keys.
  * - Every Bot: what is set once for all of them, in the fixed order of `lib/primitives.ts`.
  *   Conversations is not here: it is where work happens, not something to set. Routines, Memory,
  *   Skills and Apps (Connections) are things you make and come back to, so they are in the main
@@ -102,6 +104,13 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     icon: IconBuilding,
     organization: true,
     linkOptions: { to: "/settings/organization" },
+  },
+  {
+    /* The keys you make for your own scripts and programs, which use OpenBot as you. */
+    group: "you",
+    title: "API keys",
+    icon: IconKey,
+    linkOptions: { to: "/settings/api-keys" },
   },
   {
     /* The computer Bots work on, folders, what OpenBot runs here, and your Recorder browsers. */
