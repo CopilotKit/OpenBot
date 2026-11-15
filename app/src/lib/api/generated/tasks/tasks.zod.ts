@@ -105,6 +105,24 @@ export const ListTasksResponse = zod.object({
           .datetime({ offset: true })
           .nullable()
           .describe("When it failed."),
+        stoppedAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+          ),
+        workingSince: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the work it is doing now began. Null or absent unless it is working.",
+          ),
+        lastActivityAt: zod.iso
+          .datetime({ offset: true })
+          .optional()
+          .describe(
+            "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+          ),
         next: zod.string().nullable().describe("One line on what comes next."),
         resolvedAt: zod.iso
           .datetime({ offset: true })
@@ -235,6 +253,24 @@ export const GetTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
@@ -368,6 +404,24 @@ export const ResolveTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
@@ -501,6 +555,24 @@ export const ReopenTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
@@ -634,6 +706,24 @@ export const RetryTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
