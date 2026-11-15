@@ -215,10 +215,12 @@ def plan(monkeypatch, tmp_path):
     return CodexBackend(PLAN_LISTING).install(monkeypatch)
 
 
-def run_body(*, model=None, tools=(), content="Say hello."):
+def run_body(*, model=None, tools=(), content="Say hello.", send_once=None):
     props = {"openbotRun": "synthetic-run-assertion"}
     if model is not None:
         props["openbotModel"] = model
+    if send_once is not None:
+        props["openbotSendOnce"] = send_once
     return {
         "threadId": str(uuid4()),
         "runId": str(uuid4()),
@@ -715,6 +717,69 @@ async def test_google_gets_its_thinking_level(monkeypatch, effort):
     else:
         # The proto field, which the API reads under either spelling; SDK releases differ.
         assert thinking in ({"thinkingLevel": "LOW"}, {"thinking_level": "LOW"})
+
+
+# A run the server retries itself is asked once. Any other run keeps the client's own retries.
+
+
+@contextmanager
+def rate_limited(monkeypatch, client=httpx2.AsyncClient):
+    """A provider that answers every call with a rate limit, counting the calls it was sent."""
+    calls = []
+
+    async def send(_client, request, **kwargs):
+        calls.append(str(request.url))
+        return client_response(request)
+
+    def client_response(request):
+        return httpx2.Response(
+            429,
+            json={
+                "error": {
+                    "message": "Rate limit reached for requests per min.",
+                    "type": "rate_limit_error",
+                    "code": "rate_limit_exceeded",
+                }
+            },
+            # So the client's own retries, where it makes them, do not wait.
+            headers={"retry-after-ms": "1", "retry-after": "0"},
+            request=request,
+        )
+
+    monkeypatch.setattr(client, "send", send)
+    yield calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "key", "model"),
+    [
+        ("openai", "OPENAI_API_KEY", "gpt-5.5"),
+        ("openai", "OPENAI_API_KEY", "gpt-6.1-terra"),
+        ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
+    ],
+)
+async def test_a_run_the_server_retries_itself_asks_the_model_once(monkeypatch, provider, key, model):
+    monkeypatch.setenv(key, "sk-synthetic")
+    monkeypatch.setenv("BOT_PROVIDER", provider)
+    with rate_limited(monkeypatch) as calls:
+        events = await run(run_body(model={"model": model}, send_once=True))
+
+    assert len(calls) == 1
+    assert [e["type"] for e in events if e["type"].startswith("RUN_")] == ["RUN_STARTED", "RUN_ERROR"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_once", [None, False, "true"])
+async def test_any_other_run_keeps_the_model_clients_own_retries(monkeypatch, send_once):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-synthetic")
+    monkeypatch.setenv("BOT_PROVIDER", "openai")
+    with rate_limited(monkeypatch) as calls:
+        events = await run(run_body(model={"model": "gpt-5.5"}, send_once=send_once))
+
+    # The first call and the client's two retries.
+    assert len(calls) == 3
+    assert [e["type"] for e in events if e["type"].startswith("RUN_")] == ["RUN_STARTED", "RUN_ERROR"]
 
 
 @pytest.mark.asyncio
