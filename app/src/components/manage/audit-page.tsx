@@ -46,7 +46,7 @@ import {
 } from "@/lib/audit/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -215,9 +215,9 @@ export function AuditPage({
   });
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...skillListQueryOptions(),
     enabled: edition === "personal",
-  }).data?.skills;
+  }).data;
   const rows = withSkillTitles(
     oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
     skills,

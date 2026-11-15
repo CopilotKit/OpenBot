@@ -19,6 +19,7 @@ import { generativeUiProviderOptions, OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
 /**
@@ -110,8 +111,8 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: "refresh-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/refresh-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("refresh-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

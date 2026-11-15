@@ -342,8 +342,7 @@ A skill can be written from the composer as well as from `/skills`. The deployme
 
 The grant is the gate. Those four tools are offered only while the Bot holds `skill-creator`, because four extra tools on every run costs the narrowing above what it exists to buy, and a Bot for looking up transactions has no business drafting skills.
 
-They run in the browser as the signed-in person, through the same skill write the Skills page uses (`PUT /api/v2/organizations/{organizationId}/skills/{skillId}`), so the ownership rules and the audit row are the endpoint's rather than a second copy of them: a person's own slug, an administrator's for the deployment, and a refusal naming the slug otherwise. Written server-side, the tool would have to carry an actor into runs that do not have one (a routine, a Slack thread, a schedule), and the first way that goes wrong is a skill written under the wrong name. Nothing is lost by the restriction, because authoring is an interview and there is nobody to interview where there is no browser.
-
+They run in the browser as the signed-in person, through the same `replaceSkill` (`PUT /api/v2/organizations/{organizationId}/skills/{skillId}`) the Skills page uses, so the ownership rules and the audit row are the endpoint's rather than a second copy of them: a person's own slug, an administrator's for the deployment, and a refusal naming the slug otherwise. Written server-side, the tool would have to carry an actor into runs that do not have one (a routine, a Slack thread, a schedule), and the first way that goes wrong is a skill written under the wrong name. Nothing is lost by the restriction, because authoring is an interview and there is nobody to interview where there is no browser.
 A saved skill is on no Bot yet. Granting it is the remaining step, and it stays on the Skills page, where a skill somebody wrote can go only on Bots they own.
 
 ### Which tools a run is offered

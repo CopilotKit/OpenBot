@@ -1,9 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  type BotBrowserApiState,
-  botBrowserApiPaths,
-} from "@openbot/shared/bot-browser";
+import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,6 +14,10 @@ import {
   PREFERENCES_PATH,
   preferencesResponse,
 } from "./accounts-api";
+
+/** Record in the Bot's browser, at the API's address: a start sent to today's reaches nothing here. */
+const RECORDING =
+  "/api/v2/organizations/default/computers/fields-test/browser/recording";
 
 /**
  * This page's own fields while a person drives a Bot's browser.
@@ -88,8 +89,7 @@ beforeAll(() => {
           narration: "off",
         },
       });
-    if (url === botBrowserApiPaths.recording("fields-test"))
-      return Response.json(held);
+    if (url === RECORDING) return Response.json(held);
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 });
@@ -239,14 +239,12 @@ test("naming a task and pressing Record starts a recording", async () => {
   await waitFor(() =>
     expect(
       requests.filter(
-        (request) =>
-          request.method === "POST" &&
-          request.url === botBrowserApiPaths.recording("fields-test"),
+        (request) => request.method === "POST" && request.url === RECORDING,
       ),
     ).toEqual([
       {
         method: "POST",
-        url: botBrowserApiPaths.recording("fields-test"),
+        url: RECORDING,
         body: {
           action: "start",
           title: "Find an invoice",

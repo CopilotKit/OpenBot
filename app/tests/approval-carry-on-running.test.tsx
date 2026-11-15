@@ -16,6 +16,7 @@ import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { approvalBody, approvalInboxResponse } from "./approvals-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * After the person answers an approval, the conversation shows the Bot working until it is done.
@@ -184,8 +185,8 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: "maps-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/maps-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("maps-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

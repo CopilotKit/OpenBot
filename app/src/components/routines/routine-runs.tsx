@@ -1,12 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { relativeTime } from "@/lib/relative-time";
-import {
-  type RoutineRecord,
-  type RoutineRunRecord,
-  routineRunsQueryOptions,
-} from "@/lib/routines/queries";
+import type { RoutineRecord, RoutineRunRecord } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
+import { useRoutineRuns } from "./use-routine-runs";
 
 /*
  * What a routine has done, where a person sees a routine: its own row on the Routines list, and each
@@ -137,7 +133,7 @@ const RUN_STATUS: Record<
 
 /** Every firing of one routine, newest first, each linking to the thread it ran in. */
 export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   // Pending renders nothing: "No runs yet." would otherwise flash for the fetch.
   if (runs.isPending) return null;
   if (runs.error)

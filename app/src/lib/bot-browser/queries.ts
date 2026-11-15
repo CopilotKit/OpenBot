@@ -1,10 +1,8 @@
-import {
-  type BotBrowserApiState,
-  botBrowserApiPaths,
-} from "@openbot/shared/bot-browser";
+import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { queryOptions } from "@tanstack/react-query";
+import { getBotBrowser } from "@/lib/api/generated/browsers/browsers";
+import { ORGANIZATION_ID } from "@/lib/api/request";
 import { BROWSER_POLL_MS } from "@/lib/browser/queries";
-import { client } from "@/lib/client";
 
 export const botBrowserKeys = {
   all: ["bot-browser"] as const,
@@ -23,13 +21,10 @@ export const botBrowserKeys = {
 export function botBrowserStateQueryOptions(botId: string) {
   return queryOptions({
     queryKey: botBrowserKeys.state(botId),
-    // The whole body is the state, so no envelope key: without one, client() returns the Response.
-    queryFn: async (): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.state(botId), {
-          fallback: "Couldn't load the Bot's browser.",
-        })
-      ).json(),
+    queryFn: (): Promise<BotBrowserApiState> =>
+      getBotBrowser(ORGANIZATION_ID, botId, {
+        fallback: "Couldn't load the Bot's browser.",
+      }),
     refetchInterval: BROWSER_POLL_MS,
   });
 }

@@ -189,7 +189,7 @@ async function setup(): Promise<Harness> {
   let gateway: FakeGateway | null = null;
   const route = (request: Request): Response | Promise<Response> | null => {
     const path = new URL(request.url).pathname;
-    if (path.startsWith("/api/recorder/")) {
+    if (path.startsWith("/api/v2/organizations/default/recorder")) {
       openbot.recorderRequests.push(`${request.method} ${path}`);
       return Response.json({ error: "Not found." }, { status: 404 });
     }

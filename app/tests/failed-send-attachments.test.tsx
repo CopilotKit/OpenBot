@@ -35,6 +35,7 @@ import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { attachmentPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * WHAT A FAILED SEND DOES TO THE FILES IT WAS CARRYING, DRIVEN THROUGH THE REAL CHANNEL.
@@ -164,8 +165,8 @@ beforeAll(() => {
             canManage: true,
           },
         });
-      if (url.pathname === "/api/components/for-agent/failed-send-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("failed-send-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

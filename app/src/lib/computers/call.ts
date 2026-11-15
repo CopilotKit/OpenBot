@@ -1,4 +1,20 @@
-import { tryClient } from "@/lib/client";
+import {
+  clickComputer,
+  listComputerFiles,
+  navigateComputer,
+  pressComputerKey,
+  readComputerFile,
+  readComputerPage,
+  requestComputerControl,
+  requestComputerSecret,
+  runComputerCommand,
+  scrollComputer,
+  snapshotComputer,
+  typeComputer,
+  writeComputerFile,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import {
   reportComputerActivity,
   withdrawComputerActivity,
@@ -24,6 +40,123 @@ const OFF_SCREEN_PATHS = new Set([
   "/exec",
 ]);
 
+type Body = Record<string, unknown>;
+type Options = { signal?: AbortSignal };
+
+/** A write's key: one per call, so a retry the network makes is the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/** Only what the API's contract names for the call, so a stray argument a model added is not sent. */
+function only<T>(body: Body | undefined, fields: readonly string[]): T {
+  const kept: Body = {};
+  for (const field of fields)
+    if (body?.[field] !== undefined) kept[field] = body[field];
+  return kept as T;
+}
+
+/**
+ * Each call a Bot makes on its computer, at the API's address for it
+ * (`/api/v2/organizations/{organizationId}/computers/{botId}/...`), through the generated client.
+ * Keyed by the name the tools have always called it by.
+ */
+const CALLS: Record<
+  string,
+  (botId: string, body: Body | undefined, options: Options) => Promise<unknown>
+> = {
+  "/read": (botId, _body, options) =>
+    readComputerPage(ORGANIZATION_ID, botId, options),
+  "/snapshot": (botId, _body, options) =>
+    snapshotComputer(ORGANIZATION_ID, botId, once(), options),
+  "/navigate": (botId, body, options) =>
+    navigateComputer(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["url", "toolCallId"]),
+      once(),
+      options,
+    ),
+  "/click": (botId, body, options) =>
+    clickComputer(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["ref", "snapshotId"]),
+      once(),
+      options,
+    ),
+  "/type": (botId, body, options) =>
+    typeComputer(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["ref", "snapshotId", "text", "submit"]),
+      once(),
+      options,
+    ),
+  "/key": (botId, body, options) =>
+    pressComputerKey(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["key", "ref", "snapshotId"]),
+      once(),
+      options,
+    ),
+  "/scroll": (botId, body, options) =>
+    scrollComputer(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["deltaY"]),
+      once(),
+      options,
+    ),
+  "/exec": (botId, body, options) =>
+    runComputerCommand(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["command", "timeoutMs"]),
+      once(),
+      options,
+    ),
+  "/files/list": (botId, body, options) =>
+    listComputerFiles(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["path"]),
+      once(),
+      options,
+    ),
+  "/files/read": (botId, body, options) =>
+    readComputerFile(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["path"]),
+      once(),
+      options,
+    ),
+  "/files/write": (botId, body, options) =>
+    writeComputerFile(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["path", "contents", "append"]),
+      once(),
+      options,
+    ),
+  "/control/request": (botId, body, options) =>
+    requestComputerControl(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["reason", "toolCallId", "source"]),
+      once(),
+      options,
+    ),
+  "/control/secret": (botId, body, options) =>
+    requestComputerSecret(
+      ORGANIZATION_ID,
+      botId,
+      only(body, ["ref", "snapshotId", "label"]),
+      once(),
+      options,
+    ),
+};
+
 /**
  * Exported for the test that covers what a Bot is told when a call is refused.
  *
@@ -36,50 +169,88 @@ export async function callComputer(
   path: string,
   /*
    * A body, not a `RequestInit`. The client serialises it, so a caller that stringified first would
-   * send a JSON string of a JSON string — which is what happened, briefly, when this moved over.
+   * send a JSON string of a JSON string, which is what happened, briefly, when this moved over.
    */
   init?: { method?: string; body?: unknown },
   signal?: AbortSignal,
 ): Promise<ToolOutcome> {
   // Announce before the call so the screen can open while the action is running.
   const run = OFF_SCREEN_PATHS.has(path) ? null : reportComputerActivity(botId);
-  let response: Response;
+  const call = CALLS[path];
+  // A call the API has no address for was not made.
+  if (!call) return { ok: false, reason: "That did not work." };
   try {
-    response = await tryClient(`/api/computers/${botId}${path}`, {
-      method: init?.method,
-      body: init?.body,
+    const body = await call(
+      botId,
+      init?.body && typeof init.body === "object"
+        ? (init.body as Body)
+        : undefined,
       // Abort cancels the request and prevents later actions, but cannot undo browser work already executing.
-      signal,
-    });
+      signal ? { signal } : {},
+    );
+    return { ok: true, ...((body as Body | undefined) ?? {}) };
   } catch (error) {
     // An abort is a stopped run, not a computer failure.
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, reason: "Stopped.", stopped: true };
+    }
+    /*
+     * ALREADY DONE, AND ITS ANSWER IS NOT KEPT. What a snapshot, a command or a file answered is what
+     * was on the computer, so the API keeps no copy to answer a retry with: when the network sent
+     * this call a second time under the same key, the first one ran and this one is told so. That is
+     * neither a failure nor a refusal, so the Bot is told the step happened and that its result is
+     * gone, and asks again only if it needs it. Nobody is shown an error for it.
+     */
+    if (error instanceof ClientError && error.code === "ANSWER_NOT_KEPT") {
+      return {
+        ok: true,
+        alreadyDone: true,
+        resultUnavailable: true,
+        note: "This was already done. Its result is no longer available: do it again only if you need the result.",
+      };
+    }
+    if (error instanceof ClientError) {
+      /*
+       * A REFUSAL IS AN INTENTION, NOT AN ACTION. 403 is a policy, a capability switch or a network
+       * rule saying no, and it says so before the browser is touched: there is nothing on the screen
+       * to see, because nothing was done to it. Every other failure reached the computer and may have
+       * moved it, so those keep the screen they opened.
+       */
+      if (error.status === 403 && run !== null)
+        withdrawComputerActivity(botId, run);
+      return failedComputerCall(error.status, problemAsToday(error));
     }
     return {
       ok: false,
       reason: "The assistant's computer could not be reached.",
     };
   }
+}
 
-  const body = (await response.json().catch(() => null)) as Record<
-    string,
-    unknown
-  > | null;
-
-  if (!response.ok) {
-    /*
-     * A REFUSAL IS AN INTENTION, NOT AN ACTION. 403 is a policy, a capability switch or a network
-     * rule saying no, and it says so before the browser is touched: there is nothing on the screen
-     * to see, because nothing was done to it. Every other failure reached the computer and may have
-     * moved it, so those keep the screen they opened.
-     */
-    if (response.status === 403 && run !== null)
-      withdrawComputerActivity(botId, run);
-    return failedComputerCall(response.status, body);
-  }
-
-  return { ok: true, ...(body ?? {}) };
+/**
+ * A problem the API refused a call with, as the body today's route answers for the same refusal:
+ * the sentence as `error`, and the flags `failedComputerCall` decides a Bot's next step from. The
+ * problem's code says which case it is; `rule`, `snapshotRequired`, `controlRequestId` and `handoff`
+ * ride beside it.
+ */
+export function problemAsToday(error: ClientError): Record<string, unknown> {
+  const problem = error.body ?? {};
+  return {
+    error: error.message,
+    ...(error.code === "COMPUTER_STARTING" ? { starting: true } : {}),
+    ...(error.code === "COMPUTER_NEEDS_CONVERSATION"
+      ? { needsConversation: true }
+      : {}),
+    ...(typeof problem.rule === "string" ? { rule: problem.rule } : {}),
+    ...(error.code === "COMPUTER_PERSON_HAS_CONTROL"
+      ? {
+          humanHasControl: true,
+          requestId: problem.controlRequestId,
+          handoff: problem.handoff,
+        }
+      : {}),
+    ...(problem.snapshotRequired === true ? { snapshotRequired: true } : {}),
+  };
 }
 
 /**

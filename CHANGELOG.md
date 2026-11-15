@@ -276,6 +276,13 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   tag at the next start and recreates the Bot's container on it; the old tag stays on disk until
   you remove it (`docker image rm openbot-agent-langgraph-agui:latest`). `LANGGRAPH_IMAGE` still
   names the image outright.
+- **A recording made in a Bot's browser saves when OpenBot runs from a checkout.** It ended "Not
+  saved to your Learning space": the Recorder in the Bot's browser is handed this machine's
+  loopback address for OpenBot, which inside a Bot's computer is that computer.
+  `bash scripts/start.sh` now sets `COMPUTER_LOOPBACK_RELAYS`, as OpenBot Desktop does for its own
+  computer: the app's and the server's ports go to the server, and the port of an Intelligence
+  gateway on this machine goes to this machine. The one computer gets it, and so does every
+  computer the supervisor makes. A value in the environment or in `.env` wins.
 
 ### One image runs the server and every Bot's computer
 

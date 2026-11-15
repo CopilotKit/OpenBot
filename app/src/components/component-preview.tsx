@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import {
-  type SandboxedRecord,
-  sandboxedListQueryOptions,
-} from "@/lib/sandboxed/queries";
+  PLAYGROUND_KIND,
+  type PlaygroundRecord,
+  playgroundListQueryOptions,
+} from "@/lib/components/queries";
 
 /** Sample arguments belong to the administrator's working copy, so only Admin fetches them. */
 export function AdminComponentPreview({
@@ -16,11 +17,11 @@ export function AdminComponentPreview({
   kind: string;
 }) {
   const sandboxed = useQuery({
-    ...sandboxedListQueryOptions(),
-    enabled: kind === "sandboxed",
+    ...playgroundListQueryOptions(),
+    enabled: kind === PLAYGROUND_KIND,
   });
-  if (kind === "sandboxed" && sandboxed.isPending) return null;
-  if (kind === "sandboxed" && sandboxed.error) {
+  if (kind === PLAYGROUND_KIND && sandboxed.isPending) return null;
+  if (kind === PLAYGROUND_KIND && sandboxed.error) {
     return <PreviewNotice>Preview could not be loaded.</PreviewNotice>;
   }
   return (
@@ -49,7 +50,7 @@ export function ComponentPreview({
 }: {
   name: string;
   kind?: string;
-  sandboxed?: SandboxedRecord;
+  sandboxed?: PlaygroundRecord;
   fill?: number;
 }) {
   const entry = galleryComponent(name);
@@ -100,7 +101,7 @@ export function ComponentPreview({
     <PreviewNotice>
       {entry
         ? "This one is only drawn in a conversation."
-        : kind === "sandboxed"
+        : kind === PLAYGROUND_KIND
           ? "Published in the playground."
           : "This build cannot draw this."}
     </PreviewNotice>

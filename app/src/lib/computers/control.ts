@@ -1,4 +1,14 @@
-import { tryClient } from "@/lib/client";
+import {
+  cancelComputerControl,
+  getComputerControl,
+  releaseComputerControl,
+  requestComputerControl,
+  sendComputerHumanInput,
+  supplyComputerSecret,
+  takeComputerControl,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /**
  * Handing control of a Bot's computer to a person, and back.
@@ -18,18 +28,19 @@ import type {
   RequestHelpInput,
 } from "@openbot/shared/computer-control";
 
-async function callControl(
-  computerId: string,
-  path: string,
-  body?: unknown,
-  signal?: AbortSignal,
+/** A write's key: one per call, so a retry the network makes is the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/** The control state a call answered, or nothing when it failed or answered something else. */
+async function controlFrom(
+  call: Promise<unknown>,
 ): Promise<ControlState | null> {
-  const response = await tryClient(
-    `/api/computers/${encodeURIComponent(computerId)}${path}`,
-    { ...(body === undefined ? {} : { method: "POST", body }), signal },
-  );
-  if (!response.ok) return null;
-  const value: unknown = await response.json().catch(() => null);
+  const value: unknown = await call.catch((error: unknown) => {
+    // A stopped read is the caller's to see; any other failure is no answer.
+    if (error instanceof DOMException && error.name === "AbortError")
+      throw error;
+    return null;
+  });
   if (!value || typeof value !== "object" || !("holder" in value)) return null;
   if (value.holder !== "bot" && value.holder !== "human") return null;
   return value as ControlState;
@@ -51,11 +62,13 @@ export function readControl(
   requestId?: string,
   signal?: AbortSignal,
 ) {
-  return callControl(
-    computerId,
-    `/control${requestId ? `?requestId=${encodeURIComponent(requestId)}` : ""}`,
-    undefined,
-    signal,
+  return controlFrom(
+    getComputerControl(
+      ORGANIZATION_ID,
+      computerId,
+      requestId ? { requestId } : undefined,
+      signal ? { signal } : {},
+    ),
   );
 }
 
@@ -63,23 +76,41 @@ export async function takeControl(computerId: string, requestId?: string) {
   const id =
     requestId ??
     (
-      await callControl(computerId, "/control/request", {
-        reason: "I want to take control of the browser.",
-        // A person's own take, so nothing shows its reason back to them as though the Bot had asked.
-        source: "manual",
-      } satisfies RequestHelpInput)
+      await controlFrom(
+        requestComputerControl(
+          ORGANIZATION_ID,
+          computerId,
+          {
+            reason: "I want to take control of the browser.",
+            // A person's own take, so nothing shows its reason back to them as though the Bot had asked.
+            source: "manual",
+          } satisfies RequestHelpInput,
+          once(),
+        ),
+      )
     )?.request?.id;
   return id
-    ? callControl(computerId, "/control/take", { requestId: id })
+    ? controlFrom(
+        takeComputerControl(
+          ORGANIZATION_ID,
+          computerId,
+          { requestId: id },
+          once(),
+        ),
+      )
     : null;
 }
 
 export function releaseControl(computerId: string, requestId: string) {
-  return callControl(computerId, "/control/release", { requestId });
+  return controlFrom(
+    releaseComputerControl(ORGANIZATION_ID, computerId, { requestId }, once()),
+  );
 }
 
 export function cancelControl(computerId: string, requestId: string) {
-  return callControl(computerId, "/control/cancel", { requestId });
+  return controlFrom(
+    cancelComputerControl(ORGANIZATION_ID, computerId, { requestId }, once()),
+  );
 }
 
 /**
@@ -93,22 +124,17 @@ export async function supplySecret(
   text: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const response = await tryClient(
-      `/api/computers/${computerId}/human/secret`,
-      { method: "POST", body: { text } },
-    );
-    if (response.ok) return { ok: true };
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
+    await supplyComputerSecret(ORGANIZATION_ID, computerId, { text }, once(), {
+      fallback: "Couldn't type that into the page. Try again.",
+    });
+    return { ok: true };
+  } catch (error) {
     return {
       ok: false,
-      error: body?.error ?? "Couldn't type that into the page. Try again.",
-    };
-  } catch {
-    return {
-      ok: false,
-      error: "Couldn't reach the Bot's computer. Try again.",
+      error:
+        error instanceof ClientError
+          ? error.message
+          : "Couldn't reach the Bot's computer. Try again.",
     };
   }
 }
@@ -128,10 +154,7 @@ export function sendHumanInput(
 ): void {
   inputQueue = inputQueue
     .then(() =>
-      tryClient(`/api/computers/${computerId}/human/${kind}`, {
-        method: "POST",
-        body,
-      }),
+      sendComputerHumanInput(ORGANIZATION_ID, computerId, kind, body, once()),
     )
     // Fire-and-forget: the user can see/retry input failures, while the input queue must keep moving.
     .catch(() => undefined);
