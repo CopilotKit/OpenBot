@@ -46,11 +46,11 @@ tags:
   - name: Voice
     description: 'Voice calls with a conversation''s Bot: how a call connects, and the calls a person saved in a conversation with their transcripts.'
   - name: Credentials
-    description: 'The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
+    description: 'The organization''s vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them.'
   - name: Models
     description: The models Bots can run on, and the one a person chose for each of their conversations.
   - name: Apps
-    description: The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here.
+    description: The apps the organization has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here.
   - name: Connections
     description: 'A person''s connections to apps: the accounts they signed in with so their Bots can act there for them, and an app''s one shared account when an administrator connects it for everybody.'
   - name: Bot grants
@@ -18523,7 +18523,7 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
-            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
             connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
