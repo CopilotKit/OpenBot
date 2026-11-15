@@ -20,7 +20,7 @@ import type {
   PersonApprovalRule,
   Question,
 } from "./generated/model";
-import { apiRequest, ME, ORGANIZATION_ID } from "./request";
+import { ME, ORGANIZATION_ID } from "./request";
 
 export type {
   Bot,
@@ -30,6 +30,7 @@ export type {
   ComputerScreenshot,
   ConversationMessage,
   ConversationSummary,
+  Memory,
   Routine,
   RoutineRun,
   RoutineRunStatus,
@@ -65,32 +66,6 @@ export async function everyPage<P extends Paged, T>(
     cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
   } while (cursor && !seen.has(cursor));
   return all;
-}
-
-/**
- * An address the API does not have yet, which a screen still reaches by its path: memory (`/api/memory`), until the API
- * describes it. Through the same mutator as every generated call, so the same session and the same refusals. An API
- * operation is never called this way: it has a generated function, and api/client-boundary.test.ts fails an address of
- * the API written here.
- */
-export async function api<T>(
-  path: string,
-  input?: {
-    method?: string;
-    body?: unknown;
-    signal?: AbortSignal;
-  },
-): Promise<T> {
-  return apiRequest<T>(path, {
-    method: input?.method,
-    signal: input?.signal,
-    ...(input?.body !== undefined
-      ? {
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input.body),
-        }
-      : {}),
-  });
 }
 
 /** What waits on the person: the actions their Bots asked about, and the questions they asked. */
@@ -144,15 +119,6 @@ export function everyBot(): Promise<Bot[]> {
     (page) => page.bots,
   );
 }
-export type Memory = {
-  id: string;
-  content: string;
-  provenance: string;
-  enabled: boolean;
-  reviewState: "unreviewed" | "confirmed" | "edited";
-  formedBy: "person" | "import" | "bot";
-  updatedAt: string;
-};
 export type RuleBehaviour = ApprovalRuleBehaviour;
 /** A rule as Custom rules shows it, the person's own and the organization's alike. */
 export type ApprovalRule = Pick<
