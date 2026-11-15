@@ -1,4 +1,8 @@
-import { IconBuilding, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconBuilding,
+  IconChevronDown,
+  IconChevronRight,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";
@@ -17,6 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,6 +41,7 @@ import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
+  changeMemberRoleMutationOptions,
   leaveOrganizationMutationOptions,
   removeOrganizationMemberMutationOptions,
   renameOrganizationMutationOptions,
@@ -45,6 +56,8 @@ import {
   initialsOf,
   memberControl,
   personName,
+  roleChangeQuestion,
+  roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
 import { queryClient } from "@/query-client";
@@ -253,7 +266,17 @@ function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
   );
 }
 
-/** Who is in the organization, with each person's role, and the one control their row offers. */
+/** A member and the role they are about to be given. */
+type RoleChange = {
+  member: OrganizationMemberSummary;
+  role: OrganizationMemberSummary["role"];
+};
+
+/**
+ * Who is in the organization, with each person's role, and what their row offers: a Role menu
+ * listing the roles the server says the person looking may give them (`assignableRoles`), and
+ * Remove or Leave where the membership can end (`removable`).
+ */
 function MembersSection({
   organization,
 }: {
@@ -261,13 +284,31 @@ function MembersSection({
 }) {
   const members = useQuery(organizationMembersQueryOptions(organization.id));
   const me = useQuery(currentUserQueryOptions()).data;
+  const changeRole = useMutation(changeMemberRoleMutationOptions(queryClient));
   // Kept while its dialog closes, so the question does not lose its name on the way out.
   const [removing, setRemoving] = useState<OrganizationMemberSummary | null>(
     null,
   );
   const [removeOpen, setRemoveOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [changing, setChanging] = useState<RoleChange | null>(null);
+  const [changeOpen, setChangeOpen] = useState(false);
   const viewer = { id: me?.id, role: organization.role };
+
+  // Making somebody an owner, and stepping down, are asked about first. The rest apply at once.
+  const giveRole = (change: RoleChange) => {
+    changeRole.reset();
+    if (roleChangeQuestion(change.member, change.role, me?.id)) {
+      setChanging(change);
+      setChangeOpen(true);
+      return;
+    }
+    changeRole.mutate({
+      organizationId: organization.id,
+      personId: change.member.id,
+      role: change.role,
+    });
+  };
 
   return (
     <PageSection title="Members">
@@ -301,9 +342,39 @@ function MembersSection({
                         : roleName(member.role)}
                     </ItemDescription>
                   </ItemContent>
-                  {control ? (
+                  {control || member.assignableRoles.length > 0 ? (
                     <ItemActions>
-                      {control === "leave" ? (
+                      {member.assignableRoles.length > 0 ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                aria-label={`Change role for ${name}`}
+                                disabled={changeRole.isPending}
+                                size="sm"
+                                variant="outline"
+                              />
+                            }
+                          >
+                            Role
+                            <IconChevronDown className="text-muted-foreground" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-auto min-w-32"
+                          >
+                            {member.assignableRoles.map((role) => (
+                              <DropdownMenuItem
+                                key={role}
+                                onClick={() => giveRole({ member, role })}
+                              >
+                                {roleName(role)}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                      {!control ? null : control === "leave" ? (
                         <Button
                           onClick={() => setLeaveOpen(true)}
                           size="sm"
@@ -333,6 +404,20 @@ function MembersSection({
           })}
         </PageRows>
       )}
+      {changeRole.error ? (
+        <p className="mt-3 text-destructive text-sm" role="alert">
+          {changeRole.error.message}
+        </p>
+      ) : null}
+      {changing ? (
+        <ChangeRoleDialog
+          change={changing}
+          onOpenChange={setChangeOpen}
+          open={changeOpen}
+          organization={organization}
+          viewerId={me?.id}
+        />
+      ) : null}
       {removing ? (
         <RemoveMemberDialog
           member={removing}
@@ -347,6 +432,90 @@ function MembersSection({
         organization={organization}
       />
     </PageSection>
+  );
+}
+
+/**
+ * Asks before making somebody an owner, or before the person steps down from owner, saying what
+ * it means, and then changes the role. A refusal stays in the dialog.
+ */
+function ChangeRoleDialog({
+  change,
+  onOpenChange,
+  open,
+  organization,
+  viewerId,
+}: {
+  change: RoleChange;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  organization: OrganizationSummary;
+  viewerId: string | undefined;
+}) {
+  const changeRole = useMutation(changeMemberRoleMutationOptions(queryClient));
+  const { reset } = changeRole;
+  // A refusal from a previous attempt is not news about this one.
+  useEffect(() => {
+    if (open) reset();
+  }, [open, reset]);
+  const steppingDown =
+    roleChangeQuestion(change.member, change.role, viewerId) === "step-down";
+
+  const confirm = async () => {
+    try {
+      await changeRole.mutateAsync({
+        organizationId: organization.id,
+        personId: change.member.id,
+        role: change.role,
+      });
+    } catch {
+      // The error is on the mutation and drawn below; staying open says "not done".
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {steppingDown
+              ? `Step down as an owner of ${organization.name}?`
+              : `Make ${personName(change.member)} an owner of ${organization.name}?`}
+          </DialogTitle>
+          <DialogDescription>
+            {steppingDown
+              ? `You become ${roleInSentence(change.role)} and can no longer change who owns this organization. To be an owner again, another owner has to make you one.`
+              : "An owner can rename the organization, invite and remove people, and change who owns it. You stay an owner too."}
+          </DialogDescription>
+        </DialogHeader>
+        {changeRole.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {changeRole.error.message}
+          </p>
+        ) : null}
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            disabled={changeRole.isPending}
+            onClick={() => {
+              void confirm();
+            }}
+            size="sm"
+            variant={steppingDown ? "destructive" : "default"}
+          >
+            {changeRole.isPending
+              ? "Saving…"
+              : steppingDown
+                ? "Step down"
+                : "Make owner"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

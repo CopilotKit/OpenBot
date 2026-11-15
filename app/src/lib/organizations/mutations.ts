@@ -11,10 +11,12 @@ import {
   declineInvitation,
   removeOrganizationMember,
   updateOrganization,
+  updateOrganizationMember,
 } from "@/lib/api/generated/organizations/organizations";
 import { idempotencyKey } from "@/lib/api/request";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
 import {
+  type OrganizationMemberSummary,
   type OrganizationSummary,
   type OwnOrganizations,
   organizationKeys,
@@ -26,6 +28,7 @@ const RENAME_FALLBACK = "Couldn't rename the organization. Try again.";
 const INVITE_FALLBACK = "Couldn't send the invitation. Try again.";
 const CANCEL_FALLBACK = "Couldn't cancel the invitation. Try again.";
 const REMOVE_FALLBACK = "Couldn't remove them. Try again.";
+const CHANGE_ROLE_FALLBACK = "Couldn't change their role. Try again.";
 const LEAVE_FALLBACK = "Couldn't leave the organization. Try again.";
 const ACCEPT_FALLBACK = "Couldn't accept the invitation. Try again.";
 const DECLINE_FALLBACK = "Couldn't decline the invitation. Try again.";
@@ -147,6 +150,32 @@ export function removeOrganizationMemberMutationOptions(
         { "Idempotency-Key": idempotencyKey() },
         { fallback: REMOVE_FALLBACK },
       ),
+    onSuccess: () => invalidateOrganizations(queryClient),
+  });
+}
+
+/**
+ * Give a member of an organization another role. Which roles the person asking may give is the
+ * server's verdict on each member (`assignableRoles`), and a change it refuses is refused in words.
+ * Everything about organizations is read again, the list of the person's own included: the role
+ * that changed can be theirs.
+ */
+export function changeMemberRoleMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      organizationId: string;
+      personId: string;
+      role: OrganizationMemberSummary["role"];
+    }): Promise<OrganizationMemberSummary> =>
+      (
+        await updateOrganizationMember(
+          variables.organizationId,
+          variables.personId,
+          { role: variables.role },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: CHANGE_ROLE_FALLBACK },
+        )
+      ).member,
     onSuccess: () => invalidateOrganizations(queryClient),
   });
 }

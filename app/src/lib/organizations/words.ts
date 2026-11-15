@@ -66,6 +66,21 @@ export function memberControl(
   return isOrganizationAdmin(viewer.role) ? "remove" : null;
 }
 
+/**
+ * Whether giving a member a role is asked about first, and as what: making somebody an owner, or
+ * the person stepping down from owner themselves. Any other change applies at once. This picks the
+ * question only; which roles are offered at all is the server's verdict (`assignableRoles`).
+ */
+export function roleChangeQuestion(
+  member: Pick<OrganizationMemberSummary, "id" | "role">,
+  role: string,
+  viewerId: string | undefined,
+): "make-owner" | "step-down" | null {
+  if (role === "owner") return "make-owner";
+  if (member.role === "owner" && member.id === viewerId) return "step-down";
+  return null;
+}
+
 const SENT_STATUS: Record<SentInvitation["status"], string> = {
   pending: "Pending",
   expired: "Expired",

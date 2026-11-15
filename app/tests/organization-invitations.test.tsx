@@ -116,7 +116,36 @@ const member = (
   joinedAt: "2026-11-01T09:00:00.000Z",
   // As the server answers it: the owner stays.
   removable: role !== "owner",
+  // Said for the person asking when the list is read: see `asListed`.
+  assignableRoles: [],
 });
+
+const ROLES = ["owner", "admin", "member"] as const;
+
+/**
+ * A member as the list says them to somebody with `asker`'s role: the roles that person may give
+ * them, their current one left out. An owner gives any role, and an owner's own role changes only
+ * while another owner exists. An admin moves people between admin and member. A member gives none.
+ */
+function asListed(
+  one: OrganizationMemberSummary,
+  asker: Listed["role"],
+  all: OrganizationMemberSummary[],
+): OrganizationMemberSummary {
+  const others = ROLES.filter((role) => role !== one.role);
+  const owners = all.filter((each) => each.role === "owner").length;
+  const assignableRoles =
+    asker === "member"
+      ? []
+      : one.role === "owner"
+        ? asker === "owner" && owners > 1
+          ? others
+          : []
+        : asker === "owner"
+          ? others
+          : others.filter((role) => role !== "owner");
+  return { ...one, assignableRoles };
+}
 
 const sent = (
   id: string,
@@ -317,8 +346,26 @@ async function answer(
       return Response.json({ organization: listed(here) });
     }
     if (rest === "members" && method === "GET")
-      return page("members", server.members, url);
+      return page(
+        "members",
+        server.members.map((one) => asListed(one, here.role, server.members)),
+        url,
+      );
     const removed = /^members\/([^/]+)$/.exec(rest as string);
+    if (removed && method === "PATCH") {
+      const no = refused();
+      if (no) return no;
+      if (!manages) return adminOnly();
+      const { role } = body as { role: OrganizationMemberSummary["role"] };
+      const changed = server.members.find((one) => one.id === removed[1]);
+      if (!changed)
+        return problem(404, "PERSON_NOT_FOUND", "Couldn't find that person.");
+      changed.role = role;
+      if (changed.id === "dana") here.role = role;
+      return Response.json({
+        member: asListed(changed, here.role, server.members),
+      });
+    }
     if (removed && method === "DELETE") {
       const no = refused();
       if (no) return no;
@@ -705,6 +752,114 @@ describe("organization settings, for its owner", () => {
     });
   });
 
+  test("offers a Role menu where the server says a role can be given, and changing a member to an admin applies at once", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("sam@example.com");
+    // Dana is the only owner, so her own role stays: no menu on her row.
+    expect(
+      page.queryByRole("button", { name: "Change role for Dana Fresh" }),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Change role for Lee Park" }),
+    ).toBeTruthy();
+
+    const role = page.getByRole("button", {
+      name: "Change role for sam@example.com",
+    });
+    const row = role.closest("[data-slot=item]") as HTMLElement;
+    expect(within(row).getByText("Member")).toBeTruthy();
+    await app.person.click(role);
+    const menu = await app.view.findByRole("menu");
+    // The roles she may give Sam, by name, without the one he has.
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((choice) => choice.textContent),
+    ).toEqual(["Owner", "Admin"]);
+    await app.person.click(
+      within(menu).getByRole("menuitem", { name: "Admin" }),
+    );
+
+    // The row says the new role, read back from the server.
+    await waitFor(() => expect(within(row).getByText("Admin")).toBeTruthy());
+    expect(writes).toEqual([
+      {
+        request: `PATCH /api/v2/organizations/${ACME.id}/members/sam`,
+        body: { role: "admin" },
+        keyed: true,
+      },
+    ]);
+  });
+
+  test("asks before making somebody an owner, saying what an owner can do", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(
+      await page.findByRole("button", { name: "Change role for Lee Park" }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Owner",
+      }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Make Lee Park an owner of Acme?",
+    });
+    expect(dialog.textContent).toContain(
+      "An owner can rename the organization, invite and remove people, and change who owns it.",
+    );
+    // Asked first: nothing is sent until the answer.
+    expect(sentWrites()).toEqual([]);
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Make owner" }),
+    );
+    await page.findByText("lee@example.com · Owner");
+    expect(writes).toEqual([
+      {
+        request: `PATCH /api/v2/organizations/${ACME.id}/members/lee`,
+        body: { role: "owner" },
+        keyed: true,
+      },
+    ]);
+    // With a second owner, Dana's own role can change, and stepping down is asked about too.
+    await app.person.click(
+      await page.findByRole("button", { name: "Change role for Dana Fresh" }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Admin",
+      }),
+    );
+    await app.view.findByRole("dialog", {
+      name: "Step down as an owner of Acme?",
+    });
+    expect(writes).toHaveLength(1);
+  });
+
+  test("a role change the server refuses is said in the server's sentence, and the role stays", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    server.refusal = {
+      status: 409,
+      detail: "Their role just changed. Reload the page and try again.",
+    };
+    await app.person.click(
+      await page.findByRole("button", {
+        name: "Change role for sam@example.com",
+      }),
+    );
+    await app.person.click(
+      within(await app.view.findByRole("menu")).getByRole("menuitem", {
+        name: "Admin",
+      }),
+    );
+    expect((await page.findByRole("alert")).textContent).toBe(
+      "Their role just changed. Reload the page and try again.",
+    );
+    expect(server.members.find((one) => one.id === "sam")?.role).toBe("member");
+  });
+
   test("lists the invitations it sent with their status, copies a waiting one's link and cancels one", async () => {
     const app = await open("/settings/organization");
     const page = within(await app.view.findByRole("main"));
@@ -826,6 +981,7 @@ describe("organization settings, for a member", () => {
     expect(page.queryByRole("button", { name: /Name/ })).toBeNull();
     expect(page.getByText("Acme")).toBeTruthy();
     expect(page.queryByRole("button", { name: /^Remove/ })).toBeNull();
+    expect(page.queryByRole("button", { name: /^Change role/ })).toBeNull();
     expect(page.queryByText("Invitations")).toBeNull();
     expect(page.queryByRole("button", { name: "Invite" })).toBeNull();
     expect(requests).not.toContain(
