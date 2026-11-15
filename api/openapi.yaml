@@ -16405,7 +16405,7 @@ paths:
         - Learning
       operationId: createAutomaticLearningSpace
       summary: Create the Learning space OpenBot assigns by itself
-      description: Create, in the organization's Intelligence project, the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
+      description: Create the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
       security:
         - webSession: []
         - appOAuth:
@@ -16451,7 +16451,7 @@ paths:
         - Learning
       operationId: getLearningOverview
       summary: Read how Learning is going for a space
-      description: 'Return how Learning stands in the space every Bot learns into, or in one Bot''s own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Intelligence''s dashboard where it has one, and why Learning can''t run on this machine''s model where that is known. An Intelligence with no dashboard can''t count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.'
+      description: 'Return how Learning stands in the space every Bot learns into, or in one Bot''s own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Learning''s dashboard where there is one, and why Learning can''t run on this machine''s model where that is known. Without a dashboard, Learning can''t count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -17044,7 +17044,7 @@ paths:
         - Learning
       operationId: getRecordingTitles
       summary: Read the titles of a person's recordings
-      description: Return the title of each recording named, by the id Intelligence gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
+      description: Return the title of each recording named, by the id Learning gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -17055,7 +17055,7 @@ paths:
         - name: ids
           in: query
           required: true
-          description: The recordings, by Intelligence's id, at most 50.
+          description: The recordings, by Learning's id for each, at most 50.
           style: form
           explode: false
           schema:
@@ -17836,7 +17836,7 @@ paths:
         - Memory
       operationId: listMemories
       summary: List a person's memories
-      description: 'Return one page of what a person''s Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones Intelligence holds for them that OpenBot formed no record of, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of what a person''s Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones formed for them outside OpenBot and kept in long-term memory, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -17875,7 +17875,7 @@ paths:
         - Memory
       operationId: createMemory
       summary: Remember a fact
-      description: Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the deployment has Intelligence's memory it is copied there too. Only the person themselves may write one.
+      description: Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the deployment has long-term memory, it is copied there too. Only the person themselves may write one.
       security:
         - webSession: []
         - appOAuth:
@@ -17930,7 +17930,7 @@ paths:
         - Memory
       operationId: updateMemory
       summary: Change a memory
-      description: Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory Intelligence holds that OpenBot formed no record of can be edited, not paused or reviewed. Editing one replaces the copy Intelligence holds. Only the person themselves may change their memories.
+      description: Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory formed outside OpenBot can be edited, not paused or reviewed. Editing a memory replaces its copy in long-term memory. Only the person themselves may change their memories.
       security:
         - webSession: []
         - appOAuth:
@@ -17985,7 +17985,7 @@ paths:
         - Memory
       operationId: deleteMemory
       summary: Forget a memory
-      description: 'Forget a memory: no Bot recalls it again, Intelligence''s copy is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.'
+      description: 'Forget a memory: no Bot recalls it again, its copy in long-term memory is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.'
       security:
         - webSession: []
         - appOAuth:
@@ -18999,7 +18999,7 @@ components:
       name: skillName
       in: path
       required: true
-      description: 'A learned skill''s name as Intelligence publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.'
+      description: 'A learned skill''s name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.'
       schema:
         type: string
         minLength: 1
@@ -19048,7 +19048,7 @@ components:
       name: memoryId
       in: path
       required: true
-      description: The memory's id. A memory Intelligence holds that OpenBot formed no record of has an id that starts intelligence:.
+      description: The memory's id. A memory formed outside OpenBot has an id that starts intelligence:.
       schema:
         type: string
         minLength: 1
@@ -31874,13 +31874,13 @@ components:
           description: Where the caller saw or copied it.
     LearningSpaceId:
       type: string
-      description: A Learning space's id in Intelligence (its container).
+      description: A Learning space's id (its container).
       minLength: 1
       maxLength: 64
       pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
     LearningTarget:
       type: object
-      description: A Learning space, by its id in the organization's Intelligence project.
+      description: A Learning space, by its id.
       additionalProperties: false
       required:
         - containerId
@@ -31923,7 +31923,7 @@ components:
           description: Who reviews what people's own recordings propose.
     LearningAutomatic:
       type: object
-      description: 'What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator''s settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn''t include Learning. learning_off: Intelligence has Learning switched off. unavailable: Intelligence couldn''t be asked. pending: not asked yet.'
+      description: 'What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator''s settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn''t include Learning. learning_off: Learning is switched off. unavailable: Learning couldn''t be asked. pending: not asked yet.'
       required:
         - state
       properties:
@@ -32141,14 +32141,14 @@ components:
             properties:
               id:
                 type: string
-                description: Intelligence's id for the recording.
+                description: Learning's id for the recording.
               title:
                 type:
                   - string
                   - 'null'
               available:
                 type: boolean
-                description: False when Intelligence no longer has the recording.
+                description: False when Learning no longer has the recording.
     LearningProposal:
       type: object
       description: A skill change Learning proposed in a space, waiting for review or reviewed.
@@ -32409,7 +32409,7 @@ components:
           enum:
             - 'off'
             - unavailable
-          description: 'Why skills is null. off: Automatic learning is off. unavailable: Intelligence did not deliver them.'
+          description: 'Why skills is null. off: Automatic learning is off. unavailable: Learning did not deliver them.'
     UpdatePersonLearningRequest:
       type: object
       additionalProperties: false
@@ -32531,7 +32531,7 @@ components:
           type: string
           enum:
             - learning-off
-          description: Learning is switched off in Intelligence, so there is nothing to read.
+          description: Learning is switched off, so there is nothing to read.
     PersonLearningReview:
       type: object
       required:
@@ -32725,7 +32725,7 @@ components:
               const: conversation
             threadId:
               type: string
-              description: Intelligence's id for the conversation.
+              description: Learning's id for the conversation.
             threadName:
               type:
                 - string
@@ -32778,7 +32778,7 @@ components:
               const: recording
             trajectoryId:
               type: string
-              description: Intelligence's id for the recording.
+              description: Learning's id for the recording.
             trajectoryPresent:
               type: boolean
               description: False when the recording is gone.
@@ -32885,7 +32885,7 @@ components:
             - import
             - bot
             - intelligence
-          description: 'Who formed it: the person, a source, a Bot, or Intelligence (one Intelligence holds for the person that OpenBot formed no record of, which can be edited or forgotten but not paused).'
+          description: 'Who formed it: the person, a source, a Bot, or (intelligence) something outside OpenBot, kept in long-term memory, which can be edited or forgotten but not paused.'
         formedByBotId:
           type:
             - string
@@ -37170,7 +37170,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningAdminOnly:
-      description: The caller is not an administrator, or Intelligence's licence doesn't include Learning.
+      description: The caller is not an administrator, or the licence doesn't include Learning.
       content:
         application/problem+json:
           schema:
@@ -37199,7 +37199,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningSpaceNotFound:
-      description: The Learning space assigned doesn't exist in Intelligence yet.
+      description: The Learning space assigned doesn't exist yet.
       content:
         application/problem+json:
           schema:
@@ -37217,7 +37217,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningOff:
-      description: Learning is switched off in Intelligence, or it has no model to learn with.
+      description: Learning is switched off, or it has no model to learn with.
       content:
         application/problem+json:
           schema:
@@ -37235,7 +37235,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningBusy:
-      description: Intelligence is busy. Asking again in a minute may work.
+      description: Learning is busy. Asking again in a minute may work.
       content:
         application/problem+json:
           schema:
@@ -37253,7 +37253,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningUnreachable:
-      description: Intelligence's Learning didn't answer. Asking again may work.
+      description: Learning didn't answer. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -37271,7 +37271,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningUnavailable:
-      description: OpenBot couldn't read Learning from Intelligence just now. Asking again may work.
+      description: OpenBot couldn't read Learning just now. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -37487,7 +37487,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningCannotRun:
-      description: 'Learning can''t start: it is switched off in Intelligence, or it has no model to learn with.'
+      description: 'Learning can''t start: it is switched off, or it has no model to learn with.'
       content:
         application/problem+json:
           schema:
@@ -37588,7 +37588,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     InvalidMemory:
-      description: A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory only Intelligence holds.
+      description: A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory formed outside OpenBot.
       content:
         application/problem+json:
           schema:
@@ -37606,7 +37606,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     MemoryUnavailable:
-      description: The memory is one only Intelligence holds, and Intelligence can't be reached right now. Asking again may work.
+      description: The memory was formed outside OpenBot, and long-term memory can't be reached right now. Asking again may work.
       content:
         application/problem+json:
           schema:

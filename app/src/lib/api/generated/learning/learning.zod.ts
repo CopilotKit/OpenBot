@@ -54,9 +54,7 @@ export const GetLearningSettingsResponse = zod.object({
               .regex(
                 getLearningSettingsResponseSettingsDefaultTargetOneContainerIdRegExp,
               )
-              .describe(
-                "A Learning space's id in Intelligence (its container).",
-              ),
+              .describe("A Learning space's id (its container)."),
             revision: zod
               .string()
               .min(1)
@@ -68,9 +66,7 @@ export const GetLearningSettingsResponse = zod.object({
                 "A published revision to hold the space's skills at. Absent follows the latest.",
               ),
           })
-          .describe(
-            "A Learning space, by its id in the organization's Intelligence project.",
-          ),
+          .describe("A Learning space, by its id."),
         zod.null(),
       ])
       .describe("The space every Bot learns into. Null when none is assigned."),
@@ -87,9 +83,7 @@ export const GetLearningSettingsResponse = zod.object({
                 .regex(
                   getLearningSettingsResponseSettingsBotsOneContainerIdRegExp,
                 )
-                .describe(
-                  "A Learning space's id in Intelligence (its container).",
-                ),
+                .describe("A Learning space's id (its container)."),
               revision: zod
                 .string()
                 .min(1)
@@ -99,9 +93,7 @@ export const GetLearningSettingsResponse = zod.object({
                   "A published revision to hold the space's skills at. Absent follows the latest.",
                 ),
             })
-            .describe(
-              "A Learning space, by its id in the organization's Intelligence project.",
-            ),
+            .describe("A Learning space, by its id."),
           zod.null(),
         ]),
       )
@@ -132,7 +124,7 @@ export const GetLearningSettingsResponse = zod.object({
             .max(getLearningSettingsResponseAutomaticOneContainerIdMax)
             .regex(getLearningSettingsResponseAutomaticOneContainerIdRegExp)
             .optional()
-            .describe("A Learning space's id in Intelligence (its container)."),
+            .describe("A Learning space's id (its container)."),
           instructions: zod
             .string()
             .optional()
@@ -151,7 +143,7 @@ export const GetLearningSettingsResponse = zod.object({
             .describe("Why the last attempt to create it failed."),
         })
         .describe(
-          "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Intelligence has Learning switched off. unavailable: Intelligence couldn't be asked. pending: not asked yet.",
+          "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Learning is switched off. unavailable: Learning couldn't be asked. pending: not asked yet.",
         ),
       zod.null(),
     ])
@@ -208,7 +200,7 @@ export const UpdateLearningSettingsBody = zod.object({
             .min(1)
             .max(updateLearningSettingsBodyDefaultTargetOneContainerIdMax)
             .regex(updateLearningSettingsBodyDefaultTargetOneContainerIdRegExp)
-            .describe("A Learning space's id in Intelligence (its container)."),
+            .describe("A Learning space's id (its container)."),
           revision: zod
             .string()
             .min(1)
@@ -218,9 +210,7 @@ export const UpdateLearningSettingsBody = zod.object({
               "A published revision to hold the space's skills at. Absent follows the latest.",
             ),
         })
-        .describe(
-          "A Learning space, by its id in the organization's Intelligence project.",
-        ),
+        .describe("A Learning space, by its id."),
       zod.null(),
     ])
     .optional(),
@@ -235,9 +225,7 @@ export const UpdateLearningSettingsBody = zod.object({
               .min(1)
               .max(updateLearningSettingsBodyBotsOneContainerIdMax)
               .regex(updateLearningSettingsBodyBotsOneContainerIdRegExp)
-              .describe(
-                "A Learning space's id in Intelligence (its container).",
-              ),
+              .describe("A Learning space's id (its container)."),
             revision: zod
               .string()
               .min(1)
@@ -247,9 +235,7 @@ export const UpdateLearningSettingsBody = zod.object({
                 "A published revision to hold the space's skills at. Absent follows the latest.",
               ),
           })
-          .describe(
-            "A Learning space, by its id in the organization's Intelligence project.",
-          ),
+          .describe("A Learning space, by its id."),
         zod.null(),
       ]),
     )
@@ -295,9 +281,7 @@ export const UpdateLearningSettingsResponse = zod.object({
               .regex(
                 updateLearningSettingsResponseSettingsDefaultTargetOneContainerIdRegExp,
               )
-              .describe(
-                "A Learning space's id in Intelligence (its container).",
-              ),
+              .describe("A Learning space's id (its container)."),
             revision: zod
               .string()
               .min(1)
@@ -309,9 +293,7 @@ export const UpdateLearningSettingsResponse = zod.object({
                 "A published revision to hold the space's skills at. Absent follows the latest.",
               ),
           })
-          .describe(
-            "A Learning space, by its id in the organization's Intelligence project.",
-          ),
+          .describe("A Learning space, by its id."),
         zod.null(),
       ])
       .describe("The space every Bot learns into. Null when none is assigned."),
@@ -330,9 +312,7 @@ export const UpdateLearningSettingsResponse = zod.object({
                 .regex(
                   updateLearningSettingsResponseSettingsBotsOneContainerIdRegExp,
                 )
-                .describe(
-                  "A Learning space's id in Intelligence (its container).",
-                ),
+                .describe("A Learning space's id (its container)."),
               revision: zod
                 .string()
                 .min(1)
@@ -342,9 +322,7 @@ export const UpdateLearningSettingsResponse = zod.object({
                   "A published revision to hold the space's skills at. Absent follows the latest.",
                 ),
             })
-            .describe(
-              "A Learning space, by its id in the organization's Intelligence project.",
-            ),
+            .describe("A Learning space, by its id."),
           zod.null(),
         ]),
       )
@@ -375,7 +353,7 @@ export const UpdateLearningSettingsResponse = zod.object({
             .max(updateLearningSettingsResponseAutomaticOneContainerIdMax)
             .regex(updateLearningSettingsResponseAutomaticOneContainerIdRegExp)
             .optional()
-            .describe("A Learning space's id in Intelligence (its container)."),
+            .describe("A Learning space's id (its container)."),
           instructions: zod
             .string()
             .optional()
@@ -394,7 +372,7 @@ export const UpdateLearningSettingsResponse = zod.object({
             .describe("Why the last attempt to create it failed."),
         })
         .describe(
-          "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Intelligence has Learning switched off. unavailable: Intelligence couldn't be asked. pending: not asked yet.",
+          "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Learning is switched off. unavailable: Learning couldn't be asked. pending: not asked yet.",
         ),
       zod.null(),
     ])
@@ -402,7 +380,7 @@ export const UpdateLearningSettingsResponse = zod.object({
 });
 
 /**
- * Create, in the organization's Intelligence project, the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
+ * Create the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
  * @summary Create the Learning space OpenBot assigns by itself
  */
 
@@ -451,7 +429,7 @@ export const CreateAutomaticLearningSpaceResponse = zod.object({
         .max(createAutomaticLearningSpaceResponseAutomaticContainerIdMax)
         .regex(createAutomaticLearningSpaceResponseAutomaticContainerIdRegExp)
         .optional()
-        .describe("A Learning space's id in Intelligence (its container)."),
+        .describe("A Learning space's id (its container)."),
       instructions: zod
         .string()
         .optional()
@@ -470,12 +448,12 @@ export const CreateAutomaticLearningSpaceResponse = zod.object({
         .describe("Why the last attempt to create it failed."),
     })
     .describe(
-      "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Intelligence has Learning switched off. unavailable: Intelligence couldn't be asked. pending: not asked yet.",
+      "What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Learning is switched off. unavailable: Learning couldn't be asked. pending: not asked yet.",
     ),
 });
 
 /**
- * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Intelligence's dashboard where it has one, and why Learning can't run on this machine's model where that is known. An Intelligence with no dashboard can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
+ * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Learning's dashboard where there is one, and why Learning can't run on this machine's model where that is known. Without a dashboard, Learning can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
  * @summary Read how Learning is going for a space
  */
 
@@ -621,7 +599,7 @@ export const ListPublishedSkillsResponse = zod.object({
       .min(1)
       .max(listPublishedSkillsResponseContainerIdOneMax)
       .regex(listPublishedSkillsResponseContainerIdOneRegExp)
-      .describe("A Learning space's id in Intelligence (its container)."),
+      .describe("A Learning space's id (its container)."),
     zod.null(),
   ]),
   skills: zod.array(
@@ -664,7 +642,7 @@ export const GetPublishedSkillParams = zod.object({
     .max(getPublishedSkillPathSkillNameMax)
     .regex(getPublishedSkillPathSkillNameRegExp)
     .describe(
-      "A learned skill's name as Intelligence publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
+      "A learned skill's name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
     ),
 });
 
@@ -698,11 +676,11 @@ export const GetPublishedSkillResponse = zod.object({
   recordings: zod
     .array(
       zod.object({
-        id: zod.string().describe("Intelligence's id for the recording."),
+        id: zod.string().describe("Learning's id for the recording."),
         title: zod.string().nullable(),
         available: zod
           .boolean()
-          .describe("False when Intelligence no longer has the recording."),
+          .describe("False when Learning no longer has the recording."),
       }),
     )
     .optional()
@@ -772,7 +750,7 @@ export const ListPersonalLearningProposalsResponse = zod.object({
         .min(1)
         .max(listPersonalLearningProposalsResponsePeopleItemContainerIdMax)
         .regex(listPersonalLearningProposalsResponsePeopleItemContainerIdRegExp)
-        .describe("A Learning space's id in Intelligence (its container)."),
+        .describe("A Learning space's id (its container)."),
       proposals: zod
         .array(
           zod
@@ -1108,7 +1086,7 @@ export const GetPersonLearningSettingsResponse = zod.object({
     .enum(["off", "unavailable"])
     .optional()
     .describe(
-      "Why skills is null. off: Automatic learning is off. unavailable: Intelligence did not deliver them.",
+      "Why skills is null. off: Automatic learning is off. unavailable: Learning did not deliver them.",
     ),
 });
 
@@ -1235,7 +1213,7 @@ export const GetPersonLearningReviewResponse = zod.object({
         .min(1)
         .max(getPersonLearningReviewResponseSpacesItemContainerIdMax)
         .regex(getPersonLearningReviewResponseSpacesItemContainerIdRegExp)
-        .describe("A Learning space's id in Intelligence (its container)."),
+        .describe("A Learning space's id (its container)."),
       kind: zod.enum(["recordings", "conversations"]),
       label: zod.string(),
       proposals: zod
@@ -1314,9 +1292,7 @@ export const GetPersonLearningReviewResponse = zod.object({
       unavailable: zod
         .enum(["learning-off"])
         .optional()
-        .describe(
-          "Learning is switched off in Intelligence, so there is nothing to read.",
-        ),
+        .describe("Learning is switched off, so there is nothing to read."),
     }),
   ),
 });
@@ -1409,7 +1385,7 @@ export const ListPersonLearningProposalsResponse = zod.object({
         .min(1)
         .max(listPersonLearningProposalsResponseSkillsItemContainerIdMax)
         .regex(listPersonLearningProposalsResponseSkillsItemContainerIdRegExp)
-        .describe("A Learning space's id in Intelligence (its container)."),
+        .describe("A Learning space's id (its container)."),
       proposal: zod
         .object({
           id: zod.uuid(),
@@ -1444,7 +1420,7 @@ export const ListPersonLearningProposalsResponse = zod.object({
 });
 
 /**
- * Return the title of each recording named, by the id Intelligence gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
+ * Return the title of each recording named, by the id Learning gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
  * @summary Read the titles of a person's recordings
  */
 
@@ -1476,7 +1452,7 @@ export const GetRecordingTitlesQueryParams = zod.object({
     .array(zod.uuid())
     .min(1)
     .max(getRecordingTitlesQueryIdsMax)
-    .describe("The recordings, by Intelligence's id, at most 50."),
+    .describe("The recordings, by Learning's id for each, at most 50."),
 });
 
 export const GetRecordingTitlesResponse = zod.object({
@@ -1523,7 +1499,7 @@ export const GetLearnedSkillParams = zod.object({
     .max(getLearnedSkillPathSkillNameMax)
     .regex(getLearnedSkillPathSkillNameRegExp)
     .describe(
-      "A learned skill's name as Intelligence publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
+      "A learned skill's name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
     ),
 });
 
@@ -1544,11 +1520,11 @@ export const GetLearnedSkillResponse = zod.object({
   recordings: zod
     .array(
       zod.object({
-        id: zod.string().describe("Intelligence's id for the recording."),
+        id: zod.string().describe("Learning's id for the recording."),
         title: zod.string().nullable(),
         available: zod
           .boolean()
-          .describe("False when Intelligence no longer has the recording."),
+          .describe("False when Learning no longer has the recording."),
       }),
     )
     .optional()
@@ -1592,7 +1568,7 @@ export const UpdateLearnedSkillParams = zod.object({
     .max(updateLearnedSkillPathSkillNameMax)
     .regex(updateLearnedSkillPathSkillNameRegExp)
     .describe(
-      "A learned skill's name as Intelligence publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
+      "A learned skill's name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
     ),
 });
 
@@ -1652,7 +1628,7 @@ export const RequestSkillSharingParams = zod.object({
     .max(requestSkillSharingPathSkillNameMax)
     .regex(requestSkillSharingPathSkillNameRegExp)
     .describe(
-      "A learned skill's name as Intelligence publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
+      "A learned skill's name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.",
     ),
 });
 
@@ -1983,7 +1959,7 @@ export const GetLearningEvidenceResponse = zod.object({
             kind: zod.literal("conversation"),
             threadId: zod
               .string()
-              .describe("Intelligence's id for the conversation."),
+              .describe("Learning's id for the conversation."),
             threadName: zod.string().nullable(),
             threadPresent: zod
               .boolean()
@@ -2011,7 +1987,7 @@ export const GetLearningEvidenceResponse = zod.object({
             kind: zod.literal("recording"),
             trajectoryId: zod
               .string()
-              .describe("Intelligence's id for the recording."),
+              .describe("Learning's id for the recording."),
             trajectoryPresent: zod
               .boolean()
               .describe("False when the recording is gone."),
@@ -2522,7 +2498,7 @@ export const GetPersonLearningEvidenceResponse = zod.object({
             kind: zod.literal("conversation"),
             threadId: zod
               .string()
-              .describe("Intelligence's id for the conversation."),
+              .describe("Learning's id for the conversation."),
             threadName: zod.string().nullable(),
             threadPresent: zod
               .boolean()
@@ -2552,7 +2528,7 @@ export const GetPersonLearningEvidenceResponse = zod.object({
             kind: zod.literal("recording"),
             trajectoryId: zod
               .string()
-              .describe("Intelligence's id for the recording."),
+              .describe("Learning's id for the recording."),
             trajectoryPresent: zod
               .boolean()
               .describe("False when the recording is gone."),

@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The memory is one only Intelligence holds, and Intelligence can't be reached right now. Asking again may work.
+ * The memory was formed outside OpenBot, and long-term memory can't be reached right now. Asking again may work.
  */
 export type MemoryUnavailableResponse = Problem;

@@ -3,7 +3,7 @@
  */
 
 /**
- * Why skills is null. off: Automatic learning is off. unavailable: Intelligence did not deliver them.
+ * Why skills is null. off: Automatic learning is off. unavailable: Learning did not deliver them.
  */
 export type PersonLearningUnavailable =
   (typeof PersonLearningUnavailable)[keyof typeof PersonLearningUnavailable];

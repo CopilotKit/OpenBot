@@ -122,7 +122,7 @@ paths:
       operationId: createAutomaticLearningSpace
       summary: Create the Learning space OpenBot assigns by itself
       description: >-
-        Create, in the organization's Intelligence project, the Learning
+        Create the Learning
         space OpenBot assigns when nobody chose one, with the credential this
         deployment holds for it, then assign it. Offered only where the
         settings say canCreate. Only an administrator may. Recorded on the
@@ -174,11 +174,11 @@ paths:
         Return how Learning stands in the space every Bot learns into, or in
         one Bot's own: whether it is set up, how much waits for review, how
         many skills and insights it published, whether a run is going, links
-        into Intelligence's dashboard where it has one, and why Learning
-        can't run on this machine's model where that is known. An
-        Intelligence with no dashboard can't count waiting conversations,
-        published skills or insights: those are null then, and so is every
-        link. Only an administrator may read it.
+        into Learning's dashboard where there is one, and why Learning
+        can't run on this machine's model where that is known. Without a
+        dashboard, Learning can't count waiting conversations, published
+        skills or insights: those are null then, and so is every link. Only
+        an administrator may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -687,7 +687,7 @@ paths:
       operationId: getRecordingTitles
       summary: Read the titles of a person's recordings
       description: >-
-        Return the title of each recording named, by the id Intelligence
+        Return the title of each recording named, by the id Learning
         gives it, so a proposal's evidence can name the recordings it was
         learned from. A recording that isn't the person's is left out. The
         person themselves or an administrator may read them.
@@ -700,7 +700,7 @@ paths:
         - name: ids
           in: query
           required: true
-          description: The recordings, by Intelligence's id, at most 50.
+          description: The recordings, by Learning's id for each, at most 50.
           style: form
           explode: false
           schema:
@@ -1663,7 +1663,7 @@ components:
       in: path
       required: true
       description: >-
-        A learned skill's name as Intelligence publishes it: 1 to 200
+        A learned skill's name as Learning publishes it: 1 to 200
         characters, no slash, backslash or control character, not . or ..,
         and no space at either end.
       schema:
@@ -1696,7 +1696,7 @@ components:
   schemas:
     LearningTarget:
       type: object
-      description: A Learning space, by its id in the organization's Intelligence project.
+      description: A Learning space, by its id.
       additionalProperties: false
       required: [containerId]
       properties:
@@ -1709,7 +1709,7 @@ components:
           description: A published revision to hold the space's skills at. Absent follows the latest.
     LearningSpaceId:
       type: string
-      description: A Learning space's id in Intelligence (its container).
+      description: A Learning space's id (its container).
       minLength: 1
       maxLength: 64
       pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
@@ -1766,8 +1766,8 @@ components:
         itself. off: switched off, or the environment names a space. saved:
         an administrator's settings decide. assigned: OpenBot assigned it.
         absent: the project has no such space yet. not_entitled: the plan
-        doesn't include Learning. learning_off: Intelligence has Learning
-        switched off. unavailable: Intelligence couldn't be asked. pending:
+        doesn't include Learning. learning_off: Learning is
+        switched off. unavailable: Learning couldn't be asked. pending:
         not asked yet.
       required: [state]
       properties:
@@ -1947,12 +1947,12 @@ components:
             properties:
               id:
                 type: string
-                description: Intelligence's id for the recording.
+                description: Learning's id for the recording.
               title:
                 type: [string, 'null']
               available:
                 type: boolean
-                description: False when Intelligence no longer has the recording.
+                description: False when Learning no longer has the recording.
     SkillDelivery:
       type: object
       required: [configured, initialized, stale]
@@ -2080,7 +2080,7 @@ components:
           enum: [off, unavailable]
           description: >-
             Why skills is null. off: Automatic learning is off. unavailable:
-            Intelligence did not deliver them.
+            Learning did not deliver them.
     UpdatePersonLearningRequest:
       type: object
       additionalProperties: false
@@ -2208,7 +2208,7 @@ components:
               const: conversation
             threadId:
               type: string
-              description: Intelligence's id for the conversation.
+              description: Learning's id for the conversation.
             threadName:
               type: [string, 'null']
             threadPresent:
@@ -2242,7 +2242,7 @@ components:
               const: recording
             trajectoryId:
               type: string
-              description: Intelligence's id for the recording.
+              description: Learning's id for the recording.
             trajectoryPresent:
               type: boolean
               description: False when the recording is gone.
@@ -2375,7 +2375,7 @@ components:
         unavailable:
           type: string
           enum: [learning-off]
-          description: Learning is switched off in Intelligence, so there is nothing to read.
+          description: Learning is switched off, so there is nothing to read.
     PersonLearningReview:
       type: object
       required: [canReview, autoApprove, approved, spaces]
@@ -2452,7 +2452,7 @@ components:
   responses:
     LearningAdminOnly:
       description: >-
-        The caller is not an administrator, or Intelligence's licence doesn't
+        The caller is not an administrator, or the licence doesn't
         include Learning.
       content:
         application/problem+json:
@@ -2638,7 +2638,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningSpaceNotFound:
-      description: The Learning space assigned doesn't exist in Intelligence yet.
+      description: The Learning space assigned doesn't exist yet.
       content:
         application/problem+json:
           schema:
@@ -2656,7 +2656,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningOff:
-      description: Learning is switched off in Intelligence, or it has no model to learn with.
+      description: Learning is switched off, or it has no model to learn with.
       content:
         application/problem+json:
           schema:
@@ -2710,7 +2710,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningBusy:
-      description: Intelligence is busy. Asking again in a minute may work.
+      description: Learning is busy. Asking again in a minute may work.
       content:
         application/problem+json:
           schema:
@@ -2728,7 +2728,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningUnreachable:
-      description: Intelligence's Learning didn't answer. Asking again may work.
+      description: Learning didn't answer. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -2746,7 +2746,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningUnavailable:
-      description: OpenBot couldn't read Learning from Intelligence just now. Asking again may work.
+      description: OpenBot couldn't read Learning just now. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -2863,7 +2863,7 @@ components:
                 traceId: trace_example
     LearningCannotRun:
       description: >-
-        Learning can't start: it is switched off in Intelligence, or it has no
+        Learning can't start: it is switched off, or it has no
         model to learn with.
       content:
         application/problem+json:

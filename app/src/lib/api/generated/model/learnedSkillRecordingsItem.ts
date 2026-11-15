@@ -3,10 +3,10 @@
  */
 
 export type LearnedSkillRecordingsItem = {
-  /** Intelligence's id for the recording. */
+  /** Learning's id for the recording. */
   id: string;
   /** @nullable */
   title: string | null;
-  /** False when Intelligence no longer has the recording. */
+  /** False when Learning no longer has the recording. */
   available: boolean;
 };

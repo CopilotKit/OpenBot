@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * OpenBot couldn't read Learning from Intelligence just now. Asking again may work.
+ * OpenBot couldn't read Learning just now. Asking again may work.
  */
 export type LearningUnavailableResponse = Problem;

@@ -17,6 +17,6 @@ export interface LearningSpace {
    */
   proposals: LearningProposal[] | null;
   latestRun: LearningRun | null;
-  /** Learning is switched off in Intelligence, so there is nothing to read. */
+  /** Learning is switched off, so there is nothing to read. */
   unavailable?: LearningSpaceUnavailable;
 }

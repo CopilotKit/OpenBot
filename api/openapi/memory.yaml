@@ -22,8 +22,8 @@ paths:
         Return one page of what a person's Bots remember about them, most
         recently changed first: the ones they wrote, the ones their Bots
         formed and are waiting for their review, the ones read in from their
-        sources, and the ones Intelligence holds for them that OpenBot formed
-        no record of, after OpenBot's own. Paused memories are included;
+        sources, and the ones formed for them outside OpenBot and kept in
+        long-term memory, after OpenBot's own. Paused memories are included;
         forgotten ones are not. Only the person themselves may list them: an
         administrator can't either. A missing cursor starts at the first page
         and nextCursor null ends the list.
@@ -66,7 +66,7 @@ paths:
       description: >-
         Write a memory the person's Bots recall from now on. A memory the
         person writes is theirs and reviewed. Where the deployment has
-        Intelligence's memory it is copied there too. Only the person
+        long-term memory, it is copied there too. Only the person
         themselves may write one.
       security:
         - webSession: []
@@ -122,10 +122,9 @@ paths:
       summary: Change a memory
       description: >-
         Edit a memory's words, pause or resume it, or accept one a Bot formed
-        or read in. A memory Intelligence holds that OpenBot formed no record
-        of can be edited, not paused or reviewed. Editing one replaces the
-        copy Intelligence holds. Only the person themselves may change their
-        memories.
+        or read in. A memory formed outside OpenBot can be edited, not paused
+        or reviewed. Editing a memory replaces its copy in long-term memory.
+        Only the person themselves may change their memories.
       security:
         - webSession: []
         - appOAuth: [memories:write]
@@ -179,8 +178,8 @@ paths:
       operationId: deleteMemory
       summary: Forget a memory
       description: >-
-        Forget a memory: no Bot recalls it again, Intelligence's copy is
-        retired, and a fact read in from a source stays forgotten when the
+        Forget a memory: no Bot recalls it again, its copy in long-term
+        memory is retired, and a fact read in from a source stays forgotten when the
         source syncs again. Only the person themselves may forget their
         memories.
       security:
@@ -496,8 +495,8 @@ components:
       in: path
       required: true
       description: >-
-        The memory's id. A memory Intelligence holds that OpenBot formed no
-        record of has an id that starts intelligence:.
+        The memory's id. A memory formed outside OpenBot has an id that
+        starts intelligence:.
       schema:
         type: string
         minLength: 1
@@ -559,9 +558,9 @@ components:
           type: string
           enum: [person, import, bot, intelligence]
           description: >-
-            Who formed it: the person, a source, a Bot, or Intelligence (one
-            Intelligence holds for the person that OpenBot formed no record
-            of, which can be edited or forgotten but not paused).
+            Who formed it: the person, a source, a Bot, or (intelligence)
+            something outside OpenBot, kept in long-term memory, which can
+            be edited or forgotten but not paused.
         formedByBotId:
           type: [string, 'null']
           description: The Bot that formed it. Only that Bot recalls it.
@@ -835,7 +834,7 @@ components:
     InvalidMemory:
       description: >-
         A field is missing, blank once trimmed or too long, the change is
-        empty, or it pauses or reviews a memory only Intelligence holds.
+        empty, or it pauses or reviews a memory formed outside OpenBot.
       content:
         application/problem+json:
           schema:
@@ -875,7 +874,7 @@ components:
                 traceId: trace_example
     MemoryUnavailable:
       description: >-
-        The memory is one only Intelligence holds, and Intelligence can't be
+        The memory was formed outside OpenBot, and long-term memory can't be
         reached right now. Asking again may work.
       content:
         application/problem+json:

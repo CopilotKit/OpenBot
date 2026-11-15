@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller is not an administrator, or Intelligence's licence doesn't include Learning.
+ * The caller is not an administrator, or the licence doesn't include Learning.
  */
 export type LearningAdminOnlyResponse = Problem;

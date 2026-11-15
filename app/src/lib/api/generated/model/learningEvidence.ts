@@ -8,7 +8,7 @@
 export type LearningEvidence =
   | {
       kind: "conversation";
-      /** Intelligence's id for the conversation. */
+      /** Learning's id for the conversation. */
       threadId: string;
       /** @nullable */
       threadName: string | null;
@@ -29,7 +29,7 @@ export type LearningEvidence =
     }
   | {
       kind: "recording";
-      /** Intelligence's id for the recording. */
+      /** Learning's id for the recording. */
       trajectoryId: string;
       /** False when the recording is gone. */
       trajectoryPresent: boolean;

@@ -99,7 +99,7 @@ export const getListMemoriesUrl = (
 };
 
 /**
- * Return one page of what a person's Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones Intelligence holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of what a person's Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones formed for them outside OpenBot and kept in long-term memory, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's memories
  */
 export const listMemories = async (
@@ -324,7 +324,7 @@ export const getCreateMemoryUrl = (
 };
 
 /**
- * Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the deployment has Intelligence's memory it is copied there too. Only the person themselves may write one.
+ * Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the deployment has long-term memory, it is copied there too. Only the person themselves may write one.
  * @summary Remember a fact
  */
 export const createMemory = async (
@@ -480,7 +480,7 @@ export const getUpdateMemoryUrl = (
 };
 
 /**
- * Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory Intelligence holds that OpenBot formed no record of can be edited, not paused or reviewed. Editing one replaces the copy Intelligence holds. Only the person themselves may change their memories.
+ * Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory formed outside OpenBot can be edited, not paused or reviewed. Editing a memory replaces its copy in long-term memory. Only the person themselves may change their memories.
  * @summary Change a memory
  */
 export const updateMemory = async (
@@ -645,7 +645,7 @@ export const getDeleteMemoryUrl = (
 };
 
 /**
- * Forget a memory: no Bot recalls it again, Intelligence's copy is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.
+ * Forget a memory: no Bot recalls it again, its copy in long-term memory is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.
  * @summary Forget a memory
  */
 export const deleteMemory = async (

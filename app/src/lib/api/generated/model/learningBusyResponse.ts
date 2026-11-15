@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Intelligence is busy. Asking again in a minute may work.
+ * Learning is busy. Asking again in a minute may work.
  */
 export type LearningBusyResponse = Problem;
