@@ -164,7 +164,7 @@ export const ListSignInRequestsResponse = zod.object({
 });
 
 /**
- * Open a sign-in request: a Bot in the person's open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use.
+ * Open a sign-in request: a Bot in the person's open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use. On an OpenBot with no computers for Bots there is nowhere to sign a Bot in, and the answer is 503, as the computers answer there: nothing was opened. The deployment's botComputers says so beforehand.
  * @summary Ask a person to sign a Bot in to a website
  */
 

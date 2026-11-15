@@ -1008,6 +1008,7 @@ components:
         - ssoRequired
         - builtInBots
         - isolatedBots
+        - botComputers
       properties:
         edition:
           type: string
@@ -1059,6 +1060,14 @@ components:
           description: >-
             Whether this OpenBot can give a Bot a computer of its own. Whether
             a person may is their Isolated Bots switch.
+        botComputers:
+          type: boolean
+          description: >-
+            Whether this OpenBot has computers for Bots at all. False, a Bot
+            has no computer, browser or sign-in to a website, and the
+            computers answer 503 to every call. Not isolatedBots: an OpenBot
+            whose Bots share one computer has computers (true) and cannot give
+            a Bot one of its own (isolatedBots false).
     AllowlistEntry:
       type: string
       minLength: 1
@@ -2076,6 +2085,7 @@ components:
         ssoRequired: false
         builtInBots: true
         isolatedBots: false
+        botComputers: true
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
