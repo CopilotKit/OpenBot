@@ -119,7 +119,7 @@ Sign in to the OpenBot at `address` in the person's browser.
 
 `open` is handed the address to open, the system browser in the app. The wait ends when the browser
 comes back with a code, when the person refuses, when `attempt` is cancelled, or after `wait`.
-Returns once the code is exchanged, the OpenBot has answered `/api/me` with the new token, and the
+Returns once the code is exchanged, the OpenBot has answered `/api/copilotkit/info` with the new token, and the
 refresh token is in `store`.
 */
 pub fn sign_in(
@@ -347,12 +347,12 @@ impl Session {
         })
     }
 
-    /// Whether the OpenBot serves the app's screens to this sign-in: `GET /api/me` with the token.
+    /// Whether the OpenBot serves the app's screens to this sign-in: `GET /api/copilotkit/info` with the token.
     fn serves_the_app(&self) -> Result<(), Problem> {
         let access = self.live.lock().unwrap().access.clone();
         let answered = http()
             .map_err(|error| Kind::Unreachable.problem(&self.host, error))?
-            .get(format!("{}/api/me", self.address))
+            .get(format!("{}/api/copilotkit/info", self.address))
             .bearer_auth(access)
             .header(reqwest::header::ACCEPT, "application/json")
             .send()
@@ -362,14 +362,14 @@ impl Session {
             401 | 404 => Err(Kind::TooOld.problem(
                 &self.host,
                 format!(
-                    "GET /api/me answered {} to a new sign-in",
+                    "GET /api/copilotkit/info answered {} to a new sign-in",
                     answered.status()
                 ),
             )),
-            status => {
-                Err(Kind::SignInFailed
-                    .problem(&self.host, format!("GET /api/me answered {status}")))
-            }
+            status => Err(Kind::SignInFailed.problem(
+                &self.host,
+                format!("GET /api/copilotkit/info answered {status}"),
+            )),
         }
     }
 
@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(WAIT, Duration::from_secs(600));
     }
 
-    /// An OpenBot that signs the app in and then refuses the new token on `/api/me` is on a
+    /// An OpenBot that signs the app in and then refuses the new token on `/api/copilotkit/info` is on a
     /// release that cannot serve the app. Nothing is kept, and the tokens are revoked.
     #[test]
     fn an_openbot_that_refuses_its_own_new_token_is_too_old() {

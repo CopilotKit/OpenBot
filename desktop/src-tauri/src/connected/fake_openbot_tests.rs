@@ -10,7 +10,7 @@ loopback port that answers the addresses the app uses as the real one does.
   against the challenge, a code that burns on its first use (right or wrong), and refresh tokens
   that rotate, where one used a second time answers `invalid_grant` and ends the family;
 - revocation (RFC 7009);
-- `/api/me` and a few `/api/v2` addresses that honour a Bearer access token and nothing else, one
+- `/api/copilotkit/info` and a few `/api/v2` addresses that honour a Bearer access token and nothing else, one
   of them a stream and one a WebSocket.
 
 And a stand-in for the person's browser (`Browser`), which follows the authorization address the
@@ -53,7 +53,7 @@ pub enum Shape {
     MetadataElsewhere,
     /// Every address redirects to the same path at another address.
     RedirectsTo(String),
-    /// Signs the app in, and then refuses the token on `/api/me`.
+    /// Signs the app in, and then refuses the token on `/api/copilotkit/info`.
     MeRefuses,
 }
 
@@ -538,7 +538,7 @@ async fn answer(
             // RFC 7009 §2.2: 200 whether or not the token was known.
             json(StatusCode::OK, serde_json::json!({}))
         }
-        ("GET", "/api/me") => match authorized {
+        ("GET", "/api/copilotkit/info") => match authorized {
             Some(_) if shape != Shape::MeRefuses => {
                 json(StatusCode::OK, serde_json::json!({ "id": "person-1" }))
             }

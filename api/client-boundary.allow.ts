@@ -298,6 +298,25 @@ export const ALLOWED: Allowed[] = [
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
   },
+  // Desktop connecting to an OpenBot that runs somewhere else.
+  {
+    file: "desktop/src-tauri/src/connected/address.rs",
+    what: "/api/v2/organizations/default/deployment",
+    rule: "hand-built-v2",
+    why: "whether the address a person typed is an OpenBot, asked from Rust before anybody signs in",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/address.rs",
+    what: "/.well-known/oauth-authorization-server/api/auth",
+    rule: "before-sign-in",
+    why: "OAuth's discovery document, which names the sign-in's addresses",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/sign_in.rs",
+    what: "/api/copilotkit/info",
+    rule: "runtime",
+    why: "whether the OpenBot serves its runtime to an app's sign-in, asked once after signing in",
+  },
   // Path tables the server registers today's routes from.
   ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
     (file): Allowed => ({
