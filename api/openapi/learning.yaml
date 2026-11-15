@@ -1,0 +1,3069 @@
+# Learning: OpenBot's side of Automatic learning.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+#
+# CopilotKit Intelligence learns skills from conversations and recordings, in Learning spaces
+# (containers) inside the organization's Intelligence project. What it proposes, the evidence behind
+# each proposal, approving and rejecting one, and its runs live in Intelligence: OpenBot reads and
+# changes them for a person, after checking which spaces that person may reach, and answers in the
+# shapes below. Beside them is what OpenBot keeps: which space each Bot learns into, who reviews
+# what people's recordings propose, each person's own spaces and sharing choices, requests to share
+# a skill with every Bot, and the published skills OpenBot delivers to Bots.
+#
+# The organization's spaces (the one every Bot learns into, and each Bot's own) are an
+# administrator's, under settings/learning, picked with botId. A person's own spaces are under
+# people/{personId}, picked with containerId; an administrator may read and review them too.
+paths:
+  /api/v2/organizations/{organizationId}/settings/learning:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: getLearningSettings
+      summary: Read the organization's Learning settings
+      description: >-
+        Return whether Automatic learning is on, the Learning space every
+        Bot learns into and each Bot's own, who reviews what people's
+        recordings propose, and what OpenBot last found when it looked for
+        the space it assigns by itself. Only an administrator may read them.
+        A single-person OpenBot has no such settings: it answers not found.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Learning settings.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningConfiguration'
+              examples:
+                assigned:
+                  $ref: '#/components/examples/LearningConfigurationExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Learning]
+      operationId: updateLearningSettings
+      summary: Change the organization's Learning settings
+      description: >-
+        Change the settings sent and keep the rest. bots replaces every
+        Bot's own space at once. At least one is required. Only an
+        administrator may change them. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLearningSettingsRequest'
+            examples:
+              people:
+                value:
+                  personalReview: people
+              on:
+                value:
+                  enabled: true
+                  defaultTarget:
+                    containerId: openbot
+      responses:
+        '200':
+          description: The Learning settings, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningConfiguration'
+              examples:
+                assigned:
+                  $ref: '#/components/examples/LearningConfigurationExample'
+        '400':
+          $ref: '#/components/responses/InvalidLearningSettings'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/create-container:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Learning]
+      operationId: createAutomaticLearningSpace
+      summary: Create the Learning space OpenBot assigns by itself
+      description: >-
+        Create, in the organization's backend, the Learning
+        space OpenBot assigns when nobody chose one, with the credential this
+        deployment holds for it, then assign it. Offered only where the
+        settings say canCreate. Only an administrator may. Recorded on the
+        audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What OpenBot found once it tried.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningAutomaticResult'
+              examples:
+                assigned:
+                  value:
+                    automatic:
+                      state: assigned
+                      containerId: openbot
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AutomaticLearningOff'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/overview:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: getLearningOverview
+      summary: Read how Learning is going for a space
+      description: >-
+        Return how Learning stands in the space every Bot learns into, or in
+        one Bot's own: whether it is set up, how much waits for review, how
+        many skills and insights it published, whether a run is going, links
+        into the backend dashboard where there is one, and why Learning
+        can't run on this machine's model where that is known. A
+        backend with no dashboard can't count waiting conversations,
+        published skills or insights: those are null then, and so is every
+        link. Only an administrator may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+      responses:
+        '200':
+          description: How Learning stands.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningOverview'
+              examples:
+                configured:
+                  $ref: '#/components/examples/LearningOverviewExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningSpaceNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/personal-learning-proposals:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: listPersonalLearningProposals
+      summary: List what people's recordings proposed
+      description: >-
+        Return one page of the people whose recordings Learning reads, each
+        with their own Learning space and the proposals in it that wait for
+        review. A person whose space could not be read has proposals null;
+        one who never recorded has none. Only an
+        administrator may list them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of people.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningPersonPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/LearningPersonPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/skills:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: listPublishedSkills
+      summary: List the skills published to a space
+      description: >-
+        Return one page of the skills Learning published to the space every
+        Bot learns into, or to one Bot's own, by name, as OpenBot delivers
+        them to Bots. containerId is null, and the list empty, where no space
+        is assigned. Only an administrator may list them. A missing cursor
+        starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of published skills.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishedSkillPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/PublishedSkillPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/skills/{skillName}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillName'
+    get:
+      tags: [Learning]
+      operationId: getPublishedSkill
+      summary: Read a skill published to a space
+      description: >-
+        Return one skill Learning published to the space every Bot learns
+        into, or to one Bot's own, with its files. Only an administrator may
+        read it.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+      responses:
+        '200':
+          description: The skill and its files.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnedSkill'
+              examples:
+                skill:
+                  $ref: '#/components/examples/LearnedSkillExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/LearnedSkillNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/learning-status:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Learning]
+      operationId: getBotLearningStatus
+      summary: Read how a Bot's learned skills reach it
+      description: >-
+        Return whether a Bot learns into a space, which revision of that
+        space's skills it last received, whether that is out of date, and why
+        the last check failed. Only an administrator may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: How the Bot's learned skills reach it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDelivery'
+              examples:
+                current:
+                  value:
+                    configured: true
+                    containerId: openbot
+                    revision: '17'
+                    initialized: true
+                    stale: false
+                    lastCheckedAt: '2026-11-14T09:00:00.000Z'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skill-sharing-requests:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: listSkillSharingRequests
+      summary: List requests to share a skill with every Bot
+      description: >-
+        Return one page of the requests people made to open a skill they
+        approved for themselves to every Bot, oldest first. Only an
+        administrator may list them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of sharing requests.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSharingRequestPage'
+              examples:
+                lastPage:
+                  value:
+                    requests:
+                      - id: dXNlcl8zZjFjOWEAV2Vla2x5IHJlcG9ydA
+                        personId: user_3f1c9a
+                        name: Ada Lovelace
+                        skillName: Weekly report
+                        requestedAt: '2026-11-14T08:30:00.000Z'
+                    nextCursor: null
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-settings:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Learning]
+      operationId: getPersonLearningSettings
+      summary: Read a person's Learning choices and skills
+      description: >-
+        Return who else's Bots use the skills learned in a person's own
+        Learning space, whether an administrator lets people open skills to
+        every Bot, and the skills published in the person's spaces with what
+        they chose for each. skills is null, and unavailable says why, when
+        they could not be read. Only the person themselves may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's Learning choices and skills.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonLearning'
+              examples:
+                closed:
+                  $ref: '#/components/examples/PersonLearningExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningOwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Learning]
+      operationId: updatePersonLearningSettings
+      summary: Change a person's Learning choices
+      description: >-
+        Change who else's Bots use the skills learned in the person's own
+        space, and, in a single-person OpenBot, whether proposals are
+        approved without a review. Opening skills to every Bot waits for an
+        administrator to allow it; closing them never does. At least one is
+        required. Only the person themselves may change them. Recorded on the
+        audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePersonLearningRequest'
+            examples:
+              open:
+                value:
+                  mode: open
+      responses:
+        '200':
+          description: The person's Learning choices, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonLearningChoices'
+              examples:
+                open:
+                  value:
+                    mode: open
+                    autoApprove: null
+        '400':
+          $ref: '#/components/responses/InvalidLearningChoice'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SharingNotAllowed'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-review:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Learning]
+      operationId: getPersonLearningReview
+      summary: Read what a person's Learning spaces proposed
+      description: >-
+        Return each Learning space the person reviews (always their own,
+        which their recordings join, and in a single-person OpenBot the
+        spaces its Bots learn into), with the proposals in it that wait for
+        review and its latest run, and whether the person may decide on them
+        themselves. In a single-person OpenBot with automatic approval on,
+        reading it first approves what waits. Only the person themselves may
+        read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's Learning spaces and what waits in them.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonLearningReview'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/PersonLearningReviewExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningOwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Learning]
+      operationId: listPersonLearningProposals
+      summary: List the skills Learning proposed from one recording
+      description: >-
+        Return one page of the proposals in the person's own spaces made since
+        a recording of theirs stopped whose evidence cites a recording of
+        theirs by that title, newest first and a few at most, each with the
+        Learning space it is in. Rejected proposals and removals are left
+        out, and a recording that isn't
+        theirs never matches. Only the person themselves may list them. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - name: recordingTitle
+          in: query
+          required: true
+          description: The recording's title.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+        - name: since
+          in: query
+          required: true
+          description: When the recording stopped, in milliseconds since 1970.
+          schema:
+            type: integer
+            minimum: 0
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of proposed skills.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordingSkillPage'
+              examples:
+                none:
+                  value:
+                    skills: []
+                    nextCursor: null
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningOwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/recording-titles:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Learning]
+      operationId: getRecordingTitles
+      summary: Read the titles of a person's recordings
+      description: >-
+        Return the title of each recording named, by the id the backend
+        gives it, so a proposal's evidence can name the recordings it was
+        learned from. A recording that isn't the person's is left out. The
+        person themselves or an administrator may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: The recordings, by the backend's id, at most 50.
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+              format: uuid
+      responses:
+        '200':
+          description: The titles of the person's recordings among those named.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordingTitles'
+              examples:
+                titled:
+                  value:
+                    recordings:
+                      - id: 4b6f0a3e-2c1d-4e5f-8a9b-0c1d2e3f4a5b
+                        title: File an expense report
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/PersonForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learned-skills/{skillName}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SkillName'
+    get:
+      tags: [Learning]
+      operationId: getLearnedSkill
+      summary: Read a skill learned in a person's spaces
+      description: >-
+        Return one skill published in a person's Learning spaces, with its
+        files, and, for the person themselves, the recordings of theirs it
+        was learned from where those can be read. The person themselves or an
+        administrator may read it.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The skill and its files.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnedSkill'
+              examples:
+                skill:
+                  $ref: '#/components/examples/LearnedSkillExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/LearnedSkillNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Learning]
+      operationId: updateLearnedSkill
+      summary: Open or close a learned skill to every Bot
+      description: >-
+        Open one of the person's learned skills to every Bot, where they
+        choose skill by skill, or take it back to their own Bots. Opening
+        waits for an administrator to allow sharing; closing never does, and
+        accepts a skill that has since left their space. Only the person
+        themselves may. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLearnedSkillRequest'
+            examples:
+              open:
+                value:
+                  open: true
+      responses:
+        '200':
+          description: Whether the skill is open, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnedSkillOpen'
+              examples:
+                open:
+                  value:
+                    name: Weekly report
+                    open: true
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SharingNotAllowed'
+        '404':
+          $ref: '#/components/responses/LearnedSkillNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOffForPerson'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/LearningUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learned-skills/{skillName}/share:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SkillName'
+    post:
+      tags: [Learning]
+      operationId: requestSkillSharing
+      summary: Ask to share a learned skill with every Bot
+      description: >-
+        Ask an administrator to open a skill the person approved for
+        themselves to every Bot. A request already made, or already approved,
+        is answered as it stands. A skill an administrator approved needs no
+        request: its Open switch shares it. Not in a single-person OpenBot,
+        and not while an administrator hasn't allowed sharing. Only the
+        person themselves may ask. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Where the request stands.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSharingOutcome'
+              examples:
+                requested:
+                  value:
+                    skillName: Weekly report
+                    sharing: requested
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/SharingNotAllowed'
+        '404':
+          $ref: '#/components/responses/LearnedSkillNotFound'
+        '409':
+          $ref: '#/components/responses/SharingNotNeeded'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skill-sharing-requests/{skillSharingRequestId}/approve:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillSharingRequestId'
+    post:
+      tags: [Learning]
+      operationId: approveSkillSharing
+      summary: Share a learned skill with every Bot
+      description: >-
+        Approve a person's request to open a skill they approved for
+        themselves to every Bot. requestedAt is the request as the
+        administrator read it: a skill that changed since is refused, so the
+        administrator reads it again. Only an administrator may. Recorded on
+        the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSharingDecision'
+            examples:
+              asRead:
+                value:
+                  requestedAt: '2026-11-14T08:30:00.000Z'
+      responses:
+        '200':
+          description: The request is approved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSharingOutcome'
+              examples:
+                approved:
+                  value:
+                    skillName: Weekly report
+                    sharing: approved
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SharingRequestNotFound'
+        '409':
+          $ref: '#/components/responses/SharingRequestChanged'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skill-sharing-requests/{skillSharingRequestId}/decline:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillSharingRequestId'
+    post:
+      tags: [Learning]
+      operationId: declineSkillSharing
+      summary: Keep a learned skill with its person's Bots
+      description: >-
+        Decline a person's request to open a skill to every Bot: it stays
+        with their own Bots. requestedAt is the request as the administrator
+        read it. Only an administrator may. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSharingDecision'
+            examples:
+              asRead:
+                value:
+                  requestedAt: '2026-11-14T08:30:00.000Z'
+      responses:
+        '200':
+          description: The request is declined.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSharingOutcome'
+              examples:
+                declined:
+                  value:
+                    skillName: Weekly report
+                    sharing: declined
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SharingRequestNotFound'
+        '409':
+          $ref: '#/components/responses/SharingRequestChanged'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/proposals:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: listLearningProposals
+      summary: List what Learning proposed in a space
+      description: >-
+        Return one page of the skill changes Learning proposed in the space
+        every Bot learns into, or in one Bot's own, newest first, reviewed
+        ones included. The list is empty where no space is assigned. Only an
+        administrator may list them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of proposals.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningProposalPage'
+              examples:
+                none:
+                  value:
+                    proposals: []
+                    nextCursor: null
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningSpaceNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ProposalId'
+    get:
+      tags: [Learning]
+      operationId: getLearningProposal
+      summary: Read a proposal in a space
+      description: >-
+        Return one proposal in the space every Bot learns into, or in one
+        Bot's own, with every file it would publish and the insights behind
+        it. Read each insight's evidence with getLearningEvidence. Only an
+        administrator may read it.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+      responses:
+        '200':
+          description: The proposal, its files and its insights.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningProposalDetail'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/LearningProposalExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}/approve:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ProposalId'
+    post:
+      tags: [Learning]
+      operationId: approveLearningProposal
+      summary: Approve a proposal in a space
+      description: >-
+        Approve a proposal in the space every Bot learns into, or in one
+        Bot's own, which publishes the skill change to every Bot that learns
+        there. Approving it again answers the same review. Only an
+        administrator may. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The proposal, approved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningReview'
+              examples:
+                approved:
+                  $ref: '#/components/examples/LearningReviewApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningProposalReviewed'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}/reject:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ProposalId'
+    post:
+      tags: [Learning]
+      operationId: rejectLearningProposal
+      summary: Reject a proposal in a space
+      description: >-
+        Reject a proposal in the space every Bot learns into, or in one Bot's
+        own: nothing is published. Rejecting it again answers the same
+        review; rejecting an approved one is refused. Only an administrator
+        may. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The proposal, rejected.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningReview'
+              examples:
+                rejected:
+                  $ref: '#/components/examples/LearningReviewRejectedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningProposalReviewed'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/insights/{insightId}/evidence:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/InsightId'
+    get:
+      tags: [Learning]
+      operationId: getLearningEvidence
+      summary: Read what an insight in a space was learned from
+      description: >-
+        Return the evidence behind one insight in the space every Bot learns
+        into, or in one Bot's own: the messages it cites from conversations
+        and the events it cites from recordings, each saying whether it can
+        still be read. Only an administrator may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+      responses:
+        '200':
+          description: The insight's evidence.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningEvidenceList'
+              examples:
+                recording:
+                  $ref: '#/components/examples/LearningEvidenceExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningInsightNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/settings/learning/runs:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Learning]
+      operationId: listOrganizationLearningRuns
+      summary: List Learning's runs over a space
+      description: >-
+        Return one page of the runs over the space every Bot learns into, or
+        over one Bot's own, newest first, each with why it stopped if it
+        failed. The list is empty where no space is assigned. Only an
+        administrator may list them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of runs.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningRunPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/LearningRunPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningSpaceNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Learning]
+      operationId: startOrganizationLearningRun
+      summary: Learn now in a space
+      description: >-
+        Start Learning over the space every Bot learns into, or over one
+        Bot's own, on every finished conversation not yet learned from. A run
+        already going is answered instead of starting another. Only an
+        administrator may. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LearningBotFilter'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: The run, queued or already going.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningRun'
+              examples:
+                queued:
+                  $ref: '#/components/examples/LearningRunQueuedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningAdminOnly'
+        '404':
+          $ref: '#/components/responses/LearningSpaceNotFound'
+        '409':
+          $ref: '#/components/responses/LearningCannotRun'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ProposalId'
+    get:
+      tags: [Learning]
+      operationId: getPersonLearningProposal
+      summary: Read a proposal in a person's space
+      description: >-
+        Return one proposal in one of a person's own Learning spaces, with
+        every file it would publish and the insights behind it. Read each
+        insight's evidence with getPersonLearningEvidence. The person
+        themselves or an administrator may read it.
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/PersonLearningSpace'
+      responses:
+        '200':
+          description: The proposal, its files and its insights.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningProposalDetail'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/LearningProposalExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}/approve:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ProposalId'
+    post:
+      tags: [Learning]
+      operationId: approvePersonLearningProposal
+      summary: Approve a proposal in a person's space
+      description: >-
+        Approve a proposal in one of a person's own Learning spaces, which
+        publishes it there. The person themselves may where they review their
+        own (an administrator's choice, and always in a single-person
+        OpenBot); an administrator may for anyone. A skill approved from a
+        person's recordings is recorded as approved by whoever approved it,
+        which decides who else's Bots may use it. Recorded on the audit
+        trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/PersonLearningSpace'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The proposal, approved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningReview'
+              examples:
+                approved:
+                  $ref: '#/components/examples/LearningReviewApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningReviewNotYours'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningProposalReviewed'
+        '422':
+          $ref: '#/components/responses/LearningProposalUnnamed'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}/reject:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/ProposalId'
+    post:
+      tags: [Learning]
+      operationId: rejectPersonLearningProposal
+      summary: Reject a proposal in a person's space
+      description: >-
+        Reject a proposal in one of a person's own Learning spaces: nothing
+        is published. Who may is as for approving. Recorded on the audit
+        trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/PersonLearningSpace'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The proposal, rejected.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningReview'
+              examples:
+                rejected:
+                  $ref: '#/components/examples/LearningReviewRejectedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningReviewNotYours'
+        '404':
+          $ref: '#/components/responses/LearningProposalNotFound'
+        '409':
+          $ref: '#/components/responses/LearningProposalReviewed'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-insights/{insightId}/evidence:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/InsightId'
+    get:
+      tags: [Learning]
+      operationId: getPersonLearningEvidence
+      summary: Read what an insight in a person's space was learned from
+      description: >-
+        Return the evidence behind one insight in one of a person's own
+        Learning spaces: the messages it cites from conversations and the
+        events it cites from recordings. The person themselves or an
+        administrator may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [learning:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/PersonLearningSpace'
+      responses:
+        '200':
+          description: The insight's evidence.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningEvidenceList'
+              examples:
+                recording:
+                  $ref: '#/components/examples/LearningEvidenceExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/PersonForbidden'
+        '404':
+          $ref: '#/components/responses/LearningInsightNotFound'
+        '409':
+          $ref: '#/components/responses/LearningOff'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-runs:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Learning]
+      operationId: startPersonLearningRun
+      summary: Learn now in a person's space
+      description: >-
+        Start Learning over one of the person's own spaces. Only the person
+        themselves may, and only where they review their own (an
+        administrator's choice, and always in a single-person OpenBot). A run
+        already going is answered instead of starting another. Recorded on
+        the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [learning:write]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/PersonLearningSpace'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: The run, queued or already going.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningRun'
+              examples:
+                queued:
+                  $ref: '#/components/examples/LearningRunQueuedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/LearningReviewNotYours'
+        '404':
+          $ref: '#/components/responses/LearningSpaceNotFound'
+        '409':
+          $ref: '#/components/responses/LearningCannotRun'
+        '429':
+          $ref: '#/components/responses/LearningBusy'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/LearningUnreachable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      description: The proposal's id.
+      schema:
+        type: string
+        format: uuid
+      example: 936d0a2e-e252-48be-8803-e2f8ec15343c
+    InsightId:
+      name: insightId
+      in: path
+      required: true
+      description: The insight's id, as a proposal lists it.
+      schema:
+        type: string
+        format: uuid
+      example: 7a2b9c4d-1e3f-4a5b-8c6d-0e1f2a3b4c5d
+    PersonLearningSpace:
+      name: containerId
+      in: query
+      description: >-
+        Which of the person's own Learning spaces, as their review lists
+        them. Without it, the one their recordings join. A space that isn't
+        one of theirs is not found.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+    SkillName:
+      name: skillName
+      in: path
+      required: true
+      description: >-
+        A learned skill's name as OpenBot publishes it: 1 to 200
+        characters, no slash, backslash or control character, not . or ..,
+        and no space at either end.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: ^[^/\\\x00-\x1F\x7F]+$
+      example: Weekly report
+    SkillSharingRequestId:
+      name: skillSharingRequestId
+      in: path
+      required: true
+      description: The request's id, as listSkillSharingRequests gives it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+        pattern: ^[A-Za-z0-9_-]+$
+      example: dXNlcl8zZjFjOWEAV2Vla2x5IHJlcG9ydA
+    LearningBotFilter:
+      name: botId
+      in: query
+      description: >-
+        One Bot's own Learning space. Without it, the space every Bot learns
+        into.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  schemas:
+    LearningTarget:
+      type: object
+      description: A Learning space, by its id in the organization's backend.
+      additionalProperties: false
+      required: [containerId]
+      properties:
+        containerId:
+          $ref: '#/components/schemas/LearningSpaceId'
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: A published revision to hold the space's skills at. Absent follows the latest.
+    LearningSpaceId:
+      type: string
+      description: A Learning space's id in the backend (its container).
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+    LearningSettings:
+      type: object
+      required: [enabled, defaultTarget, bots, personalReview]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether Bots' conversations are learned from and their skills delivered.
+        defaultTarget:
+          description: The space every Bot learns into. Null when none is assigned.
+          oneOf:
+            - $ref: '#/components/schemas/LearningTarget'
+            - type: 'null'
+        bots:
+          type: object
+          description: >-
+            Each Bot's own space, by Bot id. A Bot not named learns into the
+            default; null keeps one out of Learning.
+          additionalProperties:
+            oneOf:
+              - $ref: '#/components/schemas/LearningTarget'
+              - type: 'null'
+        personalReview:
+          type: string
+          enum: [admins, people]
+          description: Who reviews what people's own recordings propose.
+    UpdateLearningSettingsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        enabled:
+          type: boolean
+        defaultTarget:
+          oneOf:
+            - $ref: '#/components/schemas/LearningTarget'
+            - type: 'null'
+        bots:
+          type: object
+          description: Replaces every Bot's own space.
+          additionalProperties:
+            oneOf:
+              - $ref: '#/components/schemas/LearningTarget'
+              - type: 'null'
+        personalReview:
+          type: string
+          enum: [admins, people]
+    LearningAutomatic:
+      type: object
+      description: >-
+        What OpenBot last found when it looked for the space it assigns by
+        itself. off: switched off, or the environment names a space. saved:
+        an administrator's settings decide. assigned: OpenBot assigned it.
+        absent: the project has no such space yet. not_entitled: the plan
+        doesn't include Learning. learning_off: the backend has Learning
+        switched off. unavailable: the backend couldn't be asked. pending:
+        not asked yet.
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [off, saved, assigned, absent, not_entitled, learning_off, unavailable, pending]
+        containerId:
+          $ref: '#/components/schemas/LearningSpaceId'
+        instructions:
+          type: string
+          description: Where the space is absent, what an operator runs to create it.
+        canCreate:
+          type: boolean
+          description: Where the space is absent, whether this deployment can create it (createAutomaticLearningSpace).
+        createError:
+          type: string
+          description: Why the last attempt to create it failed.
+    LearningConfiguration:
+      type: object
+      required: [settings, automatic]
+      properties:
+        settings:
+          $ref: '#/components/schemas/LearningSettings'
+        automatic:
+          description: Null where OpenBot never assigns a space by itself.
+          oneOf:
+            - $ref: '#/components/schemas/LearningAutomatic'
+            - type: 'null'
+    LearningAutomaticResult:
+      type: object
+      required: [automatic]
+      properties:
+        automatic:
+          $ref: '#/components/schemas/LearningAutomatic'
+    LearningOverview:
+      type: object
+      required:
+        - configuration
+        - pendingThreadCount
+        - pendingCandidateCount
+        - publishedSkillCount
+        - insightCount
+        - hasActiveRun
+        - latestRunStatus
+        - links
+      properties:
+        configuration:
+          type: string
+          enum: [not_configured, invalid, configured, selection_required]
+        container:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        pendingThreadCount:
+          type: [integer, 'null']
+          minimum: 0
+        pendingCandidateCount:
+          type: integer
+          minimum: 0
+        publishedSkillCount:
+          type: [integer, 'null']
+          minimum: 0
+        insightCount:
+          type: [integer, 'null']
+          minimum: 0
+        hasActiveRun:
+          type: boolean
+        latestRunStatus:
+          type: [string, 'null']
+        links:
+          type: object
+          required: [learning, candidates, runs]
+          properties:
+            learning:
+              type: [string, 'null']
+              format: uri
+            candidates:
+              type: [string, 'null']
+              format: uri
+            runs:
+              type: [string, 'null']
+              format: uri
+        modelProblem:
+          type: string
+          description: Why Learning can't run on this machine's model, and what to do. Absent when it can.
+    LearningPerson:
+      type: object
+      required: [personId, name, containerId, proposals]
+      properties:
+        personId:
+          type: string
+        name:
+          type: string
+        containerId:
+          $ref: '#/components/schemas/LearningSpaceId'
+        proposals:
+          type: [array, 'null']
+          description: >-
+            What waits for review in their space. Null when their space could
+            not be read.
+          items:
+            $ref: '#/components/schemas/LearningProposal'
+    LearningPersonPage:
+      type: object
+      required: [people, nextCursor]
+      properties:
+        people:
+          type: array
+          items:
+            $ref: '#/components/schemas/LearningPerson'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    PublishedSkillSummary:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    PublishedSkillPage:
+      type: object
+      required: [containerId, skills, nextCursor]
+      properties:
+        containerId:
+          oneOf:
+            - $ref: '#/components/schemas/LearningSpaceId'
+            - type: 'null'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishedSkillSummary'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LearnedSkill:
+      type: object
+      required: [name, description, files]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        files:
+          type: array
+          description: Every file the skill holds, SKILL.md first.
+          items:
+            type: object
+            required: [path, text]
+            properties:
+              path:
+                type: string
+              text:
+                type: [string, 'null']
+                description: The file's text, or null for a binary file.
+        recordings:
+          type: array
+          description: >-
+            The person's own recordings it was learned from. Absent where
+            those could not be read or don't apply.
+          items:
+            type: object
+            required: [id, title, available]
+            properties:
+              id:
+                type: string
+                description: The backend's id for the recording.
+              title:
+                type: [string, 'null']
+              available:
+                type: boolean
+                description: False when the backend no longer has the recording.
+    SkillDelivery:
+      type: object
+      required: [configured, initialized, stale]
+      properties:
+        configured:
+          type: boolean
+        containerId:
+          type: string
+        revision:
+          type: string
+        initialized:
+          type: boolean
+        stale:
+          type: boolean
+        lastCheckedAt:
+          type: string
+          format: date-time
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+    SkillSharingRequest:
+      type: object
+      required: [id, personId, name, skillName, requestedAt]
+      properties:
+        id:
+          type: string
+          description: The request's id, which approve and decline address it by.
+        personId:
+          type: string
+        name:
+          type: string
+          description: The person's name.
+        skillName:
+          type: string
+        requestedAt:
+          type: string
+          description: When the request was made, as approve and decline take it back.
+    SkillSharingRequestPage:
+      type: object
+      required: [requests, nextCursor]
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillSharingRequest'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    SkillSharingDecision:
+      type: object
+      additionalProperties: false
+      required: [requestedAt]
+      properties:
+        requestedAt:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The request's requestedAt, as the administrator read it.
+    SkillSharingOutcome:
+      type: object
+      required: [skillName, sharing]
+      properties:
+        skillName:
+          type: string
+        sharing:
+          type: string
+          enum: [requested, approved, declined]
+    LearningSharingMode:
+      type: string
+      enum: [closed, open, choose]
+      description: >-
+        Who else's Bots use the skills learned in a person's own space.
+        closed: only their own Bots. open: every Bot. choose: every Bot, for
+        the skills they open one by one.
+    PersonalLearnedSkill:
+      type: object
+      required: [name, description, open, approvedBy, sharing]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        open:
+          type: boolean
+          description: Whether the person opened it to every Bot, where they choose.
+        approvedBy:
+          type: [string, 'null']
+          enum: [person, admin, null]
+          description: Who approved it into their space. Null when no approval is on record.
+        sharing:
+          type: string
+          enum: [none, requested, approved, declined]
+          description: Where the person's request to share it with every Bot stands.
+    PersonLearning:
+      type: object
+      required: [mode, sharingAllowed, autoApprove, skills]
+      properties:
+        mode:
+          $ref: '#/components/schemas/LearningSharingMode'
+        sharingAllowed:
+          type: boolean
+          description: >-
+            Whether an administrator lets people open skills to every Bot.
+            While it is false only closed takes effect.
+        autoApprove:
+          type: [boolean, 'null']
+          description: In a single-person OpenBot, whether proposals are approved without a review. Null elsewhere.
+        skills:
+          type: [array, 'null']
+          items:
+            $ref: '#/components/schemas/PersonalLearnedSkill'
+        unavailable:
+          type: string
+          enum: [off, unavailable]
+          description: >-
+            Why skills is null. off: Automatic learning is off. unavailable:
+            the backend did not deliver them.
+    UpdatePersonLearningRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        mode:
+          $ref: '#/components/schemas/LearningSharingMode'
+        autoApprove:
+          type: boolean
+          description: Only in a single-person OpenBot.
+    PersonLearningChoices:
+      type: object
+      required: [mode, autoApprove]
+      properties:
+        mode:
+          $ref: '#/components/schemas/LearningSharingMode'
+        autoApprove:
+          type: [boolean, 'null']
+    LearningProposal:
+      type: object
+      description: A skill change Learning proposed in a space, waiting for review or reviewed.
+      required:
+        - id
+        - runId
+        - operation
+        - status
+        - title
+        - description
+        - reason
+        - createdAt
+        - reviewedAt
+        - publishedSkillId
+      properties:
+        id:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+          description: The run that proposed it.
+        operation:
+          type: string
+          enum: [add, update, remove]
+          description: Whether it adds a skill, changes one, or removes one.
+        status:
+          type: string
+          enum: [pending_review, approved, rejected]
+        title:
+          type: string
+          description: The skill's name.
+        description:
+          type: string
+        reason:
+          type: string
+          description: Why Learning proposes it.
+        createdAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        publishedSkillId:
+          type: [string, 'null']
+          description: The skill an approval published. Null until approved.
+    LearningProposalPage:
+      type: object
+      required: [proposals, nextCursor]
+      properties:
+        proposals:
+          type: array
+          description: Newest first, reviewed ones included.
+          items:
+            $ref: '#/components/schemas/LearningProposal'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LearningProposalDetail:
+      description: >-
+        One proposal with every file it would publish and the insights behind
+        it. Read each insight's evidence on its own.
+      allOf:
+        - $ref: '#/components/schemas/LearningProposal'
+        - type: object
+          required: [files, insights]
+          properties:
+            files:
+              type: array
+              description: Every file the skill would hold.
+              items:
+                type: object
+                required: [path, content]
+                properties:
+                  path:
+                    type: string
+                  content:
+                    type: string
+            insights:
+              type: array
+              description: What Learning noticed that led to it.
+              items:
+                type: object
+                required: [id, statement, impact]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  statement:
+                    type: string
+                  impact:
+                    type: string
+    LearningEvidence:
+      description: >-
+        One piece of what an insight was learned from: messages cited from a
+        conversation, or events from a recording.
+      oneOf:
+        - type: object
+          required: [kind, threadId, threadName, threadPresent, unavailable, messageCount, cited]
+          properties:
+            kind:
+              type: string
+              const: conversation
+            threadId:
+              type: string
+              description: The backend's id for the conversation.
+            threadName:
+              type: [string, 'null']
+            threadPresent:
+              type: boolean
+              description: False when the conversation is gone.
+            unavailable:
+              type: [string, 'null']
+              enum: [snapshot-missing, snapshot-unreadable, null]
+              description: Why what was cited can't be read, if it can't.
+            messageCount:
+              type: integer
+              minimum: 0
+            cited:
+              type: array
+              items:
+                type: object
+                required: [id, role, content]
+                properties:
+                  id:
+                    type: string
+                  role:
+                    type: string
+                    enum: [user, assistant, tool]
+                  content:
+                    type: string
+        - type: object
+          required: [kind, trajectoryId, trajectoryPresent, unavailable, eventCount, events]
+          properties:
+            kind:
+              type: string
+              const: recording
+            trajectoryId:
+              type: string
+              description: The backend's id for the recording.
+            trajectoryPresent:
+              type: boolean
+              description: False when the recording is gone.
+            unavailable:
+              type: [string, 'null']
+              enum: [snapshot-missing, snapshot-unreadable, null]
+            eventCount:
+              type: integer
+              minimum: 0
+            events:
+              type: array
+              description: The cited events, in order.
+              items:
+                type: object
+                required: [seq, name, offsetMs]
+                properties:
+                  seq:
+                    type: integer
+                    minimum: 0
+                  name:
+                    type: string
+                  offsetMs:
+                    type: number
+    LearningEvidenceList:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/LearningEvidence'
+    LearningReview:
+      type: object
+      description: A proposal as a review left it.
+      required: [proposalId, operation, status, publishedSkillId]
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          enum: [add, update, remove]
+        status:
+          type: string
+          enum: [approved, rejected]
+        publishedSkillId:
+          type: [string, 'null']
+    LearningRun:
+      type: object
+      description: One run of Learning over a space.
+      required:
+        - id
+        - status
+        - triggerSource
+        - proposalCount
+        - insightCount
+        - failureCode
+        - failure
+        - createdAt
+        - startedAt
+        - completedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, freezing, batching, reducing, finalizing, succeeded, failed]
+        triggerSource:
+          type: string
+          enum: [automatic, manual]
+        proposalCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: How many proposals it made. Null until it finishes.
+        insightCount:
+          type: [integer, 'null']
+          minimum: 0
+        failureCode:
+          type: [string, 'null']
+        failure:
+          type: [string, 'null']
+          description: Why a failed run stopped, in a sentence for the person, with what to do. Null unless it failed.
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+    LearningRunPage:
+      type: object
+      required: [runs, nextCursor]
+      properties:
+        runs:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/LearningRun'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    LearningSpace:
+      type: object
+      required: [containerId, kind, label, proposals, latestRun]
+      properties:
+        containerId:
+          $ref: '#/components/schemas/LearningSpaceId'
+        kind:
+          type: string
+          enum: [recordings, conversations]
+        label:
+          type: string
+        proposals:
+          type: [array, 'null']
+          description: What waits for review in it. Null when it could not be read.
+          items:
+            $ref: '#/components/schemas/LearningProposal'
+        latestRun:
+          oneOf:
+            - $ref: '#/components/schemas/LearningRun'
+            - type: 'null'
+        unavailable:
+          type: string
+          enum: [learning-off]
+          description: Learning is switched off in the backend, so there is nothing to read.
+    PersonLearningReview:
+      type: object
+      required: [canReview, autoApprove, approved, spaces]
+      properties:
+        canReview:
+          type: boolean
+          description: Whether the person decides on proposals themselves.
+        autoApprove:
+          type: [boolean, 'null']
+          description: In a single-person OpenBot, whether proposals are approved without a review. Null elsewhere.
+        approved:
+          type: integer
+          minimum: 0
+          description: How many proposals reading this approved automatically.
+        modelProblem:
+          type: string
+          description: Why Learning can't run on this machine at all. Absent when nothing is known to be wrong.
+        spaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/LearningSpace'
+    RecordingSkill:
+      type: object
+      required: [containerId, proposal]
+      properties:
+        containerId:
+          $ref: '#/components/schemas/LearningSpaceId'
+        proposal:
+          $ref: '#/components/schemas/LearningProposal'
+    RecordingSkillPage:
+      type: object
+      required: [skills, nextCursor]
+      properties:
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordingSkill'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    RecordingTitles:
+      type: object
+      required: [recordings]
+      properties:
+        recordings:
+          type: array
+          items:
+            type: object
+            required: [id, title]
+            properties:
+              id:
+                type: string
+              title:
+                type: [string, 'null']
+    UpdateLearnedSkillRequest:
+      type: object
+      additionalProperties: false
+      required: [open]
+      properties:
+        open:
+          type: boolean
+    LearnedSkillOpen:
+      type: object
+      required: [name, open]
+      properties:
+        name:
+          type: string
+        open:
+          type: boolean
+  responses:
+    LearningAdminOnly:
+      description: >-
+        The caller is not an administrator, or the backend's licence doesn't
+        include Learning.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            notLicensed:
+              value:
+                type: https://open.bot/errors/learning-not-enabled
+                title: Learning isn't licensed.
+                status: 403
+                detail: The backend's licence doesn't include Learning.
+                code: LEARNING_NOT_ENABLED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningOwnOnly:
+      description: >-
+        The caller asked about somebody else's Learning, which only that
+        person may read or change.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see their Learning.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidLearningSettings:
+      description: >-
+        A setting is malformed: a space id that can't be one, an unknown
+        field, or no change at all.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            badSpace:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A Learning container ID is lower-case letters, numbers and single hyphens.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidLearningChoice:
+      description: >-
+        The choice is malformed, empty, or sets automatic approval outside a
+        single-person OpenBot.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            badMode:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose closed, open or choose for your skills.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharingNotAllowed:
+      description: >-
+        The caller asked about somebody else's skills, or tried to open
+        skills to every Bot while an administrator hasn't allowed it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            sharingOff:
+              value:
+                type: https://open.bot/errors/sharing-not-allowed
+                title: Sharing isn't on.
+                status: 403
+                detail: An admin hasn't turned on sharing skills with every Bot, so your skills stay with your own Bots.
+                code: SHARING_NOT_ALLOWED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharingNotNeeded:
+      description: >-
+        The skill isn't one the person approved for themselves, so its Open
+        switch shares it without a request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notNeeded:
+              value:
+                type: https://open.bot/errors/sharing-not-needed
+                title: No request needed.
+                status: 409
+                detail: Only a skill you approved yourself needs an admin to share it. Share any other skill with its Open switch.
+                code: SHARING_NOT_NEEDED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharingRequestNotFound:
+      description: That person made no request to share a skill by that name.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/sharing-request-not-found
+                title: Sharing request not found.
+                status: 404
+                detail: This sharing request doesn't exist.
+                code: SHARING_REQUEST_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharingRequestChanged:
+      description: The skill changed after the administrator read the request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            changed:
+              value:
+                type: https://open.bot/errors/sharing-request-changed
+                title: The skill changed.
+                status: 409
+                detail: This skill changed after you opened it. Open it again to see the new version.
+                code: SHARING_REQUEST_CHANGED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearnedSkillNotFound:
+      description: >-
+        No skill by that name is published in the space, or none is assigned,
+        or the person has none by that name.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/learned-skill-not-found
+                title: Skill not found.
+                status: 404
+                detail: This skill doesn't exist.
+                code: LEARNED_SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningSpaceNotFound:
+      description: The Learning space assigned doesn't exist in the backend yet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/learning-space-not-found
+                title: Learning space not found.
+                status: 404
+                detail: This Learning container doesn't exist in the backend yet.
+                code: LEARNING_CONTAINER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningOff:
+      description: Learning is switched off in the backend, or it has no model to learn with.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            off:
+              value:
+                type: https://open.bot/errors/learning-off
+                title: Learning is off.
+                status: 409
+                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
+                code: LEARNING_OFF
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningOffForPerson:
+      description: Automatic learning is off, so the person has no skills to change.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            off:
+              value:
+                type: https://open.bot/errors/learning-off
+                title: Learning is off.
+                status: 409
+                detail: An admin has turned off automatic learning, so you have no skills to change.
+                code: LEARNING_OFF
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AutomaticLearningOff:
+      description: OpenBot doesn't assign a Learning space by itself here.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            off:
+              value:
+                type: https://open.bot/errors/automatic-learning-off
+                title: Automatic assignment is off.
+                status: 409
+                detail: Automatic Learning assignment is switched off.
+                code: AUTOMATIC_LEARNING_OFF
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningBusy:
+      description: The backend is busy. Asking again in a minute may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            busy:
+              value:
+                type: https://open.bot/errors/rate-limited
+                title: Try again shortly.
+                status: 429
+                detail: The backend is busy. Try again in a minute.
+                code: RATE_LIMITED
+                category: rate_limit
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    LearningUnreachable:
+      description: The backend's Learning didn't answer. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/learning-unreachable
+                title: Learning didn't answer.
+                status: 502
+                detail: Couldn't reach Learning in the backend. Try again.
+                code: LEARNING_UNREACHABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    LearningUnavailable:
+      description: OpenBot couldn't read Learning from the backend just now. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/learning-unavailable
+                title: Learning is unavailable.
+                status: 503
+                detail: Couldn't read your Skills from the backend just now. Try again.
+                code: LEARNING_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    LearningProposalNotFound:
+      description: >-
+        No proposal has that id in the space, the space isn't one the caller
+        may reach, or none is assigned.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            gone:
+              value:
+                type: https://open.bot/errors/learning-proposal-not-found
+                title: Proposal not found.
+                status: 404
+                detail: The backend no longer has this skill. Refresh the list.
+                code: LEARNING_PROPOSAL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningInsightNotFound:
+      description: >-
+        No insight has that id in the space, or the space isn't one the
+        caller may reach.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            gone:
+              value:
+                type: https://open.bot/errors/learning-insight-not-found
+                title: Insight not found.
+                status: 404
+                detail: The backend no longer has this insight. Refresh the skill.
+                code: LEARNING_INSIGHT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningProposalReviewed:
+      description: The proposal was already reviewed the other way.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reviewed:
+              value:
+                type: https://open.bot/errors/learning-proposal-reviewed
+                title: Already reviewed.
+                status: 409
+                detail: This skill was already reviewed. Refresh the list to see it.
+                code: LEARNING_PROPOSAL_REVIEWED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningProposalUnnamed:
+      description: The proposed skill has no name, so its approval can't be recorded.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unnamed:
+              value:
+                type: https://open.bot/errors/learning-proposal-unnamed
+                title: The skill has no name.
+                status: 422
+                detail: This skill has no name OpenBot can record, so it can't be approved here.
+                code: LEARNING_PROPOSAL_UNNAMED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningReviewNotYours:
+      description: >-
+        The caller may not decide here: an administrator reviews what people's
+        recordings propose, or the space is somebody else's and the caller
+        isn't an administrator, or only the person may start Learning in
+        their own space.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            adminsReview:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: An admin reviews these skills. You can't review them.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    LearningCannotRun:
+      description: >-
+        Learning can't start: it is switched off in the backend, or it has no
+        model to learn with.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            off:
+              value:
+                type: https://open.bot/errors/learning-off
+                title: Learning is off.
+                status: 409
+                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
+                code: LEARNING_OFF
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noModel:
+              value:
+                type: https://open.bot/errors/learning-model-not-configured
+                title: Learning has no model.
+                status: 409
+                detail: The backend has no Learning model yet. Give its Learning agent a model and key, then try again.
+                code: LEARNING_MODEL_NOT_CONFIGURED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    LearningReviewApprovedExample:
+      summary: An approval that published the skill.
+      value:
+        proposalId: 936d0a2e-e252-48be-8803-e2f8ec15343c
+        operation: add
+        status: approved
+        publishedSkillId: 2e5f8a1c-3b4d-4c6e-9f0a-1b2c3d4e5f60
+    LearningReviewRejectedExample:
+      summary: A rejection.
+      value:
+        proposalId: 936d0a2e-e252-48be-8803-e2f8ec15343c
+        operation: add
+        status: rejected
+        publishedSkillId: null
+    LearningRunQueuedExample:
+      summary: A run Learn now queued.
+      value:
+        id: 4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69
+        status: queued
+        triggerSource: manual
+        proposalCount: null
+        insightCount: null
+        failureCode: null
+        failure: null
+        createdAt: '2026-11-14T09:10:00.000Z'
+        startedAt: null
+        completedAt: null
+    LearningConfigurationExample:
+      summary: Learning on, every Bot learning into the space OpenBot assigned, people reviewing their own.
+      value:
+        settings:
+          enabled: true
+          defaultTarget:
+            containerId: openbot
+          bots:
+            research-assistant: null
+          personalReview: people
+        automatic:
+          state: assigned
+          containerId: openbot
+    LearningOverviewExample:
+      summary: A space with two proposals waiting and no run going.
+      value:
+        configuration: configured
+        container:
+          id: openbot
+          name: OpenBot
+        pendingThreadCount: 4
+        pendingCandidateCount: 2
+        publishedSkillCount: 5
+        insightCount: 12
+        hasActiveRun: false
+        latestRunStatus: succeeded
+        links:
+          learning: null
+          candidates: null
+          runs: null
+    LearningPersonPageExample:
+      summary: One person whose space has nothing waiting.
+      value:
+        people:
+          - personId: user_3f1c9a
+            name: Ada Lovelace
+            containerId: person-3f1c9a
+            proposals: []
+        nextCursor: null
+    PublishedSkillPageExample:
+      summary: The skills published to the space every Bot learns into.
+      value:
+        containerId: openbot
+        skills:
+          - name: Weekly report
+            description: Sum up the week's work for the team.
+        nextCursor: null
+    LearnedSkillExample:
+      summary: A learned skill with one file.
+      value:
+        name: Weekly report
+        description: Sum up the week's work for the team.
+        files:
+          - path: SKILL.md
+            text: "# Weekly report\n\nRead this week's closed issues and write a short report."
+    PersonLearningExample:
+      summary: A person who keeps their skills with their own Bots.
+      value:
+        mode: closed
+        sharingAllowed: true
+        autoApprove: null
+        skills:
+          - name: Weekly report
+            description: Sum up the week's work for the team.
+            open: false
+            approvedBy: person
+            sharing: none
+    PersonLearningReviewExample:
+      summary: A person's own space, with nothing waiting and no run yet.
+      value:
+        canReview: true
+        autoApprove: null
+        approved: 0
+        spaces:
+          - containerId: person-3f1c9a
+            kind: recordings
+            label: From your recordings
+            proposals:
+              - id: 936d0a2e-e252-48be-8803-e2f8ec15343c
+                runId: 4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69
+                operation: add
+                status: pending_review
+                title: File an expense report
+                description: Fill in and submit an expense report from a receipt.
+                reason: You filed three expense reports the same way this week.
+                createdAt: '2026-11-14T08:00:00.000Z'
+                reviewedAt: null
+                publishedSkillId: null
+            latestRun:
+              id: 4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69
+              status: succeeded
+              triggerSource: automatic
+              proposalCount: 1
+              insightCount: 3
+              failureCode: null
+              failure: null
+              createdAt: '2026-11-14T07:55:00.000Z'
+              startedAt: '2026-11-14T07:55:02.000Z'
+              completedAt: '2026-11-14T07:59:40.000Z'
+    LearningProposalExample:
+      summary: A proposal waiting for review.
+      value:
+        id: 936d0a2e-e252-48be-8803-e2f8ec15343c
+        runId: 4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69
+        operation: add
+        status: pending_review
+        title: File an expense report
+        description: Fill in and submit an expense report from a receipt.
+        reason: You filed three expense reports the same way this week.
+        createdAt: '2026-11-14T08:00:00.000Z'
+        reviewedAt: null
+        publishedSkillId: null
+        files:
+          - path: SKILL.md
+            content: "# File an expense report\n\nOpen the expenses page, attach the receipt, then submit."
+        insights:
+          - id: 7a2b9c4d-1e3f-4a5b-8c6d-0e1f2a3b4c5d
+            statement: Expense reports are filed from a receipt in three steps.
+            impact: Saves retyping the same report each week.
+    LearningEvidenceExample:
+      summary: A recording an insight was learned from.
+      value:
+        evidence:
+          - kind: recording
+            trajectoryId: 4b6f0a3e-2c1d-4e5f-8a9b-0c1d2e3f4a5b
+            trajectoryPresent: true
+            unavailable: null
+            eventCount: 12
+            events:
+              - seq: 3
+                name: click
+                offsetMs: 4200
+    LearningRunPageExample:
+      summary: One finished run.
+      value:
+        runs:
+          - id: 4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69
+            status: succeeded
+            triggerSource: manual
+            proposalCount: 1
+            insightCount: 3
+            failureCode: null
+            failure: null
+            createdAt: '2026-11-14T07:55:00.000Z'
+            startedAt: '2026-11-14T07:55:02.000Z'
+            completedAt: '2026-11-14T07:59:40.000Z'
+        nextCursor: null

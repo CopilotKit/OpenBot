@@ -1,0 +1,1008 @@
+# Memory: the facts a person's Bots keep about them, and the apps those facts are read in from.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+#
+# OpenBot keeps the record of each memory: who formed it, whether the person reviewed or paused it,
+# and which source it came from, which decide which Bot may recall it. Where the deployment has
+# CopilotKit Intelligence's memory, Intelligence holds a copy of each memory the person accepted and
+# does the recall, and the memories Intelligence holds for the person that OpenBot formed no record
+# of are listed here too. Without it, OpenBot's record is the whole store. A single-person OpenBot
+# keeps no memory: every operation here answers not found there.
+paths:
+  /api/v2/organizations/{organizationId}/people/{personId}/memories:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Memory]
+      operationId: listMemories
+      summary: List a person's memories
+      description: >-
+        Return one page of what a person's Bots remember about them, most
+        recently changed first: the ones they wrote, the ones their Bots
+        formed and are waiting for their review, the ones read in from their
+        sources, and the ones the backend holds for them that OpenBot formed
+        no record of, after OpenBot's own. Paused memories are included;
+        forgotten ones are not. Only the person themselves may list them: an
+        administrator can't either. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [memories:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of memories.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/MemoryPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Memory]
+      operationId: createMemory
+      summary: Remember a fact
+      description: >-
+        Write a memory the person's Bots recall from now on. A memory the
+        person writes is theirs and reviewed. Where the backend keeps
+        memory, it is copied there too. Only the person
+        themselves may write one.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemoryRequest'
+            examples:
+              fact:
+                value:
+                  content: I prefer meetings after 10am.
+      responses:
+        '201':
+          description: The memory, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memory'
+              examples:
+                saved:
+                  $ref: '#/components/examples/MemoryExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemory'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/memories/{memoryId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/MemoryId'
+    patch:
+      tags: [Memory]
+      operationId: updateMemory
+      summary: Change a memory
+      description: >-
+        Edit a memory's words, pause or resume it, or accept one a Bot formed
+        or read in. A memory the backend holds that OpenBot formed no record
+        of can be edited, not paused or reviewed. Editing one replaces the
+        copy the backend holds. Only the person themselves may change their
+        memories.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemoryRequest'
+            examples:
+              pause:
+                value:
+                  enabled: false
+              accept:
+                value:
+                  reviewState: confirmed
+      responses:
+        '200':
+          description: The memory, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memory'
+              examples:
+                saved:
+                  $ref: '#/components/examples/MemoryExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemory'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/MemoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Memory]
+      operationId: deleteMemory
+      summary: Forget a memory
+      description: >-
+        Forget a memory: no Bot recalls it again, the backend's copy is
+        retired, and a fact read in from a source stays forgotten when the
+        source syncs again. Only the person themselves may forget their
+        memories.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The memory is forgotten.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/MemoryUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Memory]
+      operationId: listMemorySources
+      summary: List a person's memory sources
+      description: >-
+        Return one page of the app actions a person's Bots read facts in
+        from, newest first, each with how its last sync went. Only the person
+        themselves may list them. A missing cursor starts at the first page
+        and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [memories:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of memory sources.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySourcePage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/MemorySourcePageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Memory]
+      operationId: createMemorySource
+      summary: Add a memory source
+      description: >-
+        Let one of the person's Bots read facts in from one of its app's
+        read actions, and read them in at once. The Bot must be the person's,
+        hold that action, and the app must be connected for them. What it
+        reads in waits for the person's review before any Bot recalls it.
+        Only the person themselves may add a source.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemorySourceRequest'
+            examples:
+              docs:
+                value:
+                  botId: general-assistant
+                  toolRef: google-drive/search_files
+                  title: 'Google Drive: Search files'
+                  args:
+                    query: team handbook
+      responses:
+        '201':
+          description: The source, and how many facts its first sync read in.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySourceSync'
+              examples:
+                synced:
+                  $ref: '#/components/examples/MemorySourceSyncExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemorySource'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/MemorySourceId'
+    patch:
+      tags: [Memory]
+      operationId: updateMemorySource
+      summary: Switch a memory source on or off
+      description: >-
+        Stop a source reading facts in, or start it again; a source switched
+        on syncs at its next turn. What it already read in stays. Only the
+        person themselves may change their sources.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemorySourceRequest'
+            examples:
+              off:
+                value:
+                  enabled: false
+      responses:
+        '200':
+          description: The source, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySource'
+              examples:
+                source:
+                  $ref: '#/components/examples/MemorySourceExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemorySource'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemorySourceNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Memory]
+      operationId: deleteMemorySource
+      summary: Remove a memory source
+      description: >-
+        Remove a source and forget every fact it read in. Removing one turns
+        that app down for that Bot: OpenBot never adds it back on its own.
+        Only the person themselves may remove their sources.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The source and what it read in are gone.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemorySourceNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}/sync:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/MemorySourceId'
+    post:
+      tags: [Memory]
+      operationId: syncMemorySource
+      summary: Sync a memory source now
+      description: >-
+        Read a source's facts in now rather than at its next turn. A source
+        that is off or already syncing is refused. What it reads in waits for
+        the person's review. Only the person themselves may sync their
+        sources.
+      security:
+        - webSession: []
+        - appOAuth: [memories:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The source, and how many facts this sync read in.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySourceSync'
+              examples:
+                synced:
+                  $ref: '#/components/examples/MemorySourceSyncExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemorySource'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/MemoryOwnOnly'
+        '404':
+          $ref: '#/components/responses/MemorySourceNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/memory-source-tools:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Memory]
+      operationId: listMemorySourceTools
+      summary: List what a Bot could read facts in from
+      description: >-
+        Return one page of the read actions a Bot holds that can be a memory
+        source for the caller: actions that only read and change nothing.
+        The caller must be able to use the Bot. A missing cursor starts at
+        the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [memories:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of read actions.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySourceToolPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/MemorySourceToolPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidMemorySource'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/MemoryNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    MemoryId:
+      name: memoryId
+      in: path
+      required: true
+      description: >-
+        The memory's id. A memory the backend holds that OpenBot formed no
+        record of has an id that starts intelligence:.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: 6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b
+    MemorySourceId:
+      name: memorySourceId
+      in: path
+      required: true
+      description: The memory source's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: 0f3a9c2e-7b1d-4e8a-a6c5-2d9e4f1b8c70
+  schemas:
+    Memory:
+      type: object
+      description: One fact a person's Bots remember about them.
+      required:
+        - id
+        - content
+        - provenance
+        - sourceId
+        - enabled
+        - reviewState
+        - formedBy
+        - formedByBotId
+        - sourceApp
+        - sourceLink
+        - observedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        provenance:
+          type: string
+          description: >-
+            Where it came from, in words: You, or the app and item it was read
+            in from.
+        sourceId:
+          type: [string, 'null']
+          description: The memory source it was read in from, if any.
+        enabled:
+          type: boolean
+          description: False while the person has paused it. A paused memory is never recalled.
+        reviewState:
+          type: string
+          enum: [unreviewed, confirmed, edited]
+          description: >-
+            unreviewed: a Bot formed it or a source read it in, and no Bot
+            recalls it until the person accepts it.
+        formedBy:
+          type: string
+          enum: [person, import, bot, intelligence]
+          description: >-
+            Who formed it: the person, a source, a Bot, or the backend (one
+            the backend holds for the person that OpenBot formed no record
+            of, which can be edited or forgotten but not paused).
+        formedByBotId:
+          type: [string, 'null']
+          description: The Bot that formed it. Only that Bot recalls it.
+        sourceApp:
+          type: [string, 'null']
+        sourceLink:
+          type: [string, 'null']
+        observedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    MemoryPage:
+      type: object
+      required: [memories, nextCursor]
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    CreateMemoryRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 6000
+          pattern: \S
+          description: Trimmed.
+        provenance:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          default: You
+          description: Where it came from, in words. Trimmed.
+        enabled:
+          type: boolean
+          default: true
+    UpdateMemoryRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 6000
+          pattern: \S
+          description: The memory's new words. Trimmed.
+        enabled:
+          type: boolean
+          description: False pauses it; true resumes it.
+        reviewState:
+          type: string
+          enum: [unreviewed, confirmed, edited]
+          description: confirmed accepts a memory a Bot formed or a source read in.
+    MemorySource:
+      type: object
+      description: One app action a person's Bot reads facts in from.
+      required:
+        - id
+        - botId
+        - toolRef
+        - title
+        - args
+        - enabled
+        - syncStatus
+        - syncError
+        - lastSyncAt
+        - nextSyncAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        botId:
+          type: string
+          description: The Bot that reads it, and the only one that recalls what it read in.
+        toolRef:
+          type: string
+          description: The action, as appId/toolName.
+        title:
+          type: string
+        args:
+          type: object
+          description: What the action is called with.
+          additionalProperties: true
+        enabled:
+          type: boolean
+        syncStatus:
+          type: string
+          enum: [idle, running, succeeded, error]
+        syncError:
+          type: [string, 'null']
+          description: Why the last sync failed, in a sentence for the person.
+        lastSyncAt:
+          type: [string, 'null']
+          format: date-time
+        nextSyncAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    MemorySourcePage:
+      type: object
+      required: [sources, nextCursor]
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemorySource'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    CreateMemorySourceRequest:
+      type: object
+      additionalProperties: false
+      required: [botId, toolRef, title]
+      properties:
+        botId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: \S
+        toolRef:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: \S
+          description: One of the Bot's read actions, as appId/toolName.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: \S
+        args:
+          type: object
+          default: {}
+          additionalProperties: true
+          description: What to call the action with. At most 8 KB as JSON.
+    UpdateMemorySourceRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    MemorySourceSync:
+      type: object
+      required: [imported, source]
+      properties:
+        imported:
+          type: integer
+          minimum: 0
+          description: How many facts this sync read in.
+        source:
+          $ref: '#/components/schemas/MemorySource'
+    MemorySourceTool:
+      type: object
+      required: [ref, title, description, inputSchema]
+      properties:
+        ref:
+          type: string
+          description: The action, as appId/toolName.
+        title:
+          type: string
+        description:
+          type: string
+        inputSchema:
+          type: object
+          additionalProperties: true
+          description: The JSON Schema of what the action is called with.
+    MemorySourceToolPage:
+      type: object
+      required: [tools, nextCursor]
+      properties:
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemorySourceTool'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+  responses:
+    MemoryOwnOnly:
+      description: >-
+        The caller asked about somebody else's memories, which only that
+        person may read or change: an administrator can't either.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see their memories.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    MemoryNotFound:
+      description: >-
+        No memory of the person's has that id, it was forgotten, this OpenBot
+        keeps no memory, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/memory-not-found
+                title: Memory not found.
+                status: 404
+                detail: This memory could not be found.
+                code: MEMORY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    MemorySourceNotFound:
+      description: >-
+        No memory source of the person's has that id, this OpenBot keeps no
+        memory, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/memory-source-not-found
+                title: Memory source not found.
+                status: 404
+                detail: This memory source could not be found.
+                code: MEMORY_SOURCE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidMemory:
+      description: >-
+        A field is missing, blank once trimmed or too long, the change is
+        empty, or it pauses or reviews a memory only the backend holds.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notPausable:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A memory kept in the backend can be edited or forgotten, not paused.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidMemorySource:
+      description: >-
+        A field is missing or too long, the Bot isn't the person's or doesn't
+        hold that read action, the app isn't connected for them, its policy
+        refused the read, or the source is off or already syncing.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notConnected:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Your Google Drive account is not connected. Connect it under Connections, then sync again.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    MemoryUnavailable:
+      description: >-
+        The memory is one only the backend holds, and the backend can't be
+        reached right now. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/memory-unavailable
+                title: Memory is unavailable.
+                status: 503
+                detail: This memory is kept in OpenBot's backend, which cannot be reached right now. Try again.
+                code: MEMORY_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    MemoryExample:
+      summary: A fact the person wrote themselves.
+      value:
+        id: 6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b
+        content: I prefer meetings after 10am.
+        provenance: You
+        sourceId: null
+        enabled: true
+        reviewState: confirmed
+        formedBy: person
+        formedByBotId: null
+        sourceApp: null
+        sourceLink: null
+        observedAt: null
+        createdAt: '2026-11-14T09:00:00.000Z'
+        updatedAt: '2026-11-14T09:00:00.000Z'
+    MemoryPageExample:
+      summary: A person's memories on one page, one waiting for their review.
+      value:
+        memories:
+          - id: 6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b
+            content: I prefer meetings after 10am.
+            provenance: You
+            sourceId: null
+            enabled: true
+            reviewState: confirmed
+            formedBy: person
+            formedByBotId: null
+            sourceApp: null
+            sourceLink: null
+            observedAt: null
+            createdAt: '2026-11-14T09:00:00.000Z'
+            updatedAt: '2026-11-14T09:00:00.000Z'
+          - id: 2c7e9a1b-5f3d-4b8e-9c6a-0d1e2f3a4b5c
+            content: The quarterly review is in the Finance folder.
+            provenance: 'Google Drive (https://drive.google.com/drive/folders/finance), observed 2026-11-13T15:20:00.000Z'
+            sourceId: null
+            enabled: true
+            reviewState: unreviewed
+            formedBy: bot
+            formedByBotId: general-assistant
+            sourceApp: Google Drive
+            sourceLink: https://drive.google.com/drive/folders/finance
+            observedAt: '2026-11-13T15:20:00.000Z'
+            createdAt: '2026-11-13T15:20:00.000Z'
+            updatedAt: '2026-11-13T15:20:00.000Z'
+        nextCursor: null
+    MemorySourceExample:
+      summary: A source that read facts in at its last sync.
+      value:
+        id: 0f3a9c2e-7b1d-4e8a-a6c5-2d9e4f1b8c70
+        botId: general-assistant
+        toolRef: google-drive/search_files
+        title: 'Google Drive: Search files'
+        args:
+          query: team handbook
+        enabled: true
+        syncStatus: succeeded
+        syncError: null
+        lastSyncAt: '2026-11-14T08:45:00.000Z'
+        nextSyncAt: '2026-11-14T09:00:00.000Z'
+        createdAt: '2026-11-10T12:00:00.000Z'
+        updatedAt: '2026-11-14T08:45:00.000Z'
+    MemorySourcePageExample:
+      summary: A person's memory sources on one page.
+      value:
+        sources:
+          - id: 0f3a9c2e-7b1d-4e8a-a6c5-2d9e4f1b8c70
+            botId: general-assistant
+            toolRef: google-drive/search_files
+            title: 'Google Drive: Search files'
+            args:
+              query: team handbook
+            enabled: true
+            syncStatus: succeeded
+            syncError: null
+            lastSyncAt: '2026-11-14T08:45:00.000Z'
+            nextSyncAt: '2026-11-14T09:00:00.000Z'
+            createdAt: '2026-11-10T12:00:00.000Z'
+            updatedAt: '2026-11-14T08:45:00.000Z'
+        nextCursor: null
+    MemorySourceSyncExample:
+      summary: A sync that read in three facts.
+      value:
+        imported: 3
+        source:
+          id: 0f3a9c2e-7b1d-4e8a-a6c5-2d9e4f1b8c70
+          botId: general-assistant
+          toolRef: google-drive/search_files
+          title: 'Google Drive: Search files'
+          args:
+            query: team handbook
+          enabled: true
+          syncStatus: succeeded
+          syncError: null
+          lastSyncAt: '2026-11-14T08:45:00.000Z'
+          nextSyncAt: '2026-11-14T09:00:00.000Z'
+          createdAt: '2026-11-10T12:00:00.000Z'
+          updatedAt: '2026-11-14T08:45:00.000Z'
+    MemorySourceToolPageExample:
+      summary: The read actions one Bot holds.
+      value:
+        tools:
+          - ref: google-drive/search_files
+            title: 'Google Drive: Search files'
+            description: Search the files in Google Drive.
+            inputSchema:
+              type: object
+              properties:
+                query:
+                  type: string
+        nextCursor: null

@@ -85,6 +85,8 @@ tags:
   - { name: Saved logins, description: "The logins a person saved for their Bots to sign in with, by site. A password goes in and is never read back out." }
   - { name: Recorder, description: "The OpenBot Recorder, the browser extension a person records what they do with: the browsers connected as a person, their recordings, and the Recorder's own operations, which it signs with its connection token." }
   - { name: Product events, description: "What a person did with a Bot's answer, seen on screen or copied, counted so OpenBot knows which answers people use. Best effort: a client never waits on one." }
+  - { name: Learning, description: "Automatic learning: the skills Learning proposed, the evidence behind them, approving and rejecting them, and its runs, in the organization's spaces and each person's own; which space each Bot learns into, who reviews what people's recordings propose, each person's sharing choices, requests to share a skill with every Bot, and the skills delivered to Bots." }
+  - { name: Memory, description: "The facts a person's Bots remember about them, and the app actions those facts are read in from. Each person's are theirs alone: an administrator can't read them either." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -373,6 +375,39 @@ paths:
   /api/v2/organizations/{organizationId}/recorder/learning: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1learning' }
   /api/v2/organizations/{organizationId}/recorder/activity: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1activity' }
   /api/v2/organizations/{organizationId}/product-events: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1product-events' }
+  /api/v2/organizations/{organizationId}/settings/learning: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning' }
+  /api/v2/organizations/{organizationId}/settings/learning/create-container: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1create-container' }
+  /api/v2/organizations/{organizationId}/settings/learning/overview: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1overview' }
+  /api/v2/organizations/{organizationId}/settings/learning/skills: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1skills' }
+  /api/v2/organizations/{organizationId}/settings/learning/skills/{skillName}: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1skills~1{skillName}' }
+  /api/v2/organizations/{organizationId}/personal-learning-proposals: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1personal-learning-proposals' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/learning-status: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1learning-status' }
+  /api/v2/organizations/{organizationId}/skill-sharing-requests: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skill-sharing-requests' }
+  /api/v2/organizations/{organizationId}/skill-sharing-requests/{skillSharingRequestId}/approve: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skill-sharing-requests~1{skillSharingRequestId}~1approve' }
+  /api/v2/organizations/{organizationId}/skill-sharing-requests/{skillSharingRequestId}/decline: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skill-sharing-requests~1{skillSharingRequestId}~1decline' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-settings: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-settings' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-review: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-review' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-proposals' }
+  /api/v2/organizations/{organizationId}/people/{personId}/recording-titles: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1recording-titles' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learned-skills/{skillName}: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learned-skills~1{skillName}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learned-skills/{skillName}/share: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learned-skills~1{skillName}~1share' }
+  /api/v2/organizations/{organizationId}/settings/learning/proposals: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1proposals' }
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1proposals~1{proposalId}' }
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}/approve: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1proposals~1{proposalId}~1approve' }
+  /api/v2/organizations/{organizationId}/settings/learning/proposals/{proposalId}/reject: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1proposals~1{proposalId}~1reject' }
+  /api/v2/organizations/{organizationId}/settings/learning/insights/{insightId}/evidence: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1insights~1{insightId}~1evidence' }
+  /api/v2/organizations/{organizationId}/settings/learning/runs: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1runs' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-proposals~1{proposalId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}/approve: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-proposals~1{proposalId}~1approve' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-proposals/{proposalId}/reject: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-proposals~1{proposalId}~1reject' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-insights/{insightId}/evidence: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-insights~1{insightId}~1evidence' }
+  /api/v2/organizations/{organizationId}/people/{personId}/learning-runs: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1learning-runs' }
+  /api/v2/organizations/{organizationId}/people/{personId}/memories: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memories' }
+  /api/v2/organizations/{organizationId}/people/{personId}/memories/{memoryId}: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memories~1{memoryId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memory-sources' }
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memory-sources~1{memorySourceId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}/sync: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memory-sources~1{memorySourceId}~1sync' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/memory-source-tools: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1memory-source-tools' }
 components:
   securitySchemes:
     webSession:
@@ -470,6 +505,10 @@ components:
             saved-logins:write: Delete the signed-in person's saved logins.
             recorder:read: Read the signed-in person's connected browsers and their recordings.
             recorder:write: Connect and disconnect the signed-in person's browsers.
+            learning:read: Read what Learning proposed in the signed-in person's own spaces, their Learning choices and skills, and for an administrator the organization's Learning settings, spaces, people's proposals and sharing requests.
+            learning:write: Approve and reject what Learning proposed and start Learning in the signed-in person's own spaces, change their Learning choices, and for an administrator change the organization's Learning settings and decide sharing requests.
+            memories:read: Read the signed-in person's memories and memory sources.
+            memories:write: Write, change and forget the signed-in person's memories, and add, change, sync and remove their memory sources.
     apiKey:
       type: http
       scheme: bearer
