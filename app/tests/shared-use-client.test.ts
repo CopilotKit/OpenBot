@@ -97,4 +97,26 @@ describe("describeApproval", () => {
       }),
     ).toBe("The group platform and 1 person");
   });
+
+  test("calls a team by its name, never its id, and says when one is gone", () => {
+    const approval = {
+      audience: "people" as const,
+      outsideInput: true,
+      members: [
+        { kind: "team" as const, value: "team_1" },
+        { kind: "team" as const, value: "team_2" },
+        { kind: "team" as const, value: "team_gone" },
+      ],
+    };
+    expect(
+      describeApproval(approval, [
+        { id: "team_1", name: "Support" },
+        { id: "team_2", name: "Field Sales" },
+      ]),
+    ).toBe(
+      "The teams Support, Field Sales and a team that no longer exists, and outside input",
+    );
+    // Before the organization's teams have arrived, only how many is known.
+    expect(describeApproval(approval)).toBe("3 teams, and outside input");
+  });
 });

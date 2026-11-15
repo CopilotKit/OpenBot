@@ -50,6 +50,7 @@ import {
 } from "@/lib/plugins/mutations";
 import type { PluginTool } from "@/lib/plugins/queries";
 import {
+  approvalNamesNobody,
   botSharedAppsQueryOptions,
   type SharedUseApproval,
   sharedUseKeys,
@@ -566,7 +567,7 @@ export function PluginBotPage({
                   Let {botName} use the shared {appTitle} account?
                 </DialogTitle>
               </DialogHeader>
-              <DialogBody className="mt-4">
+              <DialogBody className="mt-4 overflow-y-auto">
                 <SharedApprovalFields onChange={setApproval} value={approval} />
               </DialogBody>
               {/*
@@ -588,7 +589,7 @@ export function PluginBotPage({
                   Cancel
                 </Button>
                 <Button
-                  disabled={grantingShared}
+                  disabled={grantingShared || approvalNamesNobody(approval)}
                   onClick={() => void confirmSharedGrant()}
                   size="sm"
                 >
