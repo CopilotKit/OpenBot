@@ -355,12 +355,15 @@ function EntryRow({
   blocked,
   botName,
   entry,
+  settled,
   titleOf,
 }: {
   agentId: string;
   blocked: string | null;
   botName: string;
   entry: ActivityEntry;
+  /** Under Done: a task there asks for nothing. */
+  settled: boolean;
   /** What a conversation is called, or null when the list has not reached it. */
   titleOf: (channelId: string) => string | null;
 }) {
@@ -372,6 +375,7 @@ function EntryRow({
           origin ? { channelId: origin, title: titleOf(origin) } : undefined
         }
         listed={entry.listed}
+        settled={settled}
       />
     );
   }
@@ -476,6 +480,7 @@ export function BotActivitySections({
                     "This Bot"
                   }
                   entry={entry}
+                  settled={group.id === "done"}
                   titleOf={titleOf}
                 />
               </Fragment>
