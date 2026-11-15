@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { getSetupChecklist } from "@/lib/api/generated/organization-settings/organization-settings";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 
 /**
  * The setup checklist, as the server decided it for the person asking. See
@@ -64,7 +65,7 @@ export function setupChecklistQueryOptions() {
   return queryOptions({
     queryKey: setupKeys.checklist(),
     queryFn: ({ signal }): Promise<SetupChecklist> =>
-      getSetupChecklist(ORGANIZATION_ID, {
+      getSetupChecklist(organizationId(), {
         signal,
         fallback: "Couldn't check your setup.",
       }) as Promise<SetupChecklist>,
@@ -80,5 +81,7 @@ export function mayOpenSetup(
   user: { role?: string } | null | undefined,
   capabilities: { localEvaluation: boolean } | undefined,
 ): boolean {
-  return user?.role === "admin" || capabilities?.localEvaluation === true;
+  return (
+    isOrganizationAdmin(user?.role) || capabilities?.localEvaluation === true
+  );
 }

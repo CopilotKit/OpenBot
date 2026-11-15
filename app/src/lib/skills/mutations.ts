@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { deleteSkill, replaceSkill } from "@/lib/api/generated/skills/skills";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { pluginKeys } from "@/lib/plugins/queries";
 
 /** A skill as the API takes it, under its slug. */
@@ -38,7 +38,7 @@ export function saveSkillMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (input: SkillInput): Promise<unknown> =>
       replaceSkill(
-        ORGANIZATION_ID,
+        organizationId(),
         input.slug,
         {
           title: input.title,
@@ -62,7 +62,7 @@ export function removeSkillMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (slug: string) => {
       await deleteSkill(
-        ORGANIZATION_ID,
+        organizationId(),
         slug,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't delete the skill." },

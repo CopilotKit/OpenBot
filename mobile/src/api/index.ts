@@ -37,7 +37,13 @@ export type {
   Task,
   TaskStatus,
 } from "./generated/model";
-export { ApiError, ME, ORGANIZATION_ID } from "./request";
+export {
+  ApiError,
+  DEPLOYMENT_ORGANIZATION_ID,
+  ME,
+  ORGANIZATION_ID,
+  organizationAddress,
+} from "./request";
 
 /** One page of a list the API pages (`limit`, `cursor`, `nextCursor`). */
 type Paged = { nextCursor?: string | null };

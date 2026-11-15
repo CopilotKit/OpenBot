@@ -8,7 +8,7 @@ import {
   getReviewerGuidance,
   getReviewerGuidanceReplaySample,
 } from "@/lib/api/generated/reviewer-guidance/reviewer-guidance";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * One request a person decided, with what the reviewer would do about it given the guidance: what
@@ -38,7 +38,7 @@ export const reviewerGuidanceQueryOptions = () =>
     queryKey: reviewerGuidanceKeys.saved,
     queryFn: async ({ signal }): Promise<string | null> =>
       (
-        await getReviewerGuidance(ORGANIZATION_ID, {
+        await getReviewerGuidance(organizationId(), {
           signal,
           fallback: "Couldn't load the guidance for auto-review.",
         })
@@ -50,7 +50,7 @@ export const guidanceBacktestPreviewQueryOptions = () =>
   queryOptions({
     queryKey: reviewerGuidanceKeys.preview,
     queryFn: ({ signal }): Promise<GuidanceBacktestPreview> =>
-      getReviewerGuidanceReplaySample(ORGANIZATION_ID, undefined, {
+      getReviewerGuidanceReplaySample(organizationId(), undefined, {
         signal,
         fallback: "Couldn't count the requests to test against.",
       }),

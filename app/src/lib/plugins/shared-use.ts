@@ -10,7 +10,7 @@ import {
   getBotSharedUse,
   listSharedUseRequests,
 } from "@/lib/api/generated/shared-use/shared-use";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 export type SharedAudience = "owner" | "people" | "team";
 export type ApprovalMember = { kind: "user" | "group"; value: string };
@@ -63,7 +63,7 @@ async function waitingRequests(
   let cursor: string | undefined;
   do {
     const page = await listSharedUseRequests(
-      ORGANIZATION_ID,
+      organizationId(),
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { signal, fallback: "Couldn't load shared account requests." },
     );
@@ -86,7 +86,7 @@ export function botSharedAppsQueryOptions(botId: string) {
   return queryOptions({
     queryKey: sharedUseKeys.bot(botId),
     queryFn: ({ signal }): Promise<BotSharedApps> =>
-      getBotSharedUse(ORGANIZATION_ID, botId, {
+      getBotSharedUse(organizationId(), botId, {
         signal,
         fallback: "Couldn't load this Bot's shared apps.",
       }),
@@ -105,7 +105,7 @@ export function decideSharedUseMutationOptions(queryClient: QueryClient) {
       (decision === "approve"
         ? approveSharedUseRequest
         : declineSharedUseRequest)(
-        ORGANIZATION_ID,
+        organizationId(),
         id,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't save that decision." },
@@ -122,7 +122,7 @@ export function requestSharedUseMutationOptions(queryClient: QueryClient) {
       reason: "publish" | "trigger";
     }) =>
       createSharedUseRequest(
-        ORGANIZATION_ID,
+        organizationId(),
         body,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't send the request." },

@@ -175,9 +175,15 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "mobile/src/api/request.ts",
-    what: /^(fetch\(\)|\/api\/|\/api\/v2\/)$/,
+    what: /^(fetch\(\)|\/api\/|\/api\/v2\/|\/api\/v2\/organizations\/\{\})$/,
     rule: "transport",
-    why: "mobile's one request function, the generated client's mutator, which checks it is given an address of the server and keys the API's writes",
+    why: "mobile's one request function, the generated client's mutator, which checks it is given an address of the server, keys the API's writes, and recognises where a generated call wrote the organization",
+  },
+  {
+    file: "mobile/src/organization.ts",
+    what: /^\/api\/v2\/organizations\/(\{organizationId\}|\{\}\{\})$/,
+    rule: "transport",
+    why: "fills the organization the person is working in into an address the generated client built, and into the screen socket's",
   },
   {
     file: "extension/src/shared/openbot-client.ts",
@@ -191,6 +197,12 @@ export const ALLOWED: Allowed[] = [
     what: "fetch()",
     rule: "sign-in-protocol",
     why: "Better Auth's client sends sign-in's own requests (sign-in, SSO, sign-out) through the page's fetch",
+  },
+  {
+    file: "app/src/lib/organizations/queries.ts",
+    what: "/api/auth/organization/set-active",
+    rule: "sign-in-protocol",
+    why: "Better Auth's own address for the organization a session works in, which switching sets",
   },
   {
     file: "app/src/lib/auth/resume.ts",
@@ -235,12 +247,6 @@ export const ALLOWED: Allowed[] = [
       why: "one of the API's sockets, at the address socket-url.ts builds (api/asyncapi.yaml)",
     }),
   ),
-  {
-    file: "mobile/app/computer.tsx",
-    what: "/api/v2/organizations/default/computers/{}/screen",
-    rule: "socket",
-    why: "a Bot's screen socket (api/asyncapi.yaml)",
-  },
   // Stored data.
   {
     file: "shared/attachments.ts",

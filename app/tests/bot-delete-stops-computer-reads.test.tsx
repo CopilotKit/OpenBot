@@ -7,7 +7,7 @@ import { ManageSection } from "@/components/bot-profile/manage";
 import { deleteAgentMutationOptions } from "@/lib/agents/mutations";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { getGetComputerUrl } from "@/lib/api/generated/computers/computers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
 import { ComputerPane } from "@/skins/opendots/computer-pane";
 import {
@@ -86,7 +86,8 @@ const EXPENSES = bot("expenses", "Expenses");
 const SALES = bot("sales", "Sales");
 
 /** Every address of one Bot's computer starts here. */
-const computerOf = (botId: string) => getGetComputerUrl(ORGANIZATION_ID, botId);
+const computerOf = (botId: string) =>
+  getGetComputerUrl(organizationId(), botId);
 const isComputerOf = (botId: string, path: string) =>
   path === computerOf(botId) || path.startsWith(`${computerOf(botId)}/`);
 

@@ -17,7 +17,7 @@ export const ListConnectionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -153,7 +153,7 @@ export const GetConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -252,7 +252,7 @@ export const ConnectAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -414,7 +414,7 @@ export const ConfirmConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -469,7 +469,7 @@ export const RecheckConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -534,7 +534,7 @@ export const DisconnectAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -593,7 +593,7 @@ export const GetConnectionDisconnectPreviewParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -644,7 +644,7 @@ export const GetConnectionAuthorizationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -748,7 +748,7 @@ export const AuthorizeConnectionActionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -829,7 +829,7 @@ export const ListConnectedAccountsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -942,7 +942,7 @@ export const MakeConnectedAccountDefaultParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -1004,7 +1004,7 @@ export const DisconnectConnectedAccountParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -1075,7 +1075,7 @@ export const GetSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1165,7 +1165,7 @@ export const ConnectSharedAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1309,7 +1309,7 @@ export const ConfirmSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1353,7 +1353,7 @@ export const RecheckSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1407,7 +1407,7 @@ export const DisconnectSharedAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1455,7 +1455,7 @@ export const GetSharedConnectionAuthorizationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()
@@ -1548,7 +1548,7 @@ export const AuthorizeSharedConnectionActionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   appId: zod
     .string()

@@ -13,7 +13,7 @@ import {
   typeComputer,
   writeComputerFile,
 } from "@/lib/api/generated/computers/computers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import {
   reportComputerActivity,
@@ -64,12 +64,12 @@ const CALLS: Record<
   (botId: string, body: Body | undefined, options: Options) => Promise<unknown>
 > = {
   "/read": (botId, _body, options) =>
-    readComputerPage(ORGANIZATION_ID, botId, options),
+    readComputerPage(organizationId(), botId, options),
   "/snapshot": (botId, _body, options) =>
-    snapshotComputer(ORGANIZATION_ID, botId, once(), options),
+    snapshotComputer(organizationId(), botId, once(), options),
   "/navigate": (botId, body, options) =>
     navigateComputer(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["url", "toolCallId"]),
       once(),
@@ -77,7 +77,7 @@ const CALLS: Record<
     ),
   "/click": (botId, body, options) =>
     clickComputer(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["ref", "snapshotId"]),
       once(),
@@ -85,7 +85,7 @@ const CALLS: Record<
     ),
   "/type": (botId, body, options) =>
     typeComputer(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["ref", "snapshotId", "text", "submit"]),
       once(),
@@ -93,7 +93,7 @@ const CALLS: Record<
     ),
   "/key": (botId, body, options) =>
     pressComputerKey(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["key", "ref", "snapshotId"]),
       once(),
@@ -101,7 +101,7 @@ const CALLS: Record<
     ),
   "/scroll": (botId, body, options) =>
     scrollComputer(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["deltaY"]),
       once(),
@@ -109,7 +109,7 @@ const CALLS: Record<
     ),
   "/exec": (botId, body, options) =>
     runComputerCommand(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["command", "timeoutMs"]),
       once(),
@@ -117,7 +117,7 @@ const CALLS: Record<
     ),
   "/files/list": (botId, body, options) =>
     listComputerFiles(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["path"]),
       once(),
@@ -125,7 +125,7 @@ const CALLS: Record<
     ),
   "/files/read": (botId, body, options) =>
     readComputerFile(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["path"]),
       once(),
@@ -133,7 +133,7 @@ const CALLS: Record<
     ),
   "/files/write": (botId, body, options) =>
     writeComputerFile(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["path", "contents", "append"]),
       once(),
@@ -141,7 +141,7 @@ const CALLS: Record<
     ),
   "/control/request": (botId, body, options) =>
     requestComputerControl(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["reason", "toolCallId", "source"]),
       once(),
@@ -149,7 +149,7 @@ const CALLS: Record<
     ),
   "/control/secret": (botId, body, options) =>
     requestComputerSecret(
-      ORGANIZATION_ID,
+      organizationId(),
       botId,
       only(body, ["ref", "snapshotId", "label"]),
       once(),

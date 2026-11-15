@@ -12,7 +12,7 @@ import {
   stopInactiveComputers,
   updateOrganizationSettings,
 } from "@/lib/api/generated/organization-settings/organization-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { modelKeys } from "@/lib/models/queries";
 import {
@@ -41,7 +41,7 @@ export function setCapabilityMutationOptions(queryClient: QueryClient) {
       const { scopeKind, scopeId, capability, allowed } = variables;
       // One level of one switch: the organization's, or one role's or group's by name.
       await updateCapability(
-        ORGANIZATION_ID,
+        organizationId(),
         capability,
         scopeKind === "organization"
           ? { organization: allowed }
@@ -71,7 +71,7 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
       value: unknown;
     }) => {
       await updateOrganizationSettings(
-        ORGANIZATION_ID,
+        organizationId(),
         { [variables.key]: variables.value },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -102,7 +102,7 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
     }) => {
       const { scopeKind, scopeId, ...policy } = variables;
       await replaceNetworkPolicy(
-        ORGANIZATION_ID,
+        organizationId(),
         networkPolicyId(scopeKind, scopeId),
         policy,
         { "Idempotency-Key": idempotencyKey() },
@@ -121,7 +121,7 @@ export function removeNetworkPolicyMutationOptions(queryClient: QueryClient) {
     }) => {
       try {
         await deleteNetworkPolicy(
-          ORGANIZATION_ID,
+          organizationId(),
           networkPolicyId(variables.scopeKind, variables.scopeId),
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },
@@ -151,7 +151,7 @@ export function terminateMemberComputersMutationOptions() {
       failed: { computer: string; reason: string }[];
     }> =>
       stopPersonComputers(
-        ORGANIZATION_ID,
+        organizationId(),
         userId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Could not stop that person's computers" },
@@ -163,7 +163,7 @@ export function terminateInactiveComputersMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<{ stopped: string[] }> =>
       stopInactiveComputers(
-        ORGANIZATION_ID,
+        organizationId(),
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Could not sweep inactive computers" },
       ),

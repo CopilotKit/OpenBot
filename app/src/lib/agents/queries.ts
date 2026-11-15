@@ -6,7 +6,7 @@ import {
   testBotConnection,
 } from "@/lib/api/generated/bots/bots";
 import type { Bot, BotHandoff, BotVisibility } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 export type AgentVisibility = BotVisibility;
@@ -64,7 +64,7 @@ async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
   let cursor: string | undefined;
   do {
     const page = await listBots(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         ...(hidden ? { hidden } : {}),
         limit: 100,
@@ -91,7 +91,7 @@ export function agentQueryOptions(agentId: string) {
     queryKey: agentKeys.detail(agentId),
     queryFn: async (): Promise<AgentProfile> =>
       (
-        await getBot(ORGANIZATION_ID, agentId, {
+        await getBot(organizationId(), agentId, {
           fallback: "Couldn't load this Bot.",
         })
       ).bot,
@@ -102,7 +102,7 @@ export function agentHandoffQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.handoff(agentId),
     queryFn: (): Promise<HandoffGrants> =>
-      getBotHandoff(ORGANIZATION_ID, agentId, {
+      getBotHandoff(organizationId(), agentId, {
         fallback: "Could not load which Bots this one may ask",
       }),
   });
@@ -132,7 +132,7 @@ export async function testAgentConnection(
 ): Promise<ConnectionVerdict> {
   try {
     const verdict = await testBotConnection(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         endpoint,
         ...(key.trim() ? { headers: { Authorization: key.trim() } } : {}),

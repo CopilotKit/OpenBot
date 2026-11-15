@@ -13,7 +13,7 @@ export const ListPeopleParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
 });
 
@@ -82,7 +82,7 @@ export const ListPeopleResponse = zod.object({
           role: zod
             .enum(["owner", "admin", "member"])
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
             ),
           needsName: zod
             .boolean()
@@ -162,7 +162,7 @@ export const GetPersonParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -195,7 +195,7 @@ export const GetPersonResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -271,7 +271,7 @@ export const UpdatePersonParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -338,7 +338,7 @@ export const UpdatePersonResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -408,7 +408,7 @@ export const RevokePersonAccessParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -453,7 +453,7 @@ export const RevokePersonAccessResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -523,7 +523,7 @@ export const RestorePersonAccessParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -568,7 +568,7 @@ export const RestorePersonAccessResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -638,7 +638,7 @@ export const AdvanceOnboardingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -710,7 +710,7 @@ export const CompleteOnboardingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -771,7 +771,7 @@ export const GetStandingInstructionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -815,7 +815,7 @@ export const UpdateStandingInstructionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -889,7 +889,7 @@ export const GetPreferencesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()
@@ -953,7 +953,7 @@ export const UpdatePreferencesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. Every install has one addressed as `default`.",
     ),
   personId: zod
     .string()

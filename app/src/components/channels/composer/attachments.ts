@@ -2,7 +2,7 @@ import {
   deleteAttachment,
   uploadConversationAttachment,
 } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import type { Attachment, AttachmentsConfig } from "@copilotkit/react-core/v2";
 import {
@@ -62,7 +62,7 @@ export function uploadToChannel(
     let body: unknown;
     try {
       body = await uploadConversationAttachment(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         { file, uploadGroup },
         { "Idempotency-Key": idempotencyKey() },
@@ -355,7 +355,7 @@ export async function uploadHeldFiles(
  * either way, so a caller that has to wait for it can.
  */
 export function discardStagedAttachment(attachmentId: string): Promise<void> {
-  return deleteAttachment(ORGANIZATION_ID, attachmentId, {
+  return deleteAttachment(organizationId(), attachmentId, {
     "Idempotency-Key": idempotencyKey(),
   }).then(
     () => undefined,

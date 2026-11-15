@@ -1,5 +1,5 @@
 import { translateBoundary } from "@/lib/api/generated/boundaries/boundaries";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /** Whether a rule compiles against the policy schema, and the compiler's words when it does not. */
 export type RuleCompile = { ok: true } | { ok: false; error: string };
@@ -29,7 +29,7 @@ export async function translatePolicyRule(
   text: string,
 ): Promise<PolicyTranslation> {
   const translation = await translateBoundary(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't write the rule. Try again, or write it in CEL." },

@@ -12,7 +12,7 @@ import {
   resumeRoutine,
   runRoutine,
 } from "@/lib/api/generated/routines/routines";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
 import { ClientError } from "@/lib/client";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
@@ -62,7 +62,7 @@ const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
 
 /** `createRoutine`: a routine, or with `goalId` the routine that runs that goal on a schedule. */
 function createRoutine(body: CreateRoutineRequest) {
-  return createRoutineRequest(ORGANIZATION_ID, body, once(), {
+  return createRoutineRequest(organizationId(), body, once(), {
     fallback: CREATE_FALLBACK,
   });
 }
@@ -89,7 +89,7 @@ async function withConversation<T>(
   if (conversationId === NEW_CONVERSATION) {
     started = (
       await createConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         { botIds: [botId] },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't start a conversation for this routine." },
@@ -97,7 +97,7 @@ async function withConversation<T>(
     ).conversation.id;
     // Best effort: a conversation that keeps its default name still works.
     await updateConversation(
-      ORGANIZATION_ID,
+      organizationId(),
       started,
       { title: Array.from(name.trim()).slice(0, 60).join("") },
       { "Idempotency-Key": idempotencyKey() },
@@ -120,7 +120,7 @@ async function withConversation<T>(
       );
     if (started && !kept) {
       await deleteConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         started,
         { "Idempotency-Key": idempotencyKey() },
         undefined,
@@ -283,7 +283,7 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: { id: string; enabled: boolean }) =>
       (variables.enabled ? resumeRoutine : pauseRoutine)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.id,
         once(),
         { fallback: FALLBACK },
@@ -304,7 +304,7 @@ export function deleteRoutineMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationKey: deleteRoutineMutationKey,
     mutationFn: (id: string) =>
-      deleteRoutine(ORGANIZATION_ID, id, once(), { fallback: FALLBACK }),
+      deleteRoutine(organizationId(), id, once(), { fallback: FALLBACK }),
     onSuccess: async (_result, id) => {
       // A read of its runs already on its way is dropped too, not left to land in the cache.
       await queryClient.cancelQueries({ queryKey: routineKeys.runs(id) });
@@ -324,7 +324,7 @@ export function deleteRoutineMutationOptions(queryClient: QueryClient) {
 export function runRoutineNowMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (id: string) =>
-      runRoutine(ORGANIZATION_ID, id, once(), {
+      runRoutine(organizationId(), id, once(), {
         fallback: "That routine could not be started.",
       }),
     onSuccess: () => invalidateRoutines(queryClient),

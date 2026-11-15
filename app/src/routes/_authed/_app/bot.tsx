@@ -17,7 +17,7 @@ import {
   agentListQueryOptions,
 } from "@/lib/agents/queries";
 import { getBot } from "@/lib/api/generated/bots/bots";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
@@ -61,7 +61,7 @@ type BotDetailLookup =
 /** One Bot, read through the API (`getBot`): found, or not here at all (404). */
 async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
   try {
-    const { bot } = await getBot(ORGANIZATION_ID, agentId, {
+    const { bot } = await getBot(organizationId(), agentId, {
       fallback: "Couldn't load this Bot.",
     });
     return { bot, status: "found" };

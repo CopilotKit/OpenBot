@@ -11,7 +11,7 @@ import {
   listVoiceSessions,
   saveVoiceSession as saveVoiceSessionAtApi,
 } from "@/lib/api/generated/voice/voice";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
 import { closingOf } from "./cut";
 import {
@@ -52,7 +52,7 @@ export function voiceSessionQueryOptions(channelId: string) {
       let cursor: string | null = null;
       do {
         const answered = await listVoiceSessions(
-          ORGANIZATION_ID,
+          organizationId(),
           channelId,
           { limit: 50, ...(cursor ? { cursor } : {}) },
           { signal, fallback: "Could not load voice chats." },
@@ -114,7 +114,7 @@ export function saveVoiceSession(
       const payload = JSON.stringify(call);
       // Sent as the page closes when it is small enough to be: a call ended by leaving is still kept.
       const saved = await saveVoiceSessionAtApi(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         call,
         { "Idempotency-Key": idempotencyKey() },

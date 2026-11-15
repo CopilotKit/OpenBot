@@ -1,0 +1,538 @@
+# Organizations: the organizations a person is a member of, and each one's members.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/people/me/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: List the caller's organizations
+      description: >-
+        Return one page of the organizations the caller is a member of, the
+        one they joined first at the top, each with the caller's role in it.
+        active marks the one the caller's session is working in, which is
+        where every address outside /api/v2 reads and writes; a request
+        signed in with an API key or an app's token has no session, so none
+        is active. To work in another one, set it as the session's active
+        organization (POST /api/auth/organization/set-active). A missing
+        cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of organizations.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/OrganizationPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Create an organization
+      description: >-
+        Create an organization with the caller as its owner. It starts with no
+        Bots and no conversations. Who may create one is the deployment's
+        choice: its admins (the admins of `default`) unless it lets anybody
+        signed in. Without a slug, one is made from the name. The caller's
+        session keeps working where it was. A repeated request with the same
+        Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrganizationRequest'
+            examples:
+              named:
+                value:
+                  name: Acme Research
+                  slug: acme-research
+      responses:
+        '201':
+          description: The organization was created.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+              examples:
+                created:
+                  $ref: '#/components/examples/CreatedOrganization'
+        '400':
+          $ref: '#/components/responses/InvalidOrganization'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '409':
+          $ref: '#/components/responses/OrganizationConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/OrganizationNotCreated'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/members:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Organizations]
+      operationId: listOrganizationMembers
+      summary: List an organization's members
+      description: >-
+        Return one page of the organization's members, in the order they
+        joined. Any member can read it. A missing cursor starts at the first
+        page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of members.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/OrganizationMemberPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Organizations]
+      operationId: addOrganizationMember
+      summary: Add a person to an organization
+      description: >-
+        Make somebody who already has an account here a member of the
+        organization, by their email address, with a role. Only an owner or
+        an admin of this organization can. A repeated request with the same
+        Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddOrganizationMemberRequest'
+            examples:
+              member:
+                value:
+                  email: sam.ortiz@acme.com
+                  role: member
+      responses:
+        '201':
+          description: The person is now a member.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The organization's members.
+              schema:
+                type: string
+              example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe/members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberResponse'
+              examples:
+                added:
+                  $ref: '#/components/examples/AddedOrganizationMember'
+        '400':
+          $ref: '#/components/responses/InvalidOrganizationMember'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationOrPersonNotFound'
+        '409':
+          $ref: '#/components/responses/OrganizationMemberConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  schemas:
+    Organization:
+      type: object
+      description: >-
+        One organization, as one of its members sees it. role and active are
+        the server's verdicts about the caller.
+      required: [id, slug, name, role, active]
+      properties:
+        id:
+          type: string
+          description: The organization's id. Opaque.
+        slug:
+          type: string
+          description: Its short name, which also addresses it.
+        name:
+          type: string
+          description: What people call it.
+        role:
+          $ref: './common.yaml#/components/schemas/PersonRole'
+        active:
+          type: boolean
+          description: >-
+            Whether the caller's session is working in this one. Always false
+            for a request with no session.
+    OrganizationPage:
+      type: object
+      required: [organizations, canCreate, nextCursor]
+      properties:
+        organizations:
+          type: array
+          description: The one the caller joined first at the top.
+          items:
+            $ref: '#/components/schemas/Organization'
+        canCreate:
+          type: boolean
+          description: >-
+            Whether the caller may create an organization: the server's
+            verdict, true for the deployment's admins and for anybody signed
+            in when the deployment lets them. The same on every page.
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    OrganizationResponse:
+      type: object
+      required: [organization]
+      properties:
+        organization:
+          $ref: '#/components/schemas/Organization'
+    CreateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: What people call it.
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 48
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          description: >-
+            Its short name: lowercase letters, digits and single hyphens.
+            Unique in the install. Made from the name when absent.
+    OrganizationMember:
+      type: object
+      description: One member of an organization.
+      required: [id, email, name, image, role, joinedAt]
+      properties:
+        id:
+          type: string
+          description: The person's id.
+        email:
+          type: string
+          description: Their address.
+        name:
+          type: [string, 'null']
+          description: What OpenBot calls them. Null until they choose.
+        image:
+          type: [string, 'null']
+          description: Their picture's address, when they have one.
+        role:
+          $ref: './common.yaml#/components/schemas/PersonRole'
+        joinedAt:
+          type: string
+          format: date-time
+          description: When they became a member.
+    OrganizationMemberPage:
+      type: object
+      required: [members, nextCursor]
+      properties:
+        members:
+          type: array
+          description: In the order they joined.
+          items:
+            $ref: '#/components/schemas/OrganizationMember'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    OrganizationMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          $ref: '#/components/schemas/OrganizationMember'
+    AddOrganizationMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          pattern: ^[^\s\x00]+@[^\s\x00]+$
+          description: The address of somebody who already has an account here.
+        role:
+          $ref: './common.yaml#/components/schemas/AssignableRole'
+  responses:
+    InvalidOrganization:
+      description: The name or the slug is missing or malformed, or the Idempotency-Key is.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            name:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A name of 1 to 100 characters is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationConflict:
+      description: >-
+        Another organization has that slug. Or the Idempotency-Key was used
+        for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            slugTaken:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Another organization already uses that slug. Choose another.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotCreated:
+      description: >-
+        This OpenBot could not finish setting the organization up, so it was
+        not created. Nothing of it is left behind.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unfinished:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The organization couldn't be set up, so it wasn't created. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    InvalidOrganizationMember:
+      description: The address or the role is missing or malformed, or the Idempotency-Key is.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            role:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A role of admin or member is required.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationOrPersonNotFound:
+      description: >-
+        The organization does not exist or is not visible to the caller, or
+        nobody here has that address.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            person:
+              value:
+                type: https://open.bot/errors/person-not-found
+                title: Person not found.
+                status: 404
+                detail: Nobody here has that address. They need to sign in to OpenBot once first.
+                code: PERSON_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationMemberConflict:
+      description: >-
+        They are already a member. Or the Idempotency-Key was used for a
+        different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            already:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: They're already a member of this organization.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    OrganizationPageLast:
+      summary: Somebody in two organizations, working in the first.
+      value:
+        organizations:
+          - id: default
+            slug: default
+            name: Acme
+            role: admin
+            active: true
+          - id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+            slug: acme-research
+            name: Acme Research
+            role: owner
+            active: false
+        canCreate: true
+        nextCursor: null
+    CreatedOrganization:
+      summary: A new organization, owned by whoever created it.
+      value:
+        organization:
+          id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+          slug: acme-research
+          name: Acme Research
+          role: owner
+          active: false
+    OrganizationMemberPageLast:
+      summary: An organization's members, on one page.
+      value:
+        members:
+          - id: 8kq2m4x7p1rvz3a9c5d0
+            email: dana.whitfield@acme.com
+            name: Dana Whitfield
+            image: null
+            role: owner
+            joinedAt: '2026-11-14T09:12:40.000Z'
+          - id: 2fn8w1c6y4tq7h0mbe3s
+            email: sam.ortiz@acme.com
+            name: Sam Ortiz
+            image: null
+            role: member
+            joinedAt: '2026-11-14T09:20:05.000Z'
+        nextCursor: null
+    AddedOrganizationMember:
+      summary: Somebody added as a member.
+      value:
+        member:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: member
+          joinedAt: '2026-11-14T09:20:05.000Z'

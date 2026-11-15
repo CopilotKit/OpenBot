@@ -1,5 +1,5 @@
 import { translateNetworkPolicy } from "@/lib/api/generated/network-policies/network-policies";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { EgressRule } from "./queries";
 
 /** Whether every entry parses with the computer's own parser, and what is wrong with each that doesn't. */
@@ -34,7 +34,7 @@ export async function translateNetworkAllowlist(
   text: string,
 ): Promise<NetworkAllowlistTranslation> {
   const translation = await translateNetworkPolicy(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't write the list. Try again, or type it yourself." },

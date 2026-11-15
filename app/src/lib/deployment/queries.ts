@@ -4,7 +4,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { DEPLOYMENT_ORGANIZATION } from "@/lib/api/request";
 
 /**
  * What this deployment can do, as the server is willing to say it.
@@ -84,7 +84,7 @@ export function deploymentCapabilitiesQueryOptions() {
     // Configuration, not data. It cannot change without the process restarting.
     staleTime: Number.POSITIVE_INFINITY,
     queryFn: async ({ signal }): Promise<DeploymentCapabilities> => {
-      const body = await getDeployment(ORGANIZATION_ID, {
+      const body = await getDeployment(DEPLOYMENT_ORGANIZATION, {
         signal,
         fallback: "Couldn't load what OpenBot can do.",
       });

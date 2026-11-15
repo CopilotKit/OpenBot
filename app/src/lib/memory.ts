@@ -22,7 +22,7 @@ import type {
   Memory,
   UpdateMemoryRequest,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { everyPage } from "@/lib/routines/queries";
 
 /** Memory is always the signed-in person's own: the API addresses them as `me`. */
@@ -50,7 +50,7 @@ export const memoriesQueryOptions = () =>
     queryKey: memoryKeys.all,
     queryFn: ({ signal }): Promise<MemoryRecord[]> =>
       everyPage(async (params) => {
-        const page = await listMemories(ORGANIZATION_ID, ME, params, {
+        const page = await listMemories(organizationId(), ME, params, {
           signal,
           fallback: "Could not load memory",
         });
@@ -64,7 +64,7 @@ export const memorySourcesQueryOptions = () =>
     queryKey: memoryKeys.sources,
     queryFn: ({ signal }): Promise<MemorySource[]> =>
       everyPage(async (params) => {
-        const page = await listMemorySources(ORGANIZATION_ID, ME, params, {
+        const page = await listMemorySources(organizationId(), ME, params, {
           signal,
           fallback: "Could not load memory sources",
         });
@@ -81,7 +81,7 @@ export const availableMemorySourcesQueryOptions = (botId: string) =>
     queryFn: ({ signal }): Promise<MemorySourceTool[]> =>
       everyPage(async (params) => {
         const page = await listMemorySourceTools(
-          ORGANIZATION_ID,
+          organizationId(),
           botId,
           params,
           { signal, fallback: "Could not load connected app actions" },
@@ -92,7 +92,7 @@ export const availableMemorySourcesQueryOptions = (botId: string) =>
 
 export const createMemory = (content: string) =>
   createMemoryOperation(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     { content },
     { "Idempotency-Key": idempotencyKey() },
@@ -106,7 +106,7 @@ export type MemoryChange = Pick<
 
 export const updateMemory = (id: string, input: MemoryChange) =>
   updateMemoryOperation(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     id,
     input,
@@ -116,7 +116,7 @@ export const updateMemory = (id: string, input: MemoryChange) =>
 
 export const deleteMemory = (id: string) =>
   deleteMemoryOperation(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     id,
     { "Idempotency-Key": idempotencyKey() },
@@ -126,7 +126,7 @@ export const deleteMemory = (id: string) =>
 /** Start reading one of a Bot's connected apps' actions as a memory source, and read it once now. */
 export const addMemorySource = (input: CreateMemorySourceRequest) =>
   createMemorySource(
-    ORGANIZATION_ID,
+    organizationId(),
     ME,
     input,
     { "Idempotency-Key": idempotencyKey() },
@@ -143,12 +143,12 @@ export async function memorySourceAction(
   const headers = { "Idempotency-Key": idempotencyKey() };
   const options = { fallback: SOURCE_FALLBACK };
   if (action === "sync")
-    await syncMemorySource(ORGANIZATION_ID, ME, id, headers, options);
+    await syncMemorySource(organizationId(), ME, id, headers, options);
   else if (action === "remove")
-    await deleteMemorySource(ORGANIZATION_ID, ME, id, headers, options);
+    await deleteMemorySource(organizationId(), ME, id, headers, options);
   else
     await updateMemorySource(
-      ORGANIZATION_ID,
+      organizationId(),
       ME,
       id,
       { enabled: action === "enable" },

@@ -5,7 +5,7 @@ import {
   resolveTask,
   retryTask,
 } from "@/lib/api/generated/tasks/tasks";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type BotTask, botTaskOf, taskKeys } from "./queries";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
@@ -31,11 +31,16 @@ export const resolveTaskMutationOptions = (queryClient: QueryClient) =>
     }): Promise<BotTask> =>
       botTaskOf(
         (
-          await (done ? resolveTask : reopenTask)(ORGANIZATION_ID, id, once(), {
-            fallback: done
-              ? "Couldn't mark this task done. Try again."
-              : "Couldn't reopen this task. Try again.",
-          })
+          await (done ? resolveTask : reopenTask)(
+            organizationId(),
+            id,
+            once(),
+            {
+              fallback: done
+                ? "Couldn't mark this task done. Try again."
+                : "Couldn't reopen this task. Try again.",
+            },
+          )
         ).task,
       ),
     onSuccess: () => invalidateTasks(queryClient),
@@ -50,7 +55,7 @@ export const tryTaskAgainMutationOptions = (queryClient: QueryClient) =>
     mutationFn: async (id: string): Promise<BotTask> =>
       botTaskOf(
         (
-          await retryTask(ORGANIZATION_ID, id, once(), {
+          await retryTask(organizationId(), id, once(), {
             fallback: "Couldn't run this task again. Try again in a moment.",
           })
         ).task,

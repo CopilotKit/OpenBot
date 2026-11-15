@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { checkSetup } from "@/lib/api/generated/organization-settings/organization-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type SetupChecklist, setupKeys } from "./queries";
 
 /**
@@ -14,7 +14,7 @@ export function recheckSetupMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<SetupChecklist> =>
       checkSetup(
-        ORGANIZATION_ID,
+        organizationId(),
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't check your setup." },
       ) as Promise<SetupChecklist>,

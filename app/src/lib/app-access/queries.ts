@@ -10,7 +10,7 @@ import type {
   AppAccessRequest as ApiAppAccessRequest,
   BotApp,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * What each work app is for the person looking, on one Bot, and the requests they file when only an
@@ -210,7 +210,7 @@ export function giveableAppsQueryOptions() {
       const options = { signal, fallback: "Couldn't load your apps." };
       const apps = await everyPage(async (cursor) => {
         const page = await listGiveableApps(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { limit: 100, ...(cursor ? { cursor } : {}) },
           options,
@@ -238,7 +238,7 @@ export function botAppsQueryOptions(agentId: string) {
       };
       const apps = await everyPage(async (cursor) => {
         const page = await listBotApps(
-          ORGANIZATION_ID,
+          organizationId(),
           agentId,
           { limit: 100, ...(cursor ? { cursor } : {}) },
           options,
@@ -259,7 +259,7 @@ export function botAppQueryOptions(agentId: string, app: string) {
     queryKey: appAccessKeys.app(agentId, app),
     queryFn: async ({ signal }): Promise<AppAccess> =>
       appAccessOf(
-        await getBotApp(ORGANIZATION_ID, agentId, app, {
+        await getBotApp(organizationId(), agentId, app, {
           signal,
           fallback: `What ${app} is for this Bot could not be loaded.`,
         }),
@@ -282,7 +282,7 @@ export function appAccessInboxQueryOptions(enabled: boolean, app?: string) {
       };
       const requests = await everyPage(async (cursor) => {
         const page = await listAppAccessRequests(
-          ORGANIZATION_ID,
+          organizationId(),
           {
             limit: 100,
             ...(app ? { appId: app } : {}),

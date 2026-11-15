@@ -10,7 +10,7 @@ import {
   getPreferences,
   updatePreferences,
 } from "@/lib/api/generated/people/people";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { getSkinId, setSkin } from "@/skins/store";
 import { settingsKeys } from "./queries";
@@ -23,7 +23,7 @@ function savePreferences(
   fallback: string,
 ): Promise<UserPreferences> {
   return updatePreferences(
-    ORGANIZATION_ID,
+    organizationId(),
     "me",
     preferences as UpdatePreferencesRequest,
     { "Idempotency-Key": idempotencyKey() },
@@ -36,7 +36,7 @@ export function userPreferencesQueryOptions(userId: string | undefined) {
     queryKey: [...settingsKeys.all, "preferences", userId] as const,
     enabled: Boolean(userId),
     queryFn: ({ signal }): Promise<UserPreferences> =>
-      getPreferences(ORGANIZATION_ID, "me", {
+      getPreferences(organizationId(), "me", {
         signal,
         fallback: "Could not load your preferences",
       }),

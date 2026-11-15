@@ -7,7 +7,7 @@ import {
   supplyComputerSecret,
   takeComputerControl,
 } from "@/lib/api/generated/computers/computers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /**
@@ -64,7 +64,7 @@ export function readControl(
 ) {
   return controlFrom(
     getComputerControl(
-      ORGANIZATION_ID,
+      organizationId(),
       computerId,
       requestId ? { requestId } : undefined,
       signal ? { signal } : {},
@@ -78,7 +78,7 @@ export async function takeControl(computerId: string, requestId?: string) {
     (
       await controlFrom(
         requestComputerControl(
-          ORGANIZATION_ID,
+          organizationId(),
           computerId,
           {
             reason: "I want to take control of the browser.",
@@ -92,7 +92,7 @@ export async function takeControl(computerId: string, requestId?: string) {
   return id
     ? controlFrom(
         takeComputerControl(
-          ORGANIZATION_ID,
+          organizationId(),
           computerId,
           { requestId: id },
           once(),
@@ -103,13 +103,13 @@ export async function takeControl(computerId: string, requestId?: string) {
 
 export function releaseControl(computerId: string, requestId: string) {
   return controlFrom(
-    releaseComputerControl(ORGANIZATION_ID, computerId, { requestId }, once()),
+    releaseComputerControl(organizationId(), computerId, { requestId }, once()),
   );
 }
 
 export function cancelControl(computerId: string, requestId: string) {
   return controlFrom(
-    cancelComputerControl(ORGANIZATION_ID, computerId, { requestId }, once()),
+    cancelComputerControl(organizationId(), computerId, { requestId }, once()),
   );
 }
 
@@ -124,7 +124,7 @@ export async function supplySecret(
   text: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    await supplyComputerSecret(ORGANIZATION_ID, computerId, { text }, once(), {
+    await supplyComputerSecret(organizationId(), computerId, { text }, once(), {
       fallback: "Couldn't type that into the page. Try again.",
     });
     return { ok: true };
@@ -154,7 +154,7 @@ export function sendHumanInput(
 ): void {
   inputQueue = inputQueue
     .then(() =>
-      sendComputerHumanInput(ORGANIZATION_ID, computerId, kind, body, once()),
+      sendComputerHumanInput(organizationId(), computerId, kind, body, once()),
     )
     // Fire-and-forget: the user can see/retry input failures, while the input queue must keep moving.
     .catch(() => undefined);

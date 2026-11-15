@@ -39,7 +39,7 @@ import type {
   SkillDelivery,
   SkillSharingRequest,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { everyPage } from "@/lib/routines/queries";
 import { assembleProposal } from "./proposal-detail";
 
@@ -107,7 +107,7 @@ export function personalLearningQueryOptions() {
     queryKey: learningKeys.personal,
     retry: false,
     queryFn: ({ signal }): Promise<PersonalLearningSharing> =>
-      getPersonLearningSettings(ORGANIZATION_ID, ME, {
+      getPersonLearningSettings(organizationId(), ME, {
         signal,
         fallback: "Couldn't load your Learning settings. Reload the page.",
       }),
@@ -117,7 +117,7 @@ export function personalLearningQueryOptions() {
 function readLearningConfiguration(
   signal?: AbortSignal,
 ): Promise<LearningConfiguration> {
-  return getLearningSettings(ORGANIZATION_ID, {
+  return getLearningSettings(organizationId(), {
     signal,
     fallback: "Learning settings could not be loaded.",
   });
@@ -173,7 +173,7 @@ export function learningOverviewQueryOptions(agentId?: string) {
     queryKey: ["learning", "overview", agentId],
     retry: false,
     queryFn: ({ signal }): Promise<LearningOverview> =>
-      getLearningOverview(ORGANIZATION_ID, forBot(agentId), {
+      getLearningOverview(organizationId(), forBot(agentId), {
         signal,
         fallback: "Learning status could not be loaded.",
       }),
@@ -186,7 +186,7 @@ export function learningDeliveryQueryOptions(agentId: string) {
     enabled: Boolean(agentId),
     retry: false,
     queryFn: ({ signal }): Promise<LearningDeliveryStatus> =>
-      getBotLearningStatus(ORGANIZATION_ID, agentId, {
+      getBotLearningStatus(organizationId(), agentId, {
         signal,
         fallback: "Skill delivery status could not be loaded.",
       }),
@@ -225,7 +225,7 @@ export function learningProposalsQueryOptions(agentId?: string) {
         spaceFor(agentId, signal),
         everyPage(async (params) => {
           const page = await listLearningProposals(
-            ORGANIZATION_ID,
+            organizationId(),
             { ...forBot(agentId), ...params },
             { signal, fallback: "Couldn't load proposed skills. Try again." },
           );
@@ -250,14 +250,14 @@ export function learningProposalQueryOptions(
     queryFn: async ({ signal }): Promise<LearningProposalDetail> =>
       assembleProposal(
         await getLearningProposal(
-          ORGANIZATION_ID,
+          organizationId(),
           proposalId,
           forBot(agentId),
           { signal, fallback: PROPOSAL_FALLBACK },
         ),
         {
           evidence: (insightId) =>
-            getLearningEvidence(ORGANIZATION_ID, insightId, forBot(agentId), {
+            getLearningEvidence(organizationId(), insightId, forBot(agentId), {
               signal,
             }),
         },
@@ -277,7 +277,7 @@ export function learningRunsQueryOptions(agentId?: string) {
         spaceFor(agentId, signal),
         everyPage(async (params) => {
           const page = await listOrganizationLearningRuns(
-            ORGANIZATION_ID,
+            organizationId(),
             { ...forBot(agentId), ...params },
             { signal, fallback: "Couldn't load analysis runs. Try again." },
           );
@@ -304,7 +304,7 @@ export function learnedSkillsQueryOptions(agentId?: string) {
       let containerId: string | null | undefined;
       const skills = await everyPage(async (params) => {
         const page = await listPublishedSkills(
-          ORGANIZATION_ID,
+          organizationId(),
           { ...forBot(agentId), ...params },
           { signal, fallback: "Couldn't load published skills. Try again." },
         );
@@ -338,15 +338,20 @@ export function learnedSkillQueryOptions(
       switch (source.kind) {
         case "admin":
           return getPublishedSkill(
-            ORGANIZATION_ID,
+            organizationId(),
             name,
             forBot(source.agentId),
             options,
           );
         case "personal":
-          return getLearnedSkill(ORGANIZATION_ID, ME, name, options);
+          return getLearnedSkill(organizationId(), ME, name, options);
         case "person":
-          return getLearnedSkill(ORGANIZATION_ID, source.userId, name, options);
+          return getLearnedSkill(
+            organizationId(),
+            source.userId,
+            name,
+            options,
+          );
       }
     },
   });
@@ -358,7 +363,7 @@ export function personalReviewQueryOptions() {
     queryKey: learningKeys.review,
     retry: false,
     queryFn: ({ signal }): Promise<PersonalReview> =>
-      getPersonLearningReview(ORGANIZATION_ID, ME, {
+      getPersonLearningReview(organizationId(), ME, {
         signal,
         fallback: "Couldn't load your skills to review. Reload the page.",
       }),
@@ -420,7 +425,7 @@ function personProposal(
 ): Promise<LearningProposalDetail> {
   const space = { containerId };
   return getPersonLearningProposal(
-    ORGANIZATION_ID,
+    organizationId(),
     personId,
     proposalId,
     space,
@@ -428,11 +433,17 @@ function personProposal(
   ).then((proposal) =>
     assembleProposal(proposal, {
       evidence: (insightId) =>
-        getPersonLearningEvidence(ORGANIZATION_ID, personId, insightId, space, {
-          signal,
-        }),
+        getPersonLearningEvidence(
+          organizationId(),
+          personId,
+          insightId,
+          space,
+          {
+            signal,
+          },
+        ),
       titles: (ids) =>
-        getRecordingTitles(ORGANIZATION_ID, personId, { ids }, { signal }),
+        getRecordingTitles(organizationId(), personId, { ids }, { signal }),
     }),
   );
 }
@@ -460,7 +471,7 @@ export function peopleProposalsQueryOptions() {
     }): Promise<{ people: PeopleProposalsPerson[] }> => ({
       people: await everyPage(async (params) => {
         const page = await listPersonalLearningProposals(
-          ORGANIZATION_ID,
+          organizationId(),
           params,
           {
             signal,
@@ -494,7 +505,7 @@ export function sharingRequestsQueryOptions() {
     retry: false,
     queryFn: ({ signal }): Promise<SharingRequest[]> =>
       everyPage(async (params) => {
-        const page = await listSkillSharingRequests(ORGANIZATION_ID, params, {
+        const page = await listSkillSharingRequests(organizationId(), params, {
           signal,
           fallback: "Couldn't load sharing requests. Try again.",
         });
@@ -522,7 +533,7 @@ export function recordingSkillsQueryOptions(
     queryFn: async ({ signal }): Promise<{ skills: RecordingSkill[] }> => ({
       skills: await everyPage(async (params) => {
         const page = await listPersonLearningProposals(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           { recordingTitle: title, since, ...params },
           {

@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { Reaction, Task } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
 import { getTask, listTasks } from "@/lib/api/generated/tasks/tasks";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /*
  * The person's tasks: what Start makes of an item a Bot's check-in found. Each runs in a conversation
@@ -118,7 +118,7 @@ export const taskListQueryOptions = () =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listTasks(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load your tasks" },
         );
@@ -144,7 +144,7 @@ export const taskQueryOptions = (id: string) =>
     queryFn: async (): Promise<BotTask> =>
       botTaskOf(
         (
-          await getTask(ORGANIZATION_ID, id, {
+          await getTask(organizationId(), id, {
             fallback: "Couldn't load this task",
           })
         ).task,
@@ -167,7 +167,7 @@ export const reactionsQueryOptions = (threadId: string) =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listReactions(
-          ORGANIZATION_ID,
+          organizationId(),
           { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load reactions." },
         );

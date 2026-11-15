@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { previewCapabilityChanges } from "@/lib/api/generated/capabilities/capabilities";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 import type { CapabilityChange, CapabilityChangesCheck } from "./translate";
 
@@ -87,7 +87,7 @@ export function capabilityChangesPreviewQueryOptions(
     queryFn: ({ signal }): Promise<CapabilityPreview> =>
       // An action that saves nothing: each ask is its own, so each gets its own key.
       previewCapabilityChanges(
-        ORGANIZATION_ID,
+        organizationId(),
         { changes: [...changes] },
         { "Idempotency-Key": idempotencyKey() },
         { signal, fallback: "Couldn't work out who these changes affect." },

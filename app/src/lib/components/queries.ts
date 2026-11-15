@@ -9,7 +9,7 @@ import {
 } from "@/lib/api/generated/components/components";
 import type { Component } from "@/lib/api/generated/model";
 import { everyPage } from "@/lib/api/every-page";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /** The kind the API gives a component an admin wrote in Playground. */
@@ -128,7 +128,7 @@ function componentRecord(component: Component): ComponentRecord {
 async function everyComponent(kind?: string): Promise<Component[]> {
   return everyPage(async (cursor) => {
     const page = await listComponents(
-      ORGANIZATION_ID,
+      organizationId(),
       {
         limit: 100,
         ...(kind === undefined ? {} : { kind }),
@@ -165,7 +165,7 @@ export function agentComponentsQueryOptions(agentId: string | undefined) {
     queryFn: async (): Promise<GrantedComponent[]> =>
       everyPage(async (cursor) => {
         const page = await listBotComponents(
-          ORGANIZATION_ID,
+          organizationId(),
           agentId ?? "",
           { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
           { fallback: "This Bot's components could not be loaded." },
@@ -186,7 +186,7 @@ export async function announceGallery(
 ): Promise<string[]> {
   try {
     const { added } = await announceComponents(
-      ORGANIZATION_ID,
+      organizationId(),
       { components },
       { "Idempotency-Key": idempotencyKey() },
     );
@@ -212,7 +212,7 @@ export function componentFunctionsQueryOptions(name: string) {
     queryFn: async (): Promise<DataFunctionSummary[]> =>
       everyPage(async (cursor) => {
         const page = await listComponentFunctions(
-          ORGANIZATION_ID,
+          organizationId(),
           name,
           { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
           { fallback: "The data functions could not be loaded." },
@@ -297,7 +297,7 @@ export async function callComponentFunction(
 }> {
   try {
     const result = await callComponentFunctionApi(
-      ORGANIZATION_ID,
+      organizationId(),
       agentId,
       component,
       { function: functionName, arguments: args },
@@ -330,7 +330,7 @@ export async function decideComponent(
 ): Promise<{ allowed: boolean; reason?: string }> {
   try {
     const decision = await checkBotComponent(
-      ORGANIZATION_ID,
+      organizationId(),
       agentId,
       name,
       { functions: [...functions] },
