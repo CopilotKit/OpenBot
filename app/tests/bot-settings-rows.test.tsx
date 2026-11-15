@@ -12,9 +12,10 @@ import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import { approvalInboxResponse } from "./approvals-api";
+import { botGrantsResponse } from "./bot-grants-api";
 import { answerTeamBots, teamBotOf } from "./bots-api";
 import { notificationsResponse } from "./notifications-api";
-import { approvalInboxResponse } from "./approvals-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -79,8 +80,8 @@ function serving(
       ],
     });
     if (schedules) return schedules;
-    if (url.includes("/api/plugins/for/")) {
-      return Response.json({ tools: [], skills: [] });
+    if (url.includes("/bots/") && url.includes("/grants")) {
+      return botGrantsResponse();
     }
     const reach = notificationsResponse("GET", url, {
       bindings: [

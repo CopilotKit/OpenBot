@@ -1,4 +1,6 @@
-import { client } from "@/lib/client";
+import { translateBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
+import type { BotGrantCheck } from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 
 /** What is wrong with one action the model named. */
 export type GrantActionProblem = { action: string; message: string };
@@ -38,14 +40,26 @@ export async function translateAppGrants(variables: {
   app: string;
   text: string;
 }): Promise<AppGrantTranslation> {
-  const response = await client(
-    `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/grants/translate`,
+  const translation = await translateBotGrants(
+    ORGANIZATION_ID,
+    variables.agentId,
+    { appId: variables.app, text: variables.text },
+    { "Idempotency-Key": idempotencyKey() },
     {
-      method: "POST",
-      body: { text: variables.text },
       fallback:
         "Couldn't choose the actions. Try again, or turn them on by hand.",
     },
   );
-  return (await response.json()) as AppGrantTranslation;
+  return { ...translation, check: grantSetCheckOf(translation.check) };
+}
+
+/** The API's check of a set, as the describe sheet reads it: passing, or failing with each reason. */
+export function grantSetCheckOf(check: BotGrantCheck): GrantSetCheck {
+  return check.ok
+    ? { ok: true }
+    : {
+        ok: false,
+        error: check.error ?? "",
+        problems: check.problems ?? [],
+      };
 }

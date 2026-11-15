@@ -21,16 +21,25 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { identityKeys } from "@/lib/identity/queries";
-import {
-  type CatalogueItem,
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+import { type CatalogueItem, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ConnectionRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as ConnectionsRoute } from "@/routes/_authed/_app/connections.index";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  APPS_PATH,
+  type AppsFixture,
+  answerAppsApi,
+  appBody,
+  seedAppReads,
+  type TodayServer,
+} from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -71,8 +80,8 @@ const CATALOGUE = [
   entry("routines", "Routines", "builtin", true),
 ];
 
-/** A server row as the plugin list returns it. Notion registers its own client; Drive needs one. */
-function server(key: string): PluginServer {
+/** An app as listApps returns it. Notion registers its own client; Drive needs one. */
+function server(key: string): TodayServer {
   return {
     id: key,
     title: CATALOGUE.find((item) => item.key === key)?.title ?? key,
@@ -93,27 +102,29 @@ function server(key: string): PluginServer {
     sharedVendorConnected: false,
     ownerGrants: "any",
     ownerGrantsChosen: null,
-  } as unknown as PluginServer;
+  };
 }
 
-let servers: PluginServer[] = [];
+let servers: TodayServer[] = [];
 let connected: string[] = [];
 let composio = false;
 const writes: string[] = [];
 /** Paths that answer 500, for the states a failed read leaves the page in. */
 let failing = new Set<string>();
 let catalogue = CATALOGUE;
+/** How many apps one page of a list holds; unset, every list is one page. */
+let pageSize: number | undefined;
 
-function page(): PluginsPage {
+function page(): AppsFixture {
   return {
     catalogue,
     servers,
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: composio,
     authorizesPerAction: false,
-  } as unknown as PluginsPage;
+    pageSize,
+  };
 }
 
 const originalFetch = global.fetch;
@@ -124,29 +135,39 @@ beforeEach(() => {
   writes.length = 0;
   failing = new Set();
   catalogue = CATALOGUE;
+  pageSize = undefined;
   global.fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
       if (init?.method && init.method !== "GET") {
         writes.push(`${init.method} ${path}`);
-        if (path === "/api/plugins/servers") {
-          const { key } = JSON.parse(String(init.body)) as { key: string };
-          servers = [...servers, server(key)];
+        if (path === APPS_PATH) {
+          const { directoryEntryId } = JSON.parse(String(init.body)) as {
+            directoryEntryId: string;
+          };
+          const added = server(directoryEntryId.replace(/^catalogue:/, ""));
+          servers = [...servers, added];
+          return Response.json(appBody(added), { status: 201 });
         }
         if (path.endsWith("/connect"))
-          return Response.json({ connected: true });
+          return startResponse({ connected: true });
         return Response.json({ ok: true });
       }
       if (failing.has(path))
         return Response.json({ error: "Server error" }, { status: 500 });
-      if (path === "/api/plugins") return Response.json(page());
-      if (path === "/api/plugins/connections")
-        return Response.json({
-          connections: connected.map((serverId) => ({
-            serverId,
-            status: "connected",
-          })),
-        });
+      const apps = answerAppsApi(input, init, page());
+      if (apps) return apps;
+      // One connection a page, so a screen that read only the first page would miss the rest.
+      if (path === MY_CONNECTIONS_PATH) {
+        const at = Number(
+          new URL(String(input), "http://t").searchParams.get("cursor") ?? "0",
+        );
+        const rest = connected.slice(at + 1);
+        return connectionPage(
+          connected.slice(at, at + 1).map((serverId) => ({ serverId })),
+          rest.length > 0 ? String(at + 1) : null,
+        );
+      }
       return new Response(null, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -176,7 +197,7 @@ function draw(
       edition,
     });
   if (!fetchApps) {
-    client.setQueryData(pluginKeys.page(), page());
+    seedAppReads(client, page());
     client.setQueryData(pluginKeys.connections(), { connections: [] });
   }
   client.setQueryData(identityKeys.links(), []);
@@ -274,6 +295,26 @@ describe("Connections in the personal edition", () => {
     expect(within(add).getByTestId("account-exa")).toBeTruthy();
   });
 
+  /*
+   * The apps and the catalogue are each read a page at a time. Two to a page puts Exa on the second
+   * page of the apps and Exa Search (API key) on the second page of the catalogue, so a reader that
+   * stopped at the first page would leave both out.
+   */
+  test("lists every app however many pages the apps and the catalogue take", async () => {
+    pageSize = 2;
+    servers = [server("notion"), server("google-drive"), server("exa")];
+    const { view } = draw("personal", "/connections", { fetchApps: true });
+    const yours = (await view.findByRole("heading", { name: "Your apps" }))
+      .parentElement?.parentElement as HTMLElement;
+    await waitFor(() =>
+      expect(within(yours).getByTestId("account-exa")).toBeTruthy(),
+    );
+    expect(within(tile(view, "exa")).getByText("On")).toBeTruthy();
+    const add = view.getByRole("heading", { name: "Add an app" }).parentElement
+      ?.parentElement as HTMLElement;
+    expect(within(add).getByTestId("account-exa-authenticated")).toBeTruthy();
+  });
+
   test("Routines is not listed: it is on for every Bot and has its own page", async () => {
     servers = [server("notion"), server("routines")];
     const { view } = draw("personal");
@@ -304,7 +345,7 @@ describe("Connections in the personal edition", () => {
     const { view, user } = draw("personal");
     await user.click(await view.findByTestId("account-notion"));
     await waitFor(() =>
-      expect(writes).toEqual(["POST /api/plugins/servers/notion/connect"]),
+      expect(writes).toEqual([`POST ${myConnectionPath("notion", "connect")}`]),
     );
   });
 
@@ -314,13 +355,13 @@ describe("Connections in the personal edition", () => {
     await waitFor(() =>
       expect(history.location.pathname).toBe("/connections/google-drive"),
     );
-    expect(writes).toEqual(["POST /api/plugins/servers"]);
+    expect(writes).toEqual([`POST ${APPS_PATH}`]);
   });
 
   test("Add on an app with no account turns it on and is done", async () => {
     const { view, user } = draw("personal");
     await user.click(await view.findByTestId("account-exa"));
-    await waitFor(() => expect(writes).toEqual(["POST /api/plugins/servers"]));
+    await waitFor(() => expect(writes).toEqual([`POST ${APPS_PATH}`]));
     await waitFor(() =>
       expect(within(tile(view, "exa")).getByText("On")).toBeTruthy(),
     );
@@ -333,6 +374,18 @@ describe("Connections in the personal edition", () => {
       expect(history.location.pathname).toBe("/connections/exa-authenticated"),
     );
     expect(writes).toEqual([]);
+  });
+
+  test("every connection is read, whichever page it is on", async () => {
+    servers = [server("notion"), server("google-drive")];
+    connected = ["notion", "google-drive"];
+    const { view } = draw("personal");
+    await waitFor(() =>
+      expect(within(tile(view, "notion")).getByText("Connected")).toBeTruthy(),
+    );
+    expect(
+      within(tile(view, "google-drive")).getByText("Connected"),
+    ).toBeTruthy();
   });
 
   test("a connected app opens its page, to choose which Bots use it", async () => {
@@ -468,7 +521,7 @@ async function appsAlert(view: ReturnType<typeof draw>["view"]) {
 
 describe("when Connections can't list apps", () => {
   test("a failed read in the personal edition offers Retry and Setup, and never names an admin", async () => {
-    failing = new Set(["/api/plugins"]);
+    failing = new Set([APPS_PATH]);
     const { view, user } = draw("personal", "/connections", {
       fetchApps: true,
     });
@@ -488,7 +541,7 @@ describe("when Connections can't list apps", () => {
   });
 
   test("a failed read in the team edition keeps the admin guidance, with Retry and no Setup link", async () => {
-    failing = new Set(["/api/plugins/connections"]);
+    failing = new Set([MY_CONNECTIONS_PATH]);
     const { view } = draw("team", "/connections", { fetchApps: true });
     const alert = await appsAlert(view);
     expect(alert.textContent).toBe(
@@ -502,7 +555,7 @@ describe("when Connections can't list apps", () => {
   });
 
   test("with the edition unread, a failed read says neither admin nor Setup", async () => {
-    failing = new Set(["/api/plugins", DEPLOYMENT_PATH]);
+    failing = new Set([APPS_PATH, DEPLOYMENT_PATH]);
     const { view } = draw(null, "/connections", { fetchApps: true });
     const alert = await appsAlert(view);
     expect(alert.textContent).toContain(

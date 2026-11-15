@@ -29,9 +29,9 @@ import {
   type DeploymentCapabilities,
   deploymentKeys,
 } from "@/lib/deployment/queries";
-import type { PluginsPage } from "@/lib/plugins/queries";
 import { Route as PersonalSettingsRoute } from "@/routes/_authed/settings/_personal";
 import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
+import { seedAppReads } from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -162,16 +162,7 @@ describe("the personal pages under Settings", () => {
 
   test("link to each other under Settings, not Admin", async () => {
     const client = clientFor("personal");
-    const page: PluginsPage = {
-      catalogue: [],
-      servers: [],
-      skills: [],
-      botsMayCallBack: true,
-      redirectUri: null,
-      composioConfigured: false,
-      authorizesPerAction: false,
-    };
-    client.setQueryData(["plugins", "page"], page);
+    seedAppReads(client, { botsMayCallBack: true });
     const router = createRouter({
       history: createMemoryHistory({ initialEntries: ["/"] }),
       routeTree: createRootRoute({

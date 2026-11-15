@@ -9,6 +9,13 @@ import {
 } from "../src/lib/app-access/mutations";
 import { appAccessKeys } from "../src/lib/app-access/queries";
 import { pluginKeys } from "../src/lib/plugins/queries";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessRequest,
+  appAccessRequestBody,
+  appAccessRequestPath,
+  botAppPath,
+} from "./bot-grants-api";
 
 /**
  * The access-request writes, as the browser makes them: what each sends, and that each refreshes
@@ -71,35 +78,41 @@ test("every app-access key sits under the plugin root, so plugin writes refresh 
 });
 
 test("asking names the Bot and the app and nothing else", async () => {
-  const sent = answering(201, { request: { id: "r1" }, created: true });
+  const filed = appAccessRequest({ id: "r1", agentId: "bot-1" });
+  const sent = answering(200, appAccessRequestBody(filed));
   const { asked, result } = await run(requestAppAccessMutationOptions, {
     agentId: "bot-1",
     app: "Gmail",
   });
   expect(sent).toEqual([
     {
-      url: "/api/plugins/access-requests",
+      url: APP_ACCESS_REQUESTS_PATH,
       method: "POST",
-      body: { agentId: "bot-1", app: "Gmail" },
+      body: { botId: "bot-1", appId: "Gmail" },
     },
   ]);
-  expect(result).toEqual({ request: { id: "r1" }, created: true });
+  expect(result).toEqual({ request: filed });
   expect(asked).toEqual([{ queryKey: pluginKeys.all }]);
 });
 
 test("approving sends refs only when given", async () => {
-  const sent = answering(200, { request: {}, enabled: false, granted: [] });
+  const approval = {
+    appAccessRequest: appAccessRequestBody(appAccessRequest()),
+    enabled: false,
+    granted: [],
+  };
+  const sent = answering(200, approval);
   await run(approveAppAccessRequestMutationOptions, { id: "r1" });
   await run(approveAppAccessRequestMutationOptions, {
     id: "r2",
     refs: ["composio-gmail/SEND"],
   });
   expect(sent).toEqual([
-    { url: "/api/plugins/access-requests/r1/approve", method: "POST" },
+    { url: `${appAccessRequestPath("r1")}/approve`, method: "POST" },
     {
-      url: "/api/plugins/access-requests/r2/approve",
+      url: `${appAccessRequestPath("r2")}/approve`,
       method: "POST",
-      body: { refs: ["composio-gmail/SEND"] },
+      body: { actions: ["composio-gmail/SEND"] },
     },
   ]);
   // `toEqual` passes over a key it is not given, so the first approval's missing body is its own
@@ -108,14 +121,18 @@ test("approving sends refs only when given", async () => {
 });
 
 test("an admin's one press names the Bot and the app in the path, and sends no refs", async () => {
-  const sent = answering(200, { request: {}, enabled: true, granted: [] });
+  const sent = answering(200, {
+    appAccessRequest: appAccessRequestBody(appAccessRequest()),
+    enabled: true,
+    granted: [],
+  });
   const { asked } = await run(approveBotAppMutationOptions, {
     agentId: "bot 1",
     app: "composio-gmail",
   });
   expect(sent).toEqual([
     {
-      url: "/api/plugins/for/bot%201/apps/composio-gmail/approve",
+      url: `${botAppPath("bot 1", "composio-gmail")}/approve`,
       method: "POST",
     },
   ]);

@@ -2,13 +2,12 @@ import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ProposedSkillCard } from "@/components/skills/proposed-skill";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
-import { saveSkillMutationOptions } from "@/lib/skills/mutations";
-import { skillListQueryOptions } from "@/lib/skills/queries";
 import type { SkillFormValues } from "@/lib/skills/form";
+import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import {
   describeSkill,
   describeSkills,
@@ -18,6 +17,7 @@ import {
   proposedSkillSchema,
   SKILL_CREATOR_SLUG,
 } from "@/lib/skills/proposal";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -61,7 +61,7 @@ export function SkillTools() {
 
   /*
    * Two reads: every skill scoped to whoever is asking, which is the query the Skills page runs, and
-   * every connected app's tools, from the Plugins payload. A person who has opened those pages pays
+   * every app's tools, from the apps list (`listApps`). A person who has opened those pages pays
    * nothing for them, and they are fetched only when a tool is called, so a Bot that cannot author
    * skills, which is most of them, never asks.
    *
@@ -71,7 +71,6 @@ export function SkillTools() {
    * answered "No skills exist here yet" while skills existed. See `lib/agents/answers.ts`.
    */
   const skills = () => queryClient.ensureQueryData(skillListQueryOptions());
-  const page = () => queryClient.ensureQueryData(pluginsPageQueryOptions());
 
   useFrontendTool({
     name: "list_skills",
@@ -115,7 +114,8 @@ export function SkillTools() {
     description:
       "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet.",
     parameters: z.object({}),
-    handler: async () => describeToolRefs((await page()).servers),
+    handler: async () =>
+      describeToolRefs(await queryClient.ensureQueryData(appsQueryOptions())),
   });
 
   useHumanInTheLoop({

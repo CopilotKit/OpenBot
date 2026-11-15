@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CoverageNote } from "@/components/plugins/broker-directory";
 import { coverageWarning } from "@/lib/plugins/enablement-notes";
-import type { ComposioApp } from "@/lib/plugins/queries";
+import type { DirectoryApp } from "@/lib/apps/queries";
 import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
@@ -20,30 +20,31 @@ type FixtureTool = {
  * Arcade returns; this folds it the way `listApps` does (a tool is classified when it carries
  * behavior metadata), so the app under test is built from real tools, not a literal.
  */
-function fromFixture(toolkit: string): ComposioApp {
+function fromFixture(toolkit: string): DirectoryApp {
   const tools = (Object.values(fixture.tools) as FixtureTool[]).filter(
     (tool) => tool.toolkit.name === toolkit,
   );
   return app({
-    slug: toolkit.toLowerCase(),
-    name: toolkit,
+    id: `directory:${toolkit.toLowerCase()}`,
+    title: toolkit,
     actionCount: tools.length,
     classifiedCount: tools.filter((tool) => tool.metadata?.behavior).length,
   });
 }
 
-function app(overrides: Partial<ComposioApp> & { slug: string }): ComposioApp {
+function app(overrides: Partial<DirectoryApp> & { id: string }): DirectoryApp {
   return {
-    name: "App",
-    description: "",
+    source: "directory",
+    title: "App",
+    summary: "",
+    appId: null,
     logo: null,
     categories: [],
     actionCount: 1,
     classifiedCount: null,
     permissionCount: null,
     scopedActionCount: null,
-    connection: { kind: "consent" },
-    enabled: false,
+    connectsWith: "sign-in",
     ...overrides,
   };
 }
@@ -69,7 +70,7 @@ test("the generated toolkit AirtableApi (0/2 classified) renders the warning on 
 });
 
 test("a 0-classified toolkit renamed WITHOUT the Api suffix still warns", () => {
-  const renamed = { ...fromFixture("AirtableApi"), name: "Airtable" };
+  const renamed = { ...fromFixture("AirtableApi"), title: "Airtable" };
   expect(coverageWarning(renamed)).not.toBeNull();
 });
 
@@ -77,8 +78,8 @@ test("a classified toolkit WITH the Api suffix does not warn", () => {
   expect(
     coverageWarning(
       app({
-        slug: "x",
-        name: "DatadogApi",
+        id: "directory:x",
+        title: "DatadogApi",
         actionCount: 5,
         classifiedCount: 5,
       }),
@@ -87,13 +88,19 @@ test("a classified toolkit WITH the Api suffix does not warn", () => {
 });
 
 test("classifiedCount null draws nothing", () => {
-  const unmeasured = app({ slug: "s", name: "SlackApi", actionCount: 40 });
+  const unmeasured = app({
+    id: "directory:s",
+    title: "SlackApi",
+    actionCount: 40,
+  });
   expect(coverageWarning(unmeasured)).toBeNull();
   expect(renderToStaticMarkup(<CoverageNote app={unmeasured} />)).toBe("");
 });
 
 test("a measured zero over no actions is not a warning", () => {
   expect(
-    coverageWarning(app({ slug: "e", actionCount: 0, classifiedCount: 0 })),
+    coverageWarning(
+      app({ id: "directory:e", actionCount: 0, classifiedCount: 0 }),
+    ),
   ).toBeNull();
 });

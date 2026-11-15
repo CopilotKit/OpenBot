@@ -25,9 +25,10 @@ import { ActiveBotProvider } from "@/lib/copilot/active-bot";
 import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import { botComponentsPath, botComponentsResponse } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Bot asking the person to take over its browser, end to end in the app: the real chat, the real computer tools
@@ -289,8 +290,7 @@ beforeAll(() => {
         return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,
@@ -348,6 +348,8 @@ beforeEach(() => {
 afterEach(() => cleanup());
 afterAll(async () => {
   await settleReactWork();
+  // The app's own query client outlives this file: leave nothing in it to refetch in the next.
+  queryClient.clear();
   globalThis.fetch = originalFetch;
   HTMLImageElement.prototype.decode = originalDecode;
   globalThis.WebSocket = originalSocket;

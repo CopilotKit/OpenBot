@@ -5,23 +5,24 @@ import {
   mutationOptions,
   QueryClient,
 } from "@tanstack/react-query";
-import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
 import {
   accountModePreview,
   addCuratedServerMutationOptions,
-  addCustomServerMutationOptions,
-  brokeredConnectionFieldsMutationOptions,
-  confirmBrokeredConnectionMutationOptions,
-  connectAccountMutationOptions,
-  connectBrokeredWithFieldsMutationOptions,
-  disconnectBrokeredMutationOptions,
-  enableComposioAppMutationOptions,
-  recheckBrokeredConnectionMutationOptions,
+  addDirectoryAppMutationOptions,
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
   setAccountModeMutationOptions,
   setOwnerGrantsMutationOptions,
+} from "../src/lib/apps/mutations";
+import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
+import {
+  brokeredConnectionFieldsMutationOptions,
+  confirmBrokeredConnectionMutationOptions,
+  connectAccountMutationOptions,
+  connectBrokeredWithFieldsMutationOptions,
+  disconnectBrokeredMutationOptions,
+  recheckBrokeredConnectionMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
 import { pluginKeys } from "../src/lib/plugins/queries";
@@ -29,6 +30,8 @@ import {
   removeSkillMutationOptions,
   saveSkillMutationOptions,
 } from "../src/lib/skills/mutations";
+import { appPath } from "./apps-api";
+import { myConnectionPath } from "./connections-api";
 
 /**
  * What every plugin write does about the screen when the server says no.
@@ -38,7 +41,7 @@ import {
  * that can fail, and Hono answers the failure with a status while the write stands. `POST /servers`
  * inserts the row and then refreshes its tools, and answers 409 when that refresh faults;
  * `POST /grants` upserts the grant and then files the trail row, and answers 500 when that insert
- * does; `DELETE /servers/:id/connection` revokes the account at Composio and then deletes the row.
+ * does; disconnectApp revokes the account at the app and then deletes the row.
  * A refusal from any of them is therefore NOT evidence that nothing changed, and a mutation that
  * refetched only on success left the screen asserting a state the deployment had already left.
  *
@@ -142,7 +145,7 @@ const REFUSALS: {
 }[] = [
   {
     name: "granting a plugin to a Bot",
-    route: "POST /api/plugins/grants",
+    route: "PUT .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -155,7 +158,7 @@ const REFUSALS: {
   },
   {
     name: "withholding a plugin from a Bot",
-    route: "DELETE /api/plugins/grants",
+    route: "DELETE .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -168,36 +171,24 @@ const REFUSALS: {
   },
   {
     name: "adding a curated server",
-    route: "POST /api/plugins/servers",
+    route: "POST apps (createApp, from a catalogue entry)",
     status: 409,
     message: "That server was added but its tools could not be read.",
     factory: addCuratedServerMutationOptions,
     variables: { key: "linear" },
   },
   {
-    name: "adding a server by URL",
-    route: "POST /api/plugins/servers/custom",
-    status: 409,
-    message: "That server was added but its tools could not be read.",
-    factory: addCustomServerMutationOptions,
-    variables: {
-      id: "in-house",
-      title: "In house",
-      url: "https://example.invalid/mcp",
-    },
-  },
-  {
-    name: "enabling a Composio app",
-    route: "POST /api/plugins/composio/apps",
+    name: "adding an app from the directory",
+    route: "POST apps (createApp, from a directory entry)",
     status: 409,
     message:
       "The app was added, but its tools could not be read just now. Press Refresh on the Apps page.",
-    factory: enableComposioAppMutationOptions,
-    variables: { slug: "linear" },
+    factory: addDirectoryAppMutationOptions,
+    variables: { directoryEntryId: "directory:linear" },
   },
   {
     name: "refreshing a server's tools",
-    route: "POST /api/plugins/servers/:id/refresh",
+    route: "POST apps/{appId}/refresh (refreshApp)",
     status: 409,
     message: "That server's tools could not be recorded.",
     factory: refreshPluginServerMutationOptions,
@@ -205,7 +196,7 @@ const REFUSALS: {
   },
   {
     name: "removing a server",
-    route: "DELETE /api/plugins/servers/:id",
+    route: "DELETE apps/{appId} (deleteApp)",
     status: 409,
     message: "That server could not be removed.",
     factory: removePluginServerMutationOptions,
@@ -234,7 +225,7 @@ const REFUSALS: {
   },
   {
     name: "registering an OAuth client",
-    route: "POST /api/plugins/servers/:id/oauth-client",
+    route: "PUT apps/{appId}/oauth-client (setAppOAuthClient)",
     status: 409,
     message: "That OAuth client could not be registered.",
     factory: registerOAuthClientMutationOptions,
@@ -246,7 +237,7 @@ const REFUSALS: {
   },
   {
     name: "confirming a brokered connection",
-    route: "POST /api/plugins/servers/:id/connection/confirm",
+    route: "confirmConnection",
     status: 502,
     message: "Composio would not say whether this account is connected.",
     factory: confirmBrokeredConnectionMutationOptions,
@@ -254,7 +245,7 @@ const REFUSALS: {
   },
   {
     name: "disconnecting a brokered account",
-    route: "DELETE /api/plugins/servers/:id/connection",
+    route: "disconnectApp",
     status: 502,
     message: "Composio would not end this account, and gave no reason.",
     factory: disconnectBrokeredMutationOptions,
@@ -262,7 +253,7 @@ const REFUSALS: {
   },
   {
     name: "handing over a typed key",
-    route: "POST /api/plugins/servers/:id/connect",
+    route: "connectApp",
     status: 400,
     message:
       "What you entered for gmail did not work, and Composio would not take the account back either. Disconnect it on the Apps page and try again.",
@@ -274,7 +265,7 @@ const REFUSALS: {
   },
   {
     name: "re-checking a key",
-    route: "POST /api/plugins/servers/:id/connection/recheck",
+    route: "recheckConnection",
     status: 400,
     message: "gmail would not answer with the key it is holding.",
     factory: recheckBrokeredConnectionMutationOptions,
@@ -282,7 +273,7 @@ const REFUSALS: {
   },
   {
     name: "switching a server's account mode",
-    route: "PUT /api/plugins/servers/:id/account-mode",
+    route: "PUT apps/{appId}/account-mode (setAppAccountMode)",
     status: 500,
     message: "The switch did not finish, and nothing was changed.",
     factory: setAccountModeMutationOptions,
@@ -293,7 +284,7 @@ const REFUSALS: {
   },
   {
     name: "choosing who may give an app to a Bot",
-    route: "PUT /api/plugins/servers/:id/owner-grants",
+    route: "PATCH apps/{appId} (updateApp)",
     status: 404,
     message: "That app hasn't been added.",
     factory: setOwnerGrantsMutationOptions,
@@ -314,7 +305,7 @@ test("asking an app what it wants refetches nothing, because it writes nothing",
   /*
    * THE ONE WRITE-SHAPED PRESS THAT IS NOT A WRITE, and the reason this file does not simply say
    * "every mutation invalidates". The first press on an app whose key somebody types is a question
-   * about the APP — `POST /connect` with no body — and the route answers it out of Composio's
+   * about the APP — connectApp with no values — and the route answers it out of Composio's
    * published field list without touching a row. Nothing changed, so there is nothing to refetch,
    * and a refusal here is the same fact as a success: this deployment now knows no more than it did.
    *
@@ -399,55 +390,55 @@ const ENCODED_REQUESTS: {
 }[] = [
   {
     name: "refreshing a server's tools",
-    url: `/api/plugins/servers/${ENCODED_ID}/refresh`,
+    url: `${appPath(HOSTILE_ID)}/refresh`,
     build: refreshPluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "removing a server",
-    url: `/api/plugins/servers/${ENCODED_ID}`,
+    url: appPath(HOSTILE_ID),
     build: removePluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "registering an OAuth client",
-    url: `/api/plugins/servers/${ENCODED_ID}/oauth-client`,
+    url: `${appPath(HOSTILE_ID)}/oauth-client`,
     build: registerOAuthClientMutationOptions,
     variables: { clientId: "abc", clientSecret: "shh", serverId: HOSTILE_ID },
   },
   {
     name: "starting a consent flow",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect?returnTo=settings`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: () => connectAccountMutationOptions(),
     variables: HOSTILE_ID,
   },
   {
     name: "confirming a brokered connection",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection/confirm`,
+    url: myConnectionPath(HOSTILE_ID, "confirm"),
     build: confirmBrokeredConnectionMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "disconnecting a brokered account",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection`,
+    url: myConnectionPath(HOSTILE_ID, "disconnect"),
     build: disconnectBrokeredMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "asking an app what it wants typed in",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: () => brokeredConnectionFieldsMutationOptions(),
     variables: HOSTILE_ID,
   },
   {
     name: "handing over a typed key",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: connectBrokeredWithFieldsMutationOptions,
     variables: { serverId: HOSTILE_ID, values: { api_key: "typed" } },
   },
   {
     name: "re-checking a key",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection/recheck`,
+    url: myConnectionPath(HOSTILE_ID, "recheck"),
     build: recheckBrokeredConnectionMutationOptions,
     variables: HOSTILE_ID,
   },
@@ -459,7 +450,7 @@ const ENCODED_REQUESTS: {
   },
   {
     name: "previewing an account mode switch",
-    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
     build: () =>
       mutationOptions({
         mutationFn: (variables: {
@@ -471,25 +462,26 @@ const ENCODED_REQUESTS: {
   },
   {
     name: "switching a server's account mode",
-    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
     build: setAccountModeMutationOptions,
     variables: { serverId: HOSTILE_ID, mode: "shared" as const },
   },
   {
     name: "choosing who may give an app to a Bot",
-    url: `/api/plugins/servers/${ENCODED_ID}/owner-grants`,
+    url: appPath(HOSTILE_ID),
     build: setOwnerGrantsMutationOptions,
     variables: { serverId: HOSTILE_ID, ownerGrants: "any" as const },
   },
   {
     /*
-     * The one write whose caller text goes in a QUERY rather than a path, and it takes the same
-     * care: an unencoded `&` in a ref adds a parameter the route reads as one of its own. `kind`
-     * beside it is not a caller's text — it is this module's own two-member union — which is why it
-     * is one of the two interpolations the lever below lets through.
+     * The Bot's id and the grant's address are two segments, each encoded whole: the grant's
+     * address is `action:` and the ref with its first `/` as a `:`, and nothing in the rest of the
+     * ref may become a segment, a query or a fragment of its own.
      */
     name: "withholding a plugin from a Bot",
-    url: `/api/plugins/grants?kind=mcp&ref=${ENCODED_ID}&agentId=${ENCODED_ID}`,
+    url: `/api/v2/organizations/default/bots/${ENCODED_ID}/grants/${encodeURIComponent(
+      "action:acme:../gmail?returnTo=admin#x",
+    )}`,
     build: setPluginGrantMutationOptions,
     variables: {
       agentId: HOSTILE_ID,
@@ -519,24 +511,51 @@ for (const request of ENCODED_REQUESTS) {
  * own personal settings: the round trip the inline row exists to remove. One call each, with the
  * value the default cannot be confused with.
  */
+/** The page a consent start names, which travels in its body and never in its address. */
+async function returnsTo(
+  build: (queryClient: QueryClient) => unknown,
+  variables: unknown,
+): Promise<{ url: string; returnTo: unknown }[]> {
+  const sent: { url: string; returnTo: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as { returnTo?: unknown })
+        : {};
+    sent.push({
+      url: typeof input === "string" ? input : String(input),
+      returnTo: body.returnTo,
+    });
+    return new Response("{}", {
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  const queryClient = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  });
+  await new MutationObserver(queryClient, build(queryClient) as never)
+    .mutate(variables as never)
+    .catch(() => undefined);
+  return sent;
+}
+
 test("the consent starts carry the screen they were started from", async () => {
   expect(
-    await requestedBy(() => connectAccountMutationOptions("admin"), HOSTILE_ID),
-  ).toEqual([`/api/plugins/servers/${ENCODED_ID}/connect?returnTo=admin`]);
+    await returnsTo(() => connectAccountMutationOptions("admin"), HOSTILE_ID),
+  ).toEqual([
+    { url: myConnectionPath(HOSTILE_ID, "connect"), returnTo: "apps" },
+  ]);
 
   expect(
-    await requestedBy(() => authorizeActionMutationOptions("admin"), {
+    await returnsTo(() => authorizeActionMutationOptions("admin"), {
       serverId: HOSTILE_ID,
       action: "GMAIL_SEND_EMAIL",
     }),
-  ).toEqual([`/api/plugins/servers/${ENCODED_ID}/authorize?returnTo=admin`]);
+  ).toEqual([
+    { url: myConnectionPath(HOSTILE_ID, "authorize"), returnTo: "apps" },
+  ]);
 });
 
-/**
- * Started in OpenBot Desktop's window, both consent starts say so (`from=desktop`), so the sign-in
- * that opens in the person's browser comes back to the page that hands them back to the window
- * (`/desktop-return`). In a browser they say nothing of the kind.
- */
 test("the consent starts say when they were pressed in OpenBot Desktop", async () => {
   const scope = globalThis as unknown as { window?: Record<string, unknown> };
   const hadWindow = "window" in scope;
@@ -548,17 +567,17 @@ test("the consent starts say when they were pressed in OpenBot Desktop", async (
   };
   try {
     expect(
-      await requestedBy(() => connectAccountMutationOptions(), "gmail"),
+      await returnsTo(() => connectAccountMutationOptions(), "gmail"),
     ).toEqual([
-      "/api/plugins/servers/gmail/connect?returnTo=settings&from=desktop",
+      { url: myConnectionPath("gmail", "connect"), returnTo: "desktop" },
     ]);
     expect(
-      await requestedBy(() => authorizeActionMutationOptions(), {
+      await returnsTo(() => authorizeActionMutationOptions(), {
         serverId: "gmail",
         action: "GMAIL_SEND_EMAIL",
       }),
     ).toEqual([
-      "/api/plugins/servers/gmail/authorize?returnTo=settings&from=desktop",
+      { url: myConnectionPath("gmail", "authorize"), returnTo: "desktop" },
     ]);
   } finally {
     delete window.__TAURI_INTERNALS__;

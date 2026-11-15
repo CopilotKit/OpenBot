@@ -38,6 +38,12 @@ import {
   deploymentResponse,
   MY_CAPABILITIES_PATH,
 } from "./admin-settings-api";
+import { APPS_PATH, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  botAppPath,
+  GIVEABLE_APPS_PATH,
+  giveableAppsResponse,
+} from "./bot-grants-api";
 import {
   BOTS_PATH,
   connectionTestResponse,
@@ -101,8 +107,8 @@ let giveable: {
   account: string;
 }[] = [];
 let given: string[] = [];
-/** Every app that is turned on, as `GET /api/plugins` lists them, and every path the sheet asked for. */
-let servers: { id: string; title: string; logo: null }[] = [];
+/** Every app that is turned on, as listApps lists them, and every path the sheet asked for. */
+let servers: TodayServer[] = [];
 let requested: string[] = [];
 
 beforeEach(() => {
@@ -146,13 +152,18 @@ beforeEach(() => {
         creates.push(body);
         return Response.json({ bot: { id: "agent_new" } }, { status: 201 });
       }
-      if (path === "/api/plugins/giveable")
-        return Response.json({ apps: giveable });
-      if (path === "/api/plugins")
-        return Response.json({ catalogue: [], servers, skills: [] });
+      if (String(path).startsWith(GIVEABLE_APPS_PATH))
+        return giveableAppsResponse(
+          giveable.map((app) => ({
+            ...app,
+            account: app.account as "personal" | "shared" | "deployment",
+          })),
+        );
+      const apps = answerAppsApi(path, init, { servers });
+      if (apps) return apps;
       if (String(path).endsWith("/give") && init?.method === "POST") {
         given.push(String(path));
-        return Response.json({ granted: [] });
+        return Response.json({ given: [] });
       }
       return new Response(null, { status: 404 });
     },
@@ -449,9 +460,7 @@ test("the person's own apps arrive ticked, and the ones left ticked are given on
   expect(routines.getAttribute("aria-checked")).toBe("false");
   await user.click(view.getByRole("button", { name: "Create Bot" }));
   expect(await view.findByText("Research is ready")).toBeTruthy();
-  expect(given).toEqual([
-    "/api/plugins/for/agent_new/apps/composio-gmail/give",
-  ]);
+  expect(given).toEqual([`${botAppPath("agent_new", "composio-gmail")}/give`]);
 });
 
 test("a person with no apps to give is asked nothing about apps", async () => {
@@ -579,7 +588,7 @@ test("personal Bot creation hides team visibility and isolation controls and lin
  * from the start, and Routines. Only Routines is the person's to give, so the sheet listed only
  * Routines, and the Bot it made came out with all three.
  */
-const TURNED_ON = [
+const TURNED_ON: TodayServer[] = [
   { id: "composio-gmail", title: "Gmail", logo: null },
   { id: "parallel-search", title: "Parallel Search", logo: null },
   { id: "routines", title: "Routines", logo: null },
@@ -631,7 +640,7 @@ test("team: the sheet offers only the apps the person can give, ticked", async (
   expect(
     view.getByText("It always uses the account of whoever is asking."),
   ).toBeTruthy();
-  expect(requested).not.toContain("/api/plugins");
+  expect(requested.filter((path) => path.startsWith(APPS_PATH))).toEqual([]);
 });
 
 test("the LangGraph harness is offered as LangChain, the name people know it by", async () => {

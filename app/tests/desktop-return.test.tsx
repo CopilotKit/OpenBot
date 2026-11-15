@@ -13,6 +13,13 @@ import {
   DESKTOP_LINK,
   DesktopReturn,
 } from "@/components/desktop/desktop-return";
+import {
+  confirmationResponse,
+  connectionsCall,
+  connectionsProblem,
+  myConnectionPath,
+  sharedConnectionPath,
+} from "./connections-api";
 
 /**
  * The page an app's sign-in started in OpenBot Desktop comes back to, in the person's own browser.
@@ -33,13 +40,14 @@ afterAll(() => GlobalRegistrator.unregister());
 
 function show(
   app: string | undefined,
-  answer = () => Response.json({ connected: true }),
+  answer: (shared: boolean) => Response = () => confirmationResponse(true),
 ) {
   const asked: string[] = [];
   const opened: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     asked.push(`${init?.method ?? "GET"} ${String(input)}`);
-    return answer();
+    const call = connectionsCall(input, init);
+    return answer(call?.shared === true);
   }) as unknown as typeof fetch;
   const root = createRootRoute();
   const router = createRouter({
@@ -78,7 +86,7 @@ test("in the browser, it confirms the account and then brings OpenBot Desktop fo
     await view.findByRole("heading", { name: "Back to OpenBot" }),
   ).toBeTruthy();
   await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]));
-  expect(asked).toContain("POST /api/plugins/servers/gmail/connection/confirm");
+  expect(asked).toContain(`POST ${myConnectionPath("gmail", "confirm")}`);
   expect(
     view.getByRole("link", { name: "Open OpenBot" }).getAttribute("href"),
   ).toBe("openbot://open");
@@ -86,11 +94,28 @@ test("in the browser, it confirms the account and then brings OpenBot Desktop fo
 
 test("a confirm that fails still hands the person back", async () => {
   const { asked, opened } = show("gmail", () =>
-    Response.json({ error: "no" }, { status: 503 }),
+    connectionsProblem(503, "Connecting apps isn't set up yet."),
   );
 
   await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]));
-  expect(asked).toContain("POST /api/plugins/servers/gmail/connection/confirm");
+  expect(asked).toContain(`POST ${myConnectionPath("gmail", "confirm")}`);
+});
+
+test("an app with one shared account confirms that account, which an admin just connected", async () => {
+  const { asked, opened } = show("team-chat", (shared) =>
+    shared
+      ? confirmationResponse(true)
+      : connectionsProblem(
+          409,
+          "Team Chat uses one shared account. Ask an admin to connect it on its page under Apps.",
+        ),
+  );
+
+  await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]));
+  expect(asked).toEqual([
+    `POST ${myConnectionPath("team-chat", "confirm")}`,
+    `POST ${sharedConnectionPath("team-chat", "confirm")}`,
+  ]);
 });
 
 test("in the Desktop window itself, it goes to the account's page", async () => {

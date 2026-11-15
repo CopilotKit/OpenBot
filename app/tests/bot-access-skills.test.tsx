@@ -11,6 +11,12 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
+import {
+  botAppsPath,
+  botAppsResponse,
+  botGrantsPath,
+  botGrantsResponse,
+} from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 import { SKILLS_PATH, skillsResponse } from "./skills-api";
@@ -92,24 +98,27 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
   ];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/plugins/grants")) {
-      grants.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      return Response.json({ ok: true });
-    }
-    if (url.includes("/api/plugins/for/") && url.endsWith("/apps")) {
-      return Response.json({ apps: [] });
-    }
-    if (url.includes("/api/plugins/for/")) {
-      if (options.givesOnListing) for (const { slug } of all) held.add(slug);
+    const method = init?.method ?? "GET";
+    if (url.startsWith(`${botGrantsPath(BOT.id)}/`) && method !== "GET") {
+      grants.push(`${method} ${url} ${init?.body ?? ""}`);
       return Response.json({
-        tools: [],
+        id: "skill:x",
+        kind: "skill",
+        ref: "x",
+        action: null,
+        skill: null,
+      });
+    }
+    if (url.startsWith(botAppsPath(BOT.id))) return botAppsResponse([]);
+    if (url.startsWith(botGrantsPath(BOT.id))) {
+      if (options.givesOnListing) for (const { slug } of all) held.add(slug);
+      return botGrantsResponse({
         skills: all
           .filter(({ slug }) => held.has(slug))
           .map(({ slug, title }) => ({
             slug,
             title,
             summary: `${slug} summary`,
-            instructions: "",
           })),
       });
     }
@@ -220,7 +229,7 @@ test("switching a skill on grants it to this Bot", async () => {
   const view = draw(BOT);
   fireEvent.click(await view.findByRole("switch", { name: "mine-off" }));
   await waitFor(() => expect(grants).toHaveLength(1));
-  expect(grants[0]).toContain("POST");
+  expect(grants[0]).toContain("PUT");
   expect(grants[0]).toContain("mine-off");
   expect(grants[0]).toContain("expenses");
 });
@@ -251,7 +260,7 @@ test("this Bot's own skills failing to load says so, rather than drawing every s
   serving();
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input).endsWith("/api/plugins/for/expenses")
+    String(input).startsWith(botGrantsPath("expenses"))
       ? new Response(null, { status: 500 })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);

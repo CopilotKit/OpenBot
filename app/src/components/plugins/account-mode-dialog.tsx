@@ -12,7 +12,7 @@ import {
 import {
   accountModePreview,
   setAccountModeMutationOptions,
-} from "@/lib/plugins/mutations";
+} from "@/lib/apps/mutations";
 import { describeApproval } from "@/lib/plugins/shared-use";
 
 /**

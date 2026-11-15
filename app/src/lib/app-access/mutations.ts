@@ -1,7 +1,19 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  approveAppAccessRequest,
+  createAppAccessRequest,
+  deleteAppAccessRequest,
+  dismissAppAccessRequest,
+} from "@/lib/api/generated/app-access-requests/app-access-requests";
+import {
+  approveBotApp,
+  giveBotApp as giveBotAppOperation,
+  takeBackBotApp,
+} from "@/lib/api/generated/bot-grants/bot-grants";
+import type { AppAccessApproval } from "@/lib/api/generated/model";
+import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { pluginKeys } from "@/lib/plugins/queries";
-import type { AppAccessRequest } from "./queries";
+import { type AppAccessRequest, accessRequestOf } from "./queries";
 
 const FALLBACK = "That request could not be sent.";
 
@@ -15,23 +27,38 @@ const FALLBACK = "That request could not be sent.";
 const refresh = (queryClient: QueryClient) =>
   queryClient.invalidateQueries({ queryKey: pluginKeys.all });
 
+/** What approving does, as the inbox and the card read it. */
+function approvalOf(approval: AppAccessApproval): {
+  request: AppAccessRequest;
+  enabled: boolean;
+  granted: string[];
+} {
+  return {
+    request: accessRequestOf(approval.appAccessRequest),
+    enabled: approval.enabled,
+    granted: approval.granted,
+  };
+}
+
 /**
  * Ask an administrator for access to one app on one Bot. The server decides what is asked for from
- * the app's state; a second press answers with the request already pending (`created: false`).
+ * the app's state; a second press answers with the request already pending.
  */
 export function requestAppAccessMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
       agentId: string;
       app: string;
-    }): Promise<{ request: AppAccessRequest; created: boolean }> => {
-      const response = await client("/api/plugins/access-requests", {
-        method: "POST",
-        body: variables,
-        fallback: FALLBACK,
-      });
-      return response.json();
-    },
+    }): Promise<{ request: AppAccessRequest }> => ({
+      request: accessRequestOf(
+        await createAppAccessRequest(
+          ORGANIZATION_ID,
+          { botId: variables.agentId, appId: variables.app },
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: FALLBACK },
+        ),
+      ),
+    }),
     onSettled: () => refresh(queryClient),
   });
 }
@@ -41,14 +68,12 @@ export function cancelAppAccessRequestMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
-    mutationFn: (id: string): Promise<AppAccessRequest> =>
-      client(
-        `/api/plugins/access-requests/${encodeURIComponent(id)}`,
-        "request",
-        {
-          method: "DELETE",
-          fallback: "That request could not be withdrawn.",
-        },
+    mutationFn: (id: string): Promise<void> =>
+      deleteAppAccessRequest(
+        ORGANIZATION_ID,
+        id,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "That request could not be withdrawn." },
       ),
     onSettled: () => refresh(queryClient),
   });
@@ -70,17 +95,17 @@ export function approveAppAccessRequestMutationOptions(
       request: AppAccessRequest;
       enabled: boolean;
       granted: string[];
-    }> => {
-      const response = await client(
-        `/api/plugins/access-requests/${encodeURIComponent(variables.id)}/approve`,
-        {
-          method: "POST",
-          ...(variables.refs ? { body: { refs: variables.refs } } : {}),
-          fallback: "That request could not be approved.",
-        },
-      );
-      return response.json();
-    },
+    }> =>
+      approvalOf(
+        await approveAppAccessRequest(
+          ORGANIZATION_ID,
+          variables.id,
+          { "Idempotency-Key": idempotencyKey() },
+          // No actions named sends no body: the Bot then gets the actions that only read.
+          variables.refs ? { actions: variables.refs } : undefined,
+          { fallback: "That request could not be approved." },
+        ),
+      ),
     onSettled: () => refresh(queryClient),
   });
 }
@@ -100,13 +125,16 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
       request: AppAccessRequest;
       enabled: boolean;
       granted: string[];
-    }> => {
-      const response = await client(
-        `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/approve`,
-        { method: "POST", fallback: "Couldn't turn that app on. Try again." },
-      );
-      return response.json();
-    },
+    }> =>
+      approvalOf(
+        await approveBotApp(
+          ORGANIZATION_ID,
+          variables.agentId,
+          variables.app,
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "Couldn't turn that app on. Try again." },
+        ),
+      ),
     onSettled: () => refresh(queryClient),
   });
 }
@@ -120,11 +148,14 @@ export async function giveBotApp(variables: {
   agentId: string;
   app: string;
 }): Promise<{ granted: string[] }> {
-  const response = await client(
-    `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/give`,
-    { method: "POST", fallback: "Couldn't give that app to this Bot." },
+  const given = await giveBotAppOperation(
+    ORGANIZATION_ID,
+    variables.agentId,
+    variables.app,
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't give that app to this Bot." },
   );
-  return response.json();
+  return { granted: given.given };
 }
 
 /** One press of "Let it use your Gmail", on the card or a Bot's page. */
@@ -142,11 +173,14 @@ export function takeBackBotAppMutationOptions(queryClient: QueryClient) {
       agentId: string;
       app: string;
     }): Promise<{ revoked: string[] }> => {
-      const response = await client(
-        `/api/plugins/for/${encodeURIComponent(variables.agentId)}/apps/${encodeURIComponent(variables.app)}/give`,
-        { method: "DELETE", fallback: "Couldn't take that app back." },
+      const taken = await takeBackBotApp(
+        ORGANIZATION_ID,
+        variables.agentId,
+        variables.app,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't take that app back." },
       );
-      return response.json();
+      return { revoked: taken.takenBack };
     },
     onSettled: () => refresh(queryClient),
   });
@@ -157,11 +191,14 @@ export function dismissAppAccessRequestMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
-    mutationFn: (id: string): Promise<AppAccessRequest> =>
-      client(
-        `/api/plugins/access-requests/${encodeURIComponent(id)}/dismiss`,
-        "request",
-        { method: "POST", fallback: "That request could not be dismissed." },
+    mutationFn: async (id: string): Promise<AppAccessRequest> =>
+      accessRequestOf(
+        await dismissAppAccessRequest(
+          ORGANIZATION_ID,
+          id,
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback: "That request could not be dismissed." },
+        ),
       ),
     onSettled: () => refresh(queryClient),
   });

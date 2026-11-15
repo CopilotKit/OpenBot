@@ -14,7 +14,7 @@ import {
 import type { CreateBotRequest } from "@/lib/api/generated/model";
 import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
+import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
 import { type AgentProfile, agentKeys } from "./queries";
 
 /**
@@ -154,9 +154,9 @@ export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
 /**
  * Whether one Bot may hand work to another.
  *
- * The same `plugin_grants` write every other grant makes, with `kind: "bot"`, so the audit row and
- * the refusals are the ones already in place: an administrator only, never a Bot on itself, and
- * never onto a Bot that does not exist.
+ * The same grant every other grant is (replaceBotGrant, deleteBotGrant), addressed `bot:<Bot id>`,
+ * so the audit row and the refusals are the ones already in place: an administrator only, never a
+ * Bot on itself, and never onto a Bot that does not exist.
  *
  * DIRECTIONAL, and the two ids are easy to swap: `agentId` is the Bot doing the asking and `ref` is
  * the Bot it may reach. Granted the other way round it reads as working and hands over nothing.
@@ -170,18 +170,16 @@ export function setHandoffGrantMutationOptions(queryClient: QueryClient) {
       ref: string;
       granted: boolean;
     }) => {
+      const grant = {
+        kind: "bot" as const,
+        ref: variables.ref,
+        agentId: variables.agentId,
+      };
       if (variables.granted) {
-        await client("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "bot", ref: variables.ref, agentId: variables.agentId },
-          fallback: FALLBACK,
-        });
+        await grantPlugin(grant);
         return;
       }
-      await client(
-        `/api/plugins/grants?kind=bot&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: FALLBACK },
-      );
+      await revokePlugin(grant);
     },
     onSuccess: () => invalidateAgents(queryClient),
   });

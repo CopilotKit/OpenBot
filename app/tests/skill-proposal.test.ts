@@ -197,12 +197,11 @@ describe("the tool refs a skill may declare", () => {
       title: "Notion",
       tools: [
         {
-          serverId: "notion",
           name: "notion-search",
           description: "Search Notion.",
-          inputSchema: {},
           ref: "notion/notion-search",
           effect: "read",
+          destructive: false,
           grantedTo: [],
         },
       ],
@@ -218,10 +217,8 @@ describe("the tool refs a skill may declare", () => {
       server({
         tools: [
           {
-            serverId: "notion",
             name: "notion-create",
             description: "Create a page.",
-            inputSchema: {},
             ref: "notion/notion-create",
             effect: "write",
             destructive: false,

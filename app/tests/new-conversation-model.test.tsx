@@ -20,7 +20,9 @@ import type { ConversationModel, ModelCatalogue } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import {
   CONVERSATIONS_PATH,
   conversationOf,
@@ -34,7 +36,6 @@ import {
   problemResponse,
 } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
-import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A MODEL AND A THINKING EFFORT PICKED BEFORE A CONVERSATION EXISTS, SAVED BEFORE ITS FIRST RUN.
@@ -180,8 +181,7 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ tools: [], skills: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (url.pathname === botComponentsPath(BOT))
         return botComponentsResponse();
       if (

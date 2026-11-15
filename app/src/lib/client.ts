@@ -99,6 +99,7 @@ async function refusal(
     error?: unknown;
     detail?: unknown;
     code?: unknown;
+    appId?: unknown;
   } | null;
   const message =
     typeof body?.error === "string"
