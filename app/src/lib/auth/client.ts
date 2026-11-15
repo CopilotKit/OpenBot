@@ -2,7 +2,14 @@ import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
 import type { AuthProviderId } from "./queries";
 
-export const authClient = createAuthClient({ plugins: [ssoClient()] });
+export const authClient = createAuthClient({
+  plugins: [ssoClient()],
+  fetchOptions: {
+    // The page's fetch at the time of each call, as every other request in the app uses it, rather
+    // than the one there was when this module loaded.
+    customFetchImpl: (input, init) => fetch(input, init),
+  },
+});
 
 /** What each provider is called on the button, since none of them are called by their id. */
 const PROVIDER_NAMES: Record<AuthProviderId, string> = {
