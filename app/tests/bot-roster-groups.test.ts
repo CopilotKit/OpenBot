@@ -169,7 +169,7 @@ test("sorts names naturally, titles and descriptions both ways without mutating 
 test("search uses the same framework name the roster displays", () => {
   const bots = [bot({ id: "legacy", title: "Powered by LangGraph" })];
   // The displayed subtitle normalizer is also used by the roster's search.
-  expect(ids(filterRoster(bots, { ...defaults, query: "LangChain" }))).toEqual(
-    ["legacy"],
-  );
+  expect(ids(filterRoster(bots, { ...defaults, query: "LangChain" }))).toEqual([
+    "legacy",
+  ]);
 });
