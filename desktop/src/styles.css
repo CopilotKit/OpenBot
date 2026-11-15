@@ -732,9 +732,9 @@ button.text-link.change-provider {
 }
 
 /*
- * The ways to run OpenBot, on the first screen. Self-hosted is the one this app sets up; OpenBot
- * Cloud and OpenBot for Business are shown so a person knows they exist, greyed and not choosable.
- * Business's booking link stays live, and keeps the pointer every link has.
+ * The ways to run OpenBot, on the first screen. Self-hosted is the one this app sets up, and
+ * OpenBot for Business is the one it connects to. OpenBot Cloud is shown so a person knows it
+ * exists, greyed and not choosable.
  */
 fieldset.picker.hosting {
   max-height: none;
@@ -764,6 +764,75 @@ fieldset.picker.hosting .tile.unavailable .tile-name {
 
 fieldset.picker.hosting .tile.unavailable .mark-tile {
   opacity: 0.45;
+}
+
+/* Not choosable for now, while an address is checked or the browser is waited on: Cancel is. */
+fieldset.picker.hosting .tile.held,
+fieldset.picker.hosting .tile.held:hover,
+fieldset.picker.hosting .tile.held:active {
+  cursor: default;
+  background: var(--card);
+}
+
+/*
+ * OpenBot for Business, under the choices: the address of the OpenBot to connect to, what happens
+ * next under the field, then Connect. What went wrong with the address is said under the field,
+ * in the destructive colour; anything else is said in a card between the field and the button.
+ */
+.connect-to-openbot .field {
+  margin: 8px 0 0;
+}
+
+/* Held while it is checked or signed in to: still readable, on the ground of a field at rest. */
+.connect-to-openbot .field input:read-only {
+  background: var(--muted);
+}
+
+.address-problem {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.connect-to-openbot .footnote {
+  margin-top: 8px;
+}
+
+/*
+ * A connection that didn't work, or a sign-in that stopped or ended: the card that waits on the
+ * person, with the shell's sentence in ink. Not the failure card: nothing on this computer failed.
+ */
+.connect-to-openbot .local-alert {
+  margin: 16px 0 0;
+}
+
+.connect-to-openbot .local-alert p {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A link that is the way on, drawn as the app's `outline` button. */
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 150ms ease-out;
+}
+
+a.button-link:hover {
+  background: var(--muted);
 }
 
 /* What Self-hosted asks of this computer: the reason, then the four needs, two to a line. */
@@ -1871,13 +1940,15 @@ a:hover {
 
   /* The app's dark `outline` button: `dark:bg-input/30`, a shade above the card. */
   button.quiet,
-  button.another-question {
+  button.another-question,
+  a.button-link {
     background: color-mix(in srgb, var(--input) 30%, transparent);
     border-color: var(--input);
   }
 
   button.quiet:hover:not(:disabled),
-  button.another-question:hover:not(:disabled) {
+  button.another-question:hover:not(:disabled),
+  a.button-link:hover {
     background: color-mix(in srgb, var(--input) 50%, transparent);
   }
 

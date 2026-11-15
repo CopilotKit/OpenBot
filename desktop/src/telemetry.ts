@@ -1,7 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ModelChoice } from "./ProviderPicker";
 
-export type SetupStep = "welcome" | "install" | "account" | "model" | "connect";
+/**
+ * `connect` is the Start step, where OpenBot on this computer starts. `connect_openbot` is the
+ * first screen with an OpenBot that runs elsewhere chosen: the address field. The address itself is
+ * never part of an event.
+ */
+export type SetupStep =
+  | "welcome"
+  | "install"
+  | "account"
+  | "model"
+  | "connect"
+  | "connect_openbot";
 
 const HARNESSES = {
   crewai: "crewai",
