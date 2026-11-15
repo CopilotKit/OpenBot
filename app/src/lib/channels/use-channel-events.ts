@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
@@ -307,6 +307,24 @@ export function applyChannelWork(
   };
 }
 
+/**
+ * A conversation's work changed, so the tasks it handed out may have too: their cards read again.
+ *
+ * A card reads its task every few seconds while the task works or waits on the person, and leaves
+ * it alone once it is done or couldn't finish. A task that carries on after that (the person replied
+ * in its thread, or pressed Try again) would stay Done on its card until a reload. The server says a
+ * conversation's work changed whenever one of its tasks changes state, with the list's stamp
+ * (`workAt`), and every card on screen reads its task again then. Cards not on screen are only
+ * marked stale, and read when they are next drawn.
+ */
+export function refreshTaskCards(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+  activity: ChannelActivityEvent,
+): void {
+  if (!activity.workAt) return;
+  void queryClient.invalidateQueries({ queryKey: taskKeys.ones });
+}
+
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
@@ -384,6 +402,8 @@ export function useChannelEvents() {
             params: { channelId },
           });
         });
+
+        refreshTaskCards(queryClient, activity);
 
         if (activity.work !== undefined) {
           queryClient.setQueryData(

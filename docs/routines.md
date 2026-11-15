@@ -39,8 +39,9 @@ Two ways, and either way a routine or a goal is written by the same store calls.
   when** (optional), **Posts in**, and **Name**. It does not ask whether you want a routine, a goal
   or a check-in; the answers decide: `planRoutine` (`app/src/lib/routines/plan.ts`) turns them into a
   plan, and `createFromPlanMutationOptions` writes it:
-  - Act on a schedule with nothing in Done when is a routine (`POST /api/routines`, which calls
-    `routineStore.create` exactly as `create_routine` does).
+  - Act on a schedule with nothing in Done when is a routine
+    (`POST /api/v2/organizations/{organizationId}/routines`, which writes it exactly as
+    `create_routine` does).
   - Act on a schedule with an outcome is a goal that ends when met, plus a routine that runs it.
   - Act when something happens is a goal with that subscription.
   - Now, once is a goal, run at once.
@@ -63,24 +64,24 @@ every Bot all of its tools, including the write tools `create_routine`, `update_
 `delete_routine`. A Bot made later gets them the first time it runs. Routines can't be turned off, and
 its tools can't be taken from a Bot: the server answers `403`. A Bot still asks before each write
 while Extra vigilant is on, and `delete_routine` asks as any delete does, unless the person allowed
-it for the conversation or always (see [Approvals](approvals.md)). See `server/src/plugins/personal-defaults.ts`.
+it for the conversation or always (see [Approvals](approvals.md)).
 
 **Goals too.** The same app carries a goal's tools for a conversation: `create_goal`, `list_goals`,
 `update_goal`, `run_goal`, `pause_goal`, `resume_goal` and `complete_goal`, beside the trigger tools
 that wake a goal. Asked for a goal, a Bot makes one that reports into the conversation it was asked
 in, or into another the person names, and it shows on the Bot's Routines page. A goal has no schedule of
 its own: it runs when asked, or when an event wakes it. A goal's own run is not given these copies,
-because it already holds the goal's own tools. See `server/src/responsibilities/chat-tools.ts`.
+because it already holds the goal's own tools.
 
 A goal that repeats is never completed by one of its runs. It repeats when it was made `recurring`,
 or, unless it was made `endsWhenMet`, when an enabled routine of its Bot runs it or an event wakes
 it. Its run is told so, records its result with `report_goal_progress`, and is refused
 `complete_goal`; only the person ends it. Asked to run a completed or paused goal, `run_goal` says
-so instead of running nothing. See `GoalRepeats` in `server/src/responsibilities/types.ts`.
+so instead of running nothing.
 
 A goal that a routine or an event starts can still be completed by a run that meets its outcome, when
 it is made `endsWhenMet`; without it, a goal a routine or an event starts repeats and a run never
-completes it (`repeatsOf` in `server/src/responsibilities/store.ts`). It never combines with `recurring`: the
+completes it. It never combines with `recurring`: the
 store and `parseResponsibilityInput` refuse both together. Completing a goal by any path, a run or
 the person, switches off the routines that run it (`routineRunsGoal`): those whose `goal_id` is that
 goal, and an older routine that names it by id or whole quoted title. An older routine that also
@@ -91,7 +92,7 @@ been carried out (`NO_OUTCOME` in `shared/responsibility-turn.ts`); a Bot's `cre
 requires them.
 
 A routine records the goal it runs (`routines.goal_id`): the `goalId` passed to `create_routine`, `update_routine` or
-`POST /api/routines` (as the New routine screen does), else the goal whose id its instruction names,
+`POST /api/v2/organizations/{organizationId}/routines` (as the New routine screen does), else the goal whose id its instruction names,
 else the goal its firing first runs with `run_goal`. Never a goal its instruction only mentions. A routine made
 before 0.3.3 (`goal_by_title`) is read from its instruction, by the goal's id or its whole title in
 quotes. See `routineRunsGoal`.
@@ -152,16 +153,22 @@ OpenBot Desktop runs none. (`docker-compose.yml` still defines a `worker` servic
 which nothing starts and which does nothing if started: an OpenBot Desktop app from the release
 before reads a Compose file as current only when it defines one.)
 
+Where several servers run against one database, one of them at a time decides which routines are
+due: the one holding a PostgreSQL advisory lock, which looks every 30 seconds. Every server runs
+the turns, claiming five at a time, so one server does not carry every routine in the deployment. Each
+server checks the lock every five seconds, so when the one that held it stops, another takes over
+at its next check. A firing is still claimed from the shared work queue under a key naming the
+minute it was due, so two servers that both believe they lead for a moment cannot fire it twice.
+
 It used to take a second process: a worker that ran the sweep in a loop and handed each due run to
 the server at `/internal/routines/run`. A deployment that never started one stored every routine,
 showed it with a next run time, and fired nothing, so the Routines page carried a warning for it.
 With the sweep in the server there is no such state to warn about, and the page no longer does.
-`GET /api/routines` still answers with the `sweep` record that warning read, for apps from before
-this.
+The routines list (`GET /api/v2/organizations/{organizationId}/routines`) carries no record of the
+sweep.
 
-Each sweep still records that it happened, in `routine_sweeps`. The window that matters is
-`MINIMUM_INTERVAL_MS`: fifteen minutes, the floor a routine's own schedule already has, so a gap
-longer than that is one no routine could have wanted.
+A sweep no longer records that it happened: nothing writes `routine_sweeps` now, and the table
+stays for one more release.
 
 The server has no `/internal/routines/run` now and reads neither of the two settings that worker
 took: `WORKER_SHARED_SECRET`, the credential it presented there, and `SERVER_INTERNAL_URL`, where it

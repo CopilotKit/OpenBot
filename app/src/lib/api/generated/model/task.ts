@@ -61,6 +61,18 @@ export interface Task {
    */
   failedAt: string | null;
   /**
+   * When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.
+   * @nullable
+   */
+  stoppedAt?: string | null;
+  /**
+   * When the work it is doing now began. Null or absent unless it is working.
+   * @nullable
+   */
+  workingSince?: string | null;
+  /** When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it. */
+  lastActivityAt?: string;
+  /**
    * One line on what comes next.
    * @nullable
    */

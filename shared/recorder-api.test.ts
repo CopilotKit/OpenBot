@@ -3,7 +3,6 @@ import {
   connectCodeRequestSchema,
   exchangeRequestSchema,
   joinedLearningContainer,
-  recorderApiPaths,
   recorderPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "./recorder-api";
@@ -70,17 +69,6 @@ describe("recorder constants and paths", () => {
         name !== "trajectoryConnect",
       );
     }
-  });
-
-  test("the Recorder reaches OpenBot only at the API's addresses, in its one organization", () => {
-    expect(recorderApiPaths).toEqual({
-      connections: "/api/v2/organizations/default/recorder-connections",
-      currentConnection:
-        "/api/v2/organizations/default/recorder-connections/current",
-      me: "/api/v2/organizations/default/recorder/me",
-      learning: "/api/v2/organizations/default/recorder/learning",
-      activity: "/api/v2/organizations/default/recorder/activity",
-    });
   });
 
   test("the gate refusals carry the documented statuses", () => {

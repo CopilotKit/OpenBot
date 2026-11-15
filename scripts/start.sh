@@ -464,6 +464,24 @@ for pair in OPENAI_BASE_URL:OPENAI_CONTAINER_BASE_URL \
     export "$container_name=$(in_container "$(setting "$host_name" "")")"
   fi
 done
+# ONE ADDRESS, where it can be kept. With an Intelligence gateway on this machine the server can
+# carry the gateway's socket itself, so the app dials OpenBot's own address and never the gateway's
+# port (docker-compose.yml, INTELLIGENCE_GATEWAY_PROXY). It does only when `.env` or the environment
+# names OPENBOT_PUBLIC_URL. The Recorder is not on the page, so it needs that socket as a whole
+# address, and without a public URL the server has none to write: it is in a container, where a
+# call from this machine does not arrive on loopback, so it cannot vouch for the name it was reached
+# by. A recording would not save. So with no public URL the browser and the Recorder are given the
+# gateway's own address, as before, which each computer relays (COMPUTER_LOOPBACK_RELAYS above).
+# An Intelligence somewhere else is reached at its own address either way.
+GATEWAY_WS_URL="$(setting INTELLIGENCE_GATEWAY_WS_URL "")"
+if printf '%s' "$GATEWAY_WS_URL" | grep -qE '^[a-zA-Z][a-zA-Z0-9+.-]*://(localhost|127\.0\.0\.1|\[::1\])([:/]|$)' \
+   && [ -n "$(setting OPENBOT_PUBLIC_URL "")" ]; then
+  export OPENBOT_GATEWAY_PROXY=on
+  export OPENBOT_BROWSER_GATEWAY_WS_URL=""
+else
+  export OPENBOT_GATEWAY_PROXY=""
+  export OPENBOT_BROWSER_GATEWAY_WS_URL="$GATEWAY_WS_URL"
+fi
 # An agent somebody registers on their own loopback is dialled on this machine, not in the container.
 export OPENBOT_THIS_MACHINE_CONTAINER_HOST="${OPENBOT_THIS_MACHINE_CONTAINER_HOST:-host.docker.internal}"
 # The app is this checkout's, on APP_PORT, so the server's own copy of it is published nowhere fixed.

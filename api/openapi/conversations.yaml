@@ -2419,6 +2419,22 @@ components:
             - 'null'
           format: date-time
           description: When it failed.
+        stoppedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.
+        workingSince:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the work it is doing now began. Null or absent unless it is working.
+        lastActivityAt:
+          type: string
+          format: date-time
+          description: When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.
         next:
           type:
             - string
@@ -3066,10 +3082,10 @@ components:
       value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true}
     TaskPageExample:
       summary: "One task, ready to read."
-      value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "next": "Read the draft and send it.", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}
+      value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}
     TaskResponseExample:
       summary: "A task ready to read."
-      value: {"task": {"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "next": "Read the draft and send it.", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}}
+      value: {"task": {"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}}
     TranscriptionExample:
       summary: "What was said."
       value: {"text": "Remind me to send the forecast on Friday."}

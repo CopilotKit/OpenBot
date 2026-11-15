@@ -9,11 +9,12 @@ import {
   View,
 } from "react-native";
 import {
-  api,
-  type Conversation,
-  DEPLOYMENT_ORGANIZATION,
-  ORGANIZATION,
+  type ConversationSummary,
+  DEPLOYMENT_ORGANIZATION_ID,
+  ORGANIZATION_ID,
 } from "../src/api";
+import { listConversations } from "../src/api/generated/conversations/conversations";
+import { getDeployment } from "../src/api/generated/organization-settings/organization-settings";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { useLoad } from "../src/use-load";
@@ -23,7 +24,7 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [pushRegistered, setPushRegistered] = useState(false);
-  const [older, setOlder] = useState<Conversation[]>([]);
+  const [older, setOlder] = useState<ConversationSummary[]>([]);
   const [olderCursor, setOlderCursor] = useState<string | null | undefined>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
   useEffect(() => {
@@ -32,21 +33,14 @@ export default function Home() {
     setPushRegistered(false);
   }, [session?.user.id]);
   const loadOptions = useCallback(
-    () =>
-      // The API's `deployment`, which answers before anybody has signed in.
-      api<{
-        authProviders?: ("google" | "microsoft" | "okta")[];
-        ssoConfigured?: boolean;
-      }>(`${DEPLOYMENT_ORGANIZATION}/deployment`),
+    // The API's `deployment`, which answers before anybody has signed in: asked of the organization every install has.
+    () => getDeployment(DEPLOYMENT_ORGANIZATION_ID),
     [],
   );
   const options = useLoad(loadOptions, !session);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
   const loadConversations = useCallback(
-    () =>
-      api<{ conversations: Conversation[]; nextCursor: string | null }>(
-        `${ORGANIZATION}/conversations?limit=100`,
-      ),
+    () => listConversations(ORGANIZATION_ID, { limit: 100 }),
     [session?.user.id],
   );
   const conversations = useLoad(loadConversations, Boolean(session));
@@ -185,12 +179,10 @@ export default function Home() {
               disabled={busy}
               onPress={() => {
                 void act(async () => {
-                  const page = await api<{
-                    conversations: Conversation[];
-                    nextCursor: string | null;
-                  }>(
-                    `${ORGANIZATION}/conversations?limit=100&cursor=${encodeURIComponent(nextCursor)}`,
-                  );
+                  const page = await listConversations(ORGANIZATION_ID, {
+                    limit: 100,
+                    cursor: nextCursor,
+                  });
                   setOlder((items) => [...items, ...page.conversations]);
                   setOlderCursor(page.nextCursor);
                 });

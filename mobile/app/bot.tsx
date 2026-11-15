@@ -1,17 +1,20 @@
 import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Button, Pressable, Switch, Text, View } from "react-native";
+import { everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
-  api,
-  type Bot,
-  type BotLifecycle,
-  botPath,
-  type CheckInItem,
-  type Conversation,
-  everyPage,
-  ORGANIZATION,
-  type Routine,
-} from "../src/api";
+  getBot,
+  getBotLifecycle,
+  pauseBot,
+  resumeBot,
+} from "../src/api/generated/bots/bots";
+import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
+import { listConversations } from "../src/api/generated/conversations/conversations";
+import {
+  listRoutines,
+  pauseRoutine,
+  resumeRoutine,
+} from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
 import { hideItem, ItemCard, startItem } from "../src/check-ins";
 import {
@@ -40,21 +43,28 @@ export default function BotScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const loadBot = useCallback(() => api<{ bot: Bot }>(botPath(botId)), [botId]);
+  const loadBot = useCallback(() => getBot(ORGANIZATION_ID, botId), [botId]);
   const bot = useLoad(loadBot, Boolean(session && botId));
   const loadLifecycle = useCallback(
-    () => api<BotLifecycle>(`${botPath(botId)}/lifecycle`),
+    () => getBotLifecycle(ORGANIZATION_ID, botId),
     [botId],
   );
   const lifecycle = useLoad(loadLifecycle, Boolean(session && botId));
   const loadRoutines = useCallback(
-    () => everyPage<Routine>(`${ORGANIZATION}/routines`, "routines"),
+    () =>
+      everyPage(
+        (page) => listRoutines(ORGANIZATION_ID, page),
+        (page) => page.routines,
+      ),
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
   const loadItems = useCallback(
     () =>
-      everyPage<CheckInItem>(`${ORGANIZATION}/check-in-items`, "checkInItems"),
+      everyPage(
+        (page) => listCheckInItems(ORGANIZATION_ID, page),
+        (page) => page.checkInItems,
+      ),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
@@ -66,26 +76,22 @@ export default function BotScreen() {
 
   async function setPaused(next: boolean) {
     await action.run("pause", async () => {
-      await api(`${botPath(botId)}/${next ? "pause" : "resume"}`, {
-        method: "POST",
-      });
+      await (next ? pauseBot : resumeBot)(ORGANIZATION_ID, botId);
       await lifecycle.refresh();
     });
   }
   async function setActive(routine: Routine, enabled: boolean) {
     await action.run(routine.id, async () => {
-      await api(
-        `${ORGANIZATION}/routines/${encodeURIComponent(routine.id)}/${enabled ? "resume" : "pause"}`,
-        { method: "POST" },
+      await (enabled ? resumeRoutine : pauseRoutine)(
+        ORGANIZATION_ID,
+        routine.id,
       );
       await routines.refresh();
     });
   }
   async function addRoutine() {
     await action.run("add", async () => {
-      const page = await api<{ conversations: Conversation[] }>(
-        `${ORGANIZATION}/conversations?limit=100`,
-      );
+      const page = await listConversations(ORGANIZATION_ID, { limit: 100 });
       const conversation = page.conversations.find(
         (item) => item.active && item.botIds.includes(botId),
       );
