@@ -46,6 +46,8 @@ const asked = process.env.OPENBOT_SMOKE === "1";
 const API = process.env.OPENBOT_API_URL ?? "http://localhost:3001";
 const BOT = process.env.OPENBOT_SMOKE_BOT ?? "risk-analyst";
 const COOKIE = process.env.OPENBOT_SMOKE_COOKIE ?? "";
+/** The boundaries on what Bots may do, at the API's address. Only an administrator reads them. */
+const BOUNDARIES = "/api/v2/organizations/default/boundaries";
 
 /** Long enough for a computer to be created and Chromium to answer on a cold deployment. */
 const COMPUTER_TIMEOUT_MS = 180_000;
@@ -92,7 +94,7 @@ beforeAll(async () => {
 
   // Asked once, here, so a session that is missing, expired or from another deployment is one
   // sentence at the start rather than the same 401 read three different ways further down.
-  const accepted = await api("/api/computers/policy");
+  const accepted = await api(BOUNDARIES);
   if (accepted.status === 401) {
     throw new Error(
       `The session in OPENBOT_SMOKE_COOKIE is not accepted by ${API}. It may have expired, or belong ` +
@@ -170,12 +172,13 @@ describe.skipIf(!asked)("a Bot acting on its computer", () => {
   test(
     "is refused by a boundary, and the refusal is recorded with its rule",
     async () => {
-      const original = await json<{ policy: unknown }>("/api/computers/policy");
+      // The boundaries are read as they are saved: the same object both ways.
+      const original = await json<unknown>(BOUNDARIES);
       const rule = 'contains(page.host, "example.com")';
 
-      // The listing nests it under `policy`; the write takes the policy itself.
-      await json("/api/computers/policy", {
+      await json(BOUNDARIES, {
         method: "PUT",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           mode: "enforce",
           deny: [rule],
@@ -200,9 +203,10 @@ describe.skipIf(!asked)("a Bot acting on its computer", () => {
         expect(refusal).toBeDefined();
       } finally {
         // Whatever this deployment had before, it gets back, including on a failure above.
-        await json("/api/computers/policy", {
+        await json(BOUNDARIES, {
           method: "PUT",
-          body: JSON.stringify(original.policy),
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+          body: JSON.stringify(original),
         });
       }
     },
