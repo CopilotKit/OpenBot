@@ -16,6 +16,6 @@ export interface Organization {
   /** What people call it. */
   name: string;
   role: PersonRole;
-  /** Whether the caller's session is working in this one. Always false for a request with no session. */
+  /** Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key. */
   active: boolean;
 }

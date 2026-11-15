@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes; a request signed in with an API key or an app's token has no session, so none is active. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizationsQueryLimitDefault = 50;
@@ -63,7 +63,7 @@ export const ListOrganizationsResponse = zod.object({
           active: zod
             .boolean()
             .describe(
-              "Whether the caller's session is working in this one. Always false for a request with no session.",
+              "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
             ),
         })
         .describe(
@@ -151,7 +151,7 @@ export const CreateOrganizationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller's session is working in this one. Always false for a request with no session.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
         ),
     })
     .describe(
@@ -303,7 +303,7 @@ export const UpdateOrganizationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller's session is working in this one. Always false for a request with no session.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
         ),
     })
     .describe(
@@ -764,7 +764,7 @@ export const AcceptInvitationResponse = zod.object({
       active: zod
         .boolean()
         .describe(
-          "Whether the caller's session is working in this one. Always false for a request with no session.",
+          "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
         ),
     })
     .describe(
