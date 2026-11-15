@@ -233,6 +233,21 @@ READ_TOOL = "Read"
 # run was already given, called through OpenBot as before.
 TOOL_SEARCH = "ToolSearch"
 
+# Claude Code's switch for that search (code.claude.com/docs/en/env-vars, `ENABLE_TOOL_SEARCH`).
+#
+# The Claude Code this harness ships (2.1.259) searches by default only when it talks to Anthropic's
+# own API. With `ANTHROPIC_BASE_URL` set, a gateway or a proxy in front of the same API, it leaves
+# the search off unless this is set, and loads every tool it holds upfront
+# (code.claude.com/docs/en/mcp, "Tool search through a gateway": on by default behind one only from
+# 2.1.304). Measured live on one task across three apps, through a proxy that passes every request
+# on to Anthropic unchanged: each request carried 108 to 118 whole tool definitions and 109K to
+# 150K input tokens, and `ToolSearch` was in none of them. Straight to Anthropic's API the same
+# task carried 39 to 61 and 24K to 106K. A deployment behind a gateway is the proxy's shape.
+# Set to `true`, the search is on wherever the model can use it. A gateway has to pass on
+# the `defer_loading` field, `tool_reference` blocks and the `anthropic-beta` header for it; one
+# that cannot is run with `ENABLE_TOOL_SEARCH=false` in this container's environment, which stands.
+ENABLE_TOOL_SEARCH = "ENABLE_TOOL_SEARCH"
+
 # What a full Bot is told `Read` is for. Its own description says it reads any file on "the local
 # filesystem", and the person calls the computer's tool "Read file": asked to read a file on its
 # computer, the Bot picked `Read`, was refused, and asked the person what to do.
@@ -818,6 +833,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # And `ToolSearch`, which only finds and loads the definitions of the tools this run
             # already holds (see `TOOL_SEARCH`).
             options.tools = [READ_TOOL, TOOL_SEARCH]
+            # On behind a gateway too, unless whoever runs this container chose otherwise. The SDK
+            # lays `options.env` over the container's own environment, so theirs is read here.
+            if not (os.environ.get(ENABLE_TOOL_SEARCH) or "").strip():
+                options.env[ENABLE_TOOL_SEARCH] = "true"
             # After the Bot's own instructions, which come first.
             prompt = options.system_prompt
             options.system_prompt = (
