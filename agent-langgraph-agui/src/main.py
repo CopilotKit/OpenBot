@@ -185,7 +185,7 @@ def _retries(run) -> dict:
     again several times over, without the wait. So a run that carries `openbotSendOnce` asks once
     and hands the failure back. Every other run keeps the integration's own retries.
     """
-    return {"max_retries": 0} if run.send_once else {}
+    return {"max_retries": 0} if getattr(run, "send_once", False) is True else {}
 
 
 def _model(plan_models=None):
