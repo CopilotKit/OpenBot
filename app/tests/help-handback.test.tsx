@@ -348,6 +348,8 @@ beforeEach(() => {
 afterEach(() => cleanup());
 afterAll(async () => {
   await settleReactWork();
+  // The app's own query client outlives this file: leave nothing in it to refetch in the next.
+  queryClient.clear();
   globalThis.fetch = originalFetch;
   HTMLImageElement.prototype.decode = originalDecode;
   globalThis.WebSocket = originalSocket;
