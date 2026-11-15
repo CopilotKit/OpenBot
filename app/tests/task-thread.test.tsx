@@ -621,6 +621,20 @@ test("a task that is not waiting to try again, or is no longer working, reads as
   expect(waitingOf(none)).toBeNull();
   cleanup();
 
+  // A server from before the field: the task it returns does not carry it at all.
+  const { tryingAgainAt: _absent, ...without } = task;
+  task = without as typeof task;
+  expect("tryingAgainAt" in task).toBe(false);
+  const absent = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await absent.findByText("Working");
+  expect(lastActivityOf(absent)).toBe("Last activity 2 minutes ago");
+  expect(tryingAgainOf(absent)).toBeNull();
+  expect(waitingOf(absent)).toBeNull();
+  cleanup();
+  task = { ...task, tryingAgainAt: null };
+
   // A time already behind this clock when the card is first drawn, as after a reload.
   task = { ...task, tryingAgainAt: ago(30) };
   const past = draw(
