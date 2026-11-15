@@ -28698,8 +28698,20 @@ components:
           description: The newest first.
           items:
             $ref: '#/components/schemas/Invitation'
-        member:
-          $ref: '#/components/schemas/OrganizationMember'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    InvitationResponse:
+      type: object
+      required:
+        - invitation
+      properties:
+        invitation:
+          $ref: '#/components/schemas/Invitation'
     TeamSource:
       type: string
       description: 'Where a team comes from. openbot is a team made here. directory is a group of the company''s directory, kept in step with it: its name and its people are the directory''s and can''t be changed here.'
@@ -28790,13 +28802,6 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    InvitationResponse:
-      type: object
-      required:
-        - invitation
-      properties:
-        invitation:
-          $ref: '#/components/schemas/Invitation'
     CreateTeamRequest:
       type: object
       additionalProperties: false
