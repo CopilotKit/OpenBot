@@ -78,7 +78,10 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
       botId: string;
       audience: TeamBotAudience;
       emails: string[];
+      /** Directory groups a Bot was published to before there were teams, kept as they are. */
       groups: string[];
+      /** The teams to publish to, by each team's id. */
+      teams: string[];
     }) => {
       const { botId, ...publication } = input;
       await publishTeamBot(organizationId(), botId, publication, once(), {

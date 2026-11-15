@@ -23,6 +23,8 @@ export interface TeamBot {
   people?: string[];
   /** The directory groups it is published to. */
   groups?: string[];
+  /** The teams it is published to, by each team's id. */
+  teams?: string[];
   /** The directory groups an administrator assigned it to; * is everybody. */
   assignedGroups?: string[];
 }

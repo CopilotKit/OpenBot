@@ -44,9 +44,9 @@ test.each([
 
 test("the check fails a list that swaps two of the eight", () => {
   expect(inOrder(positions(["Routines", "Skills", "Memory"]))).toBe(false);
-  expect(inOrder(positions(["Vault", "Routines", "Team", "Skills"]))).toBe(
-    true,
-  );
+  expect(
+    inOrder(positions(["Vault", "Routines", "Organization", "Skills"])),
+  ).toBe(true);
   // Naming one twice is out of order too.
   expect(inOrder(positions(["Skills", "Skills"]))).toBe(false);
 });

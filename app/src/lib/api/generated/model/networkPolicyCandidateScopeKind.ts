@@ -3,7 +3,7 @@
  */
 
 /**
- * Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.
+ * Whose policy: the organization's, a team's, or a directory group's.
  */
 export type NetworkPolicyCandidateScopeKind =
   (typeof NetworkPolicyCandidateScopeKind)[keyof typeof NetworkPolicyCandidateScopeKind];
@@ -11,4 +11,5 @@ export type NetworkPolicyCandidateScopeKind =
 export const NetworkPolicyCandidateScopeKind = {
   organization: "organization",
   group: "group",
+  team: "team",
 } as const;

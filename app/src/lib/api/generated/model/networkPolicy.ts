@@ -6,11 +6,11 @@ import type { NetworkMode } from "./networkMode";
 import type { NetworkPolicyScopeKind } from "./networkPolicyScopeKind";
 
 export interface NetworkPolicy {
-  /** organization, or group:<name> for a directory group. Team scopes will be added when teams arrive. */
+  /** organization, team:<id> for a team, or group:<name> for a directory group. */
   id: string;
-  /** Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive. */
+  /** Whose policy: the organization's, a team's, or a directory group's. */
   scopeKind: NetworkPolicyScopeKind;
-  /** The directory group's name. Empty for the organization. */
+  /** The team's id, or the directory group's name. Empty for the organization. */
   scopeId: string;
   mode: NetworkMode;
   rules: EgressRule[];

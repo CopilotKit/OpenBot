@@ -135,7 +135,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
             />
           ) : null}
           <LinkRow
-            detail="Yours, shared with you, and your team's"
+            detail="Yours, shared with you, and your organization's"
             icon={IconBolt}
             render={<Link onClick={onClose} to="/bots" />}
             tint="plain"

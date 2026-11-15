@@ -616,7 +616,7 @@ test("a Shared app landing from a consent names the action and marks its row", a
   expect(row(view, "Gmail.ListEmails").hasAttribute("data-landed")).toBe(true);
   expect(row(view, "Gmail.SendEmail").hasAttribute("data-landed")).toBe(false);
   // The Shared branch is the one drawing this, not the personal-account branch.
-  expect(view.container.textContent).toContain("Team account");
+  expect(view.container.textContent).toContain("Shared account");
 });
 
 test("a Shared app reached without an action says nothing about authorizing", async () => {

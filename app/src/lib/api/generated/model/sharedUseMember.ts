@@ -4,10 +4,10 @@
 import type { SharedUseMemberKind } from "./sharedUseMemberKind";
 
 /**
- * One person or directory group an audience names.
+ * One person, team or directory group an audience names.
  */
 export interface SharedUseMember {
   kind: SharedUseMemberKind;
-  /** The person's id, or the directory group's name. */
+  /** The person's id, the team's id, or the directory group's name. */
   value: string;
 }

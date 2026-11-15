@@ -472,9 +472,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           <PageRows className="mt-0">
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Team account</ItemTitle>
+                <ItemTitle>Shared account</ItemTitle>
                 <ItemDescription>
-                  Shared by your organisation. Bots act as the team account.
+                  Shared by your organization. Bots act as this account.
                 </ItemDescription>
               </ItemContent>
             </Item>

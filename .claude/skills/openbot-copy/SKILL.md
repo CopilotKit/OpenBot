@@ -28,6 +28,9 @@ One word for one thing, everywhere a person can see it.
 | **connect / disconnect / reconnect** | What a person does to their own account. | link (except GitHub and Slack identity, where "link" is the vendor's own word) |
 | **skill** | A named instruction invoked with `/`. | command, prompt |
 | **admin** | The person who runs OpenBot for everybody. | administrator, owner, operator |
+| **organization**, **everyone in the organization** | Everybody who uses OpenBot together, and what is theirs as a whole: "everyone in the organization", "organization rules", "your organization's shared account". | team, the whole team, teammates, organisation |
+| **team**, **Teams** | A named group of people inside one organization, made in Admin under Teams or kept in step with the company's directory. Whatever can be given to everyone can be given to a team. | group (for a team), and never the whole organization |
+| **shared account** | An app account the organization connects once, which Bots act as. | team account |
 | **OpenBot** | The product the person is using, and their account with it: "Sign in to OpenBot", "your OpenBot account". | this deployment, the server, the instance, CopilotKit |
 | **OpenBot by CopilotKit** | The company, only where it has to be named: the license agreement's name, a legal or privacy line, the one place setup says who makes OpenBot. | CopilotKit alone |
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |
@@ -120,6 +123,7 @@ because the admin is the one who sets them. A page anybody can open may not.
 |---|---|
 | "agent" or "coworker" for a Bot | Bot |
 | "administrator" | admin |
+| "team", "the whole team" or "teammates" for everybody | "everyone in the organization", or "organization"; a team is one named group inside it |
 | "this deployment" on a page anybody can open | OpenBot, or say what is missing |
 | "CopilotKit" alone: "Sign in to CopilotKit", "your CopilotKit account" | OpenBot, or "OpenBot by CopilotKit" where the company must be named |
 | A sentence over ~25 words | Split it, or cut the clause that justifies the screen |

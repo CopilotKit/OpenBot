@@ -4,6 +4,7 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
@@ -40,6 +41,7 @@ export type NavigationItem =
         | "memory"
         | "skills"
         | "connections"
+        | "teams"
         | "admin"
         | "settings";
       label: string;
@@ -49,12 +51,15 @@ export type NavigationItem =
         | "/memory"
         | "/skills"
         | "/connections"
+        | "/teams"
         | "/admin"
         | "/settings";
       icon: Icon;
       section: "primary" | "account";
       /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
       adminOnly?: boolean;
+      /** Shown only in the team edition: the personal edition has one person and no teams. */
+      teamOnly?: boolean;
       /** Shown only where OpenBot offers memory (see `offersMemory`). */
       memoryOnly?: boolean;
     }
@@ -123,6 +128,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
     section: "primary",
   },
   {
+    /*
+     * The organization's teams, for everybody in it: which there are, which the person is in, and
+     * a team's own page, where its maintainers keep its people. Under the person's name with their
+     * organizations, because a team is the organization's and not something a Bot has. Not inside
+     * Admin: a team's members and maintainers are mostly not admins.
+     */
+    id: "teams",
+    label: "Teams",
+    to: "/teams",
+    icon: IconUsersGroup,
+    section: "account",
+    teamOnly: true,
+  },
+  {
     id: "admin",
     label: "Admin",
     to: "/admin",
@@ -143,7 +162,7 @@ export const NAVIGATION: readonly NavigationItem[] = [
  * The destinations this person may open, in order. Admin is in every edition, for an admin: in the
  * personal edition that is the one person, whom single-user mode makes the admin. The personal
  * edition also lists what the team edition adds, right after Admin, and has no Memory (see
- * `offersMemory`).
+ * `offersMemory`) and no Teams.
  */
 export function navigationFor(
   role: string | undefined,
@@ -152,10 +171,14 @@ export function navigationFor(
   const offered = NAVIGATION.filter(
     (item) =>
       item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
-  ).filter(
-    (item) =>
-      item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),
-  );
+  )
+    .filter(
+      (item) =>
+        item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),
+    )
+    .filter(
+      (item) => item.kind === "dialog" || !item.teamOnly || edition === "team",
+    );
   if (edition !== "personal") return offered;
   const settings = offered.findIndex((item) => item.id === "settings");
   return [
@@ -166,8 +189,8 @@ export function navigationFor(
 }
 
 /**
- * `navigationFor` the signed-in person, on this deployment's edition. Memory waits for the edition,
- * so the personal edition never shows it for a moment.
+ * `navigationFor` the signed-in person, on this deployment's edition. Memory and Teams wait for the
+ * edition, so the personal edition never shows either for a moment.
  */
 export function useNavigationItems(): readonly NavigationItem[] {
   const { data: user } = useQuery(currentUserQueryOptions());
@@ -175,5 +198,7 @@ export function useNavigationItems(): readonly NavigationItem[] {
   const items = navigationFor(user?.role, capabilities?.edition ?? "team");
   return capabilities
     ? items
-    : items.filter((item) => item.kind === "dialog" || !item.memoryOnly);
+    : items.filter(
+        (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
+      );
 }

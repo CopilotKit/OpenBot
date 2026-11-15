@@ -43,5 +43,6 @@ export * from "./sign-in-requests/sign-in-requests.zod";
 export * from "./skills/skills.zod";
 export * from "./tasks/tasks.zod";
 export * from "./team-bots/team-bots.zod";
+export * from "./teams/teams.zod";
 export * from "./voice/voice.zod";
 export * from "./what-if/what-if.zod";

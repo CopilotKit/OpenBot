@@ -85,7 +85,13 @@ export const ListCapabilitiesResponse = zod.object({
           groups: zod
             .record(zod.string(), zod.boolean())
             .describe(
-              "What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.",
+              "What each directory group is set to, by the group's name. A group absent sets nothing.",
+            ),
+          teams: zod
+            .record(zod.string(), zod.boolean())
+            .optional()
+            .describe(
+              "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
             ),
         })
         .describe(
@@ -178,8 +184,20 @@ export const UpdateCapabilityBody = zod
           ),
       )
       .optional()
+      .describe("By directory group name, 1 to 200 characters."),
+    teams: zod
+      .record(
+        zod.string(),
+        zod
+          .boolean()
+          .nullable()
+          .describe(
+            "On, off, or null to clear it so the level beneath decides.",
+          ),
+      )
+      .optional()
       .describe(
-        "By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.",
+        "By team id. A team that is not one of this organization's is not found.",
       ),
   })
   .describe("The levels to set or clear. At least one.");
@@ -218,7 +236,13 @@ export const UpdateCapabilityResponse = zod
     groups: zod
       .record(zod.string(), zod.boolean())
       .describe(
-        "What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.",
+        "What each directory group is set to, by the group's name. A group absent sets nothing.",
+      ),
+    teams: zod
+      .record(zod.string(), zod.boolean())
+      .optional()
+      .describe(
+        "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
       ),
   })
   .describe(
@@ -269,9 +293,9 @@ export const BatchUpdateCapabilitiesBody = zod.object({
     .array(
       zod.object({
         scopeKind: zod
-          .enum(["organization", "role", "group"])
+          .enum(["organization", "role", "group", "team"])
           .describe(
-            "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+            "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
           ),
         scopeId: zod
           .string()
@@ -279,7 +303,7 @@ export const BatchUpdateCapabilitiesBody = zod.object({
           .regex(batchUpdateCapabilitiesBodyChangesItemScopeIdRegExp)
           .optional()
           .describe(
-            "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+            "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
           ),
         capability: zod
           .enum([
@@ -332,9 +356,9 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
   saved: zod.array(
     zod.object({
       scopeKind: zod
-        .enum(["organization", "role", "group"])
+        .enum(["organization", "role", "group", "team"])
         .describe(
-          "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+          "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
         ),
       scopeId: zod
         .string()
@@ -342,7 +366,7 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
         .regex(batchUpdateCapabilitiesResponseSavedItemScopeIdRegExp)
         .optional()
         .describe(
-          "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+          "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
         ),
       capability: zod
         .enum([
@@ -417,14 +441,14 @@ export const TranslateCapabilityChangesResponse = zod.object({
       zod
         .object({
           scopeKind: zod
-            .enum(["organization", "role", "group"])
+            .enum(["organization", "role", "group", "team"])
             .describe(
-              "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+              "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
             ),
           scopeId: zod
             .string()
             .describe(
-              "Empty for the organization; admin or member for a role; a directory group's name for a group.",
+              "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
             ),
           capability: zod.string(),
           allowed: zod
@@ -497,9 +521,9 @@ export const PreviewCapabilityChangesBody = zod.object({
     .array(
       zod.object({
         scopeKind: zod
-          .enum(["organization", "role", "group"])
+          .enum(["organization", "role", "group", "team"])
           .describe(
-            "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+            "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
           ),
         scopeId: zod
           .string()
@@ -507,7 +531,7 @@ export const PreviewCapabilityChangesBody = zod.object({
           .regex(previewCapabilityChangesBodyChangesItemScopeIdRegExp)
           .optional()
           .describe(
-            "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+            "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
           ),
         capability: zod
           .string()
@@ -573,17 +597,33 @@ export const PreviewCapabilityChangesResponse = zod.object({
           title: zod.string(),
           before: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum(["default", "organization", "role", "group"]),
+            decidedBy: zod.enum([
+              "default",
+              "organization",
+              "role",
+              "group",
+              "team",
+            ]),
             scopeId: zod
               .string()
-              .describe("The role or group that decided it. Empty otherwise."),
+              .describe(
+                "The role, the group's name or the team's id that decided it. Empty otherwise.",
+              ),
           }),
           after: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum(["default", "organization", "role", "group"]),
+            decidedBy: zod.enum([
+              "default",
+              "organization",
+              "role",
+              "group",
+              "team",
+            ]),
             scopeId: zod
               .string()
-              .describe("The role or group that decided it. Empty otherwise."),
+              .describe(
+                "The role, the group's name or the team's id that decided it. Empty otherwise.",
+              ),
           }),
           activity: zod
             .object({

@@ -178,6 +178,99 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/skills/{skillId}/team-grants:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SkillId'
+    get:
+      tags: [Skills]
+      operationId: getSkillTeamGrants
+      summary: Read the teams the skill is granted to
+      description: >-
+        Return the teams the skill is granted to, by id. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. Only an admin
+        of the organization may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [skills:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The teams the skill is granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Skills]
+      operationId: replaceSkillTeamGrants
+      summary: Grant a skill to teams
+      description: >-
+        Grant the skill to exactly these teams of the organization, taking it
+        from any team left out. An empty list takes it from every team.
+        A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. A team of another organization is not found. Only an admin
+        of the organization may do this. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [skills:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillTeamGrantsInput'
+            examples:
+              oneTeam:
+                value:
+                  teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
+      responses:
+        '200':
+          description: The teams the skill is now granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/SkillTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/SkillOrTeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     SkillId:
@@ -264,6 +357,30 @@ components:
           description: >-
             Make a new skill the organization's. Only an admin may. It
             applies when the skill is made: rewriting one keeps whose it is.
+    SkillTeamGrants:
+      type: object
+      description: The teams the skill is granted to.
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          description: Each team's id, in order.
+          items:
+            type: string
+    SkillTeamGrantsInput:
+      type: object
+      additionalProperties: false
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          maxItems: 100
+          description: The id of each team of this organization to grant it to.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     SkillPage:
       type: object
       required: [skills, nextCursor]
@@ -297,6 +414,37 @@ components:
                 status: 404
                 detail: There's no skill called standup.
                 code: SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SkillOrTeamNotFound:
+      description: >-
+        There is no skill by that slug, a team named is not one of this
+        organization's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            skill:
+              value:
+                type: https://open.bot/errors/skill-not-found
+                title: Skill not found.
+                status: 404
+                detail: There is no skill called standup.
+                code: SKILL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -383,6 +531,10 @@ components:
             ownerId: null
             botIds: [general-assistant, research-assistant]
         nextCursor: null
+    SkillTeamGrantsExample:
+      summary: Granted to one team.
+      value:
+        teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
     SkillExample:
       summary: A person's own skill, offered by one Bot.
       value:

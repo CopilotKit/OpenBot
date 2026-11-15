@@ -226,7 +226,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   serving("user", [{ id: "expenses", audience: "team" }]);
   const view = draw({ ...BOT, mine: false, canManage: false });
   expect(await view.findByText("Sharing")).toBeTruthy();
-  expect(await view.findByText("Whole team")).toBeTruthy();
+  expect(await view.findByText("Everyone in the organization")).toBeTruthy();
 });
 
 test("the rows for routines, reach, memory and approvals say what this Bot has and open their pages", async () => {

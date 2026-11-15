@@ -121,7 +121,7 @@ export type TodayOverview = {
   settings?: Record<string, unknown>;
   groups?: string[];
   network?: {
-    scopeKind: "organization" | "group";
+    scopeKind: "organization" | "group" | "team";
     scopeId: string;
     mode: string;
     rules: unknown[];

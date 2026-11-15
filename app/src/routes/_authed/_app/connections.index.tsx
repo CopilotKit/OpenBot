@@ -819,7 +819,9 @@ function ConnectionStateLabel({
     );
   }
   if (state === "team") {
-    return <span className="text-xs text-muted-foreground">Team account</span>;
+    return (
+      <span className="text-xs text-muted-foreground">Shared account</span>
+    );
   }
   const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">

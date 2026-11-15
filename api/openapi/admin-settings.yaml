@@ -994,12 +994,14 @@ components:
       name: networkPolicyId
       in: path
       required: true
-      description: organization, or group:<name> for a directory group's.
+      description: >-
+        organization, team:<id> for a team's, or group:<name> for a directory
+        group's.
       schema:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
   schemas:
     Deployment:
       type: object
@@ -1310,7 +1312,15 @@ components:
           type: object
           description: >-
             What each directory group is set to, by the group's name. A group
-            absent sets nothing. Team scopes will be added when teams arrive.
+            absent sets nothing.
+          additionalProperties:
+            type: boolean
+        teams:
+          type: object
+          description: >-
+            What each team is set to, by the team's id. A team absent sets
+            nothing. A team's switch can only turn a permission on for the
+            people in it, and in the teams beneath it.
           additionalProperties:
             type: boolean
     CapabilityPage:
@@ -1354,7 +1364,20 @@ components:
           minProperties: 1
           maxProperties: 100
           description: >-
-            By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.
+            By directory group name, 1 to 200 characters.
+          propertyNames:
+            minLength: 1
+            maxLength: 200
+            pattern: ^[^\x00]*\S[^\x00]*$
+          additionalProperties:
+            $ref: '#/components/schemas/SwitchValue'
+        teams:
+          type: object
+          minProperties: 1
+          maxProperties: 100
+          description: >-
+            By team id. A team that is not one of this organization's is not
+            found.
           propertyNames:
             minLength: 1
             maxLength: 200
@@ -1368,15 +1391,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           $ref: '#/components/schemas/CapabilityId'
         allowed:
@@ -1418,15 +1441,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
           maxLength: 100
@@ -1505,13 +1528,13 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
         allowed:
@@ -1524,10 +1547,10 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group]
+          enum: [default, organization, role, group, team]
         scopeId:
           type: string
-          description: The role or group that decided it. Empty otherwise.
+          description: The role, the group's name or the team's id that decided it. Empty otherwise.
     CapabilityPreview:
       type: object
       required: [check, people, counts, activity, warning]
@@ -1666,16 +1689,16 @@ components:
         id:
           type: string
           description: >-
-            organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.
+            organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group]
+          enum: [organization, group, team]
           description: >-
-            Whose policy: the organization's, or a directory group's.
-            Team scopes will be added when teams arrive.
+            Whose policy: the organization's, a team's, or a directory
+            group's.
         scopeId:
           type: string
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -1730,15 +1753,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, group]
+          enum: [organization, group, team]
           description: >-
-            Whose policy: the organization's, or a directory group's.
-            Team scopes will be added when teams arrive.
+            Whose policy: the organization's, a team's, or a directory
+            group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:

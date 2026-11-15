@@ -86,7 +86,7 @@ test("a skill's slug is the one the skill form lets a person type", () => {
 
 test("each operation asks for its own area's scope: reading to read, writing to change", () => {
   const found = operations();
-  expect(found).toHaveLength(19);
+  expect(found).toHaveLength(21);
   for (const { path, method, tag, scopes } of found) {
     const area = tag === "Skills" ? "skills" : "components";
     // Checking whether a Bot may draw a component, and reading its data, change nothing a person set.
