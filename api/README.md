@@ -16,7 +16,7 @@ not touch the same lines:
 | `audit-events.yaml` | The audit trail |
 | `accounts.yaml` | People, API keys, sessions, linked accounts and identity providers |
 | `admin-settings.yaml` | Deployment, organization settings, capabilities, network policies, model usage, computer actions and the setup checklist |
-| `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls and conversation join tokens |
+| `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls, conversation join tokens and product events |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
 | `notifications.yaml` | Devices, destinations, deliveries and notification settings |
 | `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
