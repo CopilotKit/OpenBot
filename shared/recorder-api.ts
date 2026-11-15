@@ -215,23 +215,13 @@ export function isAllowedGatewayUrl(
 const id = (value: string) => encodeURIComponent(value);
 
 /**
- * The addresses a Recorder installed before the API's reached OpenBot at, which OpenBot keeps answering for it, and
- * the capture pass (`trajectoryConnect`), which is the runtime's. Nothing new calls the `/api/recorder` ones: the
- * Recorder reaches the API through its generated client (extension/src/shared/generated, the spec's Recorder tag), and
- * OpenBot's own screens through theirs.
+ * The Recorder's two addresses outside the API. `connectCodes` is where the Desktop shells released as 1.0.2 and 1.0.3
+ * ask for the connect code they hand a Recorder; nothing newer calls it. `trajectoryConnect` is the capture pass, which
+ * is the runtime's. Everything else the Recorder reaches through its generated client (extension/src/shared/generated,
+ * the spec's Recorder tag), and OpenBot's own screens through theirs.
  */
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",
-  connections: "/api/recorder/connections",
-  connection: (connectionId: string) =>
-    `/api/recorder/connections/${id(connectionId)}`,
-  currentConnection: "/api/recorder/connections/current",
-  me: "/api/recorder/me",
-  /** GET, the signed-in person's own recordings, `?cursor=`. */
-  recordings: "/api/recorder/recordings",
-  learning: "/api/recorder/learning",
-  /** POST `RecorderActivity`, with the Recorder's bearer: what this browser's Recorder is doing now (the red dot). */
-  activity: "/api/recorder/activity",
   trajectoryConnect: (t: string) =>
     `/api/copilotkit/trajectory/${id(t)}/connect`,
 } as const;
