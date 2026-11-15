@@ -28,6 +28,15 @@ import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { COMPUTER_STEPS_PATH } from "./approvals-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+  COMPONENTS_PATH,
+  checkComponentPath,
+  checkResponse,
+} from "./components-api";
 
 /**
  * A tool call that arrives after its person has left the conversation acts for the Bot that made it.
@@ -112,7 +121,7 @@ let runs: RunAgentInput[] = [];
 let stored: Message[] = [];
 /** Holds the Bot's first run until the test lets its call arrive. */
 let arrive: Promise<void> = Promise.resolve();
-/** Every question asked of `/api/components/:name/decision`, as its body. */
+/** Every check asked (`checkBotComponent`), as the Bot it names and its body. */
 let decisions: unknown[] = [];
 /** Every computer route called, as its path. */
 let computerCalls: string[] = [];
@@ -217,35 +226,33 @@ function runEvents(input: RunAgentInput): unknown[] {
 }
 
 /**
- * The server's component routes, answering as `server/src/components/routes.ts` does: an id that is
- * not a Bot this person can use is a 404, and a Bot is allowed only what it holds.
+ * The server's components, answering as the API does: a Bot that isn't one this person can use is a
+ * 404, and a Bot is allowed only what it holds.
  */
 async function components(path: string, request: Request): Promise<Response> {
-  if (path === "/api/components/catalogue")
-    return NativeResponse.json({ added: [] });
-  if (path === `/api/components/for-agent/${BOT}`)
-    return NativeResponse.json({
-      components: [{ name: "showRecord", description: RECORD_PUBLISHED }],
+  if (path === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
+  if (path === botComponentsPath(BOT))
+    return botComponentsResponse([
+      { name: "showRecord", description: RECORD_PUBLISHED },
+    ]);
+  if (path === botComponentsPath(OTHER))
+    return botComponentsResponse([
+      { name: "showMetrics", description: METRICS.description },
+    ]);
+  for (const bot of [BOT, OTHER]) {
+    if (path !== checkComponentPath(bot, "showRecord")) continue;
+    const body = (await request.json()) as { functions?: string[] };
+    decisions.push({ agentId: bot, ...body });
+    if (bot === BOT) return checkResponse({ allowed: true });
+    return checkResponse({
+      allowed: false,
+      reason: "Record is not available to this Bot at the moment.",
     });
-  if (path === `/api/components/for-agent/${OTHER}`)
-    return NativeResponse.json({
-      components: [{ name: "showMetrics", description: METRICS.description }],
-    });
-  if (path === "/api/components/showRecord/decision") {
-    const body = (await request.json()) as { agentId?: string };
-    decisions.push(body);
-    if (body.agentId === BOT) return NativeResponse.json({ allowed: true });
-    if (body.agentId === OTHER)
-      return NativeResponse.json({
-        allowed: false,
-        reason: "Record is not available to this Bot at the moment.",
-      });
-    return NativeResponse.json(
-      { error: "There is no such Bot." },
-      { status: 404 },
-    );
   }
-  return NativeResponse.json({ error: "Not found" }, { status: 404 });
+  return NativeResponse.json(
+    { detail: "Couldn't find that Bot.", code: "BOT_NOT_FOUND" },
+    { status: 404 },
+  );
 }
 
 /** A Bot's computer. Only the crm Bot's answers; any other id is a computer that is not there. */
@@ -335,7 +342,12 @@ beforeAll(() => {
       const request = input instanceof Request ? input : new Request(url, init);
       if (url.pathname.startsWith("/api/v2/organizations/default/computers/"))
         return computer(url.pathname);
-      if (url.pathname.startsWith("/api/components/"))
+      if (
+        url.pathname.startsWith(COMPONENTS_PATH) ||
+        /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/components(\/|$)/.test(
+          url.pathname,
+        )
+      )
         return components(url.pathname, request);
       if (url.pathname.startsWith(SIGN_IN_REQUESTS))
         return signIn(url.pathname, request);

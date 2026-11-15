@@ -21,6 +21,7 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath } from "./components-api";
 
 /**
  * What one run of a Bot is offered, and how its facts are read: the rules in `bot-offer.ts` against
@@ -67,8 +68,8 @@ const RECORD = { name: "showRecord", description: "Its published words." };
 const PROFILE = { id: BOT, visibility: "public", canManage: true };
 
 function ordinaryAnswer(path: string): Response {
-  if (path === `/api/components/for-agent/${BOT}`)
-    return Response.json({ components: [RECORD] });
+  if (path === botComponentsPath(BOT))
+    return Response.json({ components: [RECORD], nextCursor: null });
   if (path === botPath(BOT)) return Response.json({ bot: PROFILE });
   if (path === MY_CAPABILITIES_PATH)
     return Response.json({ capabilities: {}, enforced: false });
@@ -99,7 +100,7 @@ const facts = (overrides: Partial<BotFacts> = {}): BotFacts => ({
 test("a transient failure reading a Bot's grants is retried as the screen's own read is, and leaves the query answered", async () => {
   let failures = 1;
   answering((path) => {
-    if (path === `/api/components/for-agent/${BOT}` && failures > 0) {
+    if (path === botComponentsPath(BOT) && failures > 0) {
       failures -= 1;
       return Response.json({ error: "Try again" }, { status: 503 });
     }
@@ -156,7 +157,7 @@ test("facts already read are served at once, and fetched again in the background
     RECORD.description,
   );
   // And the next step's facts are on their way.
-  expect(asked).toContain(`/api/components/for-agent/${BOT}`);
+  expect(asked).toContain(botComponentsPath(BOT));
 });
 
 /*

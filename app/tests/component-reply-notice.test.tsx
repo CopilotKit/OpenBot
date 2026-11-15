@@ -45,6 +45,14 @@ import {
   lifecycleResponse,
 } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+  checkComponentPath,
+  checkResponse,
+} from "./components-api";
 
 /**
  * A Bot whose whole answer is something it drew raises the same "replied" notice a Bot that answers
@@ -404,14 +412,13 @@ async function serve(url: URL, request: Request): Promise<Response> {
         canManage: true,
       },
     });
-  if (path === "/api/components/catalogue")
-    return NativeResponse.json({ added: [] });
-  if (path === `/api/components/for-agent/${BOT}`)
-    return NativeResponse.json({
-      components: [{ name: "showRecord", description: "Show one record." }],
-    });
-  if (path === "/api/components/showRecord/decision")
-    return NativeResponse.json({ allowed: true });
+  if (path === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
+  if (path === botComponentsPath(BOT))
+    return botComponentsResponse([
+      { name: "showRecord", description: "Show one record." },
+    ]);
+  if (path === checkComponentPath(BOT, "showRecord"))
+    return checkResponse({ allowed: true });
   if (path === MY_CAPABILITIES_PATH)
     return NativeResponse.json({ capabilities: {}, enforced: false });
   if (path.endsWith("/info"))

@@ -24,9 +24,9 @@ import {
 import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
 import {
-  type PublishedSandboxed,
-  publishedSandboxedQueryOptions,
-} from "@/lib/sandboxed/queries";
+  type PublishedPlayground,
+  publishedPlaygroundQueryOptions,
+} from "@/lib/components/queries";
 
 /**
  * Browser-authored components use the same component grants as compiled gallery components, but
@@ -37,7 +37,7 @@ export function SandboxedTools() {
   // surface has declared its Bot; the placeholder is not one the server knows, and asking would 404
   // on every poll.
   const declared = useDeclaredBotId();
-  const { data: published } = useQuery(publishedSandboxedQueryOptions());
+  const { data: published } = useQuery(publishedPlaygroundQueryOptions());
   const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
   // Each one offered to the run of a Bot holding it, never by what the screen shows; see
   // `bot-offer.ts`.
@@ -85,7 +85,7 @@ function SandboxedTool({
   component,
   description,
 }: {
-  component: PublishedSandboxed;
+  component: PublishedPlayground;
   description: string | undefined;
 }) {
   const [refusals, setRefusals] = useState<Map<string, string>>(new Map());

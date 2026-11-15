@@ -23,6 +23,7 @@ import {
   LOOKUPS,
   lookupsStored,
 } from "./parallel-lookups.fixture";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /*
  * A message sent from a conversation that missed the end of a step of parallel lookups carries the
@@ -85,8 +86,8 @@ beforeAll(() => {
         return NativeResponse.json({
           bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
