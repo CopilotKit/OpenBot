@@ -2313,6 +2313,12 @@ components:
         threadId:
           type: string
           description: The new thread's id.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     ConversationThreadStatus:
       type: object
       required:
@@ -2324,6 +2330,12 @@ components:
         known:
           type: boolean
           description: Whether the thread still holds the caller's conversation.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
       enum:
@@ -3068,10 +3080,10 @@ components:
       value: {"transport": "webrtc"}
     ConversationThreadExample:
       summary: "A new thread id."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a"}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     ConversationThreadStatusExample:
       summary: "A thread that is still there."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true, "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     TaskPageExample:
       summary: "One task, ready to read."
       value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}
