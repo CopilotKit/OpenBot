@@ -1213,9 +1213,51 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
     MANAGED_AGENT_AG_UI_URL: "http://agent-langgraph-agui:4206/",
     PICKED_HARNESS_URL: "http://agent-harness:4202/run",
     OPENAI_BASE_URL: "http://host.docker.internal:3001/api/model-provider/v1",
-    // The server's own way to the gateway, and the browser's, which is on the host.
+    // The server's own way to the gateway, which it carries the browser's socket to.
     INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
-    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://localhost:14401",
+    INTELLIGENCE_GATEWAY_PROXY: "on",
+  });
+  // One address: nothing the server is given names the gateway's own port on this machine, which
+  // is the address a client would otherwise be handed beside OpenBot's.
+  expect(
+    withBots.services.server.environment.INTELLIGENCE_BROWSER_GATEWAY_WS_URL ??
+      "",
+  ).toBe("");
+  for (const [name, value] of Object.entries(
+    withBots.services.server.environment,
+  )) {
+    expect(`${name}=${value}`).not.toMatch(/(localhost|127\.0\.0\.1):14401/);
+  }
+
+  // An Intelligence somewhere else has a host of its own, which the browser reaches itself: the
+  // server is given no container address for it and carries nothing.
+  const elsewhere = runComposeConfig({
+    INTELLIGENCE_GATEWAY_WS_URL: "wss://realtime.intelligence.example",
+  });
+  expect(elsewhere.services.server.environment).toMatchObject({
+    INTELLIGENCE_GATEWAY_WS_URL: "wss://realtime.intelligence.example",
+  });
+  expect(
+    elsewhere.services.server.environment.INTELLIGENCE_GATEWAY_PROXY ?? "",
+  ).toBe("");
+  expect(
+    elsewhere.services.server.environment.INTELLIGENCE_BROWSER_GATEWAY_WS_URL ??
+      "",
+  ).toBe("");
+
+  // Whoever starts the server may keep the gateway's own address for the browser instead, as
+  // `scripts/start.sh` does for a checkout with no public URL: the relay off, said by setting it
+  // empty, and the browser's address named.
+  const kept = runComposeConfig({
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
+    INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    OPENBOT_GATEWAY_PROXY: "",
+    OPENBOT_BROWSER_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
+  });
+  expect(kept.services.server.environment).toMatchObject({
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    INTELLIGENCE_GATEWAY_PROXY: "",
+    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
   });
 
   // No managed Bot stays no managed Bot, and a remote harness keeps its own address.
