@@ -26,6 +26,7 @@ export default defineConfig({
           "Computers",
           "Conversations",
           "Devices",
+          "Memory",
           "Organization settings",
           "Routines",
           "Skills",

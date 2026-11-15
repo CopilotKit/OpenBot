@@ -1,7 +1,14 @@
 import { Redirect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Button, Switch, Text, TextInput, View } from "react-native";
-import { api, everyPage, type Memory, ORGANIZATION } from "../src/api";
+import { everyPage, ME, type Memory, ORGANIZATION_ID } from "../src/api";
+import {
+  createMemory,
+  deleteMemory,
+  listMemories,
+  updateMemory,
+} from "../src/api/generated/memory/memory";
+import type { UpdateMemoryRequest } from "../src/api/generated/model";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -18,30 +25,33 @@ const ORIGIN: Record<Memory["formedBy"], string> = {
   person: "You wrote this",
   import: "Imported",
   bot: "A Bot learned this",
+  intelligence: "Kept in the backend",
 };
 
-/** The person's own memories in the API. A write there carries an Idempotency-Key, which `api` adds. */
-const MEMORIES = `${ORGANIZATION}/people/me/memories`;
-
-/** What your Bots remember about you: read, add, edit, switch off and delete. */
+/**
+ * What your Bots remember about you: read, add, edit, switch off and delete. Every write carries an Idempotency-Key,
+ * which the API client's mutator adds.
+ */
 export default function MemoryScreen() {
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ id: string; content: string }>();
   const load = useCallback(
-    async () => ({ memories: await everyPage<Memory>(MEMORIES, "memories") }),
+    async () => ({
+      memories: await everyPage(
+        (page) => listMemories(ORGANIZATION_ID, ME, page),
+        (page) => page.memories,
+      ),
+    }),
     [],
   );
   const memories = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
 
-  const change = (id: string, body: Record<string, unknown>) =>
+  const change = (id: string, body: UpdateMemoryRequest) =>
     action.run(id, async () => {
-      await api(`${MEMORIES}/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body,
-      });
+      await updateMemory(ORGANIZATION_ID, ME, id, body);
       await memories.refresh();
     });
 
@@ -71,9 +81,8 @@ export default function MemoryScreen() {
           disabled={Boolean(action.busy) || !draft.trim()}
           onPress={() => {
             void action.run("add", async () => {
-              await api(MEMORIES, {
-                method: "POST",
-                body: { content: draft.trim() },
+              await createMemory(ORGANIZATION_ID, ME, {
+                content: draft.trim(),
               });
               setDraft("");
               await memories.refresh();
@@ -170,10 +179,7 @@ export default function MemoryScreen() {
                       style: "destructive",
                       onPress: () => {
                         void action.run(memory.id, async () => {
-                          await api(
-                            `${MEMORIES}/${encodeURIComponent(memory.id)}`,
-                            { method: "DELETE" },
-                          );
+                          await deleteMemory(ORGANIZATION_ID, ME, memory.id);
                           await memories.refresh();
                         });
                       },

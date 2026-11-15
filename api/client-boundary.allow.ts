@@ -376,30 +376,6 @@ export const ALLOWED: Allowed[] = [
  * entry here; the test then fails if the call is still made by hand.
  */
 export const TEMPORARY: Temporary[] = [
-  // Learning and memory: the spec in OpenBot PR 1667, the screens after it.
-  ...[
-    "app/src/lib/learning/queries.ts",
-    "app/src/lib/learning/mutations.ts",
-  ].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/(admin|settings)\/learning(\/|\?|\{|$)/,
-      rule: "temporary",
-      why: "Learning's screens, at today's addresses",
-      until:
-        "OpenBot PR 1667 (Learning in the API), then its screens on the generated client",
-    }),
-  ),
-  ...["app/src/lib/memory.ts", "mobile/app/memory.tsx"].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/memory(\/|$)/,
-      rule: "temporary",
-      why: "memory, at today's addresses",
-      until:
-        "OpenBot PR 1667 (memory in the API), then these screens on the generated client",
-    }),
-  ),
   // The Recorder's earlier addresses: no client calls them any more (the Recorder is on its
   // generated client), but the server's own tests still read them from this table.
   {
