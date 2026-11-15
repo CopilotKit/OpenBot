@@ -107,20 +107,23 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
   expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
   cleanup();
 
-  // The Activity page doesn't list them a second time: one row goes to the Bot's Routines.
+  // The Activity page lists both under Recurring, which ends on a row to the Bot's Routines.
   const sections = glance(data, BotActivitySections);
   const routines = (await sections.findByText("Routines")).closest("a");
   expect(routines?.getAttribute("href")).toBe("/bots/scout/routines");
   expect(routines?.textContent).toContain("1 scheduled · 1 on demand");
   expect(sections.queryByRole("heading", { name: "On demand" })).toBeNull();
-  expect(sections.queryByText("Watch OpenBot releases")).toBeNull();
-  expect(sections.queryByText("Check releases 1")).toBeNull();
+  const recurring = sections
+    .getByRole("heading", { name: "Recurring" })
+    .closest("section") as HTMLElement;
+  expect(recurring.textContent).toContain("Watch OpenBot releases");
+  expect(recurring.textContent).toContain("Check releases 1");
 });
 
 /*
  * The Bot's own follow-ups, a queued run of a goal and a delegated task waiting its turn are lined
  * up too, and the Routines page does not list them. They stay under Scheduled, a follow-up with its
- * Cancel, and the row to Routines counts only the routines.
+ * Cancel. The routine and the goal are under Recurring, and the row to Routines counts only them.
  */
 test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with their Cancel", async () => {
   const [routine] = items(1, "Check releases");
@@ -178,10 +181,17 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
     .getByText("Chase the invoice reply")
     .closest("[data-slot=item]") as HTMLElement;
   expect(followUpRow).toBeTruthy();
-  expect(view.getByText("Run of Watch OpenBot releases")).toBeTruthy();
-  // The routine and the goal are on the Routines page, so not here.
-  expect(view.queryByText("Check releases 1")).toBeNull();
-  expect(view.queryByText("Watch OpenBot releases")).toBeNull();
+  const scheduled = view
+    .getByRole("heading", { name: "Scheduled" })
+    .closest("section") as HTMLElement;
+  expect(scheduled.textContent).toContain("Run of Watch OpenBot releases");
+  // The routine and the goal recur, so they are not under Scheduled.
+  expect(scheduled.textContent).not.toContain("Check releases 1");
+  const recurring = view
+    .getByRole("heading", { name: "Recurring" })
+    .closest("section") as HTMLElement;
+  expect(recurring.textContent).toContain("Check releases 1");
+  expect(recurring.textContent).toContain("Watch OpenBot releases");
   const routines = view.getByText("Routines").closest("a");
   expect(routines?.textContent).toContain("2 scheduled");
   expect(routines?.textContent).not.toContain("4 scheduled");
@@ -233,10 +243,13 @@ function glance(
   global.fetch = (async (input: RequestInfo | URL) =>
     String(input) === botOperationPath("scout", "activity")
       ? activityResponse(data)
-      : Response.json(
-          { error: "unexpected" },
-          { status: 404 },
-        )) as typeof fetch;
+      : // The person's tasks, which the Activity page lists beside the Bot's activity: none here.
+        pathOf(input) === `${ORGANIZATION_PATH}/tasks`
+        ? Response.json({ tasks: [], nextCursor: null })
+        : Response.json(
+            { error: "unexpected" },
+            { status: 404 },
+          )) as typeof fetch;
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => <Component agentId="scout" />,

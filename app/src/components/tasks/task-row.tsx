@@ -72,19 +72,33 @@ function nextLine({ task, status }: ListedTask): string | null {
 export function TaskRow({
   listed,
   botName,
+  askedIn,
+  settled = false,
 }: {
   listed: ListedTask;
-  botName: string;
+  /** Left out on a Bot's own page, where every row is that Bot's. */
+  botName?: string;
+  /**
+   * The conversation that asked for the task, for a link back to it, with what that conversation is
+   * called when it is known. A check-in's task was not asked for in one.
+   */
+  askedIn?: { channelId: string; title: string | null };
+  /**
+   * Listed as finished, on a Bot's Activity page: no dot asking for attention, and Open does not
+   * lead. Its result was already said in the conversation that asked for it.
+   */
+  settled?: boolean;
 }) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
   const Icon = ICONS[status];
-  const dot = DOT[status];
+  const dot = settled ? undefined : DOT[status];
   const next = nextLine(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  const openFirst = status === "ready_for_review" || status === "needs_input";
+  const openFirst =
+    !settled && (status === "ready_for_review" || status === "needs_input");
   return (
     <Item size="sm">
       <ItemMedia className="relative" variant="icon">
@@ -108,6 +122,26 @@ export function TaskRow({
         </ItemDescription>
         {next ? (
           <ItemDescription className="text-foreground">{next}</ItemDescription>
+        ) : null}
+        {askedIn ? (
+          /*
+           * Not clamped: a clamped line cuts the underline off, and the link then reads as plain
+           * text. The underline sits close, as on the task's own "Sent from" label.
+           */
+          <ItemDescription
+            className="line-clamp-none [&>a]:underline-offset-2"
+            data-slot="task-asked-in"
+          >
+            <Link
+              className="rounded-sm outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              params={{ channelId: askedIn.channelId }}
+              to="/channel/$channelId"
+            >
+              {askedIn.title
+                ? `Asked in ${askedIn.title}`
+                : "Asked in another conversation"}
+            </Link>
+          </ItemDescription>
         ) : null}
         <ItemFooter className="mt-2 flex-wrap justify-start">
           {status === "failed" ? (
