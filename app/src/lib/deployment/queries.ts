@@ -105,6 +105,17 @@ export function deploymentCapabilitiesQueryOptions() {
 }
 
 /**
+ * Asks OpenBot the cheapest thing it answers, to find out whether it answers at all. A verdict about
+ * this moment, so no cache key: the answer reaches `lib/desktop/reachability.ts` through the client
+ * like every other, and that is what the connection line reads.
+ */
+export async function askWhetherOpenBotAnswers(): Promise<void> {
+  await getDeployment(DEPLOYMENT_ORGANIZATION, {
+    fallback: "Couldn't reach OpenBot.",
+  }).catch(() => undefined);
+}
+
+/**
  * Whether this deployment offers memory: what a person's Bots remember about them, and the apps a
  * Bot learns it from. Every memory screen, row and link reads this.
  *
