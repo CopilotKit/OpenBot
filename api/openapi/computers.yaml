@@ -2355,11 +2355,11 @@ components:
           examples:
             computer:
               value:
-                type: https://open.bot/errors/not-found
-                title: Not found.
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
                 status: 404
                 detail: Couldn't find that computer.
-                code: NOT_FOUND
+                code: BOT_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
