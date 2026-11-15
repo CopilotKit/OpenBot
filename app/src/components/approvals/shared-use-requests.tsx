@@ -15,11 +15,13 @@ import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
+  approvalNamesTeam,
   decideSharedUseMutationOptions,
   describeApproval,
   type SharedUseRequestReason,
   sharedUseRequestsQueryOptions,
 } from "@/lib/plugins/shared-use";
+import { teamListQueryOptions } from "@/lib/teams/queries";
 
 const WHY: Record<SharedUseRequestReason, string> = {
   refused_call:
@@ -40,6 +42,20 @@ export function SharedUseRequests() {
   const isAdmin = isOrganizationAdmin(me?.role);
   const requests = useQuery(sharedUseRequestsQueryOptions(isAdmin));
   const decide = useMutation(decideSharedUseMutationOptions(queryClient));
+  /*
+   * An approval keeps a team's id and a person reads its name, so the organization's teams are read
+   * once for every row, and only when a row names one.
+   */
+  const teams = useQuery({
+    ...teamListQueryOptions(),
+    enabled:
+      isAdmin &&
+      (requests.data ?? []).some(
+        (request) =>
+          approvalNamesTeam(request.current) ||
+          approvalNamesTeam(request.proposed),
+      ),
+  }).data?.teams;
   if (!isAdmin || !requests.data?.length) return null;
 
   return (
@@ -68,11 +84,11 @@ export function SharedUseRequests() {
                 <p className="text-sm">
                   Now:{" "}
                   {request.current
-                    ? describeApproval(request.current)
+                    ? describeApproval(request.current, teams)
                     : "Not approved"}
                 </p>
                 <p className="text-sm">
-                  Asked: {describeApproval(request.proposed)}
+                  Asked: {describeApproval(request.proposed, teams)}
                 </p>
               </ItemContent>
               <ItemFooter className="justify-start">

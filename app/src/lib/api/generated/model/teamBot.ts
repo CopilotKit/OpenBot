@@ -4,7 +4,7 @@
 import type { TeamBotAudience } from "./teamBotAudience";
 
 /**
- * A Bot published to the team, as the caller sees it. Who it reaches (people, groups and assignedGroups) is present only for its owner and administrators.
+ * A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.
  */
 export interface TeamBot {
   botId: string;
@@ -17,7 +17,7 @@ export interface TeamBot {
   publishedAt: string;
   /** Whether an administrator put it in the caller's Bots list, where they can't hide it. */
   assigned: boolean;
-  /** False while its name or description would leave teammates unable to tell it apart, so they can't see it. */
+  /** False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it. */
   visibleToTeam: boolean;
   /** The people it is published to, by email. */
   people?: string[];

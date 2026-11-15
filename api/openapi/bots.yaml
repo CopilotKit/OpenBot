@@ -1081,7 +1081,8 @@ paths:
       description: >-
         Return one page of the published Bots the caller may use or manages:
         their own publications, the ones published to them by name, to a
-        group they are in or to the whole team, and the ones an administrator
+        group or team they are in or to everyone in the organization, and the
+        ones an administrator
         assigned them. An administrator sees every one. Who a Team Bot reaches
         (people, groups and assignments) is shown only to its owner and
         administrators. Ordered by name, then the Bot's id. A missing cursor
@@ -1161,13 +1162,14 @@ paths:
     put:
       tags: [Team Bots]
       operationId: publishTeamBot
-      summary: Publish a Bot to the team
+      summary: Publish a Bot to everyone in the organization, or to some of them
       description: >-
-        Publish one of the caller's own Bots to the whole team, or to named
-        people and directory groups, or change who it is published to. Each
-        person's conversations with it are private to them; its owner can't
-        read them. Needs the caller's Team Bots switch, and a Bot with a real
-        name and a description, which is how teammates tell it apart. Every
+        Publish one of the caller's own Bots to everyone in the organization,
+        or to named people, teams and directory groups, or change who it is
+        published to. Each person's conversations with it are private to them;
+        its owner can't read them. Needs the caller's Team Bots switch, and a
+        Bot with a real name and a description, which is how the people it is
+        published to tell it apart. Every
         person named must have signed in here. Publishing can widen who
         reaches the shared app accounts the Bot uses, and the answer says
         which an administrator still has to approve.
@@ -1185,7 +1187,7 @@ paths:
               $ref: '#/components/schemas/TeamBotPublication'
             examples:
               team:
-                summary: To the whole team.
+                summary: To everyone in the organization.
                 value:
                   audience: team
               people:
@@ -1226,8 +1228,8 @@ paths:
       operationId: unpublishTeamBot
       summary: Unpublish a Team Bot
       description: >-
-        Stop publishing a Bot: teammates can't use it until it is published
-        again, and its assignments wait, doing nothing. Its owner or an
+        Stop publishing a Bot: the people it was published to can't use it
+        until it is published again, and its assignments wait, doing nothing. Its owner or an
         administrator may unpublish it. Unpublishing a Bot that is not
         published changes nothing.
       security:
@@ -2132,12 +2134,14 @@ components:
     TeamBotAudience:
       type: string
       enum: [team, people]
-      description: team is everybody in the organization; people is the people and groups named.
+      description: >-
+        team is everyone in the organization; people is the people, teams and
+        groups named.
     TeamBot:
       type: object
       description: >-
-        A Bot published to the team, as the caller sees it. Who it reaches
-        (people, groups and assignedGroups) is present only for its owner and
+        A published Bot, as the caller sees it. Who it reaches (people, teams,
+        groups and assignedGroups) is present only for its owner and
         administrators.
       required:
         - botId
@@ -2172,8 +2176,8 @@ components:
         visibleToTeam:
           type: boolean
           description: >-
-            False while its name or description would leave teammates unable
-            to tell it apart, so they can't see it.
+            False while its name or description would leave the people it is
+            published to unable to tell it apart, so they can't see it.
         people:
           type: array
           description: The people it is published to, by email.
@@ -2700,7 +2704,7 @@ components:
             assignedGroups: []
         nextCursor: null
     TeamBotExample:
-      summary: Published to the whole team, seen by a teammate.
+      summary: Published to everyone in the organization, seen by one of them.
       value:
         teamBot:
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21

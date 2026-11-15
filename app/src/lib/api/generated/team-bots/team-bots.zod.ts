@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the published Bots the caller may use or manages: their own publications, the ones published to them by name, to a group they are in or to the whole team, and the ones an administrator assigned them. An administrator sees every one. Who a Team Bot reaches (people, groups and assignments) is shown only to its owner and administrators. Ordered by name, then the Bot's id. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the published Bots the caller may use or manages: their own publications, the ones published to them by name, to a group or team they are in or to everyone in the organization, and the ones an administrator assigned them. An administrator sees every one. Who a Team Bot reaches (people, groups and assignments) is shown only to its owner and administrators. Ordered by name, then the Bot's id. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Team Bots
  */
 
@@ -60,7 +60,7 @@ export const ListTeamBotsResponse = zod.object({
         audience: zod
           .enum(["team", "people"])
           .describe(
-            "team is everybody in the organization; people is the people and groups named.",
+            "team is everyone in the organization; people is the people, teams and groups named.",
           ),
         publishedAt: zod.iso.datetime({ offset: true }),
         assigned: zod
@@ -71,7 +71,7 @@ export const ListTeamBotsResponse = zod.object({
         visibleToTeam: zod
           .boolean()
           .describe(
-            "False while its name or description would leave teammates unable to tell it apart, so they can't see it.",
+            "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
           ),
         people: zod
           .array(zod.string())
@@ -93,7 +93,7 @@ export const ListTeamBotsResponse = zod.object({
           ),
       })
       .describe(
-        "A Bot published to the team, as the caller sees it. Who it reaches (people, groups and assignedGroups) is present only for its owner and administrators.",
+        "A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.",
       ),
   ),
   nextCursor: zod
@@ -138,7 +138,7 @@ export const GetTeamBotResponse = zod.object({
       audience: zod
         .enum(["team", "people"])
         .describe(
-          "team is everybody in the organization; people is the people and groups named.",
+          "team is everyone in the organization; people is the people, teams and groups named.",
         ),
       publishedAt: zod.iso.datetime({ offset: true }),
       assigned: zod
@@ -149,7 +149,7 @@ export const GetTeamBotResponse = zod.object({
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave teammates unable to tell it apart, so they can't see it.",
+          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
@@ -171,13 +171,13 @@ export const GetTeamBotResponse = zod.object({
         ),
     })
     .describe(
-      "A Bot published to the team, as the caller sees it. Who it reaches (people, groups and assignedGroups) is present only for its owner and administrators.",
+      "A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.",
     ),
 });
 
 /**
- * Publish one of the caller's own Bots to the whole team, or to named people and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how teammates tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
- * @summary Publish a Bot to the team
+ * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
+ * @summary Publish a Bot to everyone in the organization, or to some of them
  */
 
 export const publishTeamBotPathBotIdRegExp = new RegExp("\\S");
@@ -225,7 +225,7 @@ export const PublishTeamBotBody = zod.object({
   audience: zod
     .enum(["team", "people"])
     .describe(
-      "team is everybody in the organization; people is the people and groups named.",
+      "team is everyone in the organization; people is the people, teams and groups named.",
     ),
   emails: zod
     .array(zod.string().max(publishTeamBotBodyEmailsItemMax))
@@ -265,7 +265,7 @@ export const PublishTeamBotResponse = zod.object({
       audience: zod
         .enum(["team", "people"])
         .describe(
-          "team is everybody in the organization; people is the people and groups named.",
+          "team is everyone in the organization; people is the people, teams and groups named.",
         ),
       publishedAt: zod.iso.datetime({ offset: true }),
       assigned: zod
@@ -276,7 +276,7 @@ export const PublishTeamBotResponse = zod.object({
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave teammates unable to tell it apart, so they can't see it.",
+          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
@@ -298,7 +298,7 @@ export const PublishTeamBotResponse = zod.object({
         ),
     })
     .describe(
-      "A Bot published to the team, as the caller sees it. Who it reaches (people, groups and assignedGroups) is present only for its owner and administrators.",
+      "A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.",
     ),
   sharedApps: zod
     .object({
@@ -321,7 +321,7 @@ export const PublishTeamBotResponse = zod.object({
 });
 
 /**
- * Stop publishing a Bot: teammates can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
+ * Stop publishing a Bot: the people it was published to can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
  * @summary Unpublish a Team Bot
  */
 
@@ -410,7 +410,7 @@ export const AssignTeamBotResponse = zod.object({
       audience: zod
         .enum(["team", "people"])
         .describe(
-          "team is everybody in the organization; people is the people and groups named.",
+          "team is everyone in the organization; people is the people, teams and groups named.",
         ),
       publishedAt: zod.iso.datetime({ offset: true }),
       assigned: zod
@@ -421,7 +421,7 @@ export const AssignTeamBotResponse = zod.object({
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave teammates unable to tell it apart, so they can't see it.",
+          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
@@ -443,7 +443,7 @@ export const AssignTeamBotResponse = zod.object({
         ),
     })
     .describe(
-      "A Bot published to the team, as the caller sees it. Who it reaches (people, groups and assignedGroups) is present only for its owner and administrators.",
+      "A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.",
     ),
   sharedApps: zod
     .object({

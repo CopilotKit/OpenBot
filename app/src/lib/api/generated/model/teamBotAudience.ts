@@ -3,7 +3,7 @@
  */
 
 /**
- * team is everybody in the organization; people is the people and groups named.
+ * team is everyone in the organization; people is the people, teams and groups named.
  */
 export type TeamBotAudience =
   (typeof TeamBotAudience)[keyof typeof TeamBotAudience];

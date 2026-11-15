@@ -72,6 +72,35 @@ export function readControl(
   );
 }
 
+/** A read of the wheel that answered "not found": the Bot is not one this person can use. */
+export const BOT_GONE = "gone";
+
+/**
+ * Who is driving, for the poll: as `readControl`, and saying when the Bot itself is not there.
+ *
+ * The API answers the read 404 when the Bot does not exist or is not this person's any more (a Bot
+ * shared with a team they were taken out of). That is an answer and not a hiccup: asking again a
+ * second later gets it again, for as long as the screen stays open.
+ */
+export async function readControlOrGone(
+  computerId: string,
+  signal?: AbortSignal,
+): Promise<ControlState | typeof BOT_GONE | null> {
+  let gone = false;
+  const control = await controlFrom(
+    getComputerControl(
+      organizationId(),
+      computerId,
+      undefined,
+      signal ? { signal } : {},
+    ).catch((error: unknown) => {
+      gone = error instanceof ClientError && error.status === 404;
+      throw error;
+    }),
+  );
+  return gone ? BOT_GONE : control;
+}
+
 export async function takeControl(computerId: string, requestId?: string) {
   const id =
     requestId ??

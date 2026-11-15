@@ -57,6 +57,7 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { runReply } from "@/lib/channels/run-reply";
+import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
 import {
   onRunStartedAway,
   onTurnFinishedAway,
@@ -67,7 +68,7 @@ import {
   turnsLeftRunning,
   turnsNoLongerAway,
 } from "@/lib/channels/turns-finished-away";
-import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
+import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import { useConversationActivity } from "@/lib/computers/activity";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
@@ -90,7 +91,12 @@ import {
   withStoredAnswers,
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
-import { followLastRun, stoppedReason } from "@/lib/copilot/stopped-turn";
+import {
+  failedRunReason,
+  followLastRun,
+  requestNotMade,
+  stoppedReason,
+} from "@/lib/copilot/stopped-turn";
 import {
   readThreadMessages,
   withCurrentA2uiVersions,
@@ -98,7 +104,6 @@ import {
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
-import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import {
   askChannelAgent,
   messageText,
@@ -1535,13 +1540,24 @@ export function ChannelChat({
      * nine steps into a form) ended the turn with its steps on screen and nothing said. Only a
      * RUN_ERROR counts there: the Bot said it failed, where a Stop ends a run as finished, cancelled.
      */
-    const fail = (message: string, laterRun = false) => {
+    const fail = (
+      message: string,
+      laterRun = false,
+      /** A truer sentence that is still being asked for; nothing is drawn until it answers. */
+      truer?: Promise<string>,
+    ) => {
       if (!awaitingReply.current && !(laterRun && turnsRef.current > 0)) return;
       awaitingReply.current = false;
       // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
       // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
       turnFailure.current = message;
-      setRunError(message);
+      if (!truer) return setRunError(message);
+      void truer.then((sentence) => {
+        // The next turn clears the failure; a sentence about the one before it is dropped.
+        if (turnFailure.current !== message) return;
+        turnFailure.current = sentence;
+        setRunError(sentence);
+      });
     };
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
@@ -1561,7 +1577,18 @@ export function ChannelChat({
           streamBroke.current = true;
           return;
         }
-        fail(stoppedReason(error));
+        /*
+         * The run request itself was not made. That is the back end out of reach, or the Bot taken
+         * away from this person (the runtime answers 404 for a Bot that is not theirs), and the
+         * runtime client reports both the same way. `failedRunReason` asks the server which.
+         */
+        fail(
+          stoppedReason(error),
+          false,
+          requestNotMade(error)
+            ? failedRunReason(error, runtimeAgentId)
+            : undefined,
+        );
       },
       onRunFinishedEvent: ({ event }) => {
         /*

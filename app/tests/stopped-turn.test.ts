@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { stoppedReason } from "../src/lib/copilot/stopped-turn";
+import {
+  failedRunReason,
+  stoppedReason,
+} from "../src/lib/copilot/stopped-turn";
 
 /**
  * What a person is told when a turn ends and no answer came.
@@ -48,6 +51,41 @@ describe("the reason a turn ended", () => {
       expect(shown).not.toContain("{");
       expect(shown).not.toContain("Learning Container");
     }
+  });
+
+  test("a refused request says the Bot isn't shared any more only when the server says the Bot is gone", async () => {
+    const gone = async () => true;
+    const here = async () => false;
+    const unknown = async (): Promise<boolean> => {
+      throw new Error("Failed to fetch");
+    };
+    // The runtime's refusal of a Bot that is not the person's, as CopilotKit's Intelligence agent
+    // reports it: the same shape as a back end that is down.
+    const refused = new Error(
+      `REST run request failed: {"error":"Agent not found","message":"Agent 'pipeline-bot' does not exist"}`,
+    );
+    expect(await failedRunReason(refused, "pipeline-bot", gone)).toBe(
+      "This Bot isn't shared with you any more, so your message wasn't sent. Its owner or an admin can share it again.",
+    );
+    // Joining its thread sends nothing, so nothing is said about a message.
+    expect(
+      await failedRunReason(
+        "REST connect request failed: Not found",
+        "pipeline-bot",
+        gone,
+      ),
+    ).toBe(
+      "This Bot isn't shared with you any more. Its owner or an admin can share it again.",
+    );
+    // Still theirs, or nobody could say: the back end is what failed, as before.
+    for (const answer of [here, unknown])
+      expect(await failedRunReason(refused, "pipeline-bot", answer)).toBe(
+        "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
+      );
+    // A Bot's own words are never second-guessed, whatever the server would say of the Bot.
+    expect(
+      await failedRunReason("invalid x-api-key", "pipeline-bot", gone),
+    ).toBe("invalid x-api-key");
   });
 
   test("says so plainly when nothing was reported, rather than inventing a cause", () => {

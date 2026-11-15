@@ -24,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
+import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -90,6 +91,7 @@ import {
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
 import { toolsListError } from "@/lib/plugins/tools-error";
+import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -146,10 +148,19 @@ function BotApprovalText({
 }) {
   const exposure = useQuery(botSharedAppsQueryOptions(botId));
   const app = exposure.data?.apps.find((one) => one.serverId === serverId);
+  /* An approval that names a team is read by the team's name: one read, shared by every row. */
+  const teams = useQuery({
+    ...teamListQueryOptions(),
+    enabled: Boolean(
+      app?.approval?.members.some((member) => member.kind === "team"),
+    ),
+  });
   if (!app) return null;
   return (
     <span className="text-muted-foreground text-xs">
-      {app.approval ? describeApproval(app.approval) : "Not approved"}
+      {app.approval
+        ? describeApproval(app.approval, teams.data?.teams)
+        : "Not approved"}
     </span>
   );
 }
@@ -850,6 +861,16 @@ export function PluginPage({
                   />
                 </ItemActions>
               </Item>
+              {/*
+               * Which teams may give it to their own Bots without asking. A set of teams, so a
+               * summary and a dialog. No icon, as no other row of this card has one.
+               */}
+              <AppTeamGrantsRow
+                appId={key}
+                icon={false}
+                separator="before"
+                title={title}
+              />
             </>
           ) : null}
         </PageRows>
