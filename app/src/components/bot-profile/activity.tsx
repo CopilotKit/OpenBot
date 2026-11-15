@@ -399,7 +399,14 @@ function EntryRow({
  * and check-ins are under Recurring, which ends on a row to the Bot's Routines, where they are
  * changed.
  */
-export function BotActivitySections({ agentId }: { agentId: string }) {
+export function BotActivitySections({
+  agentId,
+  boardAbove = false,
+}: {
+  agentId: string;
+  /** The Needs you board sits above, so tasks and what the Bot asked are not listed twice. */
+  boardAbove?: boolean;
+}) {
   const activity = useQuery(botActivityQueryOptions(agentId));
   const taskList = useQuery(taskListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -436,6 +443,7 @@ export function BotActivitySections({ agentId }: { agentId: string }) {
     ),
     checkIns: ownCheckIns,
     goalRoutineIds,
+    boardAbove,
   });
   const titleOf = (channelId: string) => {
     const found = channel(channelId);

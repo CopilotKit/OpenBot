@@ -94,11 +94,17 @@ export function groupActivity({
   tasks,
   checkIns = [],
   goalRoutineIds = new Set(),
+  boardAbove = false,
 }: {
   activity: BotActivity;
   tasks: readonly ListedTask[];
   checkIns?: readonly ProactiveSetting[];
   goalRoutineIds?: ReadonlySet<string>;
+  /**
+   * The Needs you board is drawn above these groups and already lists the Bot's tasks and what it
+   * asked the person, so neither is listed a second time and there is no second Needs you group.
+   */
+  boardAbove?: boolean;
 }): ActivityGroup[] {
   const groups: Record<ActivityGroupId, ActivityEntry[]> = {
     needs_you: [],
@@ -110,7 +116,7 @@ export function groupActivity({
   };
   const taskConversations = new Set(tasks.map(({ task }) => task.channelId));
 
-  for (const listed of tasks)
+  for (const listed of boardAbove ? [] : tasks)
     groups[taskGroup(listed)].push({
       kind: "task",
       key: `task:${listed.task.id}`,
@@ -130,8 +136,11 @@ export function groupActivity({
       item.channelId !== null &&
       taskConversations.has(item.channelId);
     if (inTask) continue;
+    const asked = item.kind === "approval" || item.kind === "question";
+    if (boardAbove && asked) continue;
     if (item.status === "failed") groups.failed.push(entry(item));
-    else if (item.needsYou) groups.needs_you.push(entry(item, true));
+    else if (item.needsYou && !boardAbove)
+      groups.needs_you.push(entry(item, true));
     else groups.working.push(entry(item, true));
   }
 
