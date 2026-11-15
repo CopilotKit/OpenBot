@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of what a person's Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's memories
  */
 

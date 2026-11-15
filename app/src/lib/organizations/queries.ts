@@ -205,6 +205,20 @@ export async function ensureCurrentOrganization(
     ?.currentId;
 }
 
+/**
+ * The name of the organization the person is working in, for a page that says whose something is.
+ * Undefined until the list has answered, and where OpenBot keeps one organization and lists none.
+ */
+export function useCurrentOrganizationName(): string | undefined {
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const mine = useQuery({
+    ...ownOrganizationsQueryOptions(),
+    enabled: capabilities.data?.edition === "team",
+  });
+  return mine.data?.organizations.find((one) => one.id === mine.data?.currentId)
+    ?.name;
+}
+
 /** Whether there is anything to switch to or create: otherwise the account menu is as it always was. */
 export function offersOrganizations(
   mine: OwnOrganizations | null | undefined,

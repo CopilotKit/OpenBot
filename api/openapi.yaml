@@ -18029,7 +18029,7 @@ paths:
         - Memory
       operationId: listMemories
       summary: List a person's memories
-      description: 'Return one page of what a person''s Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of what a person''s Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -32360,6 +32360,11 @@ components:
           oneOf:
             - $ref: '#/components/schemas/LearningAutomatic'
             - type: 'null'
+        organizationSpaceId:
+          description: 'The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization''s is named after it: this id, a hyphen, then a name of the administrator''s choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.'
+          oneOf:
+            - $ref: '#/components/schemas/LearningSpaceId'
+            - type: 'null'
     UpdateLearningSettingsRequest:
       type: object
       additionalProperties: false
@@ -32744,7 +32749,7 @@ components:
         - closed
         - open
         - choose
-      description: 'Who else''s Bots use the skills learned in a person''s own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.'
+      description: 'Who else''s Bots use the skills learned in a person''s own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.'
     PersonalLearnedSkill:
       type: object
       required:
