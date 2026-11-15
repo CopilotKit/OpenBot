@@ -41,6 +41,7 @@ import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminProactiveRouteImport } from './routes/_authed/admin/proactive'
 import { Route as AuthedAdminProvidersRouteImport } from './routes/_authed/admin/providers'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
+import { Route as AuthedAdminTeamsRouteImport } from './routes/_authed/admin/teams'
 import { Route as AuthedAdminWhatIfRouteImport } from './routes/_authed/admin/what-if'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsPersonalRouteImport } from './routes/_authed/settings/_personal'
@@ -88,6 +89,8 @@ import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/a
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
 import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
+import { Route as AuthedAdminTeamsTeamIdRouteImport } from './routes/_authed/admin/teams_.$teamId'
+import { Route as AuthedAdminTeamsNewRouteImport } from './routes/_authed/admin/teams_.new'
 import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
@@ -279,6 +282,11 @@ const AuthedAdminProvidersRoute = AuthedAdminProvidersRouteImport.update({
 const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminTeamsRoute = AuthedAdminTeamsRouteImport.update({
+  id: '/teams',
+  path: '/teams',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminWhatIfRoute = AuthedAdminWhatIfRouteImport.update({
@@ -533,6 +541,16 @@ const AuthedAdminSkillsNewRoute = AuthedAdminSkillsNewRouteImport.update({
   path: '/skills/new',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminTeamsTeamIdRoute = AuthedAdminTeamsTeamIdRouteImport.update({
+  id: '/teams_/$teamId',
+  path: '/teams/$teamId',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminTeamsNewRoute = AuthedAdminTeamsNewRouteImport.update({
+  id: '/teams_/new',
+  path: '/teams/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedSettingsPersonalActivityRoute =
   AuthedSettingsPersonalActivityRouteImport.update({
     id: '/activity',
@@ -756,6 +774,7 @@ export interface FileRoutesByFullPath {
   '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/teams': typeof AuthedAdminTeamsRoute
   '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
   '/settings/browsers': typeof AuthedSettingsBrowsersRoute
@@ -797,6 +816,8 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
+  '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
+  '/admin/teams/new': typeof AuthedAdminTeamsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -864,6 +885,7 @@ export interface FileRoutesByTo {
   '/admin/proactive': typeof AuthedAdminProactiveRoute
   '/admin/providers': typeof AuthedAdminProvidersRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/admin/teams': typeof AuthedAdminTeamsRoute
   '/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
@@ -905,6 +927,8 @@ export interface FileRoutesByTo {
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
+  '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
+  '/admin/teams/new': typeof AuthedAdminTeamsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -976,6 +1000,7 @@ export interface FileRoutesById {
   '/_authed/admin/proactive': typeof AuthedAdminProactiveRoute
   '/_authed/admin/providers': typeof AuthedAdminProvidersRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
+  '/_authed/admin/teams': typeof AuthedAdminTeamsRoute
   '/_authed/admin/what-if': typeof AuthedAdminWhatIfRoute
   '/_authed/settings/_personal': typeof AuthedSettingsPersonalRouteWithChildren
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
@@ -1019,6 +1044,8 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
+  '/_authed/admin/teams_/$teamId': typeof AuthedAdminTeamsTeamIdRoute
+  '/_authed/admin/teams_/new': typeof AuthedAdminTeamsNewRoute
   '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
@@ -1090,6 +1117,7 @@ export interface FileRouteTypes {
     | '/admin/proactive'
     | '/admin/providers'
     | '/admin/skills'
+    | '/admin/teams'
     | '/admin/what-if'
     | '/settings/approvals'
     | '/settings/browsers'
@@ -1131,6 +1159,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/composio'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
+    | '/admin/teams/$teamId'
+    | '/admin/teams/new'
     | '/settings/activity'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
@@ -1198,6 +1228,7 @@ export interface FileRouteTypes {
     | '/admin/proactive'
     | '/admin/providers'
     | '/admin/skills'
+    | '/admin/teams'
     | '/admin/what-if'
     | '/settings'
     | '/settings/approvals'
@@ -1239,6 +1270,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/composio'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
+    | '/admin/teams/$teamId'
+    | '/admin/teams/new'
     | '/settings/activity'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
@@ -1309,6 +1342,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/proactive'
     | '/_authed/admin/providers'
     | '/_authed/admin/skills'
+    | '/_authed/admin/teams'
     | '/_authed/admin/what-if'
     | '/_authed/settings/_personal'
     | '/_authed/settings/approvals'
@@ -1352,6 +1386,8 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/composio'
     | '/_authed/admin/skills_/$slug'
     | '/_authed/admin/skills_/new'
+    | '/_authed/admin/teams_/$teamId'
+    | '/_authed/admin/teams_/new'
     | '/_authed/settings/_personal/activity'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
@@ -1621,6 +1657,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/admin/skills'
       preLoaderRoute: typeof AuthedAdminSkillsRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/teams': {
+      id: '/_authed/admin/teams'
+      path: '/teams'
+      fullPath: '/admin/teams'
+      preLoaderRoute: typeof AuthedAdminTeamsRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/what-if': {
@@ -1952,6 +1995,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminSkillsNewRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/teams_/$teamId': {
+      id: '/_authed/admin/teams_/$teamId'
+      path: '/teams/$teamId'
+      fullPath: '/admin/teams/$teamId'
+      preLoaderRoute: typeof AuthedAdminTeamsTeamIdRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/teams_/new': {
+      id: '/_authed/admin/teams_/new'
+      path: '/teams/new'
+      fullPath: '/admin/teams/new'
+      preLoaderRoute: typeof AuthedAdminTeamsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/_personal/activity': {
       id: '/_authed/settings/_personal/activity'
       path: '/activity'
@@ -2194,6 +2251,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminProactiveRoute: typeof AuthedAdminProactiveRoute
   AuthedAdminProvidersRoute: typeof AuthedAdminProvidersRoute
   AuthedAdminSkillsRoute: typeof AuthedAdminSkillsRoute
+  AuthedAdminTeamsRoute: typeof AuthedAdminTeamsRoute
   AuthedAdminWhatIfRoute: typeof AuthedAdminWhatIfRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminApprovalsDescribeRoute: typeof AuthedAdminApprovalsDescribeRoute
@@ -2208,6 +2266,8 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
   AuthedAdminSkillsSlugRoute: typeof AuthedAdminSkillsSlugRoute
   AuthedAdminSkillsNewRoute: typeof AuthedAdminSkillsNewRoute
+  AuthedAdminTeamsTeamIdRoute: typeof AuthedAdminTeamsTeamIdRoute
+  AuthedAdminTeamsNewRoute: typeof AuthedAdminTeamsNewRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
   AuthedAdminPluginsKeyBotsAgentIdRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRoute
@@ -2229,6 +2289,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminProactiveRoute: AuthedAdminProactiveRoute,
   AuthedAdminProvidersRoute: AuthedAdminProvidersRoute,
   AuthedAdminSkillsRoute: AuthedAdminSkillsRoute,
+  AuthedAdminTeamsRoute: AuthedAdminTeamsRoute,
   AuthedAdminWhatIfRoute: AuthedAdminWhatIfRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminApprovalsDescribeRoute: AuthedAdminApprovalsDescribeRoute,
@@ -2243,6 +2304,8 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
   AuthedAdminSkillsSlugRoute: AuthedAdminSkillsSlugRoute,
   AuthedAdminSkillsNewRoute: AuthedAdminSkillsNewRoute,
+  AuthedAdminTeamsTeamIdRoute: AuthedAdminTeamsTeamIdRoute,
+  AuthedAdminTeamsNewRoute: AuthedAdminTeamsNewRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
   AuthedAdminPluginsKeyBotsAgentIdRoute: AuthedAdminPluginsKeyBotsAgentIdRoute,
