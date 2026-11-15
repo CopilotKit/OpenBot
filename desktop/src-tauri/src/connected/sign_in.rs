@@ -1,0 +1,1019 @@
+/*!
+Signing in to an OpenBot that runs elsewhere, and staying signed in.
+
+OAuth 2.1 authorization code with PKCE (S256), as a public client with a loopback redirect
+(RFC 8252): a listener on `127.0.0.1` at a port the system picks, the system browser sent to the
+OpenBot's authorization endpoint, and the code it sends back to `/callback` exchanged for tokens.
+The PKCE verifier, the `state` and the callback's first line are read with what
+`provider_oauth` already has; nothing new is done with a hash or a random number here.
+
+A `Session` is what comes out: the access token in memory for its hour, and the refresh token in
+the system's credential store (`credentials`). Refresh tokens rotate on every use and an old one
+fails if it is used again, so one refresh runs at a time and the new token is stored before the old
+one is let go.
+
+Nothing here logs or returns a token, a code or a verifier. A failure's detail is a status, an
+OAuth error code or a transport error.
+*/
+
+use super::address::Metadata;
+use super::credentials::Store;
+use super::{host_of, http, transport, Kind, CLIENT_ID};
+use crate::problem::Problem;
+use crate::provider_oauth::{pkce_challenge, random, read_callback_request};
+use std::io::Write;
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// The redirect's path. The OpenBot accepts exactly `http://127.0.0.1:<port>/callback`.
+pub const CALLBACK_PATH: &str = "/callback";
+
+/// How long the browser has to come back.
+pub const WAIT: Duration = Duration::from_secs(600);
+
+/// An access token this close to its end is replaced before it is used.
+const REFRESH_BEFORE_END: Duration = Duration::from_secs(60);
+
+/// An access token the OpenBot refused is replaced at most this often. Without it, an address
+/// that answers 401 whatever the token would use a refresh token on every request.
+const REFUSED_REFRESH_EVERY: Duration = Duration::from_secs(30);
+
+/// What the browser tab shows once the sign-in has come back.
+pub const SIGNED_IN_PAGE: &str = "You're signed in. You can close this tab and go back to OpenBot.";
+/// What it shows when the sign-in was refused or was not this app's.
+pub const NOT_SIGNED_IN_PAGE: &str =
+    "Sign-in didn't finish. You can close this tab and go back to OpenBot.";
+
+/// A sign-in that is waiting for the browser, so Cancel can end it.
+#[derive(Default)]
+pub struct Attempt {
+    cancelled: AtomicBool,
+}
+
+impl Attempt {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
+/// A sign-in to one OpenBot.
+pub struct Session {
+    address: String,
+    host: String,
+    token_endpoint: String,
+    revocation_endpoint: Option<String>,
+    store: Store,
+    live: Mutex<Live>,
+    /// Held for the whole of a refresh, so two requests that both find the token stale make one.
+    refreshing: Mutex<()>,
+}
+
+struct Live {
+    access: String,
+    refresh: String,
+    expires: Instant,
+    /// When a refused access token last led to a refresh (`REFUSED_REFRESH_EVERY`).
+    refreshed_after_refusal: Option<Instant>,
+    ended: bool,
+}
+
+/// Never the tokens.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("address", &self.address)
+            .finish_non_exhaustive()
+    }
+}
+
+struct Granted {
+    access: String,
+    refresh: Option<String>,
+    expires_in: u64,
+}
+
+enum Refused {
+    /// The request never got an answer.
+    Transport(String),
+    /// The OpenBot answered no: its status and its OAuth error code.
+    Answer { status: u16, error: String },
+}
+
+impl Refused {
+    fn detail(&self, what: &str) -> String {
+        match self {
+            Refused::Transport(error) => format!("{what}: {error}"),
+            Refused::Answer { status, error } => format!("{what} answered {status} {error}"),
+        }
+    }
+}
+
+/**
+Sign in to the OpenBot at `address` in the person's browser.
+
+`open` is handed the address to open, the system browser in the app. The wait ends when the browser
+comes back with a code, when the person refuses, when `attempt` is cancelled, or after `wait`.
+Returns once the code is exchanged, the OpenBot has answered `/api/me` with the new token, and the
+refresh token is in `store`.
+*/
+pub fn sign_in(
+    address: &str,
+    metadata: &Metadata,
+    store: Store,
+    attempt: &Attempt,
+    wait: Duration,
+    open: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Session, Problem> {
+    let host = host_of(address);
+    let failed = |detail: String| Kind::SignInFailed.problem(&host, detail);
+    // 127.0.0.1 only: the redirect names it, and nothing off this computer can reach it.
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
+        .map_err(|error| failed(format!("could not listen for the browser: {error}")))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| failed(error.to_string()))?
+        .port();
+    let redirect = format!("http://127.0.0.1:{port}{CALLBACK_PATH}");
+    let verifier = random();
+    let state = random();
+    let challenge = pkce_challenge(&verifier);
+    let scope = metadata.scopes.join(" ");
+    let mut authorize = reqwest::Url::parse(&metadata.authorization_endpoint)
+        .map_err(|error| failed(error.to_string()))?;
+    authorize.query_pairs_mut().extend_pairs([
+        ("response_type", "code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", redirect.as_str()),
+        ("scope", scope.as_str()),
+        ("state", state.as_str()),
+        ("code_challenge", challenge.as_str()),
+        ("code_challenge_method", "S256"),
+    ]);
+    open(authorize.as_str())
+        .map_err(|error| failed(format!("could not open the browser: {error}")))?;
+
+    let code = wait_for_code(&listener, &state, attempt, wait, &host)?;
+    drop(listener);
+
+    let granted = token_request(
+        &metadata.token_endpoint,
+        &[
+            ("grant_type", "authorization_code"),
+            ("code", &code),
+            ("redirect_uri", &redirect),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", &verifier),
+        ],
+    )
+    .map_err(|refused| match refused {
+        Refused::Transport(_) => {
+            Kind::Unreachable.problem(&host, refused.detail("the token exchange"))
+        }
+        Refused::Answer { .. } => failed(refused.detail("the token exchange")),
+    })?;
+    let Some(refresh) = granted.refresh else {
+        return Err(Kind::TooOld.problem(&host, "the token exchange gave no refresh token"));
+    };
+    let session = Session {
+        address: address.to_owned(),
+        host: host.clone(),
+        token_endpoint: metadata.token_endpoint.clone(),
+        revocation_endpoint: metadata.revocation_endpoint.clone(),
+        store,
+        live: Mutex::new(Live {
+            access: granted.access,
+            refresh,
+            expires: Instant::now() + Duration::from_secs(granted.expires_in),
+            refreshed_after_refusal: None,
+            ended: false,
+        }),
+        refreshing: Mutex::new(()),
+    };
+    // The app's screens start with who is signed in. An OpenBot that refuses its own new token
+    // there is one from before it honoured an app's sign-in on the addresses the screens need.
+    if let Err(problem) = session.serves_the_app() {
+        session.revoke();
+        return Err(problem);
+    }
+    let kept = {
+        let live = session.live.lock().unwrap();
+        session.store.set(&session.address, &live.refresh)
+    };
+    if let Err(problem) = kept {
+        session.revoke();
+        return Err(problem);
+    }
+    log::info!("[connect] signed in to {host}");
+    Ok(session)
+}
+
+/// The saved sign-in for `address`, made current: the stored refresh token exchanged for a new
+/// access token. `session-ended` when there is none or the OpenBot no longer takes it.
+pub fn resume(address: &str, metadata: &Metadata, store: Store) -> Result<Session, Problem> {
+    let host = host_of(address);
+    let Some(refresh) = store.get(address)? else {
+        return Err(Kind::SessionEnded.problem(&host, "no sign-in is saved for this address"));
+    };
+    let session = Session {
+        address: address.to_owned(),
+        host,
+        token_endpoint: metadata.token_endpoint.clone(),
+        revocation_endpoint: metadata.revocation_endpoint.clone(),
+        store,
+        live: Mutex::new(Live {
+            access: String::new(),
+            refresh,
+            // Already over, so the first use refreshes.
+            expires: Instant::now(),
+            refreshed_after_refusal: None,
+            ended: false,
+        }),
+        refreshing: Mutex::new(()),
+    };
+    session.access()?;
+    Ok(session)
+}
+
+impl Session {
+    /// The normalised address this is a sign-in to.
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
+    /// The address's host, as the sentences name it.
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// An access token good for at least the next minute, refreshed first when it is not.
+    pub fn access(&self) -> Result<String, Problem> {
+        self.current(None)
+    }
+
+    /// The OpenBot answered 401 to `used`: a newer access token, from a refresh unless another
+    /// request already made one or one was made for a refusal moments ago.
+    pub fn after_refused(&self, used: &str) -> Result<String, Problem> {
+        self.current(Some(used))
+    }
+
+    fn ended(&self, detail: impl Into<String>) -> Problem {
+        Kind::SessionEnded.problem(&self.host, detail)
+    }
+
+    fn current(&self, refused: Option<&str>) -> Result<String, Problem> {
+        // Without waiting for a refresh, when the token in hand is good.
+        if let Some(access) = self.usable(refused)? {
+            return Ok(access);
+        }
+        let _one_at_a_time = self.refreshing.lock().unwrap();
+        // Whoever held it may have refreshed.
+        if let Some(access) = self.usable(refused)? {
+            return Ok(access);
+        }
+        let old = self.live.lock().unwrap().refresh.clone();
+        let granted = token_request(
+            &self.token_endpoint,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", &old),
+                ("client_id", CLIENT_ID),
+            ],
+        );
+        let granted = match granted {
+            Ok(granted) => granted,
+            Err(Refused::Transport(error)) => {
+                return Err(Kind::Unreachable.problem(&self.host, format!("the refresh: {error}")))
+            }
+            // The OpenBot could not answer: the sign-in may still be good.
+            Err(Refused::Answer { status, error }) if status >= 500 => {
+                return Err(Kind::Unreachable
+                    .problem(&self.host, format!("the refresh answered {status} {error}")))
+            }
+            Err(refused) => {
+                // Signed out elsewhere, removed, or expired: this sign-in is over.
+                self.live.lock().unwrap().ended = true;
+                if let Err(problem) = self.store.forget(&self.address) {
+                    log::warn!(
+                        "[connect] could not forget the ended sign-in: {}",
+                        problem.detail.unwrap_or(problem.said)
+                    );
+                }
+                log::info!("[connect] the sign-in to {} has ended", self.host);
+                return Err(self.ended(refused.detail("the refresh")));
+            }
+        };
+        // The new refresh token is kept before the old one is let go: the old one is already
+        // dead at the OpenBot, so losing the new one here would lose the sign-in.
+        let refresh = granted.refresh.unwrap_or(old);
+        if let Err(problem) = self.store.set(&self.address, &refresh) {
+            // Still signed in for as long as the app runs; the next launch asks again.
+            log::warn!(
+                "[connect] could not keep the refreshed sign-in: {}",
+                problem.detail.unwrap_or(problem.said)
+            );
+        }
+        let mut live = self.live.lock().unwrap();
+        live.access = granted.access.clone();
+        live.refresh = refresh;
+        live.expires = Instant::now() + Duration::from_secs(granted.expires_in);
+        if refused.is_some() {
+            live.refreshed_after_refusal = Some(Instant::now());
+        }
+        Ok(granted.access)
+    }
+
+    /// The access token in hand, when it can be used as it is.
+    fn usable(&self, refused: Option<&str>) -> Result<Option<String>, Problem> {
+        let live = self.live.lock().unwrap();
+        if live.ended {
+            return Err(self.ended("the sign-in has ended"));
+        }
+        let fresh = live.expires > Instant::now() + REFRESH_BEFORE_END;
+        Ok(match refused {
+            None => fresh.then(|| live.access.clone()),
+            // Another request has replaced the refused one since.
+            Some(used) if live.access != used => Some(live.access.clone()),
+            Some(_) => live
+                .refreshed_after_refusal
+                .is_some_and(|at| at.elapsed() < REFUSED_REFRESH_EVERY)
+                .then(|| live.access.clone()),
+        })
+    }
+
+    /// Whether the OpenBot serves the app's screens to this sign-in: `GET /api/me` with the token.
+    fn serves_the_app(&self) -> Result<(), Problem> {
+        let access = self.live.lock().unwrap().access.clone();
+        let answered = http()
+            .map_err(|error| Kind::Unreachable.problem(&self.host, error))?
+            .get(format!("{}/api/me", self.address))
+            .bearer_auth(access)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .map_err(|error| Kind::Unreachable.problem(&self.host, transport(error)))?;
+        match answered.status().as_u16() {
+            200..=299 => Ok(()),
+            401 | 404 => Err(Kind::TooOld.problem(
+                &self.host,
+                format!(
+                    "GET /api/me answered {} to a new sign-in",
+                    answered.status()
+                ),
+            )),
+            status => {
+                Err(Kind::SignInFailed
+                    .problem(&self.host, format!("GET /api/me answered {status}")))
+            }
+        }
+    }
+
+    /// Sign out: both tokens revoked at the OpenBot (RFC 7009), as far as it answers, then the
+    /// sign-in forgotten on this computer whatever it answered.
+    pub fn sign_out(&self) -> Result<(), Problem> {
+        let _one_at_a_time = self.refreshing.lock().unwrap();
+        self.revoke();
+        self.live.lock().unwrap().ended = true;
+        log::info!("[connect] signed out of {}", self.host);
+        self.store.forget(&self.address)
+    }
+
+    /// Best effort: a token that could not be revoked ends by itself, the access token within the
+    /// hour.
+    fn revoke(&self) {
+        let Some(endpoint) = &self.revocation_endpoint else {
+            return;
+        };
+        let (refresh, access) = {
+            let live = self.live.lock().unwrap();
+            (live.refresh.clone(), live.access.clone())
+        };
+        for (token, hint) in [(refresh, "refresh_token"), (access, "access_token")] {
+            if token.is_empty() {
+                continue;
+            }
+            if let Err(error) = revoke_token(endpoint, &token, hint) {
+                log::warn!(
+                    "[connect] could not revoke the {hint} at {}: {error}",
+                    self.host
+                );
+            }
+        }
+    }
+}
+
+/// Revoke a saved sign-in with no session around it: the stored refresh token, when the OpenBot
+/// can be asked, and then forgotten either way.
+pub fn sign_out_saved(
+    address: &str,
+    metadata: Option<&Metadata>,
+    store: &Store,
+) -> Result<(), Problem> {
+    if let (Some(endpoint), Ok(Some(refresh))) = (
+        metadata.and_then(|metadata| metadata.revocation_endpoint.as_deref()),
+        store.get(address),
+    ) {
+        if let Err(error) = revoke_token(endpoint, &refresh, "refresh_token") {
+            log::warn!(
+                "[connect] could not revoke the saved sign-in at {}: {error}",
+                host_of(address)
+            );
+        }
+    }
+    store.forget(address)
+}
+
+fn revoke_token(endpoint: &str, token: &str, hint: &str) -> Result<(), String> {
+    let answered = http()?
+        .post(endpoint)
+        .form(&[
+            ("token", token),
+            ("token_type_hint", hint),
+            ("client_id", CLIENT_ID),
+        ])
+        .send()
+        .map_err(transport)?;
+    if answered.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("it answered {}", answered.status()))
+    }
+}
+
+/// One request to the token endpoint: form-encoded, with the client's id in the body.
+fn token_request(endpoint: &str, form: &[(&str, &str)]) -> Result<Granted, Refused> {
+    let answered = http()
+        .map_err(Refused::Transport)?
+        .post(endpoint)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .form(form)
+        .send()
+        .map_err(|error| Refused::Transport(transport(error)))?;
+    let status = answered.status();
+    let body: serde_json::Value = answered.json().unwrap_or(serde_json::Value::Null);
+    let text = |name: &str| {
+        body.get(name)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    if !status.is_success() {
+        return Err(Refused::Answer {
+            status: status.as_u16(),
+            // The error code only (RFC 6749 §5.2): a description may quote what was sent.
+            error: text("error").unwrap_or_else(|| "with no error code".into()),
+        });
+    }
+    let Some(access) = text("access_token") else {
+        return Err(Refused::Answer {
+            status: status.as_u16(),
+            error: "with no access token".into(),
+        });
+    };
+    Ok(Granted {
+        access,
+        refresh: text("refresh_token"),
+        expires_in: body
+            .get("expires_in")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|seconds| *seconds > 0)
+            .unwrap_or(3600),
+    })
+}
+
+/// Wait for the browser to come back to the listener with this sign-in's code.
+fn wait_for_code(
+    listener: &TcpListener,
+    state: &str,
+    attempt: &Attempt,
+    wait: Duration,
+    host: &str,
+) -> Result<String, Problem> {
+    let deadline = Instant::now() + wait;
+    loop {
+        if attempt.cancelled() {
+            return Err(Kind::SignInCancelled.problem(host, "cancelled in the app"));
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                Kind::SignInCancelled.problem(host, "the browser did not come back in time")
+            );
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => match callback(&mut stream, state) {
+                Callback::Code(code) => return Ok(code),
+                Callback::Refused(error) if error == "access_denied" => {
+                    return Err(Kind::SignInCancelled.problem(host, "consent was not given"))
+                }
+                Callback::Refused(error) => {
+                    return Err(Kind::SignInFailed
+                        .problem(host, format!("the sign-in came back with {error}")))
+                }
+                // Not this sign-in's answer. Whoever sent it does not get to end the wait.
+                Callback::NotOurs => {}
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => {
+                return Err(Kind::SignInFailed
+                    .problem(host, format!("could not hear from the browser: {error}")))
+            }
+        }
+    }
+}
+
+enum Callback {
+    Code(String),
+    /// The OpenBot sent the browser back with an OAuth error code.
+    Refused(String),
+    NotOurs,
+}
+
+/// Read one request to the listener and answer the browser tab.
+fn callback(stream: &mut TcpStream, state: &str) -> Callback {
+    let Ok(request) = read_callback_request(stream, Duration::from_secs(2)) else {
+        return Callback::NotOurs;
+    };
+    let mut parts = request.lines().next().unwrap_or("").split_whitespace();
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let parsed = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok();
+    let Some(parsed) = parsed.filter(|url| method == "GET" && url.path() == CALLBACK_PATH) else {
+        page(stream, "404 Not Found", NOT_SIGNED_IN_PAGE);
+        return Callback::NotOurs;
+    };
+    let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+    if query.get("state").map(String::as_str) != Some(state) {
+        page(stream, "400 Bad Request", NOT_SIGNED_IN_PAGE);
+        return Callback::NotOurs;
+    }
+    if let Some(error) = query.get("error") {
+        page(stream, "200 OK", NOT_SIGNED_IN_PAGE);
+        // Only the code's own characters: it goes into the log.
+        return Callback::Refused(
+            error
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .take(64)
+                .collect(),
+        );
+    }
+    match query.get("code").filter(|code| !code.is_empty()) {
+        Some(code) => {
+            page(stream, "200 OK", SIGNED_IN_PAGE);
+            Callback::Code(code.clone())
+        }
+        None => {
+            page(stream, "400 Bad Request", NOT_SIGNED_IN_PAGE);
+            Callback::NotOurs
+        }
+    }
+}
+
+/// A small plain page for the browser tab.
+fn page(stream: &mut TcpStream, status: &str, sentence: &str) {
+    let body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>OpenBot</title>\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>\
+         <body style=\"font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 28rem; \
+         padding: 0 1rem;\"><p>{sentence}</p></body></html>"
+    );
+    let _ = stream.write_all(
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
+             Cache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .as_bytes(),
+    );
+    let _ = stream.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::credentials::in_memory;
+    use super::super::fake_openbot::{Browser, FakeOpenBot, Shape};
+    use super::super::kind_of;
+    use super::*;
+    use std::sync::Arc;
+
+    fn check(openbot: &FakeOpenBot) -> (String, Metadata) {
+        super::super::address::check(&openbot.address()).unwrap()
+    }
+
+    /// The whole sign-in, as a person does it: the browser goes to the OpenBot, they approve,
+    /// the tab says they are signed in, and the app holds a sign-in that OpenBot honours.
+    #[test]
+    fn a_full_sign_in_ends_with_a_session_and_the_refresh_token_in_the_store() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let (address, metadata) = check(&openbot);
+        let store = in_memory();
+        let browser = Browser::approves();
+        let session = sign_in(
+            &address,
+            &metadata,
+            store.clone(),
+            &Attempt::default(),
+            Duration::from_secs(20),
+            browser.opener(),
+        )
+        .unwrap();
+
+        // What the browser was sent to ask for.
+        let asked = browser.asked();
+        assert_eq!(asked["client_id"], "openbot-desktop-oauth");
+        assert_eq!(asked["response_type"], "code");
+        assert_eq!(asked["code_challenge_method"], "S256");
+        assert!(asked["state"].len() >= 32);
+        let redirect = reqwest::Url::parse(&asked["redirect_uri"]).unwrap();
+        assert_eq!(redirect.host_str(), Some("127.0.0.1"));
+        assert_eq!(redirect.path(), "/callback");
+        assert!(redirect.port().is_some());
+        let scopes: Vec<&str> = asked["scope"].split(' ').collect();
+        assert_eq!(scopes, metadata.scopes);
+        assert!(scopes.contains(&"offline_access"));
+        // What the tab said.
+        let tab = browser.tab();
+        assert!(tab.contains(SIGNED_IN_PAGE), "{tab}");
+
+        // The access token is one that OpenBot honours, and only the refresh token is stored.
+        let access = session.access().unwrap();
+        assert!(access.starts_with("oba_"));
+        assert!(openbot.honours(&access));
+        let stored = store.get(&address).unwrap().unwrap();
+        assert!(stored.starts_with("obr_"));
+        assert_ne!(stored, access);
+        // The exchange was form-encoded with the client's id in the body, and no secret.
+        let exchange = openbot.token_requests().remove(0);
+        assert_eq!(exchange["grant_type"], "authorization_code");
+        assert_eq!(exchange["client_id"], "openbot-desktop-oauth");
+        assert_eq!(exchange["redirect_uri"], asked["redirect_uri"]);
+        assert!(!exchange.contains_key("client_secret"));
+    }
+
+    /// A request to the listener with another `state` is not this sign-in's answer: it is refused,
+    /// no code is exchanged for it, and the real answer still completes the sign-in.
+    #[test]
+    fn a_callback_with_the_wrong_state_is_refused_and_exchanges_nothing() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let (address, metadata) = check(&openbot);
+        let browser = Browser::forges_state_first();
+        let session = sign_in(
+            &address,
+            &metadata,
+            in_memory(),
+            &Attempt::default(),
+            Duration::from_secs(20),
+            browser.opener(),
+        )
+        .unwrap();
+        let forged = browser.forged_answer();
+        assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+        assert!(forged.contains(NOT_SIGNED_IN_PAGE), "{forged}");
+        // One exchange, for the real code; the forged one never reached the token endpoint.
+        assert_eq!(openbot.token_requests().len(), 1);
+        assert!(openbot.honours(&session.access().unwrap()));
+    }
+
+    #[test]
+    fn consent_denied_reads_as_a_sign_in_that_did_not_finish() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let (address, metadata) = check(&openbot);
+        let store = in_memory();
+        let browser = Browser::denies();
+        let problem = sign_in(
+            &address,
+            &metadata,
+            store.clone(),
+            &Attempt::default(),
+            Duration::from_secs(20),
+            browser.opener(),
+        )
+        .expect_err("consent was denied");
+        assert_eq!(kind_of(&problem), Some(Kind::SignInCancelled));
+        assert_eq!(
+            problem.said,
+            "Sign-in didn't finish. Try again when you're ready."
+        );
+        assert!(browser.tab().contains(NOT_SIGNED_IN_PAGE));
+        assert_eq!(openbot.token_requests().len(), 0);
+        assert_eq!(store.get(&address).unwrap(), None);
+    }
+
+    #[test]
+    fn cancel_and_a_browser_that_never_comes_back_both_end_the_wait() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let (address, metadata) = check(&openbot);
+        // Cancel, while the browser is open and nothing has come back.
+        let attempt = Arc::new(Attempt::default());
+        let cancelling = attempt.clone();
+        let started = Instant::now();
+        let problem = sign_in(
+            &address,
+            &metadata,
+            in_memory(),
+            &attempt,
+            Duration::from_secs(30),
+            move |_| {
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(200));
+                    cancelling.cancel();
+                });
+                Ok(())
+            },
+        )
+        .expect_err("cancelled");
+        assert_eq!(kind_of(&problem), Some(Kind::SignInCancelled));
+        assert!(started.elapsed() < Duration::from_secs(10));
+
+        // The wait running out, here after a moment in place of ten minutes.
+        let problem = sign_in(
+            &address,
+            &metadata,
+            in_memory(),
+            &Attempt::default(),
+            Duration::from_millis(300),
+            |_| Ok(()),
+        )
+        .expect_err("timed out");
+        assert_eq!(kind_of(&problem), Some(Kind::SignInCancelled));
+        assert_eq!(WAIT, Duration::from_secs(600));
+    }
+
+    /// An OpenBot that signs the app in and then refuses the new token on `/api/me` is on a
+    /// release that cannot serve the app. Nothing is kept, and the tokens are revoked.
+    #[test]
+    fn an_openbot_that_refuses_its_own_new_token_is_too_old() {
+        let openbot = FakeOpenBot::start(Shape::MeRefuses);
+        let (address, metadata) = check(&openbot);
+        let store = in_memory();
+        let problem = sign_in(
+            &address,
+            &metadata,
+            store.clone(),
+            &Attempt::default(),
+            Duration::from_secs(20),
+            Browser::approves().opener(),
+        )
+        .expect_err("too old");
+        assert_eq!(kind_of(&problem), Some(Kind::TooOld));
+        assert_eq!(store.get(&address).unwrap(), None);
+        assert_eq!(openbot.live_tokens(), 0, "the unused sign-in was revoked");
+    }
+
+    /// The fake checks S256 as the real one does: a code presented with another verifier is
+    /// refused and burns, so the exchange that follows with the right one fails too.
+    #[test]
+    fn the_fake_openbot_really_checks_the_verifier_and_burns_the_code() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let (_, metadata) = check(&openbot);
+        let verifier = random();
+        let redirect = "http://127.0.0.1:49152/callback";
+        let code = openbot.issue_code(&pkce_challenge(&verifier), redirect);
+        let exchange = |verifier: &str, redirect: &str| {
+            token_request(
+                &metadata.token_endpoint,
+                &[
+                    ("grant_type", "authorization_code"),
+                    ("code", &code),
+                    ("redirect_uri", redirect),
+                    ("client_id", CLIENT_ID),
+                    ("code_verifier", verifier),
+                ],
+            )
+        };
+        let refused = |result: Result<Granted, Refused>| match result {
+            Err(Refused::Answer { status, error }) => (status, error),
+            _ => panic!("the exchange was not refused"),
+        };
+        assert_eq!(
+            refused(exchange(&random(), redirect)),
+            (400, "invalid_grant".into())
+        );
+        assert_eq!(
+            refused(exchange(&verifier, redirect)),
+            (400, "invalid_grant".into()),
+            "the code burned on the wrong verifier"
+        );
+        // Another redirect than the one the code was issued for, and a redirect by name.
+        let code = openbot.issue_code(&pkce_challenge(&verifier), redirect);
+        let other = token_request(
+            &metadata.token_endpoint,
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", &code),
+                ("redirect_uri", "http://127.0.0.1:49153/callback"),
+                ("client_id", CLIENT_ID),
+                ("code_verifier", &verifier),
+            ],
+        );
+        assert_eq!(refused(other), (400, "invalid_grant".into()));
+        assert!(openbot
+            .authorize_refuses("http://localhost:49152/callback")
+            .contains("redirect_uri"));
+        assert!(openbot
+            .authorize_refuses("http://127.0.0.1:49152/oauth/callback")
+            .contains("redirect_uri"));
+    }
+
+    /// Refresh tokens rotate: after a refresh the store holds the new one, the old one no longer
+    /// works, and OpenBot honours the new access token.
+    #[test]
+    fn a_refresh_rotates_and_the_store_holds_the_new_token() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let address = openbot.address();
+        let first_access = session.access().unwrap();
+        let first_refresh = store.get(&address).unwrap().unwrap();
+
+        openbot.expire_access_tokens();
+        let second_access = session.after_refused(&first_access).unwrap();
+        assert_ne!(second_access, first_access);
+        assert!(openbot.honours(&second_access));
+        let second_refresh = store.get(&address).unwrap().unwrap();
+        assert_ne!(second_refresh, first_refresh);
+        assert!(second_refresh.starts_with("obr_"));
+
+        // The next launch picks the sign-in up from the store alone.
+        let (_, metadata) = check(&openbot);
+        let resumed = resume(&address, &metadata, store.clone()).unwrap();
+        assert!(openbot.honours(&resumed.access().unwrap()));
+
+        // The old refresh token, used again, is refused as the real OpenBot refuses it.
+        let replayed = token_request(
+            &metadata.token_endpoint,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", &first_refresh),
+                ("client_id", CLIENT_ID),
+            ],
+        );
+        assert!(matches!(
+            replayed,
+            Err(Refused::Answer { status: 400, ref error }) if error == "invalid_grant"
+        ));
+    }
+
+    /// Two requests find the same token refused at the same moment. One refresh is made: a second
+    /// would present a refresh token the first already used up, and end the sign-in.
+    #[test]
+    fn two_refreshes_at_once_make_one_request() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let session = Arc::new(openbot.sign_in(in_memory()));
+        let stale = session.access().unwrap();
+        openbot.expire_access_tokens();
+        openbot.slow_token_endpoint(Duration::from_millis(300));
+        let before = openbot.token_requests().len();
+
+        let together = Arc::new(std::sync::Barrier::new(2));
+        let refreshes: Vec<_> = (0..2)
+            .map(|_| {
+                let (session, stale, together) = (session.clone(), stale.clone(), together.clone());
+                std::thread::spawn(move || {
+                    together.wait();
+                    session.after_refused(&stale).unwrap()
+                })
+            })
+            .collect();
+        let tokens: Vec<String> = refreshes
+            .into_iter()
+            .map(|refresh| refresh.join().unwrap())
+            .collect();
+        assert_eq!(tokens[0], tokens[1]);
+        assert_ne!(tokens[0], stale);
+        assert_eq!(openbot.token_requests().len() - before, 1);
+        assert!(openbot.honours(&tokens[0]));
+    }
+
+    /// A refresh the OpenBot refuses ends the sign-in: the problem says so, and the stored token
+    /// is forgotten, so the next launch asks the person to sign in.
+    #[test]
+    fn a_refused_refresh_ends_the_session_and_forgets_it() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let access = session.access().unwrap();
+        openbot.end_sessions();
+        let problem = session.after_refused(&access).expect_err("ended");
+        assert_eq!(kind_of(&problem), Some(Kind::SessionEnded));
+        assert_eq!(
+            problem.said,
+            format!(
+                "Your sign-in to {} has ended. Sign in again to keep going.",
+                session.host()
+            )
+        );
+        assert_eq!(store.get(&openbot.address()).unwrap(), None);
+        assert_eq!(
+            kind_of(&session.access().expect_err("still ended")),
+            Some(Kind::SessionEnded)
+        );
+    }
+
+    /// Sign-out revokes both tokens at the OpenBot, then forgets the sign-in here.
+    #[test]
+    fn sign_out_revokes_then_forgets() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let access = session.access().unwrap();
+        let refresh = store.get(&openbot.address()).unwrap().unwrap();
+        assert_eq!(openbot.live_tokens(), 2);
+
+        session.sign_out().unwrap();
+
+        let revoked = openbot.revoke_requests();
+        assert_eq!(revoked.len(), 2);
+        assert_eq!(revoked[0]["token"], refresh);
+        assert_eq!(revoked[0]["token_type_hint"], "refresh_token");
+        assert_eq!(revoked[1]["token"], access);
+        assert!(revoked
+            .iter()
+            .all(|request| request["client_id"] == "openbot-desktop-oauth"));
+        assert_eq!(openbot.live_tokens(), 0);
+        assert!(!openbot.honours(&access));
+        assert_eq!(store.get(&openbot.address()).unwrap(), None);
+        assert!(session.access().is_err());
+    }
+
+    /// Nothing shaped like a token reaches a file under the app's configuration folder or a line
+    /// of the log, through a sign-in, a refresh, a refused refresh and a sign-out.
+    #[test]
+    fn no_token_is_written_to_the_configuration_folder_or_the_log() {
+        if crate::test_support::isolated_process(
+            "connected::sign_in::tests::no_token_is_written_to_the_configuration_folder_or_the_log",
+        ) {
+            return;
+        }
+        // Every line any crate logs in this process, as written, before any scrubbing.
+        struct Captured(Mutex<Vec<String>>);
+        impl log::Log for Captured {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record) {
+                self.0.lock().unwrap().push(record.args().to_string());
+            }
+            fn flush(&self) {}
+        }
+        let captured: &'static Captured = Box::leak(Box::new(Captured(Mutex::new(Vec::new()))));
+        log::set_logger(captured).expect("nothing else logs in this process");
+        log::set_max_level(log::LevelFilter::Trace);
+
+        let config = crate::test_support::temp_root("connected-no-token");
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let store = in_memory();
+        let session = openbot.sign_in(store.clone());
+        let address = openbot.address();
+        super::super::choice::write(
+            &config,
+            &super::super::choice::Choice {
+                mode: super::super::choice::Mode::Connected,
+                address: Some(address.clone()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        let mut tokens = vec![
+            session.access().unwrap(),
+            store.get(&address).unwrap().unwrap(),
+        ];
+        openbot.expire_access_tokens();
+        tokens.push(session.after_refused(&tokens[0]).unwrap());
+        tokens.push(store.get(&address).unwrap().unwrap());
+        session.sign_out().unwrap();
+        // And a sign-in that ends by being refused.
+        let session = openbot.sign_in(store.clone());
+        tokens.push(session.access().unwrap());
+        tokens.push(store.get(&address).unwrap().unwrap());
+        openbot.end_sessions();
+        session.after_refused(&tokens[4]).expect_err("ended");
+
+        let lines = captured.0.lock().unwrap().join("\n");
+        assert!(lines.contains("[connect] signed in to"), "{lines}");
+        for token in &tokens {
+            assert!(!lines.contains(token.as_str()), "a token was logged");
+        }
+        assert!(
+            !lines.contains("oba_") && !lines.contains("obr_"),
+            "{lines}"
+        );
+        let mut files = 0;
+        for entry in std::fs::read_dir(&config).unwrap() {
+            let written = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            files += 1;
+            assert!(
+                !written.contains("oba_") && !written.contains("obr_"),
+                "{written}"
+            );
+        }
+        assert_eq!(files, 1, "only connection.json is written");
+        let _ = std::fs::remove_dir_all(config);
+    }
+}

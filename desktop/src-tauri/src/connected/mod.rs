@@ -1,0 +1,215 @@
+/*!
+OpenBot Desktop connected to an OpenBot that runs somewhere else.
+
+The person types one address. The app signs in to that OpenBot in the system browser (OAuth 2.1
+authorization code with PKCE and a loopback redirect, `sign_in`), keeps the sign-in in the operating
+system's credential store (`credentials`), and shows that OpenBot's own pages in the window through
+a relay on `127.0.0.1` (`relay`), which is the only thing that ever holds a token. Nothing of a local
+installation is started, read or written while the app is connected.
+
+- `choice`: which of the two the person chose, in `connection.json`.
+- `address`: a typed address made into one the app can use, and checked to be an OpenBot it can
+  connect to.
+- `sign_in`: the browser sign-in, the token exchange, refresh and sign-out.
+- `credentials`: the refresh token, in Keychain, Credential Manager or the Secret Service.
+- `relay`: the loopback HTTP server the window loads.
+*/
+
+pub mod address;
+pub mod choice;
+pub mod credentials;
+pub mod relay;
+pub mod sign_in;
+
+#[cfg(test)]
+pub(crate) mod fake_openbot;
+
+use crate::problem::Problem;
+
+/// The public client this app signs in as. It has no secret.
+pub const CLIENT_ID: &str = "openbot-desktop-oauth";
+
+/// Why a connection could not be made or kept, for the window to choose what to offer next. The
+/// sentence for each is written here, once, and the window shows it as given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    AddressInvalid,
+    Unreachable,
+    NotOpenBot,
+    SinglePerson,
+    TooOld,
+    SignInCancelled,
+    SignInFailed,
+    SessionEnded,
+    CredentialStore,
+}
+
+impl Kind {
+    pub fn id(self) -> &'static str {
+        match self {
+            Kind::AddressInvalid => "address-invalid",
+            Kind::Unreachable => "unreachable",
+            Kind::NotOpenBot => "not-openbot",
+            Kind::SinglePerson => "single-person",
+            Kind::TooOld => "too-old",
+            Kind::SignInCancelled => "sign-in-cancelled",
+            Kind::SignInFailed => "sign-in-failed",
+            Kind::SessionEnded => "session-ended",
+            Kind::CredentialStore => "credential-store",
+        }
+    }
+
+    /// The sentence for the person. `host` is the OpenBot's, as they typed it.
+    pub fn said(self, host: &str) -> String {
+        match self {
+            Kind::AddressInvalid => "That isn't an address OpenBot can connect to. Use one that \
+                                     starts with https://, such as https://openbot.example.com."
+                .into(),
+            Kind::Unreachable => format!(
+                "OpenBot couldn't reach {host}. Check the address and your network, then try again."
+            ),
+            Kind::NotOpenBot => format!(
+                "There's no OpenBot at {host}. Check the address with whoever runs your OpenBot."
+            ),
+            Kind::SinglePerson => format!(
+                "The OpenBot at {host} is set up for one person on its own computer, so the app \
+                 can't connect to it."
+            ),
+            Kind::TooOld => format!(
+                "The OpenBot at {host} is on a release this app can't connect to yet. Ask whoever \
+                 runs it to update OpenBot, or open it in your browser."
+            ),
+            Kind::SignInCancelled => "Sign-in didn't finish. Try again when you're ready.".into(),
+            Kind::SignInFailed => format!(
+                "OpenBot couldn't sign you in at {host}. Try again, or ask whoever runs your OpenBot."
+            ),
+            Kind::SessionEnded => {
+                format!("Your sign-in to {host} has ended. Sign in again to keep going.")
+            }
+            Kind::CredentialStore => if cfg!(windows) {
+                "OpenBot couldn't save your sign-in on this computer. Check Windows Credential \
+                 Manager, then try again."
+            } else {
+                "OpenBot couldn't save your sign-in on this computer. Unlock your keychain, then \
+                 try again."
+            }
+            .into(),
+        }
+    }
+
+    /// The problem the window is given: the sentence, this kind, and `detail` for the log. Never a
+    /// token: callers pass a status, an error code or a transport error.
+    pub fn problem(self, host: &str, detail: impl Into<String>) -> Problem {
+        let mut problem = Problem::with(self.said(host), detail);
+        problem.kind = Some(self.id());
+        problem
+    }
+}
+
+/// Which kind a problem from this module is, when it is one.
+pub fn kind_of(problem: &Problem) -> Option<Kind> {
+    [
+        Kind::AddressInvalid,
+        Kind::Unreachable,
+        Kind::NotOpenBot,
+        Kind::SinglePerson,
+        Kind::TooOld,
+        Kind::SignInCancelled,
+        Kind::SignInFailed,
+        Kind::SessionEnded,
+        Kind::CredentialStore,
+    ]
+    .into_iter()
+    .find(|kind| problem.kind == Some(kind.id()))
+}
+
+/// The host of a normalised address, as the sentences name it: `openbot.example.com`, with its
+/// port when it has one.
+pub fn host_of(address: &str) -> String {
+    reqwest::Url::parse(address)
+        .ok()
+        .and_then(|url| {
+            let host = url.host_str()?.to_owned();
+            Some(match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host,
+            })
+        })
+        .unwrap_or_else(|| address.to_owned())
+}
+
+/// A client for the few requests the shell itself makes to that OpenBot: short timeouts, and a
+/// redirect followed only while it stays on the same host.
+pub(crate) fn http() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let same_host = attempt.previous().last().is_some_and(|from| {
+                from.scheme() == attempt.url().scheme()
+                    && from.host_str() == attempt.url().host_str()
+                    && from.port_or_known_default() == attempt.url().port_or_known_default()
+            });
+            if same_host && attempt.previous().len() < 5 {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .user_agent("OpenBot/desktop")
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+/// A transport error without the address's query, which a sign-in address carries a code in.
+pub(crate) fn transport(error: reqwest::Error) -> String {
+    let error = error.without_url();
+    let mut said = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(inner) = source {
+        said.push_str(": ");
+        said.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    said
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window reads `kind` beside the sentence, and the sentences are the agreed ones.
+    #[test]
+    fn a_problem_carries_its_kind_and_the_agreed_sentence() {
+        let problem = Kind::Unreachable.problem("openbot.example.com", "connection refused");
+        let sent = serde_json::to_value(&problem).unwrap();
+        assert_eq!(sent["kind"], "unreachable");
+        assert_eq!(
+            sent["said"],
+            "OpenBot couldn't reach openbot.example.com. Check the address and your network, then try again."
+        );
+        assert_eq!(sent["detail"], "connection refused");
+        assert_eq!(kind_of(&problem), Some(Kind::Unreachable));
+        // A problem from anywhere else carries none, and reads as it always did.
+        let plain = serde_json::to_value(Problem::plain("OpenBot has stopped.")).unwrap();
+        assert!(plain.get("kind").is_none());
+        assert_eq!(
+            Kind::SessionEnded.said("openbot.example.com"),
+            "Your sign-in to openbot.example.com has ended. Sign in again to keep going."
+        );
+        assert_eq!(
+            Kind::TooOld.said("127.0.0.1:4000"),
+            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser."
+        );
+    }
+
+    #[test]
+    fn the_host_is_named_with_its_port_when_it_has_one() {
+        assert_eq!(
+            host_of("https://openbot.example.com"),
+            "openbot.example.com"
+        );
+        assert_eq!(host_of("http://127.0.0.1:4000"), "127.0.0.1:4000");
+        assert_eq!(host_of("http://[::1]:4000"), "[::1]:4000");
+    }
+}

@@ -34,7 +34,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.9"
 base64 = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+# `stream`: the relay hands a request's and a response's body on as it arrives. See `connected/relay.rs`.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json", "stream"] }
 flate2 = "1"
 # Checking the digest of an installer before running it. See `install.rs`.
 sha2 = "0.10"
@@ -79,6 +80,20 @@ log = "0.4"
 regex = "1"
 # The log's UTC timestamps, and the local offset its first line says. The version Tauri already uses.
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
+# The sign-in to an OpenBot that runs elsewhere, kept in the system's own credential store: Keychain
+# on macOS, Credential Manager on Windows, the Secret Service on Linux. See `connected/credentials.rs`.
+keyring = "4.2"
+# The entry type `keyring` hands back, and the in-memory store its own tests use, which this
+# crate's tests use in place of the real keychain. The version `keyring` already builds.
+keyring-core = "1"
+# The loopback relay between the window and that OpenBot: an HTTP/1 server on 127.0.0.1, with the
+# runtime, bodies and streams reqwest and Tauri already build. See `connected/relay.rs`.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -118,6 +133,9 @@ harness = false
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# A real WebSocket client and server at each end of the relay in its tests.
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 # Every local evaluation CLI call checks the pinned runtime and script against their digests,
 # about 150 MB. Unoptimized, that hash alone took 4.9 s per call in a debug build; optimized, 0.3 s.
