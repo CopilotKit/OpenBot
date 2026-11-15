@@ -86,10 +86,14 @@ test("each convention is enforced", () => {
   }
 });
 
-test("only the caller's own organizations sit outside an organization", () => {
+test("only the caller's own organizations and invitations sit outside an organization", () => {
   const ORGANIZATIONS = "/api/v2/people/me/organizations";
-  // The one address a person can ask before they can name an organization: allowed as committed.
+  // What a person can ask before they can name an organization, or before they are a member of
+  // the one an invitation is for: allowed as committed.
   expect(Object.keys(spec().paths)).toContain(ORGANIZATIONS);
+  expect(Object.keys(spec().paths)).toContain(
+    "/api/v2/people/me/invitations/{invitationId}/accept",
+  );
   const broken = spec();
   // Nothing beside it is: not another of the person's own resources, and not the address under it.
   broken.paths["/api/v2/people/me/bots"] = broken.paths[BOTS];

@@ -9846,7 +9846,7 @@ paths:
         - Organizations
       operationId: createOrganization
       summary: Create an organization
-      description: 'Create an organization with the caller as its owner. It starts with no Bots and no conversations. Who may create one is the deployment''s choice: its admins (the admins of `default`) unless it lets anybody signed in. Without a slug, one is made from the name. The caller''s session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: Create an organization with the caller as its owner. It starts with no Bots and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
       security:
         - webSession: []
         - appOAuth:
@@ -9883,7 +9883,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/AdminOnly'
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/OrganizationConflict'
         '500':
@@ -9934,12 +9934,15 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
-    post:
+  /api/v2/organizations/{organizationId}/profile:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    patch:
       tags:
         - Organizations
-      operationId: addOrganizationMember
-      summary: Add a person to an organization
-      description: Make somebody who already has an account here a member of the organization, by their email address, with a role. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+      operationId: updateOrganization
+      summary: Rename an organization
+      description: Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenBot named after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
       security:
         - webSession: []
         - appOAuth:
@@ -9952,7 +9955,136 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AddOrganizationMemberRequest'
+              $ref: '#/components/schemas/UpdateOrganizationRequest'
+            examples:
+              renamed:
+                value:
+                  name: Acme Research Lab
+      responses:
+        '200':
+          description: The organization, renamed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+              examples:
+                renamed:
+                  $ref: '#/components/examples/RenamedOrganization'
+        '400':
+          $ref: '#/components/responses/InvalidOrganization'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/members/{personId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    delete:
+      tags:
+        - Organizations
+      operationId: removeOrganizationMember
+      summary: Remove a member, or leave an organization
+      description: End somebody's membership of the organization. An owner or an admin of it can remove anybody but its owner, and any member can leave by naming themselves or `me`. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: They are not a member.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/OwnerStays'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Organizations
+      operationId: listOrganizationInvitations
+      summary: List the invitations an organization has sent
+      description: 'Return one page of the organization''s invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of invitations.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitationPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/OrganizationInvitationPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    post:
+      tags:
+        - Organizations
+      operationId: createOrganizationInvitation
+      summary: Invite somebody to an organization
+      description: 'Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrganizationInvitationRequest'
             examples:
               member:
                 value:
@@ -9960,32 +10092,221 @@ paths:
                   role: member
       responses:
         '201':
-          description: The person is now a member.
+          description: The invitation was made.
           headers:
             Cache-Control:
               $ref: '#/components/headers/PrivateNoStore'
             Location:
-              description: The organization's members.
+              description: The organization's invitations.
               schema:
                 type: string
-              example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe/members
+              example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe/invitations
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrganizationMemberResponse'
+                $ref: '#/components/schemas/OrganizationInvitationResponse'
               examples:
-                added:
-                  $ref: '#/components/examples/AddedOrganizationMember'
+                invited:
+                  $ref: '#/components/examples/CreatedOrganizationInvitation'
         '400':
-          $ref: '#/components/responses/InvalidOrganizationMember'
+          $ref: '#/components/responses/InvalidOrganizationInvitation'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
-          $ref: '#/components/responses/OrganizationOrPersonNotFound'
+          $ref: '#/components/responses/OrganizationNotFound'
         '409':
-          $ref: '#/components/responses/OrganizationMemberConflict'
+          $ref: '#/components/responses/OrganizationInvitationConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/invitations/{invitationId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/InvitationId'
+    delete:
+      tags:
+        - Organizations
+      operationId: cancelOrganizationInvitation
+      summary: Cancel an invitation
+      description: Take back an invitation the organization sent, whatever state it is in. It leaves the organization's list and the invited person's. Only an owner or an admin of this organization can.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The invitation is canceled.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationOrInvitationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/invitations:
+    get:
+      tags:
+        - Organizations
+      operationId: listInvitations
+      summary: List the caller's invitations
+      description: Return one page of the invitations sent to the caller's email address that they have not answered, the newest first, each with the organization and who invited them. One that ran out of time is listed as expired until it is canceled or replaced. A missing cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of invitations.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/InvitationPageLast'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/invitations/{invitationId}:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    get:
+      tags:
+        - Organizations
+      operationId: getInvitation
+      summary: Read one of the caller's invitations
+      description: Return an invitation sent to the caller's email address, in whatever state it is in, so the page a link opens can say what happened to it. An invitation sent to another address answers as one that does not exist.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The invitation.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationResponse'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/WaitingInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvitationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/invitations/{invitationId}/accept:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags:
+        - Organizations
+      operationId: acceptInvitation
+      summary: Accept an invitation
+      description: Join the organization the invitation is for, with the role it offers. The caller's session keeps working where it was; switch to the new organization to work in it. An invitation that expired, was canceled or was already answered is refused in words. A repeated request with the same Idempotency-Key returns the first result.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The caller is now a member of the organization.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+              examples:
+                joined:
+                  $ref: '#/components/examples/JoinedOrganization'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvitationNotFound'
+        '409':
+          $ref: '#/components/responses/InvitationNotWaiting'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/people/me/invitations/{invitationId}/decline:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags:
+        - Organizations
+      operationId: declineInvitation
+      summary: Decline an invitation
+      description: Turn the invitation down. It leaves the caller's list, and the organization sees that it was declined. A repeated request with the same Idempotency-Key returns the first result.
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The invitation is declined.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/InvitationNotFound'
+        '409':
+          $ref: '#/components/responses/InvitationNotWaiting'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -19018,6 +19339,16 @@ components:
         minLength: 1
         maxLength: 200
         pattern: \S
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      description: The invitation's id. Opaque.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: ^[A-Za-z0-9_-]+$
     ApprovalId:
       name: approvalId
       in: path
@@ -27346,7 +27677,11 @@ components:
         - name
         - role
         - active
+        - personal
       properties:
+        personal:
+          type: boolean
+          description: 'Whether this is the caller''s own organization: the one OpenBot made for them when they first signed in.'
         id:
           type: string
           description: The organization's id. Opaque.
@@ -27375,7 +27710,7 @@ components:
             $ref: '#/components/schemas/Organization'
         canCreate:
           type: boolean
-          description: 'Whether the caller may create an organization: the server''s verdict, true for the deployment''s admins and for anybody signed in when the deployment lets them. The same on every page.'
+          description: 'Whether the caller may create another organization: the server''s verdict, true for anybody signed in where OpenBot keeps more than one organization. The same on every page.'
         nextCursor:
           type:
             - string
@@ -27459,7 +27794,89 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
           description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
-    AddOrganizationMemberRequest:
+    UpdateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: What people call it.
+    InvitationSender:
+      type: object
+      description: Who sent an invitation.
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type:
+            - string
+            - 'null'
+          description: What OpenBot calls them. Null until they choose.
+        email:
+          type: string
+          description: Their address.
+    OrganizationInvitation:
+      type: object
+      description: An invitation an organization sent, as its admins see it. status is the server's verdict.
+      required:
+        - id
+        - email
+        - role
+        - status
+        - invitedBy
+        - createdAt
+        - expiresAt
+      properties:
+        id:
+          type: string
+          description: The invitation's id. Opaque.
+        email:
+          type: string
+          description: The address it was sent to.
+        role:
+          $ref: '#/components/schemas/AssignableRole'
+        status:
+          type: string
+          enum:
+            - pending
+            - expired
+            - declined
+          description: pending while it waits for an answer, expired once its seven days ran out, declined when the person turned it down.
+        invitedBy:
+          $ref: '#/components/schemas/InvitationSender'
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was sent.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When it stops being accepted.
+    OrganizationInvitationPage:
+      type: object
+      required:
+        - invitations
+        - nextCursor
+      properties:
+        invitations:
+          type: array
+          description: The newest first.
+          items:
+            $ref: '#/components/schemas/OrganizationInvitation'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    CreateOrganizationInvitationRequest:
       type: object
       additionalProperties: false
       required:
@@ -27471,16 +27888,101 @@ components:
           minLength: 3
           maxLength: 320
           pattern: ^[^\s\x00]+@[^\s\x00]+$
-          description: The address of somebody who already has an account here.
+          description: The address of the person to invite.
         role:
           $ref: '#/components/schemas/AssignableRole'
-    OrganizationMemberResponse:
+    OrganizationInvitationResponse:
       type: object
       required:
-        - member
+        - invitation
+        - delivery
       properties:
-        member:
-          $ref: '#/components/schemas/OrganizationMember'
+        invitation:
+          $ref: '#/components/schemas/OrganizationInvitation'
+        delivery:
+          type: string
+          enum:
+            - emailed
+            - link
+          description: How the person hears of it. emailed when OpenBot sent them an email. link when it could not or is not set up to, so the inviter passes the invitation's link on themselves. Either way the person sees the invitation in OpenBot when they sign in.
+    Invitation:
+      type: object
+      description: An invitation as the person it was sent to sees it. status is the server's verdict.
+      required:
+        - id
+        - organization
+        - role
+        - status
+        - invitedBy
+        - createdAt
+        - expiresAt
+      properties:
+        id:
+          type: string
+          description: The invitation's id. Opaque.
+        organization:
+          type: object
+          description: The organization it is an invitation to.
+          required:
+            - id
+            - slug
+            - name
+          properties:
+            id:
+              type: string
+              description: The organization's id. Opaque.
+            slug:
+              type: string
+              description: Its short name.
+            name:
+              type: string
+              description: What people call it.
+        role:
+          $ref: '#/components/schemas/AssignableRole'
+        status:
+          type: string
+          enum:
+            - pending
+            - expired
+            - accepted
+            - declined
+            - canceled
+          description: pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back.
+        invitedBy:
+          $ref: '#/components/schemas/InvitationSender'
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was sent.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When it stops being accepted.
+    InvitationPage:
+      type: object
+      required:
+        - invitations
+        - nextCursor
+      properties:
+        invitations:
+          type: array
+          description: The newest first.
+          items:
+            $ref: '#/components/schemas/Invitation'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
+    InvitationResponse:
+      type: object
+      required:
+        - invitation
+      properties:
+        invitation:
+          $ref: '#/components/schemas/Invitation'
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
@@ -36106,7 +36608,25 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
-    InvalidOrganizationMember:
+    OwnerStays:
+      description: The person owns the organization, so they stay in it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            owner:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: They own this organization, so they stay a member of it.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidOrganizationInvitation:
       description: The address or the role is missing or malformed, or the Idempotency-Key is.
       content:
         application/problem+json:
@@ -36124,8 +36644,48 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    OrganizationOrPersonNotFound:
-      description: The organization does not exist or is not visible to the caller, or nobody here has that address.
+    OrganizationInvitationConflict:
+      description: They are already a member, or already have an invitation waiting. Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            already:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: They're already a member of this organization.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            invited:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: They already have an invitation waiting. Cancel it to send a new one.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationOrInvitationNotFound:
+      description: The organization does not exist or is not visible to the caller, or it has no such invitation.
       content:
         application/problem+json:
           schema:
@@ -36142,30 +36702,48 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-            person:
+            invitation:
               value:
-                type: https://open.bot/errors/person-not-found
-                title: Person not found.
+                type: https://open.bot/errors/invitation-not-found
+                title: Invitation not found.
                 status: 404
-                detail: Nobody here has that address. They need to sign in to OpenBot once first.
-                code: PERSON_NOT_FOUND
+                detail: Couldn't find that invitation.
+                code: INVITATION_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    OrganizationMemberConflict:
-      description: They are already a member. Or the Idempotency-Key was used for a different request.
+    InvitationNotFound:
+      description: There is no such invitation, or it was sent to another address.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
           examples:
-            already:
+            invitation:
+              value:
+                type: https://open.bot/errors/invitation-not-found
+                title: Invitation not found.
+                status: 404
+                detail: Couldn't find that invitation. Check that you're signed in with the address it was sent to.
+                code: INVITATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvitationNotWaiting:
+      description: The invitation expired, was canceled or was already answered. Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            expired:
               value:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: They're already a member of this organization.
+                detail: This invitation has expired. Ask whoever invited you to send a new one.
                 code: CONFLICT
                 category: conflict
                 retryable: false
@@ -40455,19 +41033,21 @@ components:
       value:
         cancelled: true
     OrganizationPageLast:
-      summary: Somebody in two organizations, working in the first.
+      summary: Somebody in their own organization and one they created, working in their own.
       value:
         organizations:
-          - id: default
-            slug: default
-            name: Acme
-            role: admin
+          - id: Wm4pZ7tKc1Xb9RnQ2sYd6hLe
+            slug: dana
+            name: Dana's organization
+            role: owner
             active: true
+            personal: true
           - id: Jq3xT9mLw2Vb8RnC5sYd0fKe
             slug: acme-research
             name: Acme Research
             role: owner
             active: false
+            personal: false
         canCreate: true
         nextCursor: null
     CreatedOrganization:
@@ -40479,6 +41059,7 @@ components:
           name: Acme Research
           role: owner
           active: false
+          personal: false
     OrganizationMemberPageLast:
       summary: An organization's members, on one page.
       value:
@@ -40496,16 +41077,96 @@ components:
             role: member
             joinedAt: '2026-11-14T09:20:05.000Z'
         nextCursor: null
-    AddedOrganizationMember:
-      summary: Somebody added as a member.
+    RenamedOrganization:
+      summary: An organization with its new name.
       value:
-        member:
-          id: 2fn8w1c6y4tq7h0mbe3s
+        organization:
+          id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+          slug: acme-research
+          name: Acme Research Lab
+          role: owner
+          active: true
+          personal: false
+    OrganizationInvitationPageLast:
+      summary: One invitation waiting and one that expired.
+      value:
+        invitations:
+          - id: 5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11
+            email: sam.ortiz@acme.com
+            role: member
+            status: pending
+            invitedBy:
+              name: Dana Whitfield
+              email: dana.whitfield@acme.com
+            createdAt: '2026-11-15T09:20:05.000Z'
+            expiresAt: '2026-11-22T09:20:05.000Z'
+          - id: 0c2d7a53-1f4e-4f0a-8a57-3d1b2c9e7f42
+            email: lee.park@acme.com
+            role: admin
+            status: expired
+            invitedBy:
+              name: Dana Whitfield
+              email: dana.whitfield@acme.com
+            createdAt: '2026-11-01T09:20:05.000Z'
+            expiresAt: '2026-11-08T09:20:05.000Z'
+        nextCursor: null
+    CreatedOrganizationInvitation:
+      summary: An invitation OpenBot could not email, so the inviter passes the link on.
+      value:
+        invitation:
+          id: 5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11
           email: sam.ortiz@acme.com
-          name: Sam Ortiz
-          image: null
           role: member
-          joinedAt: '2026-11-14T09:20:05.000Z'
+          status: pending
+          invitedBy:
+            name: Dana Whitfield
+            email: dana.whitfield@acme.com
+          createdAt: '2026-11-15T09:20:05.000Z'
+          expiresAt: '2026-11-22T09:20:05.000Z'
+        delivery: link
+    InvitationPageLast:
+      summary: One invitation waiting for the caller.
+      value:
+        invitations:
+          - id: 5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11
+            organization:
+              id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+              slug: acme-research
+              name: Acme Research
+            role: member
+            status: pending
+            invitedBy:
+              name: Dana Whitfield
+              email: dana.whitfield@acme.com
+            createdAt: '2026-11-15T09:20:05.000Z'
+            expiresAt: '2026-11-22T09:20:05.000Z'
+        nextCursor: null
+    WaitingInvitation:
+      summary: An invitation the caller can still answer.
+      value:
+        invitation:
+          id: 5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11
+          organization:
+            id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+            slug: acme-research
+            name: Acme Research
+          role: member
+          status: pending
+          invitedBy:
+            name: Dana Whitfield
+            email: dana.whitfield@acme.com
+          createdAt: '2026-11-15T09:20:05.000Z'
+          expiresAt: '2026-11-22T09:20:05.000Z'
+    JoinedOrganization:
+      summary: The organization somebody joined by accepting an invitation.
+      value:
+        organization:
+          id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+          slug: acme-research
+          name: Acme Research
+          role: member
+          active: false
+          personal: false
     ApprovalPageExample:
       summary: One approval waiting, on the last page.
       value:

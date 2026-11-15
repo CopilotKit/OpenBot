@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The organization does not exist or is not visible to the caller, or nobody here has that address.
+ * The person owns the organization, so they stay in it.
  */
-export type OrganizationOrPersonNotFoundResponse = Problem;
+export type OwnerStaysResponse = Problem;

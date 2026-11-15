@@ -7,6 +7,8 @@ import type { PersonRole } from "./personRole";
  * One organization, as one of its members sees it. role and active are the server's verdicts about the caller.
  */
 export interface Organization {
+  /** Whether this is the caller's own organization: the one OpenBot made for them when they first signed in. */
+  personal: boolean;
   /** The organization's id. Opaque. */
   id: string;
   /** Its short name, which also addresses it. */

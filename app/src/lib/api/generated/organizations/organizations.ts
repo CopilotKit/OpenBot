@@ -18,29 +18,44 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
-  AddOrganizationMemberHeaders,
-  AddOrganizationMemberRequest,
+  AcceptInvitationHeaders,
   AdminOnlyResponse,
+  CancelOrganizationInvitationHeaders,
   CreateOrganizationHeaders,
+  CreateOrganizationInvitationHeaders,
+  CreateOrganizationInvitationRequest,
   CreateOrganizationRequest,
+  DeclineInvitationHeaders,
   ForbiddenResponse,
-  InvalidOrganizationMemberResponse,
+  IdempotencyConflictResponse,
+  InvalidOrganizationInvitationResponse,
   InvalidOrganizationResponse,
   InvalidRequestResponse,
+  InvitationNotFoundResponse,
+  InvitationNotWaitingResponse,
+  InvitationPage,
+  InvitationResponse,
+  ListInvitationsParams,
+  ListOrganizationInvitationsParams,
   ListOrganizationMembersParams,
   ListOrganizationsParams,
   OrganizationConflictResponse,
-  OrganizationMemberConflictResponse,
+  OrganizationInvitationConflictResponse,
+  OrganizationInvitationPage,
+  OrganizationInvitationResponse,
   OrganizationMemberPage,
-  OrganizationMemberResponse,
   OrganizationNotCreatedResponse,
   OrganizationNotFoundResponse,
-  OrganizationOrPersonNotFoundResponse,
+  OrganizationOrInvitationNotFoundResponse,
   OrganizationPage,
   OrganizationResponse,
+  OwnerStaysResponse,
+  RemoveOrganizationMemberHeaders,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
+  UpdateOrganizationHeaders,
+  UpdateOrganizationRequest,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -286,7 +301,7 @@ export const getCreateOrganizationUrl = () => {
 };
 
 /**
- * Create an organization with the caller as its owner. It starts with no Bots and no conversations. Who may create one is the deployment's choice: its admins (the admins of `default`) unless it lets anybody signed in. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with no Bots and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganization = async (
@@ -334,7 +349,7 @@ export const getCreateOrganizationMutationOptions = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | ForbiddenResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
@@ -382,7 +397,7 @@ export type CreateOrganizationMutationBody = CreateOrganizationRequest;
 export type CreateOrganizationMutationError =
   | InvalidOrganizationResponse
   | UnauthenticatedResponse
-  | AdminOnlyResponse
+  | ForbiddenResponse
   | OrganizationConflictResponse
   | ServerErrorResponse
   | OrganizationNotCreatedResponse
@@ -399,7 +414,7 @@ export const useCreateOrganization = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | ForbiddenResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
@@ -672,20 +687,20 @@ export function useListOrganizationMembers<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getAddOrganizationMemberUrl = (organizationId: string) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/members`;
+export const getUpdateOrganizationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/profile`;
 };
 
 /**
- * Make somebody who already has an account here a member of the organization, by their email address, with a role. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
- * @summary Add a person to an organization
+ * Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenBot named after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Rename an organization
  */
-export const addOrganizationMember = async (
+export const updateOrganization = async (
   organizationId: string,
-  addOrganizationMemberRequest: AddOrganizationMemberRequest,
-  headers: AddOrganizationMemberHeaders,
+  updateOrganizationRequest: UpdateOrganizationRequest,
+  headers: UpdateOrganizationHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<OrganizationMemberResponse> => {
+): Promise<OrganizationResponse> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -707,49 +722,49 @@ export const addOrganizationMember = async (
     }
     return headers;
   };
-  return apiRequest<OrganizationMemberResponse>(
-    getAddOrganizationMemberUrl(organizationId),
+  return apiRequest<OrganizationResponse>(
+    getUpdateOrganizationUrl(organizationId),
     {
       ...options,
-      method: "POST",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         ...headers,
         ...getHeaders(options?.headers),
       },
-      body: JSON.stringify(addOrganizationMemberRequest),
+      body: JSON.stringify(updateOrganizationRequest),
     },
   );
 };
 
-export const getAddOrganizationMemberMutationKey = () =>
-  ["addOrganizationMember"] as const;
+export const getUpdateOrganizationMutationKey = () =>
+  ["updateOrganization"] as const;
 
-export const getAddOrganizationMemberMutationOptions = <
+export const getUpdateOrganizationMutationOptions = <
   TError =
-    | InvalidOrganizationMemberResponse
+    | InvalidOrganizationResponse
     | UnauthenticatedResponse
     | AdminOnlyResponse
-    | OrganizationOrPersonNotFoundResponse
-    | OrganizationMemberConflictResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof addOrganizationMember>>,
+    Awaited<ReturnType<typeof updateOrganization>>,
     TError,
-    AddOrganizationMemberMutationVariables,
+    UpdateOrganizationMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof apiRequest>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof addOrganizationMember>>,
+  Awaited<ReturnType<typeof updateOrganization>>,
   TError,
-  AddOrganizationMemberMutationVariables,
+  UpdateOrganizationMutationVariables,
   TContext
 > => {
-  const mutationKey = getAddOrganizationMemberMutationKey();
+  const mutationKey = getUpdateOrganizationMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -759,67 +774,1442 @@ export const getAddOrganizationMemberMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof addOrganizationMember>>,
-    AddOrganizationMemberMutationVariables
+    Awaited<ReturnType<typeof updateOrganization>>,
+    UpdateOrganizationMutationVariables
   > = (props) => {
     const { organizationId, data, headers } = props ?? {};
 
-    return addOrganizationMember(organizationId, data, headers, requestOptions);
+    return updateOrganization(organizationId, data, headers, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type AddOrganizationMemberMutationResult = NonNullable<
-  Awaited<ReturnType<typeof addOrganizationMember>>
+export type UpdateOrganizationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateOrganization>>
 >;
-export type AddOrganizationMemberMutationBody = AddOrganizationMemberRequest;
-export type AddOrganizationMemberMutationError =
-  | InvalidOrganizationMemberResponse
+export type UpdateOrganizationMutationBody = UpdateOrganizationRequest;
+export type UpdateOrganizationMutationError =
+  | InvalidOrganizationResponse
   | UnauthenticatedResponse
   | AdminOnlyResponse
-  | OrganizationOrPersonNotFoundResponse
-  | OrganizationMemberConflictResponse
+  | OrganizationNotFoundResponse
+  | IdempotencyConflictResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
-export type AddOrganizationMemberMutationVariables = {
+export type UpdateOrganizationMutationVariables = {
   organizationId: string;
-  data: AddOrganizationMemberRequest;
-  headers: AddOrganizationMemberHeaders;
+  data: UpdateOrganizationRequest;
+  headers: UpdateOrganizationHeaders;
 };
 
 /**
- * @summary Add a person to an organization
+ * @summary Rename an organization
  */
-export const useAddOrganizationMember = <
+export const useUpdateOrganization = <
   TError =
-    | InvalidOrganizationMemberResponse
+    | InvalidOrganizationResponse
     | UnauthenticatedResponse
     | AdminOnlyResponse
-    | OrganizationOrPersonNotFoundResponse
-    | OrganizationMemberConflictResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(
   options?: {
     mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof addOrganizationMember>>,
+      Awaited<ReturnType<typeof updateOrganization>>,
       TError,
-      AddOrganizationMemberMutationVariables,
+      UpdateOrganizationMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof apiRequest>;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<
-  Awaited<ReturnType<typeof addOrganizationMember>>,
+  Awaited<ReturnType<typeof updateOrganization>>,
   TError,
-  AddOrganizationMemberMutationVariables,
+  UpdateOrganizationMutationVariables,
   TContext
 > => {
   return useMutation(
-    getAddOrganizationMemberMutationOptions(options),
+    getUpdateOrganizationMutationOptions(options),
     queryClient,
   );
+};
+export const getRemoveOrganizationMemberUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/members/${encodeURIComponent(String(personId))}`;
+};
+
+/**
+ * End somebody's membership of the organization. An owner or an admin of it can remove anybody but its owner, and any member can leave by naming themselves or `me`. The person keeps their account and their other organizations, and what they made here stays here. Removing somebody who is not a member answers the same as removing one.
+ * @summary Remove a member, or leave an organization
+ */
+export const removeOrganizationMember = async (
+  organizationId: string,
+  personId: string,
+  headers: RemoveOrganizationMemberHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(
+    getRemoveOrganizationMemberUrl(organizationId, personId),
+    {
+      ...options,
+      method: "DELETE",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getRemoveOrganizationMemberMutationKey = () =>
+  ["removeOrganizationMember"] as const;
+
+export const getRemoveOrganizationMemberMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | OwnerStaysResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeOrganizationMember>>,
+    TError,
+    RemoveOrganizationMemberMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeOrganizationMember>>,
+  TError,
+  RemoveOrganizationMemberMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRemoveOrganizationMemberMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeOrganizationMember>>,
+    RemoveOrganizationMemberMutationVariables
+  > = (props) => {
+    const { organizationId, personId, headers } = props ?? {};
+
+    return removeOrganizationMember(
+      organizationId,
+      personId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveOrganizationMemberMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeOrganizationMember>>
+>;
+
+export type RemoveOrganizationMemberMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | OwnerStaysResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type RemoveOrganizationMemberMutationVariables = {
+  organizationId: string;
+  personId: string;
+  headers: RemoveOrganizationMemberHeaders;
+};
+
+/**
+ * @summary Remove a member, or leave an organization
+ */
+export const useRemoveOrganizationMember = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | OwnerStaysResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof removeOrganizationMember>>,
+      TError,
+      RemoveOrganizationMemberMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof removeOrganizationMember>>,
+  TError,
+  RemoveOrganizationMemberMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRemoveOrganizationMemberMutationOptions(options),
+    queryClient,
+  );
+};
+export const getListOrganizationInvitationsUrl = (
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/invitations?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/invitations`;
+};
+
+/**
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List the invitations an organization has sent
+ */
+export const listOrganizationInvitations = async (
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationInvitationPage> => {
+  return apiRequest<OrganizationInvitationPage>(
+    getListOrganizationInvitationsUrl(organizationId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListOrganizationInvitationsQueryKey = (
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/invitations`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListOrganizationInvitationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listOrganizationInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listOrganizationInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListOrganizationInvitationsQueryKey(organizationId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listOrganizationInvitations>>
+  > = ({ signal }) =>
+    listOrganizationInvitations(organizationId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listOrganizationInvitations>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListOrganizationInvitationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listOrganizationInvitations>>
+>;
+export type ListOrganizationInvitationsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListOrganizationInvitations<
+  TData = Awaited<ReturnType<typeof listOrganizationInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params: undefined | ListOrganizationInvitationsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listOrganizationInvitations>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOrganizationInvitations>>,
+          TError,
+          Awaited<ReturnType<typeof listOrganizationInvitations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListOrganizationInvitations<
+  TData = Awaited<ReturnType<typeof listOrganizationInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listOrganizationInvitations>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOrganizationInvitations>>,
+          TError,
+          Awaited<ReturnType<typeof listOrganizationInvitations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListOrganizationInvitations<
+  TData = Awaited<ReturnType<typeof listOrganizationInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listOrganizationInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List the invitations an organization has sent
+ */
+
+export function useListOrganizationInvitations<
+  TData = Awaited<ReturnType<typeof listOrganizationInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListOrganizationInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listOrganizationInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListOrganizationInvitationsQueryOptions(
+    organizationId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateOrganizationInvitationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/invitations`;
+};
+
+/**
+ * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Invite somebody to an organization
+ */
+export const createOrganizationInvitation = async (
+  organizationId: string,
+  createOrganizationInvitationRequest: CreateOrganizationInvitationRequest,
+  headers: CreateOrganizationInvitationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationInvitationResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<OrganizationInvitationResponse>(
+    getCreateOrganizationInvitationUrl(organizationId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(createOrganizationInvitationRequest),
+    },
+  );
+};
+
+export const getCreateOrganizationInvitationMutationKey = () =>
+  ["createOrganizationInvitation"] as const;
+
+export const getCreateOrganizationInvitationMutationOptions = <
+  TError =
+    | InvalidOrganizationInvitationResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationInvitationConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOrganizationInvitation>>,
+    TError,
+    CreateOrganizationInvitationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createOrganizationInvitation>>,
+  TError,
+  CreateOrganizationInvitationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateOrganizationInvitationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createOrganizationInvitation>>,
+    CreateOrganizationInvitationMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return createOrganizationInvitation(
+      organizationId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateOrganizationInvitationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createOrganizationInvitation>>
+>;
+export type CreateOrganizationInvitationMutationBody =
+  CreateOrganizationInvitationRequest;
+export type CreateOrganizationInvitationMutationError =
+  | InvalidOrganizationInvitationResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | OrganizationInvitationConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type CreateOrganizationInvitationMutationVariables = {
+  organizationId: string;
+  data: CreateOrganizationInvitationRequest;
+  headers: CreateOrganizationInvitationHeaders;
+};
+
+/**
+ * @summary Invite somebody to an organization
+ */
+export const useCreateOrganizationInvitation = <
+  TError =
+    | InvalidOrganizationInvitationResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationInvitationConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createOrganizationInvitation>>,
+      TError,
+      CreateOrganizationInvitationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createOrganizationInvitation>>,
+  TError,
+  CreateOrganizationInvitationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getCreateOrganizationInvitationMutationOptions(options),
+    queryClient,
+  );
+};
+export const getCancelOrganizationInvitationUrl = (
+  organizationId: string,
+  invitationId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/invitations/${encodeURIComponent(String(invitationId))}`;
+};
+
+/**
+ * Take back an invitation the organization sent, whatever state it is in. It leaves the organization's list and the invited person's. Only an owner or an admin of this organization can.
+ * @summary Cancel an invitation
+ */
+export const cancelOrganizationInvitation = async (
+  organizationId: string,
+  invitationId: string,
+  headers: CancelOrganizationInvitationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(
+    getCancelOrganizationInvitationUrl(organizationId, invitationId),
+    {
+      ...options,
+      method: "DELETE",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getCancelOrganizationInvitationMutationKey = () =>
+  ["cancelOrganizationInvitation"] as const;
+
+export const getCancelOrganizationInvitationMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationOrInvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelOrganizationInvitation>>,
+    TError,
+    CancelOrganizationInvitationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelOrganizationInvitation>>,
+  TError,
+  CancelOrganizationInvitationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCancelOrganizationInvitationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelOrganizationInvitation>>,
+    CancelOrganizationInvitationMutationVariables
+  > = (props) => {
+    const { organizationId, invitationId, headers } = props ?? {};
+
+    return cancelOrganizationInvitation(
+      organizationId,
+      invitationId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelOrganizationInvitationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelOrganizationInvitation>>
+>;
+
+export type CancelOrganizationInvitationMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationOrInvitationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type CancelOrganizationInvitationMutationVariables = {
+  organizationId: string;
+  invitationId: string;
+  headers: CancelOrganizationInvitationHeaders;
+};
+
+/**
+ * @summary Cancel an invitation
+ */
+export const useCancelOrganizationInvitation = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationOrInvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof cancelOrganizationInvitation>>,
+      TError,
+      CancelOrganizationInvitationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof cancelOrganizationInvitation>>,
+  TError,
+  CancelOrganizationInvitationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getCancelOrganizationInvitationMutationOptions(options),
+    queryClient,
+  );
+};
+export const getListInvitationsUrl = (params?: ListInvitationsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/people/me/invitations?${stringifiedParams}`
+    : `/api/v2/people/me/invitations`;
+};
+
+/**
+ * Return one page of the invitations sent to the caller's email address that they have not answered, the newest first, each with the organization and who invited them. One that ran out of time is listed as expired until it is canceled or replaced. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List the caller's invitations
+ */
+export const listInvitations = async (
+  params?: ListInvitationsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<InvitationPage> => {
+  return apiRequest<InvitationPage>(getListInvitationsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListInvitationsQueryKey = (params?: ListInvitationsParams) => {
+  return [
+    `/api/v2/people/me/invitations`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListInvitationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  params?: ListInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListInvitationsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvitations>>> = ({
+    signal,
+  }) => listInvitations(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listInvitations>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListInvitationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listInvitations>>
+>;
+export type ListInvitationsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListInvitations<
+  TData = Awaited<ReturnType<typeof listInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  params: undefined | ListInvitationsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listInvitations>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvitations>>,
+          TError,
+          Awaited<ReturnType<typeof listInvitations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListInvitations<
+  TData = Awaited<ReturnType<typeof listInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  params?: ListInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listInvitations>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvitations>>,
+          TError,
+          Awaited<ReturnType<typeof listInvitations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListInvitations<
+  TData = Awaited<ReturnType<typeof listInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  params?: ListInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List the caller's invitations
+ */
+
+export function useListInvitations<
+  TData = Awaited<ReturnType<typeof listInvitations>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  params?: ListInvitationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listInvitations>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListInvitationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetInvitationUrl = (invitationId: string) => {
+  return `/api/v2/people/me/invitations/${encodeURIComponent(String(invitationId))}`;
+};
+
+/**
+ * Return an invitation sent to the caller's email address, in whatever state it is in, so the page a link opens can say what happened to it. An invitation sent to another address answers as one that does not exist.
+ * @summary Read one of the caller's invitations
+ */
+export const getInvitation = async (
+  invitationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<InvitationResponse> => {
+  return apiRequest<InvitationResponse>(getGetInvitationUrl(invitationId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetInvitationQueryKey = (invitationId: string) => {
+  return [`/api/v2/people/me/invitations/${invitationId}`] as const;
+};
+
+export const getGetInvitationQueryOptions = <
+  TData = Awaited<ReturnType<typeof getInvitation>>,
+  TError =
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  invitationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getInvitation>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetInvitationQueryKey(invitationId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getInvitation>>> = ({
+    signal,
+  }) => getInvitation(invitationId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: invitationId !== null && invitationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getInvitation>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetInvitationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getInvitation>>
+>;
+export type GetInvitationQueryError =
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | InvitationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetInvitation<
+  TData = Awaited<ReturnType<typeof getInvitation>>,
+  TError =
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  invitationId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getInvitation>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getInvitation>>,
+          TError,
+          Awaited<ReturnType<typeof getInvitation>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetInvitation<
+  TData = Awaited<ReturnType<typeof getInvitation>>,
+  TError =
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  invitationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getInvitation>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getInvitation>>,
+          TError,
+          Awaited<ReturnType<typeof getInvitation>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetInvitation<
+  TData = Awaited<ReturnType<typeof getInvitation>>,
+  TError =
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  invitationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getInvitation>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read one of the caller's invitations
+ */
+
+export function useGetInvitation<
+  TData = Awaited<ReturnType<typeof getInvitation>>,
+  TError =
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  invitationId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getInvitation>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetInvitationQueryOptions(invitationId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAcceptInvitationUrl = (invitationId: string) => {
+  return `/api/v2/people/me/invitations/${encodeURIComponent(String(invitationId))}/accept`;
+};
+
+/**
+ * Join the organization the invitation is for, with the role it offers. The caller's session keeps working where it was; switch to the new organization to work in it. An invitation that expired, was canceled or was already answered is refused in words. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Accept an invitation
+ */
+export const acceptInvitation = async (
+  invitationId: string,
+  headers: AcceptInvitationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<OrganizationResponse>(
+    getAcceptInvitationUrl(invitationId),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getAcceptInvitationMutationKey = () =>
+  ["acceptInvitation"] as const;
+
+export const getAcceptInvitationMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | InvitationNotWaitingResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptInvitation>>,
+    TError,
+    AcceptInvitationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptInvitation>>,
+  TError,
+  AcceptInvitationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAcceptInvitationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptInvitation>>,
+    AcceptInvitationMutationVariables
+  > = (props) => {
+    const { invitationId, headers } = props ?? {};
+
+    return acceptInvitation(invitationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptInvitationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptInvitation>>
+>;
+
+export type AcceptInvitationMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | InvitationNotFoundResponse
+  | InvitationNotWaitingResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type AcceptInvitationMutationVariables = {
+  invitationId: string;
+  headers: AcceptInvitationHeaders;
+};
+
+/**
+ * @summary Accept an invitation
+ */
+export const useAcceptInvitation = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | InvitationNotWaitingResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof acceptInvitation>>,
+      TError,
+      AcceptInvitationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof acceptInvitation>>,
+  TError,
+  AcceptInvitationMutationVariables,
+  TContext
+> => {
+  return useMutation(getAcceptInvitationMutationOptions(options), queryClient);
+};
+export const getDeclineInvitationUrl = (invitationId: string) => {
+  return `/api/v2/people/me/invitations/${encodeURIComponent(String(invitationId))}/decline`;
+};
+
+/**
+ * Turn the invitation down. It leaves the caller's list, and the organization sees that it was declined. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Decline an invitation
+ */
+export const declineInvitation = async (
+  invitationId: string,
+  headers: DeclineInvitationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(getDeclineInvitationUrl(invitationId), {
+    ...options,
+    method: "POST",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getDeclineInvitationMutationKey = () =>
+  ["declineInvitation"] as const;
+
+export const getDeclineInvitationMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | InvitationNotWaitingResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof declineInvitation>>,
+    TError,
+    DeclineInvitationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof declineInvitation>>,
+  TError,
+  DeclineInvitationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeclineInvitationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof declineInvitation>>,
+    DeclineInvitationMutationVariables
+  > = (props) => {
+    const { invitationId, headers } = props ?? {};
+
+    return declineInvitation(invitationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeclineInvitationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof declineInvitation>>
+>;
+
+export type DeclineInvitationMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | InvitationNotFoundResponse
+  | InvitationNotWaitingResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type DeclineInvitationMutationVariables = {
+  invitationId: string;
+  headers: DeclineInvitationHeaders;
+};
+
+/**
+ * @summary Decline an invitation
+ */
+export const useDeclineInvitation = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | InvitationNotFoundResponse
+    | InvitationNotWaitingResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof declineInvitation>>,
+      TError,
+      DeclineInvitationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof declineInvitation>>,
+  TError,
+  DeclineInvitationMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeclineInvitationMutationOptions(options), queryClient);
 };

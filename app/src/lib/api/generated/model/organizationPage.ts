@@ -6,7 +6,7 @@ import type { Organization } from "./organization";
 export interface OrganizationPage {
   /** The one the caller joined first at the top. */
   organizations: Organization[];
-  /** Whether the caller may create an organization: the server's verdict, true for the deployment's admins and for anybody signed in when the deployment lets them. The same on every page. */
+  /** Whether the caller may create another organization: the server's verdict, true for anybody signed in where OpenBot keeps more than one organization. The same on every page. */
   canCreate: boolean;
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
