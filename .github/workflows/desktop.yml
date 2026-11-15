@@ -57,6 +57,49 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: desktop/src-tauri
 
+  # The ignored live regressions, which drive real containers on the runner's Docker, so Linux only.
+  # One runner per module and beside the installer builds, not after the Linux one: run there they
+  # added about six minutes, one test at a time, to the slowest job of every Desktop run. Each module
+  # still runs its own tests one at a time, because they share the runner's Docker.
+  #
+  # - local_images: the back end's image download against a real containerd (the k3s node the CLI
+  #   creates), a registry and a throttling proxy.
+  # - update_ready: an announced release's images downloaded while the running version stays up,
+  #   against the same node, registry and proxy, with Docker as OpenBot's engine: the update afterwards
+  #   downloads nothing, and a disk short of room downloads nothing at all.
+  # - netavark_rules: OpenBot's machine on Windows shares one network namespace with every WSL
+  #   distro, so a stopped machine's port rules outlive it. Reproduced on real netavark, both
+  #   generations Podman runs on WSL, in a privileged lab, then cleared.
+  # - host_access: the folder sandbox, and what a Bot is told when its command fails, runs too long
+  #   or out of memory, or cannot start, for each way that happens.
+  live:
+    name: live (${{ matrix.module }})
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [local_images, update_ready, netavark_rules, host_access]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop/src-tauri
+          key: live
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Live regression tests
+        env:
+          MODULE: ${{ matrix.module }}
+        run: cargo test --locked --lib "$MODULE::live" -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
+
   # The three artifacts, built by the shared workflow. A pull request build is unchanged: unpinned, no CLI, kept 7 days.
   app:
     name: app

@@ -320,12 +320,32 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test app/tests/build-cache.test.ts
 
+  # The Python Bot harnesses' provider-boundary regressions, one runner each, so the job takes as long
+  # as the slowest harness (CrewAI, about three minutes) rather than as long as all twelve one after
+  # another (nine to thirteen). Each harness installs its own pinned requirements, which share no
+  # lockfile, so a runner each is also what keeps one harness's dependencies out of another's tests.
+  # pip's download cache is keyed on the two requirements files, so an unchanged harness downloads
+  # nothing; the install itself still runs from those files.
   python-harness:
-    name: python harness regressions
-    # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
-    # minute) for main, releases and pull requests from this repository. Pull requests from forks
-    # stay on the free standard runner.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    name: python harness (${{ matrix.harness }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Every harness runs to the end, so one red run names every harness that broke.
+      fail-fast: false
+      matrix:
+        harness:
+          - crewai
+          - langgraph-agui
+          - langroid
+          - adk
+          - agno
+          - llamaindex
+          - strands
+          - claude-sdk
+          - antigravity
+          - microsoft
+          - pydantic-ai
+          - ag2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -333,93 +353,29 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            agent-${{ matrix.harness }}/requirements.txt
+            agent-${{ matrix.harness }}/requirements-test.txt
+      - name: Regressions
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          set -euo pipefail
+          python -m pip install --requirement "agent-$HARNESS/requirements.txt" --requirement "agent-$HARNESS/requirements-test.txt"
+          python -m pytest "agent-$HARNESS/tests" -q
+
+  # The Compose file, as the harness pick and the oldest Compose the desktop app meets read it.
+  compose:
+    name: compose file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: CrewAI provider-boundary regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-crewai
-          . .venv-crewai/bin/activate
-          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
-          python -m pytest agent-crewai/tests -q
-      - name: Claude client-tool continuation regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-claude-sdk
-          . .venv-claude-sdk/bin/activate
-          python -m pip install --requirement agent-claude-sdk/requirements.txt --requirement agent-claude-sdk/requirements-test.txt
-          python -m pytest agent-claude-sdk/tests -q
-      - name: LangGraph AG-UI provider-boundary regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langgraph-agui
-          . .venv-langgraph-agui/bin/activate
-          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
-          python -m pytest agent-langgraph-agui/tests -q
-      - name: LlamaIndex model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-llamaindex
-          . .venv-llamaindex/bin/activate
-          python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
-          python -m pytest agent-llamaindex/tests -q
-      - name: Agno model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-agno
-          . .venv-agno/bin/activate
-          python -m pip install --requirement agent-agno/requirements.txt --requirement agent-agno/requirements-test.txt
-          python -m pytest agent-agno/tests -q
-      - name: Strands model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-strands
-          . .venv-strands/bin/activate
-          python -m pip install --requirement agent-strands/requirements.txt --requirement agent-strands/requirements-test.txt
-          python -m pytest agent-strands/tests -q
-      - name: Pydantic AI model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-pydantic-ai
-          . .venv-pydantic-ai/bin/activate
-          python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
-          python -m pytest agent-pydantic-ai/tests -q
-      - name: Google ADK tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-adk
-          . .venv-adk/bin/activate
-          python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
-          python -m pytest agent-adk/tests -q
-      - name: Antigravity provider pin and token gate
-        run: |
-          set -euo pipefail
-          python -m venv .venv-antigravity
-          . .venv-antigravity/bin/activate
-          python -m pip install --requirement agent-antigravity/requirements.txt --requirement agent-antigravity/requirements-test.txt
-          python -m pytest agent-antigravity/tests -q
-      - name: Langroid model-choice and tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langroid
-          . .venv-langroid/bin/activate
-          python -m pip install --requirement agent-langroid/requirements.txt --requirement agent-langroid/requirements-test.txt
-          python -m pytest agent-langroid/tests -q
-      - name: AG2 model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-ag2
-          . .venv-ag2/bin/activate
-          python -m pip install --requirement agent-ag2/requirements.txt --requirement agent-ag2/requirements-test.txt
-          python -m pytest agent-ag2/tests -q
-      - name: Microsoft Agent Framework model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-microsoft
-          . .venv-microsoft/bin/activate
-          python -m pip install --requirement agent-microsoft/requirements.txt --requirement agent-microsoft/requirements-test.txt
-          python -m pytest agent-microsoft/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
@@ -465,27 +421,26 @@ jobs:
   # Built, not pushed, and one architecture: this answers whether the Dockerfile resolves. Whether
   # it resolves on arm64 too is answered at release time, on an arm64 runner.
   #
-  # No registry cache, so a release builds these a second time. `type=gha` needs ACTIONS_* in the
-  # environment, which `build-push-action` injects and a plain `run:` step does not have, and
-  # reaching for another action to export them would buy minutes in a job that runs rarely at the
-  # price of a dependency in the one workflow whose inputs are a security boundary.
-  component-dockerfiles:
-    name: component dockerfiles
+  # Minutes rather than seconds, so on a pull request these run only when an admin adds the
+  # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
+  # the release's workflow_call they always run. `verify` treats a skipped job as passing.
+  #
+  # A Dockerfile the release does not publish is one a machine would build from source, so the
+  # list and the tree have to agree. Checked here rather than trusted, because the failure is
+  # silent: the release succeeds and a laptop somewhere builds the image. The list it checks is the
+  # one the builds below fan out over.
+  component-list:
+    name: component list
     runs-on: ubuntu-latest
-    # Minutes rather than seconds, so on a pull request it runs only when an admin adds the
-    # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
-    # the release's workflow_call it always runs. `verify` treats a skipped job as passing.
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')
+    outputs:
+      components: ${{ steps.list.outputs.components }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # A Dockerfile the release does not publish is one a machine would build from source, so the
-      # list and the tree have to agree. Checked here rather than trusted, because the failure is
-      # silent: the release succeeds and a laptop somewhere builds the image.
       - name: Every buildable service is published
         run: |
           set -euo pipefail
@@ -497,14 +452,42 @@ jobs:
             diff <(echo "$published") <(echo "$found") || true
             exit 1
           fi
-      - name: They build
-        run: |
-          set -euo pipefail
-          while read -r image; do
-            echo "::group::$image"
-            docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
-            echo "::endgroup::"
-          done < <(jq -r '.[]' .github/published-images.json)
+      - id: list
+        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+
+  # One runner per image, so the job takes as long as the slowest image rather than all of them one
+  # after another. Each reads the build cache images.yml writes for the same image and architecture
+  # (`<image>-amd64`), and a run on main writes it back, so main keeps the release's cache warm and
+  # the release's builds reuse what main already built. A pull request reads that cache but never
+  # writes it: a labelled PR's cache could only be read by that PR, and would push main's out of the
+  # repository's cache quota.
+  component-dockerfiles:
+    name: component dockerfile (${{ matrix.image }})
+    needs: component-list
+    runs-on: ubuntu-latest
+    strategy:
+      # Every image is built to the end, so one red run names every Dockerfile that broke.
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.component-list.outputs.components) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # build-push-action rather than `docker buildx build` in a `run:` step: the gha cache needs the
+      # runner's ACTIONS_* values, which this action hands to buildx and a plain step does not have.
+      # It is the action images.yml publishes with, pinned the same, so nothing new is trusted here.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.image }}-amd64
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,ignore-error=true,scope={0}-amd64', matrix.image) || '' }}
+          provenance: false
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
@@ -512,7 +495,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, api, mobile, app-browser, test, test-total, startup, python-harness, build, component-dockerfiles]
+    needs: [static, api, mobile, app-browser, test, test-total, startup, python-harness, compose, build, component-list, component-dockerfiles]
     steps:
       - name: Require every check
         env:
