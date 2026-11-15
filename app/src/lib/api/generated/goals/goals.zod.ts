@@ -6211,9 +6211,8 @@ export const ListGithubEventSourcesResponse = zod.object({
             .describe("When it was connected."),
           webhookPath: zod
             .string()
-            .optional()
             .describe(
-              "The path on this server to give the repository's webhook. Answered when the source is made.",
+              "The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it.",
             ),
         })
         .describe(
@@ -6288,9 +6287,8 @@ export const CreateGithubEventSourceResponse = zod.object({
         .describe("When it was connected."),
       webhookPath: zod
         .string()
-        .optional()
         .describe(
-          "The path on this server to give the repository's webhook. Answered when the source is made.",
+          "The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it.",
         ),
     })
     .describe(

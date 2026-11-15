@@ -29,6 +29,7 @@ export * from "./notification-settings/notification-settings";
 export * from "./organization-settings/organization-settings";
 export * from "./organizations/organizations";
 export * from "./people/people";
+export * from "./product-events/product-events";
 export * from "./reactions/reactions";
 export * from "./recorder/recorder";
 export * from "./reviewer-guidance/reviewer-guidance";

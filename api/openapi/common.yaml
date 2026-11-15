@@ -84,6 +84,7 @@ tags:
   - { name: Sign-in requests, description: "A Bot asking the person it works for to sign it in to a website, and the person's answer on a private form. What they type goes to the Bot's browser and nowhere else; the Bot is told only whether the sign-in worked." }
   - { name: Saved logins, description: "The logins a person saved for their Bots to sign in with, by site. A password goes in and is never read back out." }
   - { name: Recorder, description: "The OpenBot Recorder, the browser extension a person records what they do with: the browsers connected as a person, their recordings, and the Recorder's own operations, which it signs with its connection token." }
+  - { name: Product events, description: "What a person did with a Bot's answer, seen on screen or copied, counted so OpenBot knows which answers people use. Best effort: a client never waits on one." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -371,6 +372,7 @@ paths:
   /api/v2/organizations/{organizationId}/recorder/me: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1me' }
   /api/v2/organizations/{organizationId}/recorder/learning: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1learning' }
   /api/v2/organizations/{organizationId}/recorder/activity: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1activity' }
+  /api/v2/organizations/{organizationId}/product-events: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1product-events' }
 components:
   securitySchemes:
     webSession:

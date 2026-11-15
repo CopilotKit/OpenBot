@@ -478,7 +478,7 @@ export const UnassignTeamBotHeader = zod.object({
 export const UnassignTeamBotResponse = zod.void();
 
 /**
- * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else.
+ * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.
  * @summary Answer whether a Team Bot may use the caller's account
  */
 
