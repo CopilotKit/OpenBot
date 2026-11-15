@@ -45,8 +45,17 @@ export type BotTask = {
   /** Why its turn couldn't finish, in plain words, while `failed`. Null otherwise. */
   failure: string | null;
   failedAt: string | null;
+  /**
+   * When the person stopped its run. Its status is `failed` while this is set, and its card reads
+   * Stopped. Null once it carries on.
+   */
+  stoppedAt?: string | null;
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
+  /** When the work it is doing now began, for how long it has been working. Null unless working. */
+  workingSince?: string | null;
+  /** When it last did something: a step of its work, or a line said in its conversation. */
+  lastActivityAt?: string;
   resolvedAt: string | null;
   /** The latest thing the person told it directly in its conversation, unasked. See `TaskSteer`. */
   steer?: { text: string; at: string } | null;
@@ -57,6 +66,8 @@ export type BotTask = {
 export const taskKeys = {
   all: ["tasks"] as const,
   list: ["tasks", "list"] as const,
+  /** Every task read on its own, whichever it is: what a card in a conversation reads. */
+  ones: ["tasks", "one"] as const,
   one: (id: string) => ["tasks", "one", id] as const,
   reactions: (threadId: string) => ["tasks", "reactions", threadId] as const,
 };
