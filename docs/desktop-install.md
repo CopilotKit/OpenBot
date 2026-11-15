@@ -32,8 +32,10 @@ and a redirect to `http://127.0.0.1:<port>/callback` (`connected/sign_in.rs`). T
 kept in the operating system's credential store (Keychain, Credential Manager or the Secret
 Service) and the access token only in memory; neither is written to a file or a log, and the page
 never holds one. The window loads the app from a relay on `127.0.0.1` (`connected/relay.rs`), which
-passes each request on to the one address the person typed with the access token added, and
-refreshes the token before it ends. The relay answers only its own `127.0.0.1:<port>`, only to the
+passes each request on to the one address the person typed and refreshes the token before it ends.
+The access token and the organisation the person picked are added only to requests for OpenBot's
+API (`/api/...` and `/.well-known/...`); the app's pages and files, and anything else the same host
+name serves, such as another service's socket, are passed on without them. The relay answers only its own `127.0.0.1:<port>`, only to the
 window (a secret made for each run, carried in a cookie the relay sets), and never follows a
 redirect to another host.
 

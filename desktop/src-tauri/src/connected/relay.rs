@@ -3,7 +3,11 @@ The relay between the window and an OpenBot that runs elsewhere.
 
 The window's page cannot hold a token, and that OpenBot sends no CORS headers, so the window loads
 the app from `http://127.0.0.1:<port>/` and this server passes each request on to the one address
-the person typed, with `Authorization: Bearer <access token>` added. The page never sees the token.
+the person typed. Requests for OpenBot's API (`/api`, `/api/...` and `/.well-known/...`) go with
+`Authorization: Bearer <access token>` added, and the organisation the person picked. The page
+never sees the token, and nothing but OpenBot's API is sent it: the app's pages and files, and
+anything else the same host name serves (on a company's cluster, another service's socket), are
+passed on without either.
 
 What keeps it to that:
 
@@ -286,6 +290,14 @@ fn dropped_on_the_way_out(name: &HeaderName) -> bool {
         || name.eq_ignore_ascii_case(ORGANIZATION_HEADER)
 }
 
+/// Whether a request for `path` is one of OpenBot's own that takes the person's sign-in: its API,
+/// and the well-known documents beside it. Everything else behind the same host name (the app's
+/// pages and files, another service's socket) is passed on without the token or the organisation:
+/// the sign-in is OpenBot's to see and nobody else's.
+fn carries_the_sign_in(path: &str) -> bool {
+    path == "/api" || path.starts_with("/api/") || path.starts_with("/.well-known/")
+}
+
 async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response<Body> {
     // Only `GET /path`: an absolute address or a CONNECT names somewhere else to go.
     let target = request.uri();
@@ -390,7 +402,14 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
         }
         headers.append(name.clone(), value.clone());
     }
-    let organization = shared.organization.lock().unwrap().clone();
+    // The person's sign-in and their organisation, for OpenBot's own API only.
+    let signed_in = carries_the_sign_in(request.uri().path());
+    let organization = shared
+        .organization
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|_| signed_in);
     if let (Some(organization), Ok(name)) = (
         organization,
         HeaderName::from_bytes(ORGANIZATION_HEADER.as_bytes()),
@@ -404,9 +423,13 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
         }
     }
 
-    let access = match token(&shared, None).await {
-        Ok(access) => access,
-        Err((status, said)) => return plain(status, said),
+    let access = if signed_in {
+        match token(&shared, None).await {
+            Ok(access) => Some(access),
+            Err((status, said)) => return plain(status, said),
+        }
+    } else {
+        None
     };
     let method = request.method().clone();
     let on_upgrade = upgrading.then(|| hyper::upgrade::on(&mut request));
@@ -415,27 +438,30 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
     let body = (!no_body)
         .then(|| reqwest::Body::wrap_stream(http_body_util::BodyDataStream::new(incoming)));
 
-    let send = |access: &str, body: Option<reqwest::Body>| {
+    let send = |access: Option<&str>, body: Option<reqwest::Body>| {
         let mut outgoing = shared
             .client
             .request(method.clone(), destination.clone())
-            .headers(headers.clone())
-            .bearer_auth(access);
+            .headers(headers.clone());
+        if let Some(access) = access {
+            outgoing = outgoing.bearer_auth(access);
+        }
         if let Some(body) = body {
             outgoing = outgoing.body(body);
         }
         outgoing.send()
     };
-    let mut answered = match send(&access, body).await {
+    let mut answered = match send(access.as_deref(), body).await {
         Ok(answered) => answered,
         Err(error) => return unreachable(&shared, error),
     };
-    if answered.status() == StatusCode::UNAUTHORIZED {
+    // A 401 to a request that carried no sign-in is somebody else's refusal, and is handed back.
+    if let (Some(access), true) = (access, answered.status() == StatusCode::UNAUTHORIZED) {
         // The token was refused. A new one, and the request once more when it had no body to
         // send again; a request with a body is answered as it was, and the next one is signed in.
         match token(&shared, Some(access.clone())).await {
             Ok(newer) if no_body && newer != access => {
-                answered = match send(&newer, None).await {
+                answered = match send(Some(&newer), None).await {
                     Ok(answered) => answered,
                     Err(error) => return unreachable(&shared, error),
                 };
@@ -932,6 +958,114 @@ mod tests {
         assert_eq!(upgrade.header(ORGANIZATION_HEADER), Some("org_socket"));
         assert_eq!(upgrade.header("origin"), None);
         assert_eq!(upgrade.header("cookie"), None);
+    }
+
+    /// The person's OpenBot sign-in goes to OpenBot's API and nowhere else. On a company's cluster
+    /// the same host name also serves things that are not OpenBot's, a socket at
+    /// `/client/websocket` among them, and the app's own pages and files need no sign-in at all.
+    /// Those go through the relay like everything else, with no token and no organisation named.
+    #[test]
+    fn the_sign_in_and_the_organisation_go_only_to_openbots_api() {
+        use futures_util::SinkExt;
+        let rig = rig();
+        let window = rig.window();
+        rig.relay.set_organization(Some("org_A1-b"));
+        let access = rig.session.access().unwrap();
+        let bearer = format!("Bearer {access}");
+
+        // OpenBot's API, and an upgrade under it: both carried.
+        let sent = window.echo(window.get(ECHO));
+        assert_eq!(sent["headers"]["authorization"], bearer);
+        assert_eq!(
+            sent["headers"][ORGANIZATION_HEADER.to_ascii_lowercase()],
+            "org_A1-b"
+        );
+        assert!(carries_the_sign_in("/api"));
+        assert!(carries_the_sign_in("/api/me"));
+        assert!(carries_the_sign_in(
+            "/.well-known/oauth-authorization-server/api/auth"
+        ));
+
+        // The app's pages and files, whatever the page itself sends with them.
+        for path in ["/", "/assets/app.js", "/landing"] {
+            let answered = window
+                .get(path)
+                .header("authorization", "Bearer made-by-the-page")
+                .header(ORGANIZATION_HEADER, "org_forged")
+                .send()
+                .unwrap();
+            assert_eq!(answered.status(), 200, "{path}");
+            let seen = rig.openbot.seen_at(path).remove(0);
+            assert_eq!(seen.header("authorization"), None, "{path}");
+            assert_eq!(seen.header(ORGANIZATION_HEADER), None, "{path}");
+            assert_eq!(seen.header("cookie"), None, "{path}");
+            assert_eq!(seen.header("origin"), None, "{path}");
+        }
+        for path in [
+            "/client/websocket",
+            "/apis",
+            "/api-docs",
+            "/API/v2/echo",
+            "/x/api/v2/echo",
+            "/.well-knownish",
+        ] {
+            assert!(!carries_the_sign_in(path), "{path}");
+        }
+
+        // The other service's socket: still connects through the relay and echoes both ways, and
+        // its upgrade carries neither. The window's cookie is still what lets it through.
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let connect = |request| async {
+                let stream = tokio::net::TcpStream::connect(&window.host).await.unwrap();
+                tokio_tungstenite::client_async(request, stream).await
+            };
+            assert!(connect(socket_request(&window, "/client/websocket"))
+                .await
+                .is_err());
+            for path in ["/client/websocket", "/api/v2/socket"] {
+                let mut request = socket_request(&window, path);
+                request
+                    .headers_mut()
+                    .insert("cookie", window.cookie.parse().unwrap());
+                request
+                    .headers_mut()
+                    .insert("authorization", "Bearer made-by-the-page".parse().unwrap());
+                let (mut socket, answered) = connect(request).await.unwrap();
+                assert_eq!(answered.status(), 101, "{path}");
+                for said in ["hello", "and again"] {
+                    socket.send(said.into()).await.unwrap();
+                    let heard = socket.next().await.unwrap().unwrap();
+                    assert_eq!(heard.to_text().unwrap(), format!("echo: {said}"));
+                }
+                socket.close(None).await.unwrap();
+            }
+        });
+        let other = rig.openbot.seen_at("/client/websocket");
+        assert_eq!(other.len(), 1, "the one without the cookie never arrived");
+        assert_eq!(other[0].header("upgrade"), Some("websocket"));
+        assert_eq!(other[0].header("authorization"), None);
+        assert_eq!(other[0].header(ORGANIZATION_HEADER), None);
+        assert_eq!(other[0].header("cookie"), None);
+        let own = rig.openbot.seen_at("/api/v2/socket").remove(0);
+        assert_eq!(own.header("authorization"), Some(bearer.as_str()));
+        assert_eq!(own.header(ORGANIZATION_HEADER), Some("org_A1-b"));
+        // No refresh was needed for any of it, and nothing ended.
+        assert!(rig.ended.lock().unwrap().is_empty());
+    }
+
+    /// A path that is not OpenBot's API answers 401 for reasons of its own. That is not the
+    /// person's sign-in being refused: no refresh is made, and the answer goes back as it is.
+    #[test]
+    fn a_401_from_outside_openbots_api_uses_no_refresh() {
+        let rig = rig();
+        let window = rig.window();
+        let before = rig.openbot.token_requests().len();
+        // The stand-in's OpenBot socket path, asked for under a prefix that is not the API's.
+        let answered = window.get("/client/needs-its-own-token").send().unwrap();
+        assert_eq!(answered.status(), 401);
+        assert_eq!(rig.openbot.token_requests().len(), before);
+        assert_eq!(rig.openbot.seen_at("/client/needs-its-own-token").len(), 1);
     }
 
     /// The access token ran out. OpenBot answers 401, the relay refreshes once, and the same

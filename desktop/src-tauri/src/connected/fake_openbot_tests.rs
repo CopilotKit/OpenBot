@@ -594,12 +594,16 @@ async fn answer(
             .header("location", "https://elsewhere.example/page")
             .body(full(""))
             .unwrap(),
-        ("GET", "/api/v2/socket") => {
+        // OpenBot's own socket takes an app's token. The other is not OpenBot's: on a company's
+        // cluster the same host name hands that path straight to another service, which checks a
+        // join token of its own and has no business seeing the person's OpenBot sign-in.
+        ("GET", "/api/v2/socket" | "/client/websocket") => {
             let key = headers
                 .iter()
                 .find(|(name, _)| name == "sec-websocket-key")
                 .map(|(_, value)| value.clone());
-            let (Some(_), Some(key)) = (authorized, key) else {
+            let allowed = authorized.is_some() || path == "/client/websocket";
+            let (true, Some(key)) = (allowed, key) else {
                 return Ok(refused());
             };
             let accept =
@@ -631,6 +635,12 @@ async fn answer(
                 .body(full(""))
                 .unwrap()
         }
+        // Something else behind the same host name, refusing for reasons of its own.
+        ("GET", "/client/needs-its-own-token") => refused(),
+        ("GET", "/assets/app.js") => Response::builder()
+            .header("content-type", "text/javascript")
+            .body(full("console.log('OpenBot');"))
+            .unwrap(),
         ("GET", "/" | "/landing") => Response::builder()
             .header("content-type", "text/html")
             .body(full("<!doctype html><title>OpenBot</title>"))
