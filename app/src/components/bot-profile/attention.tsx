@@ -13,6 +13,7 @@ import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
+import { stoppedByYou, taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,8 +50,23 @@ export function waitingOnYou(bot: BotAttention): number {
 const count = (total: number, one: string, many: string) =>
   `${total} ${total === 1 ? one : many}`;
 
-/** What the badge says, in words, for the row's accessible name and its tooltip. */
-export function attentionSummary(bot: BotAttention): string {
+/**
+ * How many of each Bot's tasks the person stopped, from the task list. The server counts a stopped
+ * task among the failed ones, since its status is failed; the words tell the two apart.
+ */
+export function useStoppedTasks(): (botId: string) => number {
+  const tasks = useQuery(taskListQueryOptions());
+  return (botId) =>
+    (tasks.data ?? []).filter(
+      (task) => task.agentId === botId && stoppedByYou(task),
+    ).length;
+}
+
+/**
+ * What the badge says, in words, for the row's accessible name and its tooltip. `stopped` is how
+ * many of its failed tasks the person stopped themselves: those are said as stopped, not failed.
+ */
+export function attentionSummary(bot: BotAttention, stopped = 0): string {
   const parts: string[] = [];
   if (bot.questions) parts.push(count(bot.questions, "question", "questions"));
   if (bot.approvals) parts.push(count(bot.approvals, "approval", "approvals"));
@@ -69,8 +85,10 @@ export function attentionSummary(bot: BotAttention): string {
     parts.push(count(bot.items, "thing needs you", "things need you"));
   if (bot.tasks.ready)
     parts.push(count(bot.tasks.ready, "task to review", "tasks to review"));
-  if (bot.tasks.failed)
-    parts.push(count(bot.tasks.failed, "failed task", "failed tasks"));
+  const byYou = Math.min(stopped, bot.tasks.failed);
+  const failed = bot.tasks.failed - byYou;
+  if (failed) parts.push(count(failed, "failed task", "failed tasks"));
+  if (byYou) parts.push(count(byYou, "stopped task", "stopped tasks"));
   if (bot.unread) parts.push(`${bot.unread} unread`);
   return parts.join(", ");
 }

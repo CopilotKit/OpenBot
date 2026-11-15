@@ -202,3 +202,26 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 export function couldNotFinish(failure: string | null): string {
   return failure ? `Couldn't finish: ${failure}.` : "Couldn't finish.";
 }
+
+/**
+ * Whether the person stopped this task. Its status is `failed` either way, and only a stop sets
+ * `stoppedAt`. A stop is the person's own choice, so nothing that lists the task calls it a failure.
+ */
+export function stoppedByYou(
+  task: { status?: TaskStatus; stoppedAt?: string | null } | undefined,
+): boolean {
+  return task?.status === "failed" && Boolean(task.stoppedAt);
+}
+
+/**
+ * A finished task's status in a word, on its card and on its row under Done on a Bot's Activity
+ * page. One name for one state: a row under Done never reads "Ready for review".
+ */
+export const TASK_DONE_LABEL = "Done";
+
+/** A stopped task's status in a word, on its card and on every row that lists it. */
+export const TASK_STOPPED_LABEL = "Stopped";
+
+/** What a stopped task says after its status. Stopping never undoes what was already done. */
+export const TASK_STOPPED =
+  "You stopped this. Anything it had already done stays done.";
