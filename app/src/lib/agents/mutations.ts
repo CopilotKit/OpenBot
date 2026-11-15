@@ -109,8 +109,12 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** Every Bot delete, so what reads a Bot can tell it is being deleted from this browser. */
+export const deleteAgentMutationKey = [...agentKeys.all, "delete"] as const;
+
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
+    mutationKey: deleteAgentMutationKey,
     mutationFn: async (agentId: string) => {
       await deleteBot(organizationId(), agentId, once(), {
         fallback: FALLBACK,

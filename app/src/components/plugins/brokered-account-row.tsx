@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { desktopShell } from "@/lib/desktop/shell";
+import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -1152,13 +1153,16 @@ export function BrokeredAccountRow({
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
    * or could not be read the row reads as it always did: one connection, with its own Disconnect.
    */
+  // Not read while this connection is being ended: it would ask for one that is gone.
+  const ending = useConnectionEnding(account.serverId);
   const listing = useQuery({
     ...brokeredAccountsQueryOptions(account.serverId),
     enabled:
       account.configured &&
       account.connected &&
       account.kind !== "no-auth" &&
-      !account.shared,
+      !account.shared &&
+      !ending,
   });
   const accounts =
     account.connected && !listing.isPending && !listing.error && listing.data

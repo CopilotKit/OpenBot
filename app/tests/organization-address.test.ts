@@ -13,7 +13,7 @@ import ts from "typescript";
  * request is well formed and an OpenBot with one organization answers it.
  *
  * Read are the app (app/src, which holds the skins) and the phone (mobile/app, mobile/src). Not
- * read: the generated clients, tests and comments.
+ * read: the generated clients and comments. The app's tests are read for the removed constant only.
  *
  * Found are:
  * - the constant `ORGANIZATION_ID`, which the app no longer has: any mention in the app, and on the
@@ -162,12 +162,32 @@ const EXPECTED: { file: string; what: string; why: string }[] = [
 const key = (each: { file: string; what: string }) =>
   `${each.file}: ${each.what}`;
 
+/**
+ * The app's tests, read for the removed constant only: a test that imports it does not load. Their
+ * addresses are left alone, because every test starts in the organization default (preload.ts) and
+ * says so in the addresses it expects.
+ */
+function testHits(): Hit[] {
+  return readdirSync(import.meta.dir)
+    .filter((name) => IS_SOURCE.test(name))
+    .flatMap((name) => {
+      const file = join("app/tests", name);
+      return organizationHits(
+        file,
+        readFileSync(join(REPO, file), "utf8"),
+      ).filter((each) => each.what === REMOVED);
+    });
+}
+
 function everyHit(): Hit[] {
-  return ROOTS.flatMap((root) =>
-    [...sourceFiles(root)].flatMap((file) =>
-      organizationHits(file, readFileSync(join(REPO, file), "utf8")),
+  return [
+    ...ROOTS.flatMap((root) =>
+      [...sourceFiles(root)].flatMap((file) =>
+        organizationHits(file, readFileSync(join(REPO, file), "utf8")),
+      ),
     ),
-  );
+    ...testHits(),
+  ];
 }
 
 test("no request names an organization itself: each is addressed to the one the person is working in", () => {

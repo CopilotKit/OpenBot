@@ -50,6 +50,7 @@ import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   directoryProvider,
@@ -281,9 +282,10 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * is gated on the connection and its answer is read only through the same gate, so a cached answer
    * from before a disconnect is never drawn beside "Connect".
    */
+  const ending = useConnectionEnding(key);
   const siblings = useQuery({
     ...connectionSiblingsQueryOptions(key),
-    enabled: brokered && connection !== undefined,
+    enabled: brokered && connection !== undefined && !ending,
   });
   const siblingsNotice =
     brokered && connection !== undefined && siblings.data
