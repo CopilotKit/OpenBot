@@ -30,7 +30,7 @@ import {
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
 import { APPROVALS_PATH, approvalInboxResponse } from "./approvals-api";
-import { answerBotAttention, answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
@@ -100,6 +100,7 @@ type Task = {
     | "ready_for_review";
   failure: string | null;
   failedAt: string | null;
+  stoppedAt?: string | null;
   next: string | null;
   resolvedAt: string | null;
   createdAt: string;
@@ -149,6 +150,8 @@ let questions: {
 let failing = new Set<string>();
 /** Conversations a turn is running in right now, as the sidebar's live list says. */
 let busy: string[] = [];
+/** What each Bot is waiting on the person for, as the server counts it. */
+let waitingBots: ReturnType<typeof attentionOf>[] = [];
 const sent: { method: string; path: string }[] = [];
 
 function serving() {
@@ -247,7 +250,7 @@ function serving() {
       });
       if (approvals) return approvals;
     }
-    const waiting = answerBotAttention(input, init, { bots: [] });
+    const waiting = answerBotAttention(input, init, { bots: waitingBots });
     if (waiting) return waiting;
     const schedules = answerScheduleLists(input, init);
     if (schedules) return schedules;
@@ -269,6 +272,7 @@ beforeEach(() => {
   questions = [];
   failing = new Set();
   busy = [];
+  waitingBots = [];
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
@@ -486,6 +490,122 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
   await waitFor(() =>
     expect(bots.queryByRole("heading", { name: "Done" })).toBeNull(),
   );
+});
+
+test("a task the person stopped reads Stopped on the board, in its card's words, and can be tried again", async () => {
+  tasks = [
+    task({
+      id: "s",
+      title: "Chase the supplier",
+      status: "failed",
+      failure: "you stopped it",
+      failedAt: now,
+      stoppedAt: now,
+    }),
+    task({
+      id: "f",
+      title: "File the expense report",
+      status: "failed",
+      failure: "Gmail stopped answering",
+      failedAt: now,
+    }),
+  ];
+  // The server counts both as failed, since that is the status of both.
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 0, ready: 0, failed: 2 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  // The Bot's row in the list says which was which.
+  expect(
+    await region("Bots page").findByText("1 failed task, 1 stopped task"),
+  ).toBeTruthy();
+  // The Bots page and the Bot's own page draw the same board.
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    const stopped = within(
+      (await surface.findByText("Chase the supplier")).closest(
+        "[data-slot=item]",
+      ) as HTMLElement,
+    );
+    expect(stopped.getByText("Stopped")).toBeTruthy();
+    expect(
+      stopped.getByText(
+        "You stopped this. Anything it had already done stays done.",
+      ),
+    ).toBeTruthy();
+    expect(stopped.queryByText("Failed")).toBeNull();
+    expect(stopped.queryByText(/Couldn't finish/)).toBeNull();
+    expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+    // Its own choice, so it is not drawn as a failure: the card's stop icon, and no tint.
+    const row = (title: string) =>
+      surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
+    expect(row("Chase the supplier").dataset.taskState).toBe("stopped");
+    expect(
+      row("Chase the supplier").querySelector(".tabler-icon-player-stop"),
+    ).not.toBeNull();
+    expect(row("Chase the supplier").querySelector(".bg-amber-50")).toBeNull();
+    expect(row("File the expense report").dataset.taskState).toBe("failed");
+    expect(
+      row("File the expense report").querySelector(".bg-amber-50"),
+    ).not.toBeNull();
+
+    // One that couldn't finish on its own still says so.
+    const failed = within(
+      surface
+        .getByText("File the expense report")
+        .closest("[data-slot=item]") as HTMLElement,
+    );
+    expect(failed.getByText("Failed")).toBeTruthy();
+    expect(
+      failed.getByText("Couldn't finish: Gmail stopped answering."),
+    ).toBeTruthy();
+    expect(failed.queryByText("Stopped")).toBeNull();
+    expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
+  }
+});
+
+test("the board says a task's line as plain text, and a working task is not offered Mark done", async () => {
+  tasks = [
+    task({
+      id: "t",
+      title: "Check the river facts",
+      next: "| Begins / headwaters | **Columbia Lake**, British Columbia |",
+    }),
+    task({
+      id: "s",
+      title: "Research the locks",
+      next: "Source: Lake Washington Ship …",
+    }),
+    task({ id: "w", title: "Draft the board update", status: "working" }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    const row = async (title: string) =>
+      (await surface.findByText(title)).closest(
+        "[data-slot=item]",
+      ) as HTMLElement;
+    expect(
+      within(await row("Check the river facts")).getByText(
+        "Begins / headwaters: Columbia Lake, British Columbia",
+      ),
+    ).toBeTruthy();
+    expect((await row("Research the locks")).textContent).not.toContain(
+      "Source:",
+    );
+    const working = within(await row("Draft the board update"));
+    expect(working.getByText("Open")).toBeTruthy();
+    expect(working.queryByRole("button", { name: "Mark done" })).toBeNull();
+    expect(
+      within(await row("Check the river facts")).getByRole("button", {
+        name: "Mark done",
+      }),
+    ).toBeTruthy();
+  }
 });
 
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {

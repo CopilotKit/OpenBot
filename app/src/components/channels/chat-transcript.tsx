@@ -105,6 +105,8 @@ import {
 } from "@/lib/plugins/research-results";
 import {
   asText,
+  CUT_OFF_SENTENCE,
+  cutOffStep,
   forDisplay,
   refusalOf,
   toolResultFailed,
@@ -1764,8 +1766,9 @@ export function ServerToolLine({
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const named = readToolName(name, running);
-  const { label } = named;
+  // Cut off with its outcome unknown: named as it is while under way, since nobody knows it was done.
+  const interrupted = cutOffStep(result);
+  const named = readToolName(name, running || interrupted);
   const folders = useContext(FolderNamesContext);
   // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
   // on the person's computer names the folder too ("todo.txt in share").
@@ -1786,7 +1789,18 @@ export function ServerToolLine({
   const refused = reason !== undefined;
   // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
-  const failed = !refused && (unoffered || toolResultFailed(result));
+  const failed =
+    !refused && !interrupted && (unoffered || toolResultFailed(result));
+  const role = researchRoleOfCall(name);
+  /*
+   * A search with its results in reads as done. A research step is named for what it does ("Search
+   * the web"), which on a line of its own, finished, read as a search still going on; folded with
+   * other steps it has always read "Searched the web".
+   */
+  const label =
+    role === "search" && !running && !interrupted && !refused && !failed
+      ? "Searched the web"
+      : named.label;
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1827,24 +1841,28 @@ export function ServerToolLine({
   const shown =
     name === SHOW_APP_ACCESS_TOOL || folderRefusal !== undefined
       ? undefined
-      : unoffered
-        ? UNOFFERED_TOOL_SENTENCE
-        : refused && body
-          ? outcomeForPerson(body)
-          : answersTheModel(name)
-            ? // Written for the model. A tool search opens to the tools it found, in words.
-              name === SEARCH_TOOLS
-              ? foundToolsInWords(answer)
-              : undefined
-            : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
-              folderStepBody(name, body);
+      : interrupted
+        ? // What the Bot was told is for the Bot. The person is told what happened.
+          CUT_OFF_SENTENCE
+        : unoffered
+          ? UNOFFERED_TOOL_SENTENCE
+          : refused && body
+            ? outcomeForPerson(body)
+            : answersTheModel(name)
+              ? // Written for the model. A tool search opens to the tools it found, in words.
+                name === SEARCH_TOOLS
+                ? foundToolsInWords(answer)
+                : undefined
+              : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+                folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
    */
-  const role = researchRoleOfCall(name);
   const sources =
-    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+    role && shown && !refused && !failed && !interrupted
+      ? readResearchSources(shown)
+      : null;
   if (role && sources)
     return (
       <ToolLine
@@ -1869,6 +1887,7 @@ export function ServerToolLine({
       label={label}
       refused={refused}
       failed={failed}
+      interrupted={interrupted}
       running={running}
     >
       {shown ? (
