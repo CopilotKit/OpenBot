@@ -1,5 +1,6 @@
 export * from "./approval-rules/approval-rules";
 export * from "./approvals/approvals";
+export * from "./bot-grants/bot-grants";
 export * from "./bots/bots";
 export * from "./check-ins/check-ins";
 export * from "./computers/computers";
@@ -7,4 +8,5 @@ export * from "./conversations/conversations";
 export * from "./devices/devices";
 export * from "./organization-settings/organization-settings";
 export * from "./routines/routines";
+export * from "./skills/skills";
 export * from "./tasks/tasks";

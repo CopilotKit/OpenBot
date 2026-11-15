@@ -80,6 +80,14 @@ const server = Bun.serve({
       );
     if (route === `DELETE ${ORG}/routines/r1`)
       return new Response(null, { status: 204 });
+    if (route === `PUT ${ORG}/bots/ada/grants/skill%3Aresearch`)
+      return Response.json({
+        id: "skill:research",
+        kind: "skill",
+        ref: "research",
+        action: null,
+        skill: { slug: "research", title: "Research", summary: "Looks it up." },
+      });
     return Response.json(
       { detail: "Not found.", code: "NOT_FOUND" },
       { status: 404 },
@@ -104,9 +112,10 @@ const { deleteDevice, registerDevice } = await import(
 const { deleteRoutine } = await import(
   "../src/api/generated/routines/routines"
 );
-const { ApiError, api, everyBot, ME, ORGANIZATION_ID } = await import(
-  "../src/api"
+const { replaceBotGrant } = await import(
+  "../src/api/generated/bot-grants/bot-grants"
 );
+const { ApiError, everyBot, ME, ORGANIZATION_ID } = await import("../src/api");
 
 beforeEach(() => {
   seen.length = 0;
@@ -201,9 +210,23 @@ test("a 204 answers nothing", async () => {
   expect(seen[0]?.key).toMatch(/^[0-9a-f-]{36}$/);
 });
 
-test("an API operation is never reached by its path: only the addresses the API does not have yet are", async () => {
-  await expect(api(`${ORG}/bots`)).rejects.toThrow(
-    "Call the API's operations through the generated client",
+test("switching a skill on gives the Bot its grant, the grant's id one path segment", async () => {
+  const grant = await replaceBotGrant(
+    ORGANIZATION_ID,
+    "ada",
+    "skill:research",
+    {},
   );
-  expect(seen).toEqual([]);
+  expect(grant.skill?.slug).toBe("research");
+  expect(seen).toEqual([
+    {
+      method: "PUT",
+      path: `${ORG}/bots/ada/grants/skill%3Aresearch`,
+      query: "",
+      cookie: COOKIE,
+      key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      contentType: "application/json",
+      body: {},
+    },
+  ]);
 });

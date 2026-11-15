@@ -20,6 +20,7 @@ export default defineConfig({
         tags: [
           "Approval rules",
           "Approvals",
+          "Bot grants",
           "Bots",
           "Check-ins",
           "Computers",
@@ -27,6 +28,7 @@ export default defineConfig({
           "Devices",
           "Organization settings",
           "Routines",
+          "Skills",
           "Tasks",
         ],
       },

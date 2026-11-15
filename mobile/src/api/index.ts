@@ -62,9 +62,10 @@ export async function everyPage<P extends Paged, T>(
 }
 
 /**
- * The addresses the API does not have yet, which a screen still reaches by its path: a Bot's memory and plugins
- * (`/api/memory`, `/api/plugins`). Through the same mutator as every generated call, so the same session and the same
- * refusals. An API operation is never called this way: it has a generated function.
+ * An address the API does not have yet, which a screen still reaches by its path: memory (`/api/memory`), until the API
+ * describes it. Through the same mutator as every generated call, so the same session and the same refusals. An API
+ * operation is never called this way: it has a generated function, and api/client-boundary.test.ts fails an address of
+ * the API written here.
  */
 export async function api<T>(
   path: string,
@@ -74,10 +75,6 @@ export async function api<T>(
     signal?: AbortSignal;
   },
 ): Promise<T> {
-  if (path.startsWith("/api/v2/"))
-    throw new Error(
-      "Call the API's operations through the generated client (src/api/generated).",
-    );
   return apiRequest<T>(path, {
     method: input?.method,
     signal: input?.signal,
@@ -169,8 +166,3 @@ export type ApprovalSettings = {
   preferences?: { enabled: boolean; autoReview: boolean };
   team?: { enforceAutoReview: boolean; customRulesEnabled: boolean };
 };
-export type GrantedPlugins = {
-  tools: { ref: string; description: string }[];
-  skills: { slug: string; title: string; summary: string }[];
-};
-export type SkillSummary = { slug: string; title: string; summary: string };
