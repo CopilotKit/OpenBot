@@ -212,6 +212,62 @@ paths:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
       - $ref: './common.yaml#/components/parameters/PersonId'
+    patch:
+      tags: [Organizations]
+      operationId: updateOrganizationMember
+      summary: Change a member's role
+      description: >-
+        Give a member of the organization another role. An owner or an admin
+        changes anybody between admin and member. Only an owner makes
+        somebody an owner, or changes an owner's role, their own included,
+        and the organization always keeps an owner: the last one cannot step
+        down. A person's own organization keeps exactly its one owner. The
+        members list says which roles the caller may give each member, as
+        assignableRoles. A repeated request with the same Idempotency-Key
+        and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationMemberRequest'
+            examples:
+              owner:
+                value:
+                  role: owner
+      responses:
+        '200':
+          description: The member, with their new role.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberResponse'
+              examples:
+                owner:
+                  $ref: '#/components/examples/PromotedOrganizationMember'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/OwnerStays'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
     delete:
       tags: [Organizations]
       operationId: removeOrganizationMember
@@ -651,15 +707,24 @@ components:
     OrganizationMember:
       type: object
       description: One member of an organization.
-      required: [id, email, name, image, role, joinedAt, removable]
+      required: [id, email, name, image, role, joinedAt, removable, assignableRoles]
       properties:
         removable:
           type: boolean
           description: >-
             Whether this membership can end: an admin can remove them and
             they can leave. The server's verdict. False for the
-            organization's owner, who stays in it, and for somebody this
-            OpenBot's settings keep as an admin of the organization.
+            organization's last owner, who stays in it, for the owner of
+            their own organization, and for somebody this OpenBot's settings
+            keep as an admin of the organization.
+        assignableRoles:
+          type: array
+          description: >-
+            The roles the caller may give this member, their current one left
+            out. The server's verdict. Empty when the caller may not change
+            this member's role.
+          items:
+            $ref: './common.yaml#/components/schemas/PersonRole'
         id:
           type: string
           description: The person's id.
@@ -694,6 +759,19 @@ components:
           description: >-
             Pass as cursor for the next page. Null ends the list. Written in
             URL-safe base64, the only form the cursor parameter accepts.
+    OrganizationMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          $ref: '#/components/schemas/OrganizationMember'
+    UpdateOrganizationMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          $ref: './common.yaml#/components/schemas/PersonRole'
     UpdateOrganizationRequest:
       type: object
       additionalProperties: false
@@ -1127,6 +1205,7 @@ components:
             role: owner
             joinedAt: '2026-11-14T09:12:40.000Z'
             removable: false
+            assignableRoles: []
           - id: 2fn8w1c6y4tq7h0mbe3s
             email: sam.ortiz@acme.com
             name: Sam Ortiz
@@ -1134,7 +1213,20 @@ components:
             role: member
             joinedAt: '2026-11-14T09:20:05.000Z'
             removable: true
+            assignableRoles: [owner, admin]
         nextCursor: null
+    PromotedOrganizationMember:
+      summary: A member an owner has made an owner too.
+      value:
+        member:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: owner
+          joinedAt: '2026-11-14T09:20:05.000Z'
+          removable: true
+          assignableRoles: [admin, member]
     RenamedOrganization:
       summary: An organization with its new name.
       value:

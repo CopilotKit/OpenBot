@@ -9991,6 +9991,56 @@ paths:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
       - $ref: '#/components/parameters/PersonId'
+    patch:
+      tags:
+        - Organizations
+      operationId: updateOrganizationMember
+      summary: Change a member's role
+      description: 'Give a member of the organization another role. An owner or an admin changes anybody between admin and member. Only an owner makes somebody an owner, or changes an owner''s role, their own included, and the organization always keeps an owner: the last one cannot step down. A person''s own organization keeps exactly its one owner. The members list says which roles the caller may give each member, as assignableRoles. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationMemberRequest'
+            examples:
+              owner:
+                value:
+                  role: owner
+      responses:
+        '200':
+          description: The member, with their new role.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberResponse'
+              examples:
+                owner:
+                  $ref: '#/components/examples/PromotedOrganizationMember'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/OwnerStays'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags:
         - Organizations
@@ -27754,10 +27804,16 @@ components:
         - role
         - joinedAt
         - removable
+        - assignableRoles
       properties:
         removable:
           type: boolean
-          description: 'Whether this membership can end: an admin can remove them and they can leave. The server''s verdict. False for the organization''s owner, who stays in it, and for somebody this OpenBot''s settings keep as an admin of the organization.'
+          description: 'Whether this membership can end: an admin can remove them and they can leave. The server''s verdict. False for the organization''s last owner, who stays in it, for the owner of their own organization, and for somebody this OpenBot''s settings keep as an admin of the organization.'
+        assignableRoles:
+          type: array
+          description: The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role.
+          items:
+            $ref: '#/components/schemas/PersonRole'
         id:
           type: string
           description: The person's id.
@@ -27810,6 +27866,21 @@ components:
           maxLength: 100
           pattern: ^[^\x00]*\S[^\x00]*$
           description: What people call it.
+    UpdateOrganizationMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - role
+      properties:
+        role:
+          $ref: '#/components/schemas/PersonRole'
+    OrganizationMemberResponse:
+      type: object
+      required:
+        - member
+      properties:
+        member:
+          $ref: '#/components/schemas/OrganizationMember'
     InvitationSender:
       type: object
       description: Who sent an invitation.
@@ -41075,6 +41146,7 @@ components:
             role: owner
             joinedAt: '2026-11-14T09:12:40.000Z'
             removable: false
+            assignableRoles: []
           - id: 2fn8w1c6y4tq7h0mbe3s
             email: sam.ortiz@acme.com
             name: Sam Ortiz
@@ -41082,6 +41154,9 @@ components:
             role: member
             joinedAt: '2026-11-14T09:20:05.000Z'
             removable: true
+            assignableRoles:
+              - owner
+              - admin
         nextCursor: null
     RenamedOrganization:
       summary: An organization with its new name.
@@ -41093,6 +41168,20 @@ components:
           role: owner
           active: true
           personal: false
+    PromotedOrganizationMember:
+      summary: A member an owner has made an owner too.
+      value:
+        member:
+          id: 2fn8w1c6y4tq7h0mbe3s
+          email: sam.ortiz@acme.com
+          name: Sam Ortiz
+          image: null
+          role: owner
+          joinedAt: '2026-11-14T09:20:05.000Z'
+          removable: true
+          assignableRoles:
+            - admin
+            - member
     OrganizationInvitationPageLast:
       summary: One invitation waiting and one that expired.
       value:

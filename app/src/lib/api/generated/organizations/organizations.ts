@@ -44,17 +44,21 @@ import type {
   OrganizationInvitationPage,
   OrganizationInvitationResponse,
   OrganizationMemberPage,
+  OrganizationMemberResponse,
   OrganizationNotCreatedResponse,
   OrganizationNotFoundResponse,
   OrganizationOrInvitationNotFoundResponse,
   OrganizationPage,
   OrganizationResponse,
   OwnerStaysResponse,
+  PersonNotFoundResponse,
   RemoveOrganizationMemberHeaders,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
   UpdateOrganizationHeaders,
+  UpdateOrganizationMemberHeaders,
+  UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
 } from "../model";
 
@@ -835,6 +839,169 @@ export const useUpdateOrganization = <
 > => {
   return useMutation(
     getUpdateOrganizationMutationOptions(options),
+    queryClient,
+  );
+};
+export const getUpdateOrganizationMemberUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/members/${encodeURIComponent(String(personId))}`;
+};
+
+/**
+ * Give a member of the organization another role. An owner or an admin changes anybody between admin and member. Only an owner makes somebody an owner, or changes an owner's role, their own included, and the organization always keeps an owner: the last one cannot step down. A person's own organization keeps exactly its one owner. The members list says which roles the caller may give each member, as assignableRoles. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Change a member's role
+ */
+export const updateOrganizationMember = async (
+  organizationId: string,
+  personId: string,
+  updateOrganizationMemberRequest: UpdateOrganizationMemberRequest,
+  headers: UpdateOrganizationMemberHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationMemberResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<OrganizationMemberResponse>(
+    getUpdateOrganizationMemberUrl(organizationId, personId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(updateOrganizationMemberRequest),
+    },
+  );
+};
+
+export const getUpdateOrganizationMemberMutationKey = () =>
+  ["updateOrganizationMember"] as const;
+
+export const getUpdateOrganizationMemberMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | PersonNotFoundResponse
+    | OwnerStaysResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrganizationMember>>,
+    TError,
+    UpdateOrganizationMemberMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateOrganizationMember>>,
+  TError,
+  UpdateOrganizationMemberMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateOrganizationMemberMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateOrganizationMember>>,
+    UpdateOrganizationMemberMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return updateOrganizationMember(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateOrganizationMemberMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateOrganizationMember>>
+>;
+export type UpdateOrganizationMemberMutationBody =
+  UpdateOrganizationMemberRequest;
+export type UpdateOrganizationMemberMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | PersonNotFoundResponse
+  | OwnerStaysResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type UpdateOrganizationMemberMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: UpdateOrganizationMemberRequest;
+  headers: UpdateOrganizationMemberHeaders;
+};
+
+/**
+ * @summary Change a member's role
+ */
+export const useUpdateOrganizationMember = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | PersonNotFoundResponse
+    | OwnerStaysResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateOrganizationMember>>,
+      TError,
+      UpdateOrganizationMemberMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateOrganizationMember>>,
+  TError,
+  UpdateOrganizationMemberMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getUpdateOrganizationMemberMutationOptions(options),
     queryClient,
   );
 };

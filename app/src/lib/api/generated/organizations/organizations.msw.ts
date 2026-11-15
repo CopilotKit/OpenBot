@@ -16,8 +16,10 @@ import type {
   OrganizationInvitationPage,
   OrganizationInvitationResponse,
   OrganizationMemberPage,
+  OrganizationMemberResponse,
   OrganizationPage,
   OrganizationResponse,
+  UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
 } from "../model";
 
@@ -66,6 +68,7 @@ export const getListOrganizationMembersResponseMock =
         role: "owner",
         joinedAt: "2026-11-14T09:12:40.000Z",
         removable: false,
+        assignableRoles: [],
       },
       {
         id: "2fn8w1c6y4tq7h0mbe3s",
@@ -75,6 +78,7 @@ export const getListOrganizationMembersResponseMock =
         role: "member",
         joinedAt: "2026-11-14T09:20:05.000Z",
         removable: true,
+        assignableRoles: ["owner", "admin"],
       },
     ],
     nextCursor: null,
@@ -90,6 +94,20 @@ export const getUpdateOrganizationResponseMock = (): OrganizationResponse => ({
     personal: false,
   },
 });
+
+export const getUpdateOrganizationMemberResponseMock =
+  (): OrganizationMemberResponse => ({
+    member: {
+      id: "2fn8w1c6y4tq7h0mbe3s",
+      email: "sam.ortiz@acme.com",
+      name: "Sam Ortiz",
+      image: null,
+      role: "owner",
+      joinedAt: "2026-11-14T09:20:05.000Z",
+      removable: true,
+      assignableRoles: ["admin", "member"],
+    },
+  });
 
 export const getListOrganizationInvitationsResponseMock =
   (): OrganizationInvitationPage => ({
@@ -285,6 +303,45 @@ export const getUpdateOrganizationMockHandler = (
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateOrganizationResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getUpdateOrganizationMemberMockHandler = (
+  overrideResponse?:
+    | OrganizationMemberResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            UpdateOrganizationMemberRequest
+          >
+        >[0],
+      ) => Promise<OrganizationMemberResponse> | OrganizationMemberResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.patch<
+    { organizationId: string; personId: string },
+    UpdateOrganizationMemberRequest
+  >(
+    "*/api/v2/organizations/:organizationId/members/:personId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          UpdateOrganizationMemberRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getUpdateOrganizationMemberResponseMock(),
         { status: 200 },
       );
     },
@@ -516,6 +573,7 @@ export const getOrganizationsMock = () => [
   getCreateOrganizationMockHandler(),
   getListOrganizationMembersMockHandler(),
   getUpdateOrganizationMockHandler(),
+  getUpdateOrganizationMemberMockHandler(),
   getRemoveOrganizationMemberMockHandler(),
   getListOrganizationInvitationsMockHandler(),
   getCreateOrganizationInvitationMockHandler(),

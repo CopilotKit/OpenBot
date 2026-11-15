@@ -13,8 +13,10 @@ import type {
   OrganizationInvitationPage,
   OrganizationInvitationResponse,
   OrganizationMemberPage,
+  OrganizationMemberResponse,
   OrganizationPage,
   OrganizationResponse,
+  UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
 } from "../model";
 
@@ -175,6 +177,58 @@ export const updateOrganization = async (
         ...getHeaders(options?.headers),
       },
       body: JSON.stringify(updateOrganizationRequest),
+    },
+  );
+};
+
+export const getUpdateOrganizationMemberUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/members/${encodeURIComponent(String(personId))}`;
+};
+
+/**
+ * Give a member of the organization another role. An owner or an admin changes anybody between admin and member. Only an owner makes somebody an owner, or changes an owner's role, their own included, and the organization always keeps an owner: the last one cannot step down. A person's own organization keeps exactly its one owner. The members list says which roles the caller may give each member, as assignableRoles. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Change a member's role
+ */
+export const updateOrganizationMember = async (
+  organizationId: string,
+  personId: string,
+  updateOrganizationMemberRequest: UpdateOrganizationMemberRequest,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationMemberResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<OrganizationMemberResponse>(
+    getUpdateOrganizationMemberUrl(organizationId, personId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(updateOrganizationMemberRequest),
     },
   );
 };
