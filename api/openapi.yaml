@@ -10135,7 +10135,7 @@ paths:
         - Teams
       operationId: updateTeam
       summary: Change a team
-      description: Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
+      description: Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers, except that only an owner or an admin changes its parent. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
       security:
         - webSession: []
         - appOAuth:
@@ -27875,6 +27875,8 @@ components:
         - memberCount
         - role
         - canManage
+        - canMove
+        - canDelete
         - createdAt
       properties:
         id:
@@ -27907,6 +27909,12 @@ components:
         canManage:
           type: boolean
           description: 'Whether the caller may rename the team and add and remove its people: the server''s verdict.'
+        canMove:
+          type: boolean
+          description: 'Whether the caller may put the team under another team or take it out from under one: the server''s verdict, true for an owner or an admin of the organization.'
+        canDelete:
+          type: boolean
+          description: 'Whether the caller may delete the team: the server''s verdict, true for an owner or an admin of the organization, and never for a team that comes from the company''s directory.'
         createdAt:
           type: string
           format: date-time
@@ -27998,6 +28006,7 @@ components:
         - name
         - image
         - role
+        - isCaller
         - joinedAt
       properties:
         id:
@@ -28018,6 +28027,9 @@ components:
           description: Their picture's address, when they have one.
         role:
           $ref: '#/components/schemas/TeamRole'
+        isCaller:
+          type: boolean
+          description: Whether this person is the caller.
         joinedAt:
           type: string
           format: date-time
@@ -41269,6 +41281,8 @@ components:
             memberCount: 2
             role: maintainer
             canManage: true
+            canMove: true
+            canDelete: true
             createdAt: '2026-11-15T09:12:40.000Z'
           - id: Fn2Wc6Yt4Qh7M0be3sKq8xLp
             name: Finance
@@ -41278,6 +41292,8 @@ components:
             memberCount: 1
             role: null
             canManage: false
+            canMove: true
+            canDelete: false
             createdAt: '2026-11-15T09:20:05.000Z'
         canCreate: true
         nextCursor: null
@@ -41293,6 +41309,8 @@ components:
           memberCount: 0
           role: null
           canManage: true
+          canMove: true
+          canDelete: true
           createdAt: '2026-11-15T09:12:40.000Z'
     TeamMemberPageLast:
       summary: A team's people, on one page.
@@ -41303,12 +41321,14 @@ components:
             name: Dana Whitfield
             image: null
             role: maintainer
+            isCaller: true
             joinedAt: '2026-11-15T09:13:02.000Z'
           - id: 2fn8w1c6y4tq7h0mbe3s
             email: sam.ortiz@acme.com
             name: Sam Ortiz
             image: null
             role: member
+            isCaller: false
             joinedAt: '2026-11-15T09:20:05.000Z'
         nextCursor: null
     AddedTeamMember:
@@ -41320,6 +41340,7 @@ components:
           name: Sam Ortiz
           image: null
           role: member
+          isCaller: false
           joinedAt: '2026-11-15T09:20:05.000Z'
     ApprovalPageExample:
       summary: One approval waiting, on the last page.

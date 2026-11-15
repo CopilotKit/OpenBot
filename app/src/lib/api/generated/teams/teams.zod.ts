@@ -93,6 +93,16 @@ export const ListTeamsResponse = zod.object({
             .describe(
               "Whether the caller may rename the team and add and remove its people: the server's verdict.",
             ),
+          canMove: zod
+            .boolean()
+            .describe(
+              "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+            ),
+          canDelete: zod
+            .boolean()
+            .describe(
+              "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+            ),
           createdAt: zod.iso
             .datetime({ offset: true })
             .describe("When the team was created."),
@@ -220,6 +230,16 @@ export const CreateTeamResponse = zod.object({
         .describe(
           "Whether the caller may rename the team and add and remove its people: the server's verdict.",
         ),
+      canMove: zod
+        .boolean()
+        .describe(
+          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+        ),
+      canDelete: zod
+        .boolean()
+        .describe(
+          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When the team was created."),
@@ -298,6 +318,16 @@ export const GetTeamResponse = zod.object({
         .describe(
           "Whether the caller may rename the team and add and remove its people: the server's verdict.",
         ),
+      canMove: zod
+        .boolean()
+        .describe(
+          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+        ),
+      canDelete: zod
+        .boolean()
+        .describe(
+          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When the team was created."),
@@ -308,7 +338,7 @@ export const GetTeamResponse = zod.object({
 });
 
 /**
- * Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
+ * Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers, except that only an owner or an admin changes its parent. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
  * @summary Change a team
  */
 
@@ -422,6 +452,16 @@ export const UpdateTeamResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller may rename the team and add and remove its people: the server's verdict.",
+        ),
+      canMove: zod
+        .boolean()
+        .describe(
+          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+        ),
+      canDelete: zod
+        .boolean()
+        .describe(
+          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -545,6 +585,9 @@ export const ListTeamMembersResponse = zod.object({
             .describe(
               "A person's role in a team. A maintainer can rename the team and add and remove its people; a member cannot.",
             ),
+          isCaller: zod
+            .boolean()
+            .describe("Whether this person is the caller."),
           joinedAt: zod.iso
             .datetime({ offset: true })
             .describe("When they joined the team."),
@@ -633,6 +676,7 @@ export const PutTeamMemberResponse = zod.object({
         .describe(
           "A person's role in a team. A maintainer can rename the team and add and remove its people; a member cannot.",
         ),
+      isCaller: zod.boolean().describe("Whether this person is the caller."),
       joinedAt: zod.iso
         .datetime({ offset: true })
         .describe("When they joined the team."),

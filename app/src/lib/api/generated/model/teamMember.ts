@@ -22,6 +22,8 @@ export interface TeamMember {
    */
   image: string | null;
   role: TeamRole;
+  /** Whether this person is the caller. */
+  isCaller: boolean;
   /** When they joined the team. */
   joinedAt: string;
 }

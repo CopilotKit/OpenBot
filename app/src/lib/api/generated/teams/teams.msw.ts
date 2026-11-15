@@ -25,6 +25,8 @@ export const getListTeamsResponseMock = (): TeamPage => ({
       memberCount: 2,
       role: "maintainer",
       canManage: true,
+      canMove: true,
+      canDelete: true,
       createdAt: "2026-11-15T09:12:40.000Z",
     },
     {
@@ -36,6 +38,8 @@ export const getListTeamsResponseMock = (): TeamPage => ({
       memberCount: 1,
       role: null,
       canManage: false,
+      canMove: true,
+      canDelete: false,
       createdAt: "2026-11-15T09:20:05.000Z",
     },
   ],
@@ -53,6 +57,8 @@ export const getCreateTeamResponseMock = (): TeamResponse => ({
     memberCount: 0,
     role: null,
     canManage: true,
+    canMove: true,
+    canDelete: true,
     createdAt: "2026-11-15T09:12:40.000Z",
   },
 });
@@ -67,6 +73,8 @@ export const getGetTeamResponseMock = (): TeamResponse => ({
     memberCount: 0,
     role: null,
     canManage: true,
+    canMove: true,
+    canDelete: true,
     createdAt: "2026-11-15T09:12:40.000Z",
   },
 });
@@ -81,6 +89,8 @@ export const getUpdateTeamResponseMock = (): TeamResponse => ({
     memberCount: 0,
     role: null,
     canManage: true,
+    canMove: true,
+    canDelete: true,
     createdAt: "2026-11-15T09:12:40.000Z",
   },
 });
@@ -93,6 +103,7 @@ export const getListTeamMembersResponseMock = (): TeamMemberPage => ({
       name: "Dana Whitfield",
       image: null,
       role: "maintainer",
+      isCaller: true,
       joinedAt: "2026-11-15T09:13:02.000Z",
     },
     {
@@ -101,6 +112,7 @@ export const getListTeamMembersResponseMock = (): TeamMemberPage => ({
       name: "Sam Ortiz",
       image: null,
       role: "member",
+      isCaller: false,
       joinedAt: "2026-11-15T09:20:05.000Z",
     },
   ],
@@ -114,6 +126,7 @@ export const getPutTeamMemberResponseMock = (): TeamMemberResponse => ({
     name: "Sam Ortiz",
     image: null,
     role: "member",
+    isCaller: false,
     joinedAt: "2026-11-15T09:20:05.000Z",
   },
 });

@@ -632,7 +632,7 @@ export const getUpdateTeamUrl = (organizationId: string, teamId: string) => {
 };
 
 /**
- * Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
+ * Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers, except that only an owner or an admin changes its parent. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
  * @summary Change a team
  */
 export const updateTeam = async (

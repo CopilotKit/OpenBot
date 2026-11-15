@@ -32,6 +32,10 @@ export interface Team {
   role: TeamRole | null;
   /** Whether the caller may rename the team and add and remove its people: the server's verdict. */
   canManage: boolean;
+  /** Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization. */
+  canMove: boolean;
+  /** Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory. */
+  canDelete: boolean;
   /** When the team was created. */
   createdAt: string;
 }
