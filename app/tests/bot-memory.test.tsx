@@ -16,6 +16,14 @@ import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
 import { answerBotsList } from "./bots-api";
 import { CONVERSATIONS_PATH } from "./conversations-api";
+import {
+  MEMORY,
+  memoryContract,
+  memorySourceBody,
+  page,
+  problem,
+  requestOf,
+} from "./learning-api";
 import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -33,16 +41,8 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const source = (id: string, agentId: string, title: string) => ({
-  id,
-  title,
-  agentId,
-  toolRef: "mcp/drive/search",
-  enabled: true,
-  syncStatus: "succeeded",
-  syncError: null,
-  lastSyncAt: null,
-});
+const source = (id: string, botId: string, title: string) =>
+  memorySourceBody({ id, title, botId, toolRef: "mcp/drive/search" });
 
 const research = (id: string, agentId: string, focus: string) => ({
   id,
@@ -68,34 +68,31 @@ function serving() {
   searchSettings = {};
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    requested.push(url);
-    if (init?.method && init.method !== "GET") {
+    const request = requestOf(input, init);
+    requested.push(request.path);
+    if (request.method !== "GET") {
       if (refuseWrite) {
-        const error = refuseWrite;
+        const detail = refuseWrite;
         refuseWrite = null;
-        return Response.json({ error }, { status: 400 });
+        return problem(400, detail, "VALIDATION_ERROR");
       }
       return Response.json({ ok: true });
     }
-    if (url === "/api/memory/sources") {
-      return Response.json({
-        sources: [
-          source("s1", "expenses", "Receipts folder"),
-          source("s2", "knowledge", "Wiki pages"),
-        ],
-      });
+    if (request.path === MEMORY.sources) {
+      return page(memoryContract.ListMemorySourcesResponse, "sources", [
+        source("s1", "expenses", "Receipts folder"),
+        source("s2", "knowledge", "Wiki pages"),
+      ]);
     }
-    if (url.startsWith("/api/memory/sources/available/")) {
-      return Response.json({
-        tools: [
-          {
-            ref: "mcp/drive/search",
-            title: "Search Drive",
-            description: "",
-            inputSchema: { properties: searchSettings },
-          },
-        ],
-      });
+    if (request.path.endsWith("/memory-source-tools")) {
+      return page(memoryContract.ListMemorySourceToolsResponse, "tools", [
+        {
+          ref: "mcp/drive/search",
+          title: "Search Drive",
+          description: "",
+          inputSchema: { properties: searchSettings },
+        },
+      ]);
     }
     if (pathOf(url) === CHECK_INS_PATH) {
       return Response.json({
@@ -150,9 +147,7 @@ test("only this Bot's sources are listed, and its app actions load without picki
   expect(await view.findByText("Receipts folder")).toBeTruthy();
   expect(view.queryByText("Wiki pages")).toBeNull();
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
-  await waitFor(() =>
-    expect(requested).toContain("/api/memory/sources/available/expenses"),
-  );
+  await waitFor(() => expect(requested).toContain(MEMORY.tools("expenses")));
 });
 
 test("only this Bot's background research is listed, with no Bot to pick", async () => {

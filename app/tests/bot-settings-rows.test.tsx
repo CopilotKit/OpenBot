@@ -15,6 +15,13 @@ import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse } from "./approvals-api";
 import { botGrantsResponse } from "./bot-grants-api";
 import { answerTeamBots, teamBotOf } from "./bots-api";
+import {
+  MEMORY,
+  memoryContract,
+  memorySourceBody,
+  page,
+  requestOf,
+} from "./learning-api";
 import { notificationsResponse } from "./notifications-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
@@ -91,10 +98,10 @@ function serving(
       available: { slack: true, sms: true },
     });
     if (reach) return reach;
-    if (url === "/api/memory/sources") {
-      return Response.json({
-        sources: [{ id: "s1", agentId: "expenses", enabled: true }],
-      });
+    if (requestOf(input, init).path === MEMORY.sources) {
+      return page(memoryContract.ListMemorySourcesResponse, "sources", [
+        memorySourceBody({ id: "s1", botId: "expenses" }),
+      ]);
     }
     const approvals = approvalInboxResponse(url, {
       enabled: true,

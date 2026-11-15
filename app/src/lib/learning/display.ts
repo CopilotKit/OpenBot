@@ -88,3 +88,19 @@ const SELECTOR_NOTE = new RegExp(
 export function readableSkillBody(markdown: string): string {
   return skillBody(markdown).replace(SELECTOR_NOTE, "");
 }
+
+/**
+ * The line Learning gives a skill it reduced from its final insights: "Supported by final Insights: <slug>, <slug>.".
+ * The slugs name insights the proposal's Learned from already shows in full.
+ */
+const INSIGHT_SLUGS =
+  /Supported by (?:final )?Insights?:\s*[a-z0-9]+(?:-[a-z0-9]+)*(?:\s*,\s*[a-z0-9]+(?:-[a-z0-9]+)*)*\.?/gi;
+
+/**
+ * Why Learning proposes a skill, as a person reads it: the words Learning wrote, without a line that only names
+ * insights by slug. Null when nothing is left to say.
+ */
+export function proposalReason(reason: string): string | null {
+  const words = reason.replace(INSIGHT_SLUGS, "").replace(/\s+/g, " ").trim();
+  return words === "" ? null : words;
+}

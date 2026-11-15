@@ -103,7 +103,8 @@ function draw(
   client.setQueryData(learningKeys.review, {
     canReview: true,
     autoApprove: null,
-    sources: [],
+    approved: 0,
+    spaces: [],
   });
   client.setQueryData(browserKeys.state, { available: browser });
   const root = createRootRoute();

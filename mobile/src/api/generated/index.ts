@@ -6,6 +6,7 @@ export * from "./check-ins/check-ins";
 export * from "./computers/computers";
 export * from "./conversations/conversations";
 export * from "./devices/devices";
+export * from "./memory/memory";
 export * from "./organization-settings/organization-settings";
 export * from "./routines/routines";
 export * from "./skills/skills";
