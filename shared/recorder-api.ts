@@ -214,29 +214,11 @@ export function isAllowedGatewayUrl(
 
 const id = (value: string) => encodeURIComponent(value);
 
-/** The organization every request is in: an install has one, and the API addresses it as `default`. */
-const RECORDER_ORGANIZATION = "/api/v2/organizations/default";
-/**
- * Where the Recorder reaches OpenBot's API (api/openapi.yaml, the Recorder tag), each signed with its connection token
- * except the exchange, whose connect code is the credential. Every write carries an `Idempotency-Key`.
- */
-export const recorderApiPaths = {
-  /** POST `{ code, label, installId }`: exchanges a connect code for a connection (`ExchangeResponse`). */
-  connections: `${RECORDER_ORGANIZATION}/recorder-connections`,
-  /** DELETE: the Recorder's own Disconnect. */
-  currentConnection: `${RECORDER_ORGANIZATION}/recorder-connections/current`,
-  /** GET `RecorderMe`. */
-  me: `${RECORDER_ORGANIZATION}/recorder/me`,
-  /** GET `RecorderLearningResponse`. */
-  learning: `${RECORDER_ORGANIZATION}/recorder/learning`,
-  /** POST `RecorderActivity`: what this browser's Recorder is doing now (the red dot). */
-  activity: `${RECORDER_ORGANIZATION}/recorder/activity`,
-} as const;
-
 /**
  * The addresses a Recorder installed before the API's reached OpenBot at, which OpenBot keeps answering for it, and
  * the capture pass (`trajectoryConnect`), which is the runtime's. Nothing new calls the `/api/recorder` ones: the
- * Recorder uses {@link recorderApiPaths}, and OpenBot's own screens the generated API client.
+ * Recorder reaches the API through its generated client (extension/src/shared/generated, the spec's Recorder tag), and
+ * OpenBot's own screens through theirs.
  */
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",

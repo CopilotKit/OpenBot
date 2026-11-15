@@ -11,7 +11,6 @@ import {
   RECORDER_SIGNED_OUT,
   type RecorderActivity,
   recorderActivitySchema,
-  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
@@ -118,9 +117,12 @@ function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (path === recorderApiPaths.activity && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder/activity" &&
+    request.method === "POST"
+  )
     return activity(request, token);
-  if (path === recorderApiPaths.me)
+  if (path === "/api/v2/organizations/default/recorder/me")
     return liveTokens.has(token)
       ? Response.json({ user: ada, connectionId: `c-${token}` })
       : signedOut();

@@ -73,29 +73,39 @@ function idempotencyKey(): string {
   );
 }
 
+/** The organization the Recorder works in: an install has one, and the API addresses it as `default`. */
+export const ORGANIZATION_ID = "default";
+
+/** What a caller of a generated function (src/shared/generated) adds to the request it makes. */
+export type OpenBotRequestInit = RequestInit & {
+  /** The OpenBot the request goes to, and the connection's bearer when it has one. Every call names it. */
+  target?: OpenBotTarget;
+};
+
 /**
- * JSON in, JSON out, bearer when given, `redirect: "error"`, no cookies (`credentials: "omit"`). A write (anything but
- * a GET) carries a fresh `Idempotency-Key`. A refusal is thrown as an {@link OpenBotError} in the server's own sentence.
+ * How the Recorder's generated API client reaches OpenBot: Orval's mutator for src/shared/generated.
+ *
+ * Every Recorder operation in api/openapi.yaml calls this with the address, method, headers and serialised body the
+ * spec gives it, and the caller's `target`. It is sent through {@link openbotRaw}: to that OpenBot only, with the bearer
+ * when there is one, `redirect: "error"`, no cookies. A write (anything but a GET) carries a fresh `Idempotency-Key`
+ * unless the caller sent its own. A refusal is thrown as an {@link OpenBotError} in the server's own sentence; a 204 or
+ * an empty body answers `undefined`.
  */
-export async function openbotJson<T>(
-  target: OpenBotTarget,
-  path: string,
-  init: {
-    method?: string;
-    body?: unknown;
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-  } = {},
+export async function openbotRequest<T>(
+  url: string,
+  init: OpenBotRequestInit = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (init.body !== undefined) headers["Content-Type"] = "application/json";
-  const method = init.method ?? (init.body === undefined ? "GET" : "POST");
-  if (method !== "GET") headers["Idempotency-Key"] = idempotencyKey();
-  const response = await openbotRaw(target, path, {
+  const { target, ...request } = init;
+  if (!target) throw new Error(`Name the OpenBot to send "${url}" to.`);
+  const method = (request.method ?? "GET").toUpperCase();
+  const headers = new Headers(request.headers);
+  headers.set("Accept", "application/json");
+  if (method !== "GET" && !headers.has("Idempotency-Key"))
+    headers.set("Idempotency-Key", idempotencyKey());
+  const response = await openbotRaw(target, url, {
+    ...request,
     method,
-    headers: { ...headers, ...init.headers },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    signal: init.signal,
+    headers,
   });
   if (!response.ok) {
     const body = await readErrorBody(response);

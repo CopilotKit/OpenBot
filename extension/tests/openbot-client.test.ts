@@ -1,15 +1,32 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
+  deleteCurrentRecorderConnection,
+  exchangeRecorderConnectCode,
+  getDeleteCurrentRecorderConnectionUrl,
+  getExchangeRecorderConnectCodeUrl,
+  getGetRecorderIdentityUrl,
+  getGetRecorderLearningUrl,
+  getRecorderIdentity,
+  getRecorderLearning,
+  getReportRecorderActivityUrl,
+  reportRecorderActivity,
+} from "../src/shared/generated/recorder";
+import {
   OpenBotError,
-  openbotJson,
+  type OpenBotRequestInit,
+  ORGANIZATION_ID,
   openbotRaw,
+  openbotRequest,
 } from "../src/shared/openbot-client";
 
 type Seen = {
   auth: string | null;
   cookie: string | null;
   method: string;
+  path: string;
   key: string | null;
+  contentType: string | null;
+  body: unknown;
 };
 
 /** A refusal as OpenBot's API answers one: problem details (RFC 9457). */
@@ -37,9 +54,27 @@ function problem(
 }
 let seen: Seen | null = null;
 
+/** The Recorder's addresses in OpenBot's API, written out here rather than taken from the client under test. */
+const API = {
+  connections: "/api/v2/organizations/default/recorder-connections",
+  currentConnection:
+    "/api/v2/organizations/default/recorder-connections/current",
+  me: "/api/v2/organizations/default/recorder/me",
+  learning: "/api/v2/organizations/default/recorder/learning",
+  activity: "/api/v2/organizations/default/recorder/activity",
+};
+
+const ada = { id: "p1", name: "Ada", email: "ada@example.test" };
+
+const json = (init: OpenBotRequestInit, body: unknown): OpenBotRequestInit => ({
+  ...init,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 async function failure(path: string): Promise<OpenBotError> {
   try {
-    await openbotJson({ openbotUrl, token: "t" }, path);
+    await openbotRequest(path, { target: { openbotUrl, token: "t" } });
   } catch (error) {
     if (error instanceof OpenBotError) return error;
     throw error;
@@ -55,15 +90,48 @@ beforeAll(() => {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
+      const text = await request.text();
       seen = {
         auth: request.headers.get("authorization"),
         cookie: request.headers.get("cookie"),
         method: request.method,
+        path: url.pathname,
         key: request.headers.get("idempotency-key"),
+        contentType: request.headers.get("content-type"),
+        body: text ? JSON.parse(text) : null,
       };
+      const route = `${request.method} ${url.pathname}`;
+      // OpenBot's API, at its addresses and in its shapes, for the Recorder's own operations.
+      if (route === `POST ${API.connections}`)
+        return Response.json(
+          {
+            token: "obr_new",
+            connection: {
+              id: "c1",
+              label: "Work laptop",
+              via: "web",
+              extensionId: "ext",
+              installId: "0123456789abcdef0123456789abcdef",
+              createdAt: "2026-11-14T00:00:00.000Z",
+              lastUsedAt: null,
+            },
+            user: ada,
+          },
+          { status: 201 },
+        );
+      if (route === `DELETE ${API.currentConnection}`)
+        return new Response(null, { status: 204 });
+      if (route === `GET ${API.me}`)
+        return Response.json({ user: ada, connectionId: "c1" });
+      if (route === `GET ${API.learning}`)
+        return Response.json({
+          learning: { state: "assigned", containerId: "space-1" },
+        });
+      if (route === `POST ${API.activity}`)
+        return new Response(null, { status: 204 });
       if (url.pathname === "/ok") {
         return Response.json({
-          echoed: request.method === "POST" ? await request.json() : null,
+          echoed: request.method === "POST" ? JSON.parse(text) : null,
         });
       }
       if (url.pathname === "/signed-out") {
@@ -105,21 +173,107 @@ afterAll(() => {
   server.stop(true);
 });
 
-test("sends the bearer, no cookie, and parses JSON", async () => {
-  const result = await openbotJson<{ echoed: unknown }>(
-    { openbotUrl, token: "obr_t" },
-    "/ok",
+test("the generated client reaches OpenBot only at the API's addresses, in its one organization", () => {
+  expect({
+    connections: getExchangeRecorderConnectCodeUrl(ORGANIZATION_ID),
+    currentConnection: getDeleteCurrentRecorderConnectionUrl(ORGANIZATION_ID),
+    me: getGetRecorderIdentityUrl(ORGANIZATION_ID),
+    learning: getGetRecorderLearningUrl(ORGANIZATION_ID),
+    activity: getReportRecorderActivityUrl(ORGANIZATION_ID),
+  }).toEqual(API);
+});
+
+test("each of the Recorder's operations goes out through the mutator: its address and method, the bearer, a key on every write", async () => {
+  const target = { openbotUrl, token: "obr_t" };
+
+  const grant = await exchangeRecorderConnectCode(
+    ORGANIZATION_ID,
+    {
+      code: "obc_abc",
+      label: "Work laptop",
+      installId: "0123456789abcdef0123456789abcdef",
+    },
+    { target: { openbotUrl } },
   );
+  expect(grant.token).toBe("obr_new");
+  expect(grant.user).toEqual(ada);
+  // The code is the credential: no bearer, and the body as the spec types it.
+  expect(seen).toMatchObject({
+    method: "POST",
+    path: API.connections,
+    auth: null,
+    cookie: null,
+    contentType: "application/json",
+    body: {
+      code: "obc_abc",
+      label: "Work laptop",
+      installId: "0123456789abcdef0123456789abcdef",
+    },
+  });
+  expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
+
+  expect(await getRecorderIdentity(ORGANIZATION_ID, { target })).toEqual({
+    user: ada,
+    connectionId: "c1",
+  });
+  expect(seen).toMatchObject({
+    method: "GET",
+    path: API.me,
+    auth: "Bearer obr_t",
+    key: null,
+  });
+
+  expect(await getRecorderLearning(ORGANIZATION_ID, { target })).toEqual({
+    learning: { state: "assigned", containerId: "space-1" },
+  });
+  expect(seen).toMatchObject({ method: "GET", path: API.learning });
+
+  const activity = { phase: "recording" as const, actions: 3 };
+  expect(
+    await reportRecorderActivity(ORGANIZATION_ID, activity, { target }),
+  ).toBeUndefined();
+  expect(seen).toMatchObject({
+    method: "POST",
+    path: API.activity,
+    auth: "Bearer obr_t",
+    body: activity,
+  });
+  expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
+
+  expect(
+    await deleteCurrentRecorderConnection(ORGANIZATION_ID, { target }),
+  ).toBeUndefined();
+  expect(seen).toMatchObject({
+    method: "DELETE",
+    path: API.currentConnection,
+    auth: "Bearer obr_t",
+  });
+  expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
+});
+
+test("a call that names no OpenBot is refused before any request is made", async () => {
+  const { urls } = await recordFetch(async () => {
+    await expect(getRecorderIdentity(ORGANIZATION_ID)).rejects.toThrow(
+      "Name the OpenBot",
+    );
+  });
+  expect(urls).toEqual([]);
+});
+
+test("sends the bearer, no cookie, and parses JSON", async () => {
+  const result = await openbotRequest<{ echoed: unknown }>("/ok", {
+    target: { openbotUrl, token: "obr_t" },
+  });
   expect(result).toEqual({ echoed: null });
   expect(seen?.auth).toBe("Bearer obr_t");
   expect(seen?.cookie).toBeNull();
 });
 
 test("sends no Authorization header without a token and posts a JSON body", async () => {
-  const result = await openbotJson<{ echoed: unknown }>({ openbotUrl }, "/ok", {
-    method: "POST",
-    body: { a: 1 },
-  });
+  const result = await openbotRequest<{ echoed: unknown }>(
+    "/ok",
+    json({ target: { openbotUrl }, method: "POST" }, { a: 1 }),
+  );
   expect(result).toEqual({ echoed: { a: 1 } });
   expect(seen?.auth).toBeNull();
   expect(seen?.method).toBe("POST");
@@ -127,17 +281,28 @@ test("sends no Authorization header without a token and posts a JSON body", asyn
 
 test("every write carries an Idempotency-Key of its own, and a read carries none", async () => {
   const target = { openbotUrl, token: "obr_t" };
-  await openbotJson(target, "/ok");
+  await openbotRequest("/ok", { target });
   expect(seen?.key).toBeNull();
   const keys: (string | null)[] = [];
-  await openbotJson(target, "/ok", { method: "POST", body: { a: 1 } });
+  await openbotRequest("/ok", json({ target, method: "POST" }, { a: 1 }));
   keys.push(seen?.key ?? null);
-  await openbotJson(target, "/ok", { method: "POST", body: { a: 1 } });
+  await openbotRequest("/ok", json({ target, method: "POST" }, { a: 1 }));
   keys.push(seen?.key ?? null);
-  await openbotJson(target, "/no-content", { method: "DELETE" });
+  await openbotRequest("/no-content", { target, method: "DELETE" });
   keys.push(seen?.key ?? null);
   for (const key of keys) expect(key).toMatch(/^[0-9a-f]{32}$/);
   expect(new Set(keys).size).toBe(3);
+});
+
+test("a caller retrying a write sends its own Idempotency-Key, which is kept", async () => {
+  await openbotRequest("/ok", {
+    ...json({ target: { openbotUrl }, method: "POST" }, { a: 1 }),
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "retry-1",
+    },
+  });
+  expect(seen?.key).toBe("retry-1");
 });
 
 test("throws OpenBotError with the status and the server's message on a 4xx", async () => {
@@ -177,7 +342,7 @@ test("signedOut is true only for a 401 carrying RECORDER_SIGNED_OUT", async () =
 
 test("refuses a redirect", async () => {
   await expect(
-    openbotJson({ openbotUrl, token: "t" }, "/redirect"),
+    openbotRequest("/redirect", { target: { openbotUrl, token: "t" } }),
   ).rejects.toThrow();
   await expect(
     openbotRaw({ openbotUrl, token: "t" }, "/redirect", {}),
@@ -194,11 +359,10 @@ test("openbotRaw returns the response unparsed and adds the bearer", async () =>
 });
 
 test("a 204 answer with no body resolves to undefined", async () => {
-  const result = await openbotJson<void>(
-    { openbotUrl, token: "obr_t" },
-    "/no-content",
-    { method: "DELETE" },
-  );
+  const result = await openbotRequest<void>("/no-content", {
+    target: { openbotUrl, token: "obr_t" },
+    method: "DELETE",
+  });
   expect(result).toBeUndefined();
   expect(seen?.auth).toBe("Bearer obr_t");
   expect(seen?.method).toBe("DELETE");
@@ -229,7 +393,11 @@ async function recordFetch(
 test("every request goes out with credentials omit and redirect error, whatever the caller passes", async () => {
   const target = { openbotUrl, token: "obr_t" };
   const { inits } = await recordFetch(async () => {
-    await openbotJson(target, "/ok");
+    await openbotRequest("/ok", {
+      target,
+      credentials: "include",
+      redirect: "follow",
+    });
     await openbotRaw(target, "/ok", {
       credentials: "include",
       redirect: "follow",
@@ -248,7 +416,7 @@ test("refuses a path that leaves OpenBot's origin before any request is made", a
     let rejected = false;
     const { urls } = await recordFetch(async () => {
       try {
-        await openbotJson(target, path);
+        await openbotRequest(path, { target });
       } catch {
         rejected = true;
       }

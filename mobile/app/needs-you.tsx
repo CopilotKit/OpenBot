@@ -1,13 +1,9 @@
 import { Redirect } from "expo-router";
 import { useCallback } from "react";
 import { Text } from "react-native";
-import {
-  type BotTask,
-  type CheckInItem,
-  everyBot,
-  everyPage,
-  ORGANIZATION,
-} from "../src/api";
+import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
+import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
+import { listTasks } from "../src/api/generated/tasks/tasks";
 import { authClient } from "../src/auth";
 import {
   hideItem,
@@ -29,14 +25,20 @@ export default function NeedsYouScreen() {
   const action = useAction();
   const loadItems = useCallback(
     () =>
-      everyPage<CheckInItem>(`${ORGANIZATION}/check-in-items`, "checkInItems"),
+      everyPage(
+        (page) => listCheckInItems(ORGANIZATION_ID, page),
+        (page) => page.checkInItems,
+      ),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
   const loadTasks = useCallback(async () => {
     // Every page: the count of what waits on the person is of all of them.
     return {
-      tasks: await everyPage<BotTask>(`${ORGANIZATION}/tasks`, "tasks"),
+      tasks: await everyPage(
+        (page) => listTasks(ORGANIZATION_ID, page),
+        (page) => page.tasks,
+      ),
     };
   }, []);
   const tasks = useLoad(loadTasks, Boolean(session));

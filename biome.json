@@ -28,7 +28,11 @@
   },
   "overrides": [
     {
-      "includes": ["app/src/lib/api/generated/**"],
+      "includes": [
+        "app/src/lib/api/generated/**",
+        "mobile/src/api/generated/**",
+        "extension/src/shared/generated/**"
+      ],
       "linter": {
         "enabled": false
       }

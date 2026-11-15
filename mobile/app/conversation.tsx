@@ -9,12 +9,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { ORGANIZATION_ID } from "../src/api";
 import {
-  api,
-  type Conversation,
-  ORGANIZATION,
-  type TranscriptMessage,
-} from "../src/api";
+  getConversation,
+  listConversationMessages,
+  sendConversationMessage,
+} from "../src/api/generated/conversations/conversations";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
 export default function ConversationScreen() {
@@ -35,10 +35,7 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, not the previous person
   const loadChannels = useCallback(
-    () =>
-      api<{ conversation: Conversation }>(
-        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId ?? "")}`,
-      ),
+    () => getConversation(ORGANIZATION_ID, channelId ?? ""),
     [channelId, session?.user.id],
   );
   const channels = useLoad(loadChannels, Boolean(session));
@@ -53,9 +50,10 @@ export default function ConversationScreen() {
   }, [conversation, agentId, requestedAgentId]);
   const loadHistory = useCallback(
     () =>
-      api<{ messages: TranscriptMessage[] }>(
-        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId ?? "")}/messages?botId=${encodeURIComponent(agentId)}&limit=200`,
-      ),
+      listConversationMessages(ORGANIZATION_ID, channelId ?? "", {
+        botId: agentId,
+        limit: 200,
+      }),
     [channelId, agentId],
   );
   const history = useLoad(loadHistory, Boolean(session && agentId));
@@ -69,13 +67,11 @@ export default function ConversationScreen() {
     const pendingText = text;
     const externalId = Crypto.randomUUID();
     try {
-      await api(
-        `${ORGANIZATION}/conversations/${encodeURIComponent(channelId)}/messages`,
-        {
-          method: "POST",
-          body: { id: externalId, text: pendingText, botId: agentId },
-        },
-      );
+      await sendConversationMessage(ORGANIZATION_ID, channelId, {
+        id: externalId,
+        text: pendingText,
+        botId: agentId,
+      });
       setText("");
       await history.refresh();
     } catch (failure) {
