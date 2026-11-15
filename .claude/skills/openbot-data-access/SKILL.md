@@ -42,7 +42,9 @@ is built on `clientRequest` in `lib/client.ts`: the same session cookie, and a r
 The generated code is checked in. CI regenerates it and fails when it differs, lints the spec, and
 fails a pull request that breaks a client of the base branch's spec (oasdiff). A change that takes
 nothing from a client, such as writing down a rule the server already enforces, goes through only
-when it is listed with its reason in `api/accepted-breaking-changes.md`.
+when it is listed with its reason in `api/accepted-breaking-changes.md`. A new hand-written address
+of the server, or a request sent by hand, fails `api/client-boundary.test.ts` unless
+`api/client-boundary.allow.ts` names it with the rule it follows.
 
 ## The Shape
 
