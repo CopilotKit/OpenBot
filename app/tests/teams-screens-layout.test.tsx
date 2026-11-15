@@ -12,16 +12,22 @@ import type {
 } from "@/lib/api/generated/model";
 import { personBody } from "./accounts-api";
 import { teamBotOf } from "./bots-api";
+import { personLearningBody, reviewBody } from "./learning-api";
+import { SKILLS_PATH, skillBody } from "./skills-api";
 
 /**
  * The team screens hold their layout at every width, in light and dark.
  *
- * Admin's Teams list, a team's page, New team, and a Bot's Publish dialog with its teams to tick
- * are drawn in a real browser, in Admin's real frame, because whether a row's buttons stay inside
+ * The Teams list, a team's page, New team, and a Bot's Publish dialog with its teams to tick are
+ * drawn in a real browser, in the app's real frame, because whether a row's buttons stay inside
  * the card, a long name gives way, or a dialog fits a phone is the browser's layout to decide. Each
  * is checked wide (1440), narrow (700, where the sidebar is a sheet) and at a phone's width (390):
  * the page never scrolls sideways, every control is whole inside the window, and a row's actions
  * never sit on top of its words.
+ *
+ * The list and a team's page are drawn three times over, as the three people who open them see
+ * them: an admin of the organization, a maintainer of the team who is not an admin, and a member
+ * who is neither. The menu under the person's name is drawn open, with Teams in it.
  *
  * The server's answers are served as routes at the API's addresses: an organization with five
  * teams, one from the company's directory and one under another, with long names among them.
@@ -52,8 +58,11 @@ const THEMES = ["light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
 type Window = { width: number; height: number };
 
-/** Who is looking: an admin of the organization, one of a team's members, or an admin with no teams yet. */
-type Persona = "admin" | "member" | "no-teams";
+/**
+ * Who is looking: an admin of the organization, a maintainer of Sales who is not an admin, one of
+ * its members who is neither, or an admin with no teams yet.
+ */
+type Persona = "admin" | "maintainer" | "member" | "no-teams";
 
 const person = (id: string, name: string, email: string) => ({
   id,
@@ -85,61 +94,78 @@ const team = (id: string, name: string, rest: Partial<Team> = {}): Team => ({
   memberCount: 0,
   role: null,
   canManage: true,
+  canMove: true,
+  canDelete: true,
   createdAt: "2026-11-15T09:12:40.000Z",
   ...rest,
 });
 
+/** Who is signed in: Dana administers the organization, Sam does not. */
+const signedIn = (persona: Persona) =>
+  persona === "maintainer" || persona === "member" ? SAM : DANA;
+
+/** The organization's teams, each with the server's verdicts on what this person may do to it. */
 function teamsFor(persona: Persona): Team[] {
   if (persona === "no-teams") return [];
-  const manages = persona === "admin";
+  const admin = persona === "admin";
+  // An admin manages, moves and deletes every team; anybody else only manages one they maintain.
+  const verdicts = { canManage: admin, canMove: admin, canDelete: admin };
   return [
     team("team_sales", "Sales", {
       description: "Everybody who sells.",
       memberCount: 4,
-      role: manages ? "maintainer" : "member",
-      canManage: manages,
+      role: persona === "member" ? "member" : "maintainer",
+      ...verdicts,
+      canManage: persona !== "member",
     }),
     team("team_emea", "Sales EMEA", {
       description:
         "Quotes, renewals and partner deals for Europe, the Middle East and Africa, with the Dublin and Dubai desks.",
       parentTeamId: "team_sales",
       memberCount: 1,
-      canManage: manages,
+      ...verdicts,
     }),
     team("team_success", "Customer Success and Renewals, North America", {
       memberCount: 23,
-      canManage: manages,
+      role: admin ? null : "member",
+      ...verdicts,
     }),
-    team("team_support", "Support", { canManage: manages }),
+    team("team_support", "Support", verdicts),
     team("team_finance", "Finance", {
       source: "directory",
       memberCount: 12,
       canManage: false,
+      canMove: admin,
+      canDelete: false,
     }),
   ];
 }
 
-const member = (
-  who: { id: string; name: string; email: string },
-  role: TeamMember["role"],
-): TeamMember => ({
-  id: who.id,
-  email: who.email,
-  name: who.name,
-  image: null,
-  role,
-  joinedAt: "2026-11-15T09:13:02.000Z",
-});
-
-const MEMBERS: Record<string, TeamMember[]> = {
-  team_sales: [
-    member(DANA, "maintainer"),
-    member(SAM, "member"),
-    member(ALEX, "member"),
-    member(PRIYA, "maintainer"),
-  ],
-  team_finance: [member(TOM, "member"), member(ALEX, "member")],
-};
+/** The people in each team, with the one who is asking marked as the server marks them. */
+function membersFor(persona: Persona): Record<string, TeamMember[]> {
+  const me = signedIn(persona);
+  const member = (
+    who: { id: string; name: string; email: string },
+    role: TeamMember["role"],
+  ): TeamMember => ({
+    id: who.id,
+    email: who.email,
+    name: who.name,
+    image: null,
+    role,
+    isCaller: who.id === me.id,
+    joinedAt: "2026-11-15T09:13:02.000Z",
+  });
+  return {
+    team_sales: [
+      member(DANA, "maintainer"),
+      member(SAM, persona === "maintainer" ? "maintainer" : "member"),
+      member(ALEX, "member"),
+      member(PRIYA, "maintainer"),
+    ],
+    team_finance: [member(TOM, "member"), member(ALEX, "member")],
+  };
+}
 
 const BOT = {
   ...getGetBotResponseMock().bot,
@@ -161,7 +187,8 @@ const PUBLISHED: TeamBot = teamBotOf("expenses", "Expenses", {
 
 /** What the API answers for one read, or undefined for an address these screens never ask. */
 function answer(path: string, persona: Persona): unknown {
-  const me = persona === "member" ? SAM : DANA;
+  const me = signedIn(persona);
+  const admin = me === DANA;
   const teams = teamsFor(persona);
   if (path === `${ORGANIZATION}/deployment`)
     return {
@@ -175,10 +202,7 @@ function answer(path: string, persona: Persona): unknown {
     };
   if (path === `${ORGANIZATION}/people/me`)
     return {
-      person: personBody({
-        ...me,
-        role: persona === "member" ? "member" : "admin",
-      }),
+      person: personBody({ ...me, role: admin ? "admin" : "member" }),
       openbotVersion: "v1.0.3",
     };
   if (path === `${ORGANIZATION}/people`)
@@ -203,15 +227,38 @@ function answer(path: string, persona: Persona): unknown {
       nextCursor: null,
     };
   if (path === `${ORGANIZATION}/teams`)
-    return { teams, canCreate: persona !== "member", nextCursor: null };
+    return { teams, canCreate: admin, nextCursor: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
   if (one) {
     const found = teams.find((candidate) => candidate.id === one[1]);
     if (!found) return undefined;
     return one[2]
-      ? { members: MEMBERS[found.id] ?? [], nextCursor: null }
+      ? { members: membersFor(persona)[found.id] ?? [], nextCursor: null }
       : { team: found };
   }
+  // Skills, a page of the app's frame that was there before, to look at beside Teams.
+  if (path === SKILLS_PATH)
+    return {
+      skills: [
+        skillBody({
+          slug: "weekly-report",
+          title: "Weekly report",
+          summary: "Summarize the week's closed deals for the Monday meeting.",
+          ownerUserId: me.id,
+        }),
+        skillBody({
+          slug: "expense-check",
+          title: "Expense check",
+          summary: "Check a receipt against the travel policy.",
+          ownerUserId: me.id,
+        }),
+      ],
+      nextCursor: null,
+    };
+  if (path === `${ORGANIZATION}/bots`) return { bots: [BOT], nextCursor: null };
+  if (path === `${ORGANIZATION}/people/me/learning-settings`)
+    return personLearningBody();
+  if (path === `${ORGANIZATION}/people/me/learning-review`) return reviewBody();
   if (path === `${ORGANIZATION}/team-bots`)
     return { teamBots: [PUBLISHED], nextCursor: null };
   if (path === `${ORGANIZATION}/bots/expenses`) return { bot: BOT };
@@ -305,6 +352,13 @@ type Screen = {
   /** Every engine, theme and width, or (for a state of a screen already covered) a few of them. */
   everywhere?: boolean;
   ready: (page: Page) => Promise<unknown>;
+  /**
+   * What the person does next, once the screen is styled: for something that is pressed where it
+   * is drawn (the sidebar's sheet in a narrow window, and the menu in it).
+   */
+  press?: (page: Page) => Promise<unknown>;
+  /** Drawn only to be looked at beside the team screens, when screenshots are asked for. */
+  lookOnly?: boolean;
   /** Where to look, once the screen is styled: a part of the page further down. */
   lookAt?: (page: Page) => Promise<unknown>;
 };
@@ -312,19 +366,19 @@ type Screen = {
 const SCREENS: Screen[] = [
   {
     name: "teams-list",
-    path: "/admin/teams",
+    path: "/teams",
     everywhere: true,
     ready: (page) => page.getByRole("link", { name: /^Sales EMEA/ }).waitFor(),
   },
   {
     name: "team-page",
-    path: "/admin/teams/team_sales",
+    path: "/teams/team_sales",
     everywhere: true,
     ready: (page) => page.getByText("Sam Ortiz").waitFor(),
   },
   {
     name: "new-team",
-    path: "/admin/teams/new",
+    path: "/teams/new",
     everywhere: true,
     ready: (page) => page.getByLabel("Parent team").waitFor(),
   },
@@ -342,24 +396,85 @@ const SCREENS: Screen[] = [
   },
   {
     name: "teams-list-empty",
-    path: "/admin/teams",
+    path: "/teams",
     persona: "no-teams",
     ready: (page) => page.getByText("No teams yet").waitFor(),
   },
+  // The same two screens as the people who are not admins see them.
+  {
+    name: "teams-list-member",
+    path: "/teams",
+    persona: "member",
+    everywhere: true,
+    ready: (page) => page.getByRole("link", { name: /^Sales EMEA/ }).waitFor(),
+  },
+  {
+    name: "teams-list-maintainer",
+    path: "/teams",
+    persona: "maintainer",
+    everywhere: true,
+    ready: (page) => page.getByRole("link", { name: /^Sales EMEA/ }).waitFor(),
+  },
   {
     name: "team-page-member",
-    path: "/admin/teams/team_sales",
+    path: "/teams/team_sales",
     persona: "member",
+    everywhere: true,
     ready: (page) => page.getByRole("button", { name: "Leave team" }).waitFor(),
   },
   {
+    name: "team-page-maintainer",
+    path: "/teams/team_sales",
+    persona: "maintainer",
+    everywhere: true,
+    ready: (page) => page.getByRole("button", { name: "Leave team" }).waitFor(),
+  },
+  // Where Teams is reached: the menu under the person's name, open. In a narrow window the
+  // sidebar is a sheet, opened first.
+  {
+    name: "teams-menu-member",
+    path: "/teams",
+    persona: "member",
+    everywhere: true,
+    ready: (page) => page.getByRole("link", { name: /^Sales EMEA/ }).waitFor(),
+    press: async (page) => {
+      const account = page.getByRole("button", { name: /Sam Ortiz/ });
+      if ((await account.count()) === 0) {
+        await page.getByRole("button", { name: "Show sidebar" }).click();
+        // Styled as a sheet before anything in it is pressed.
+        await account.waitFor();
+        const classes = await page.evaluate(() =>
+          [...document.querySelectorAll("[class]")].flatMap((element) => [
+            ...element.classList,
+          ]),
+        );
+        await page.addStyleTag({
+          content: await stylesheet([...new Set(classes)]),
+        });
+        await page.waitForTimeout(400);
+      }
+      await account.click();
+      await page.getByRole("menuitem", { name: "Teams" }).waitFor();
+    },
+  },
+  // A page of the app's frame that was there before, to look at beside the new ones. It is
+  // another area's page, so it is drawn when screenshots are asked for and held to nothing here.
+  {
+    name: "skills-page-member",
+    path: "/skills",
+    persona: "member",
+    everywhere: true,
+    lookOnly: true,
+    ready: (page) => page.getByText("Weekly report").waitFor(),
+  },
+  {
     name: "team-page-directory",
-    path: "/admin/teams/team_finance",
+    path: "/teams/team_finance",
     ready: (page) => page.getByText("Tom Becker").waitFor(),
   },
   {
     name: "add-person-dialog",
-    path: "/admin/teams/team_sales",
+    path: "/teams/team_sales",
     ready: async (page) => {
       await page.getByRole("button", { name: "Add person" }).click();
       await page.getByRole("button", { name: "Add Tom Becker" }).waitFor();
@@ -454,19 +569,28 @@ async function open(
   });
   await page.goto(`${ORIGIN}${screen.path}`);
   await screen.ready(page);
-  // Built once a screen, for the classes it draws with its dialog open.
-  let sheet = css.get(screen.name);
-  if (!sheet) {
-    const classes = await page.evaluate(() =>
-      [...document.querySelectorAll("[class]")].flatMap((element) => [
-        ...element.classList,
-      ]),
-    );
-    sheet = await stylesheet([...new Set(classes)]);
-    css.set(screen.name, sheet);
-  }
-  await page.addStyleTag({ content: sheet });
+  // Built once a screen and width, for the classes it draws with its dialog open. A narrow
+  // window draws other things than a wide one (the sidebar as a sheet), so each has its own.
+  const style = async (key: string) => {
+    let sheet = css.get(key);
+    if (!sheet) {
+      const classes = await page.evaluate(() =>
+        [...document.querySelectorAll("[class]")].flatMap((element) => [
+          ...element.classList,
+        ]),
+      );
+      sheet = await stylesheet([...new Set(classes)]);
+      css.set(key, sheet);
+    }
+    await page.addStyleTag({ content: sheet });
+  };
+  await style(`${screen.name}-${window.width}`);
   await page.evaluate(() => document.fonts.ready);
+  if (screen.press) {
+    await screen.press(page);
+    // What that opened is drawn with classes of its own.
+    await style(`${screen.name}-${window.width}-pressed`);
+  }
   await screen.lookAt?.(page);
   // Rows ease in and a dialog scales up: looked at once they are still.
   await page.waitForTimeout(400);
@@ -499,8 +623,15 @@ async function measured(page: Page) {
       ),
     ].filter(shown);
     const cut = controls
+      // Not the sidebar's edge strip: nothing is drawn on it, and it straddles the edge it is on.
+      .filter((control) => !control.matches("[data-sidebar=rail]"))
       .filter((control) => !inside(control.getBoundingClientRect()))
-      .map((control) => control.textContent?.trim() || control.tagName);
+      .map(
+        (control) =>
+          control.textContent?.trim() ||
+          control.getAttribute("aria-label") ||
+          control.tagName,
+      );
     const overlapping: string[] = [];
     const squeezed: string[] = [];
     for (const row of scope.querySelectorAll("[data-slot=item]")) {
@@ -543,6 +674,7 @@ async function measured(page: Page) {
 
 describe.skipIf(!asked)("the team screens", () => {
   for (const screen of SCREENS) {
+    if (screen.lookOnly && !shots) continue;
     for (const { engine, theme, window } of combinations(screen)) {
       test(`${screen.name} holds its layout in ${engine}, ${theme}, ${window.width}px`, async () => {
         const page = await open(screen, engine, theme, window);
@@ -556,6 +688,7 @@ describe.skipIf(!asked)("the team screens", () => {
               ),
             });
           }
+          if (screen.lookOnly) return;
           expect(await measured(page)).toEqual({
             sideways: false,
             cut: [],

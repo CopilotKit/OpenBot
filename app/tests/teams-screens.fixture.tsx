@@ -11,9 +11,11 @@ import {
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { SharingSections } from "@/components/bot-profile/sharing";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
 import { NewTeamPage } from "@/components/teams/new-team-page";
 import { TeamDetailPage } from "@/components/teams/team-page";
 import { TeamsPage } from "@/components/teams/teams-page";
@@ -24,11 +26,12 @@ import { Route as PeopleRoute } from "@/routes/_authed/admin/people";
 import { queryClient } from "@/query-client";
 
 /**
- * Admin's team screens and a Bot's Sharing page, as a page of their own for
- * teams-screens-layout.test.tsx to bundle and load in a browser: the real screens in Admin's real
- * frame (its sidebar and inset panel, as `routes/_authed/admin/route.tsx` draws them), at their own
- * addresses, beside two Admin pages that were there before (the overview and People) to compare
- * them with. What the server answers comes from the test's routes.
+ * The team screens and a Bot's Sharing page, as a page of their own for
+ * teams-screens-layout.test.tsx to bundle and load in a browser. The team screens are the real
+ * ones in the app's real frame (its sidebar and inset panel, as `routes/_authed/_app.tsx` draws
+ * them), at their own addresses, beside a page that was there before (Skills) to compare them
+ * with. Admin's frame holds the overview, which lists Teams, and People. What the server answers
+ * comes from the test's routes.
  *
  * The page has no sign-in in front of it, so it starts in `default`, the organization those routes
  * answer for, as every test does (preload.ts, which a page loaded in a browser does not run).
@@ -74,15 +77,36 @@ const adminRoute = createRoute({
 const admin = (path: string, page: () => ReactNode) =>
   createRoute({ getParentRoute: () => adminRoute, path, component: page });
 
+/** The app's frame: the same sidebar and inset panel as `routes/_authed/_app.tsx`. */
+const appRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "app-frame",
+  component: () => (
+    <SidebarShell className="h-svh overflow-hidden">
+      <AppSidebar />
+      <SidebarInset className="min-h-0 overflow-hidden">
+        <Outlet />
+      </SidebarInset>
+    </SidebarShell>
+  ),
+});
+const app = (path: string, page: () => ReactNode) =>
+  createRoute({ getParentRoute: () => appRoute, path, component: page });
+
 const router = createRouter({
   history: createBrowserHistory(),
   routeTree: rootRoute.addChildren([
     adminRoute.addChildren([
       admin("/admin", component(AdminOverviewRoute)),
       admin("/admin/people", component(PeopleRoute)),
-      admin("/admin/teams", TeamsPage),
-      admin("/admin/teams/new", NewTeamPage),
-      admin("/admin/teams/$teamId", TeamDetail),
+    ]),
+    appRoute.addChildren([
+      app("/teams", TeamsPage),
+      app("/teams/new", NewTeamPage),
+      app("/teams/$teamId", TeamDetail),
+      app("/skills", () => (
+        <SkillsSettingsPage creating={false} editing={undefined} />
+      )),
     ]),
     // A Bot's page is in the app's frame, whose sidebar is not this test's business.
     createRoute({
