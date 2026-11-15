@@ -734,28 +734,27 @@ jobs:
   # Built, not pushed, and one architecture: this answers whether the Dockerfile resolves. Whether
   # it resolves on arm64 too is answered at release time, on an arm64 runner.
   #
-  # No registry cache, so a release builds these a second time. `type=gha` needs ACTIONS_* in the
-  # environment, which `build-push-action` injects and a plain `run:` step does not have, and
-  # reaching for another action to export them would buy minutes in a job that runs rarely at the
-  # price of a dependency in the one workflow whose inputs are a security boundary.
-  component-dockerfiles:
-    name: component dockerfiles
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
-    # Minutes rather than seconds, so on a pull request it runs only when an admin adds the
-    # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
-    # the release's workflow_call it always runs. `verify` treats a skipped job as passing.
+  # Minutes rather than seconds, so on a pull request these run only when an admin adds the
+  # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
+  # the release's workflow_call they always run. `verify` treats a skipped job as passing.
+  #
+  # A Dockerfile the release does not publish is one a machine would build from source, so the
+  # list and the tree have to agree. Checked here rather than trusted, because the failure is
+  # silent: the release succeeds and a laptop somewhere builds the image. The management agent
+  # is not a harness: its image is published with OpenBot's server images. The list it checks is
+  # the one the builds below fan out over.
+  component-list:
+    name: component list
+    runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'full-ci')
+    outputs:
+      components: ${{ steps.list.outputs.components }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # A Dockerfile the release does not publish is one a machine would build from source, so the
-      # list and the tree have to agree. Checked here rather than trusted, because the failure is
-      # silent: the release succeeds and a laptop somewhere builds the image. The management agent
-      # is not a harness: its image is published with OpenBot's server images.
       - name: Every buildable service is published
         run: |
           set -euo pipefail
@@ -768,14 +767,43 @@ jobs:
             diff <(echo "$published") <(echo "$found") || true
             exit 1
           fi
-      - name: They build
-        run: |
-          set -euo pipefail
-          while read -r image; do
-            echo "::group::$image"
-            docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
-            echo "::endgroup::"
-          done < <(jq -r '.[]' .github/published-images.json)
+      - id: list
+        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+
+  # One runner per image, so the check takes as long as the slowest image rather than all of them
+  # one after another. Each reads the build cache images.yml writes for the same image and
+  # architecture (`<image>-amd64`), and a run on main writes it back, so main keeps the release's
+  # cache warm and the release's builds reuse what main already built. None of the Dockerfiles
+  # declares the OPENBOT_BUILD_* args images.yml passes, so leaving them out here changes no layer.
+  # A pull request reads that cache but never writes it: a labelled PR's cache could only be read
+  # by that PR, and would push main's out of the repository's cache quota.
+  component-dockerfiles:
+    name: component dockerfile (${{ matrix.image }})
+    needs: component-list
+    runs-on: ubuntu-latest
+    strategy:
+      # Every image is built to the end, so one red run names every Dockerfile that broke.
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.component-list.outputs.components) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # build-push-action rather than `docker buildx build` in a `run:` step: the gha cache needs the
+      # runner's ACTIONS_* values, which this action hands to buildx and a plain step does not have.
+      # It is the action images.yml publishes with, pinned the same, so nothing new is trusted here.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.image }}-amd64
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,ignore-error=true,scope={0}-amd64', matrix.image) || '' }}
+          provenance: false
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
@@ -785,7 +813,7 @@ jobs:
     name: verify
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     if: always()
-    needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-dockerfiles]
+    needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-list, component-dockerfiles]
     steps:
       - name: Require every check
         env:
