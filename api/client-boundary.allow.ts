@@ -381,15 +381,4 @@ export const ALLOWED: Allowed[] = [
  * Today's calls made by hand that are moving onto the API. Each change that moves one deletes its
  * entry here; the test then fails if the call is still made by hand.
  */
-export const TEMPORARY: Temporary[] = [
-  // The Recorder's earlier addresses: no client calls them any more (the Recorder is on its
-  // generated client), but the server's own tests still read them from this table.
-  {
-    file: "shared/recorder-api.ts",
-    what: /^\/api\/recorder\/(connections|me|recordings|learning|activity)(\/|$)/,
-    rule: "temporary",
-    why: "the Recorder's earlier addresses, which no client calls and the server's tests still read from shared/recorder-api.ts",
-    until:
-      "the server no longer reading them, then their removal from shared/recorder-api.ts",
-  },
-];
+export const TEMPORARY: Temporary[] = [];
