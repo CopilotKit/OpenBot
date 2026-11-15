@@ -24,7 +24,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
@@ -97,7 +97,7 @@ export function SkillTools({
   selected: string[];
   onChange: (refs: string[]) => void;
 }) {
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
   const [open, setOpen] = useState<string | null>(null);
   const held = new Set(selected);
 
@@ -123,9 +123,7 @@ export function SkillTools({
   }
 
   /* Only apps that offer something: a heading with nothing under it reads as a failed draw. */
-  const servers = plugins.data.servers.filter(
-    (server) => server.tools.length > 0,
-  );
+  const servers = plugins.data.filter((server) => server.tools.length > 0);
   /*
    * Declared, and offered by nothing connected here. Shown rather than dropped: a package ships
    * skills declaring tools for apps nobody has added yet, and leaving them out would state part of

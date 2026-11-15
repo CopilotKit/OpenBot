@@ -57,6 +57,10 @@ tags:
   - { name: Voice, description: "Voice calls with a conversation's Bot: how a call connects, and the calls a person saved in a conversation with their transcripts." }
   - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
+  - { name: Apps, description: "The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here." }
+  - { name: Connections, description: "A person's connections to apps: the accounts they signed in with so their Bots can act there for them, and an app's one shared account when an administrator connects it for everybody." }
+  - { name: Bot grants, description: "What each Bot may use: the app actions, skills and other Bots it was given, and each app as it stands for the person asking." }
+  - { name: App access requests, description: "A person asking an administrator to turn an app on, give it to a Bot, or connect its shared account." }
   - { name: Components, description: "The charts, cards and other components a Bot draws in a conversation instead of answering in text. Most come with OpenBot, and an admin can write more in Playground. An admin decides what each tells the model, which Bots may draw it and which data it may read." }
   - { name: Skills, description: "Named instructions a person runs by typing / in a conversation. Anybody can write their own, and an admin writes the organization's. A skill adds no access: a Bot that runs one uses only the apps it can already use." }
   - { name: Devices, description: "The phones a person signed in to the OpenBot app on and turned notifications on for, which their Bots send push notifications to." }
@@ -152,6 +156,48 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
+  /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/account-mode: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1account-mode' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/oauth-client: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1oauth-client' }
+  /api/v2/organizations/{organizationId}/app-directory: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-directory' }
+  /api/v2/organizations/{organizationId}/app-setup: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-setup' }
+  /api/v2/organizations/{organizationId}/shortened-tool-names: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1shortened-tool-names' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/connect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1connect' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/confirm: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1confirm' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/recheck: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1recheck' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1disconnect' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect-preview: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1disconnect-preview' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorizations: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1authorizations' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorize: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1authorize' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/make-default: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts~1{accountId}~1make-default' }
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1connections~1{appId}~1accounts~1{accountId}~1disconnect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/connect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1connect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/confirm: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1confirm' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/recheck: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1recheck' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/disconnect: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1disconnect' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorizations: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1authorizations' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorize: { $ref: './connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1shared-connection~1authorize' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/batch-update: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1batch-update' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/translate: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1translate' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/replay: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1replay' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/grants/{grantId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1grants~1{grantId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/give: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1give' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/take-back: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1take-back' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1approve' }
+  /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1giveable-apps' }
+  /api/v2/organizations/{organizationId}/app-access-requests: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1approve' }
+  /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}/dismiss: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}~1dismiss' }
   /api/v2/organizations/{organizationId}/components: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components' }
   /api/v2/organizations/{organizationId}/components/announce: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1announce' }
   /api/v2/organizations/{organizationId}/components/{componentId}: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1components~1{componentId}' }
@@ -380,6 +426,14 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:write: Add, change, refresh and remove apps, when the signed-in person may.
+            connections:read: Read the signed-in person's connections to apps, and each app's shared account.
+            connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
+            bot-grants:read: Read what the signed-in person's Bots may use, and describe or test a change to it.
+            bot-grants:write: Give and take back what the signed-in person's Bots may use.
+            app-access-requests:read: Read requests for apps, the signed-in person's own or, for an administrator, everybody's.
+            app-access-requests:write: Ask for an app, withdraw a request, and for an administrator approve or dismiss one.
             components:read: Read the components Bots draw, check whether a Bot may draw one, and read the data a component shows.
             components:write: Tell OpenBot which components the app can draw, and, when the signed-in person is an admin, write, publish and delete components and choose which Bots and data each may use.
             skills:read: Read the skills the signed-in person can use, and for an admin everybody's.
@@ -467,6 +521,7 @@ components:
     CapabilityIdParameter: { $ref: './admin-settings.yaml#/components/parameters/CapabilityIdParameter' }
     NetworkPolicyId: { $ref: './admin-settings.yaml#/components/parameters/NetworkPolicyId' }
     BotId: { $ref: './bots.yaml#/components/parameters/BotId' }
+    AppId: { $ref: './apps.yaml#/components/parameters/AppId' }
     Limit:
       name: limit
       in: query
@@ -759,6 +814,13 @@ components:
           description: >-
             The switch an administrator can turn on for this person, when the
             refusal is for want of one (isolatedComputers).
+        problems:
+          type: array
+          description: >-
+            What is wrong, item by item, when a refusal has more than one
+            reason: each entry names the item and says what is wrong with it.
+          items:
+            type: object
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -769,6 +831,7 @@ components:
     ModelCatalogue: { $ref: './model-connections.yaml#/components/schemas/ModelCatalogue' }
     ModelChoice: { $ref: './model-connections.yaml#/components/schemas/ModelChoice' }
     ModelChoiceInput: { $ref: './model-connections.yaml#/components/schemas/ModelChoiceInput' }
+    SharedAccountApproval: { $ref: './apps.yaml#/components/schemas/SharedAccountApproval' }
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -1082,6 +1145,9 @@ components:
     ModelKeyNotFound: { $ref: './model-connections.yaml#/components/responses/ModelKeyNotFound' }
     InvalidModelChoice: { $ref: './model-connections.yaml#/components/responses/InvalidModelChoice' }
     ModelChoiceForbidden: { $ref: './model-connections.yaml#/components/responses/ModelChoiceForbidden' }
+    AppNotFound: { $ref: './apps.yaml#/components/responses/AppNotFound' }
+    AppDirectoryUnavailable: { $ref: './apps.yaml#/components/responses/AppDirectoryUnavailable' }
+    AppServiceFailed: { $ref: './apps.yaml#/components/responses/AppServiceFailed' }
   examples:
     ReactionPageLast: { $ref: './conversations.yaml#/components/examples/ReactionPageLast' }
     AuditEventPageFirst: { $ref: './audit-events.yaml#/components/examples/AuditEventPageFirst' }

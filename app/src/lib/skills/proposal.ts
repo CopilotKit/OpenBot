@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { PluginServer, PluginSkill } from "@/lib/plugins/queries";
+import type { PluginServer } from "@/lib/plugins/queries";
+import type { Skill } from "./queries";
 import { type SkillFormValues, skillFormSchema } from "./form";
 
 /**
@@ -15,7 +16,7 @@ import { type SkillFormValues, skillFormSchema } from "./form";
  *
  * Nothing here decides whether the skill may be saved. That is the server's, and it stays the
  * server's: a skill is an instruction rather than a capability, so the question is only ever whose
- * name the slug is under, which `POST /api/plugins/skills` answers with a sentence.
+ * name the slug is under, which `replaceSkill` answers with a sentence.
  */
 
 /**
@@ -168,7 +169,7 @@ function toolRefsIn(value: unknown): string[] {
  * anyway the server's own sentence comes back on the card.
  */
 export function ownershipOf(
-  skill: Pick<PluginSkill, "ownerUserId">,
+  skill: Pick<Skill, "ownerUserId">,
   meId: string | undefined,
 ): "yours" | "the deployment's" | "someone else's" {
   if (skill.ownerUserId === null) return "the deployment's";
@@ -184,7 +185,7 @@ export function ownershipOf(
  * window, and a Bot improving one asks for that skill by slug.
  */
 export function describeSkills(
-  skills: readonly PluginSkill[],
+  skills: readonly Skill[],
   meId: string | undefined,
 ): string {
   if (skills.length === 0) {
@@ -210,7 +211,7 @@ export function describeSkills(
  * Separate from {@link describeSkills} so the expensive field is fetched deliberately, one skill at
  * a time, by a Bot that has been asked to change that skill.
  */
-export function describeSkill(skill: PluginSkill): string {
+export function describeSkill(skill: Skill): string {
   return [
     `/${skill.slug} — ${skill.title}`,
     skill.summary ? `Summary: ${skill.summary}` : "Summary: (none)",

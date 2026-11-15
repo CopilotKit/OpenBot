@@ -17,8 +17,8 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminPluginRoute } from "@/routes/_authed/admin/plugins/$key";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { answerBotsList } from "./bots-api";
 
 /**
@@ -59,7 +59,7 @@ afterEach(() => {
   restoreRouteState(AdminPluginRoute, snapshot);
 });
 
-function server(shared: boolean, ownerGrants: "any" | "admin"): PluginServer {
+function server(shared: boolean, ownerGrants: "any" | "admin"): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -84,10 +84,9 @@ function server(shared: boolean, ownerGrants: "any" | "admin"): PluginServer {
 }
 
 function install(setup: { shared: boolean; ownerGrants: "any" | "admin" }) {
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(setup.shared, setup.ownerGrants)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: true,
@@ -101,7 +100,8 @@ function install(setup: { shared: boolean; ownerGrants: "any" | "admin" }) {
     });
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
-    if (path === "/api/plugins") return json(page);
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
     if (path.startsWith("/api/plugins/connections"))
       return json({ connections: [], redirectUri: null });
     const bots = answerBotsList(path, init, { visible: [] });

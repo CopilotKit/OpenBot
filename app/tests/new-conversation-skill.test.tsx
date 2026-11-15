@@ -20,6 +20,7 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import {
   CONVERSATIONS_PATH,
@@ -28,6 +29,7 @@ import {
   ROUTE_PATH,
 } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A SKILL ON THE FIRST MESSAGE OF A NEW CONVERSATION, FROM THE `/` CHIP TO THE RUN THAT LEAVES THE
@@ -135,8 +137,8 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({
+      if (url.pathname === botGrantsPath(BOT))
+        return botGrantsResponse({
           tools: [],
           skills: [
             {
@@ -147,8 +149,8 @@ beforeAll(() => {
             },
           ],
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,

@@ -21,8 +21,9 @@ import { colors, input, muted, Problem, Screen, useAction } from "../src/ui";
 
 type Frame = { uri: string; width: number; height: number };
 
+/** A Bot's computer in the API: its screenshot, who is driving it, and a person's own input. */
 const path = (botId: string, rest: string) =>
-  `/api/computers/${encodeURIComponent(botId)}${rest}`;
+  `${ORGANIZATION}/computers/${encodeURIComponent(botId)}${rest}`;
 
 /** The Bot's screen, live: the API's `computers/{botId}/screen` socket (api/asyncapi.yaml). */
 const screenSocketPath = (botId: string) =>
@@ -97,11 +98,11 @@ function useLiveFrame(botId: string, enabled: boolean) {
     const poll = setInterval(async () => {
       if (streaming.current || AppState.currentState !== "active") return;
       try {
-        const shot = await api<Screenshot | { frame: Screenshot }>(
+        // A frame, or `ready: false` for a computer that is asleep or starting, which this does not wake.
+        const value = await api<Screenshot | { ready: false }>(
           path(botId, "/screenshot"),
         );
-        const value = "frame" in shot ? shot.frame : shot;
-        if (closed || streaming.current || !value?.base64) return;
+        if (closed || streaming.current || !("base64" in value)) return;
         setFrame({
           uri: `data:image/png;base64,${value.base64}`,
           width: value.width,
@@ -210,7 +211,7 @@ export default function ComputerScreen() {
 
   const send = (kind: "click" | "type" | "key" | "scroll", body: object) =>
     action.run(kind, () =>
-      api(path(botId, `/human/${kind}`), { method: "POST", body }),
+      api(path(botId, `/human-input/${kind}`), { method: "POST", body }),
     );
   const frame = live.frame;
 
@@ -254,7 +255,7 @@ export default function ComputerScreen() {
             onPress={() => {
               void action
                 .run("secret", () =>
-                  api(path(botId, "/human/secret"), {
+                  api(path(botId, "/human-input/secret"), {
                     method: "POST",
                     body: { text: secret },
                   }),

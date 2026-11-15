@@ -14,7 +14,9 @@ import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { approvalBody, approvalInboxResponse } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -178,14 +180,14 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/maps-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("maps-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("maps-bot"))
         return NativeResponse.json({
           bot: { id: "maps-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/maps-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("maps-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

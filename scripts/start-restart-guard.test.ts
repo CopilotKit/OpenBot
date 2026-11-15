@@ -213,6 +213,8 @@ if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then
     exit 1
   fi
 fi
+# What the computer and the supervisor would be created with, kept for the test to read.
+if [[ "$args" == *"compose up -d --build"* ]]; then printf '%s' "$COMPUTER_LOOPBACK_RELAYS" > "$DOCKER_LOG.relays"; fi
 # The settings the server's container would be created with, kept for the test to read.
 if [[ "$args" == *"up -d --no-deps"*"server"* ]]; then cp "$OPENBOT_SERVER_ENV_FILE" "$SERVER_ENVIRONMENT"; fi
 # What Compose calls this checkout's project, and the services its file defines.
@@ -281,6 +283,9 @@ exit 0
     const curlLog = await Bun.file(curlLogPath)
       .text()
       .catch(() => "");
+    const loopbackRelays = await Bun.file(`${dockerLogPath}.relays`)
+      .text()
+      .catch(() => undefined);
     const serverEnvironment = await Bun.file(serverEnvironmentPath)
       .text()
       .catch(() => "");
@@ -292,6 +297,7 @@ exit 0
       pkillLog,
       dockerLog,
       curlLog,
+      loopbackRelays,
       serverEnvironment,
       envFile,
     };
@@ -320,6 +326,71 @@ describe("start.sh and a server an earlier start ran on the host", () => {
     expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     expect(result.pkillLog).toContain("bun worker/src/index.ts");
     expect(result.dockerLog).toContain("compose up -d --no-deps server tool=");
+  });
+});
+
+/**
+ * Record in a Bot's browser, from a checkout: "Not saved to your Learning space. It's kept in this browser until you
+ * connect it to OpenBot again." The Recorder there is handed the address the person's window uses,
+ * `http://127.0.0.1:<app port>`, which inside a computer's container is that container. OpenBot Desktop told its
+ * computer where each such port is reached (`COMPUTER_LOOPBACK_RELAYS`) and this script never did. The faked `docker`
+ * keeps what the computer and the supervisor are started with.
+ */
+describe("start.sh and the loopback addresses a Bot's computer relays", () => {
+  test("names the app's and the server's ports, as the computers reach the server", async () => {
+    const result = await runStart({ settings: { SERVER_PORT: "3301" } });
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(result.loopbackRelays).toBe("3010=server:3001,3301=server:3001");
+  });
+
+  test("names both by their defaults in a .env that sets neither", async () => {
+    const result = await runStart({ omitFromEnv: ["APP_PORT", "SERVER_PORT"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.loopbackRelays).toBe("3010=server:3001,3001=server:3001");
+  });
+
+  test.each([
+    "ws://localhost:14401",
+    "ws://127.0.0.1:14401/socket",
+    "ws://[::1]:14401",
+  ])(
+    "relays an Intelligence gateway on this machine (%s) to this machine",
+    async (gateway) => {
+      const result = await runStart({
+        settings: { INTELLIGENCE_GATEWAY_WS_URL: gateway },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.loopbackRelays).toBe(
+        "3010=server:3001,3001=server:3001,14401=host.docker.internal:14401",
+      );
+    },
+  );
+
+  test("relays no gateway that is reached at its own address", async () => {
+    const result = await runStart({
+      settings: {
+        INTELLIGENCE_GATEWAY_WS_URL: "wss://realtime.intelligence.example",
+      },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.loopbackRelays).toBe("3010=server:3001,3001=server:3001");
+  });
+
+  test("leaves relays that .env already names as they are", async () => {
+    const result = await runStart({
+      settings: { COMPUTER_LOOPBACK_RELAYS: "3010=elsewhere:3001" },
+    });
+    expect(result.loopbackRelays).toBe("3010=elsewhere:3001");
+  });
+
+  test("leaves relays that the environment already names as they are", async () => {
+    const result = await runStart({
+      processEnvironment: { COMPUTER_LOOPBACK_RELAYS: "3010=another:3001" },
+    });
+    expect(result.loopbackRelays).toBe("3010=another:3001");
   });
 });
 

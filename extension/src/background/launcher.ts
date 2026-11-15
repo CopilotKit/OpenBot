@@ -19,7 +19,7 @@ import {
 import {
   joinedLearningContainer,
   type RecorderMe,
-  recorderPaths,
+  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import type { PageResponse, RecorderState } from "../protocol/messages";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
@@ -288,7 +288,7 @@ export function createLauncher(
     try {
       const value = await openbotJson<RecorderMe>(
         connection,
-        recorderPaths.me,
+        recorderApiPaths.me,
         {
           signal: AbortSignal.timeout(ME_WAIT_MS),
         },

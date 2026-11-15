@@ -14,6 +14,12 @@ import { AppsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  botAppsPath,
+  botAppsResponse,
+  botGrantsPath,
+  botGrantsResponse,
+} from "./bot-grants-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -72,10 +78,8 @@ function servePersonal() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://127.0.0.1").pathname;
     if (path === DEPLOYMENT_PATH) return Response.json({ edition: "personal" });
-    if (path === `/api/plugins/for/${BOT.id}/apps`)
-      return Response.json({ apps: [] });
-    if (path === `/api/plugins/for/${BOT.id}`)
-      return Response.json({ tools: [], skills: [] });
+    if (path === botAppsPath(BOT.id)) return botAppsResponse([]);
+    if (path === botGrantsPath(BOT.id)) return botGrantsResponse();
     if (path === ME_PATH) return meResponse({ user: PERSONAL_USER });
     return Response.json({});
   }) as unknown as typeof fetch;

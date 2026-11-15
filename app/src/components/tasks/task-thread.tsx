@@ -1,6 +1,6 @@
 import type {
+  DrawnTaskReportKind,
   LinkedThread,
-  TaskReportKind,
 } from "@openbot/shared/orchestration";
 import {
   IconAlertTriangle,
@@ -236,7 +236,7 @@ export function TaskReport({
   children,
 }: {
   taskId: string;
-  kind: TaskReportKind;
+  kind: DrawnTaskReportKind;
   /** What the report said, as text, to tell a request still waiting from one answered since. */
   words?: string;
   children: ReactNode;
@@ -401,15 +401,27 @@ export function SentFromBot({
 }) {
   const { data: bots } = useQuery(agentListQueryOptions());
   const { data: tasks } = useQuery(taskListQueryOptions());
-  const agentId = tasks?.find((task) => task.threadId === threadId)?.agentId;
-  const name = bots?.find((bot) => bot.id === agentId)?.name;
+  const task = tasks?.find((task) => task.threadId === threadId);
+  const name = bots?.find((bot) => bot.id === task?.agentId)?.name;
+  const label = `Sent from ${name ?? "your Bot"}`;
   return (
     <div
       className="flex w-full flex-col items-end gap-1"
       data-slot="task-brief"
     >
       <p className="text-muted-foreground text-xs">
-        Sent from {name ?? "your Bot"}
+        {/* The way back to the conversation that asked for the task. A check-in's task has none. */}
+        {task?.originChannelId ? (
+          <Link
+            className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            params={{ channelId: task.originChannelId }}
+            to="/channel/$channelId"
+          >
+            {label}
+          </Link>
+        ) : (
+          label
+        )}
       </p>
       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm">
         {brief}

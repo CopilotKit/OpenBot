@@ -64,9 +64,7 @@ import {
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
   responsibilityActionMutationOptions,
-  responsibilityRunsQueryOptions,
   type TriggerRecord,
-  triggersQueryOptions,
   updateResponsibilityMutationOptions,
 } from "@/lib/responsibilities";
 import { describeEvent, eventIdentifier } from "@/lib/routines/events";
@@ -77,6 +75,7 @@ import {
 } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
+import { useGoalRuns, useGoalTriggers } from "./use-goal-reads";
 
 type Status = ResponsibilityRecord["status"];
 
@@ -215,7 +214,7 @@ export function GoalPage({
   const [instruction, setInstruction] = useState(goal.instruction);
   const [successCriteria, setSuccessCriteria] = useState(goal.successCriteria);
   const [criteriaMissing, setCriteriaMissing] = useState(false);
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const triggers = useGoalTriggers(goal.id);
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
   const remove = useMutation(deleteResponsibilityMutationOptions(queryClient));
@@ -605,7 +604,7 @@ function runStatusClass(status: string) {
  * moves through its states without a reload.
  */
 function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
-  const runs = useQuery(responsibilityRunsQueryOptions(goalId));
+  const runs = useGoalRuns(goalId);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (

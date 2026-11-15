@@ -153,7 +153,7 @@ test("N counts what an approval covers, and no action that needs no authorizatio
             authorization: "not-required",
           }),
         ),
-        { action: "Tk.Blocked", state: "needs-operator", missing: ["KEY"] },
+        { action: "Tk.Blocked", state: "needs-admin", missing: ["KEY"] },
       ];
       const expected = grants.filter(
         (grant) =>

@@ -69,11 +69,8 @@ import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import {
-  type PluginsPage,
-  pluginKeys,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
+import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -244,7 +241,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    * list Connections shows as on, and not only the ones this person could give.
    */
   const turnedOn = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...appsQueryOptions(),
     enabled: personal,
   });
   const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
@@ -676,7 +673,7 @@ function AboutStep({
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
-  turnedOn: UseQueryResult<PluginsPage>;
+  turnedOn: UseQueryResult<PluginServer[]>;
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
@@ -807,9 +804,13 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
+function EveryAppList({
+  turnedOn,
+}: {
+  turnedOn: UseQueryResult<PluginServer[]>;
+}) {
   if (turnedOn.isPending) return null;
-  const servers = turnedOn.data?.servers ?? [];
+  const servers = turnedOn.data ?? [];
   return (
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>

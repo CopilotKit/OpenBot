@@ -110,6 +110,28 @@ export const ListTasksResponse = zod.object({
           .datetime({ offset: true })
           .nullable()
           .describe("When the person marked it done."),
+        steer: zod
+          .union([
+            zod
+              .object({
+                text: zod
+                  .string()
+                  .describe(
+                    "The person's words, on one line and cut short when they run long.",
+                  ),
+                at: zod.iso
+                  .datetime({ offset: true })
+                  .describe("When they said it."),
+              })
+              .describe(
+                "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+              ),
+            zod.null(),
+          ])
+          .optional()
+          .describe(
+            "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+          ),
         createdAt: zod.iso
           .datetime({ offset: true })
           .describe("When it was started."),
@@ -218,6 +240,28 @@ export const GetTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -329,6 +373,28 @@ export const ResolveTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -440,6 +506,28 @@ export const ReopenTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -551,6 +639,28 @@ export const RetryTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),

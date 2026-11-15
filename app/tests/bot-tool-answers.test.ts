@@ -6,6 +6,7 @@ import {
   answerReadBot,
 } from "@/lib/agents/answers";
 import { answerBotsList, BOTS_PATH } from "./bots-api";
+import { SKILLS_PATH, skillsResponse, type TodaySkill } from "./skills-api";
 
 /**
  * What the three reading tools say, asked cold.
@@ -58,16 +59,13 @@ const AGENTS = [
   },
 ];
 
-const SKILLS = [
+const SKILLS: TodaySkill[] = [
   {
-    id: "skill_1",
     slug: "find-a-document",
     ownerUserId: null,
     title: "Find a document",
     summary: "Search the connected sources and read what it says.",
     instructions: "Search first, then read the file you found.",
-    origin: "package",
-    installedBy: null,
     grantedTo: [],
     tools: ["google-drive/search_files"],
   },
@@ -86,15 +84,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   calls.push(path);
   const bots = answerBotsList(input, init, { visible: AGENTS });
   if (bots) return bots;
-  if (path === "/api/plugins") {
-    return Response.json({
-      catalogue: [],
-      botsMayCallBack: false,
-      servers: [],
-      skills: SKILLS,
-      redirectUri: "",
-    });
-  }
+  if (path.startsWith(SKILLS_PATH)) return skillsResponse(SKILLS);
   return Response.json({ error: "not found" }, { status: 404 });
 }) as typeof fetch;
 
@@ -121,7 +111,7 @@ test("the roster is fetched when asked, not read off a render", async () => {
 test("the skills are fetched when asked, so an unloaded list never reads as an empty one", async () => {
   const answer = await answerListBotSkills(coldClient());
 
-  expect(calls).toContain("/api/plugins");
+  expect(calls.some((path) => path.startsWith(SKILLS_PATH))).toBe(true);
   expect(answer).toContain("/find-a-document — Find a document");
   // The sentence that was wrongly given to a person about a deployment holding nine skills.
   expect(answer).not.toContain("No skills exist here yet");
@@ -158,6 +148,7 @@ test("a genuinely empty deployment is described as empty", async () => {
     calls.push(path);
     const bots = answerBotsList(input, init, { visible: [] });
     if (bots) return bots;
+    if (path.startsWith(SKILLS_PATH)) return skillsResponse([]);
     return Response.json({
       catalogue: [],
       botsMayCallBack: false,

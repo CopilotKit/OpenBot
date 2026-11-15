@@ -48,6 +48,7 @@ pub mod shell_updates;
 pub mod speech;
 pub mod stack;
 pub mod stall;
+pub mod superseded_images;
 pub mod telemetry;
 pub mod tray;
 pub mod troubleshooting;

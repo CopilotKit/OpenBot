@@ -9,7 +9,7 @@
 // it). A signed-out answer goes the way any other signed-out answer goes.
 import {
   type RecorderActivity,
-  recorderPaths,
+  recorderApiPaths,
 } from "@openbot/shared/recorder-api";
 import type { RecorderState } from "../protocol/messages";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
@@ -72,7 +72,7 @@ export function createActivityReport(deps: ActivityDeps): ActivityReport {
     const target = await deps.target();
     if (!target) return;
     try {
-      await openbotJson(target, recorderPaths.activity, {
+      await openbotJson(target, recorderApiPaths.activity, {
         body: activityOf(deps.state()),
         signal: AbortSignal.timeout(REPORT_WAIT_MS),
       });

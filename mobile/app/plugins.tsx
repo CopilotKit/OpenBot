@@ -1,7 +1,14 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Switch, Text, View } from "react-native";
-import { api, type GrantedPlugins, type SkillSummary } from "../src/api";
+import {
+  ApiError,
+  api,
+  type BotGrant,
+  everyPage,
+  ORGANIZATION,
+  type SkillSummary,
+} from "../src/api";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -19,31 +26,53 @@ export default function PluginsScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const loadGranted = useCallback(
-    () => api<GrantedPlugins>(`/api/plugins/for/${encodeURIComponent(botId)}`),
-    [botId],
-  );
+  const grantsPath = `${ORGANIZATION}/bots/${encodeURIComponent(botId)}/grants`;
+  const loadGranted = useCallback(async () => {
+    const grants = await everyPage<BotGrant>(grantsPath, "grants");
+    return {
+      tools: grants.flatMap((grant) =>
+        grant.kind === "action" && grant.action
+          ? [{ ref: grant.ref, description: grant.action.description }]
+          : [],
+      ),
+      skills: grants.flatMap((grant) =>
+        grant.kind === "skill" && grant.skill ? [grant.skill] : [],
+      ),
+    };
+  }, [grantsPath]);
   const granted = useLoad(loadGranted, Boolean(session && botId));
-  const loadCatalogue = useCallback(
-    () => api<{ skills: SkillSummary[] }>("/api/plugins"),
-    [],
-  );
+  // Every skill this person can see, page after page.
+  const loadCatalogue = useCallback(async () => {
+    const skills: SkillSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { skills: SkillSummary[]; nextCursor: string | null } =
+        await api(
+          `${ORGANIZATION}/skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        );
+      skills.push(...page.skills);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return { skills };
+  }, []);
   const catalogue = useLoad(loadCatalogue, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const on = new Set(granted.data?.skills.map((skill) => skill.slug));
 
   const setSkill = (slug: string, enabled: boolean) =>
     action.run(slug, async () => {
-      if (enabled)
-        await api("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "skill", ref: slug, agentId: botId },
-        });
+      const grant = `${grantsPath}/${encodeURIComponent(`skill:${slug}`)}`;
+      if (enabled) await api(grant, { method: "PUT", body: {} });
       else
-        await api(
-          `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(botId)}`,
-          { method: "DELETE" },
-        );
+        try {
+          await api(grant, { method: "DELETE" });
+        } catch (error) {
+          // A Bot that doesn't have the skill is already without it.
+          if (
+            !(error instanceof ApiError && error.code === "BOT_GRANT_NOT_FOUND")
+          )
+            throw error;
+        }
       await granted.refresh();
     });
 

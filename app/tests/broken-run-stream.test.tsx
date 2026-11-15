@@ -22,7 +22,9 @@ import {
 import { UNANSWERED } from "@/lib/copilot/repair-history";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * A run whose live stream reaches the browser out of shape is read back from the thread, and the
@@ -240,8 +242,8 @@ beforeAll(() => {
         input instanceof Request ? input : new Request(url, init);
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/broken-stream-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("broken-stream-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("broken-stream-bot"))
         return NativeResponse.json({
           bot: {
@@ -250,8 +252,8 @@ beforeAll(() => {
             canManage: true,
           },
         });
-      if (url.pathname === "/api/components/for-agent/broken-stream-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("broken-stream-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

@@ -283,6 +283,28 @@ fi
 # told where it is before they start: the Bots call their tools back through it there.
 OPENBOT_TOOL_URL="$(setting OPENBOT_TOOL_URL "http://server:3001/api/agent-tools/call")"
 export OPENBOT_TOOL_URL
+# This machine's loopback addresses, as a Bot's computer reaches them. The Recorder in a Bot's browser
+# reaches OpenBot only at https or at loopback, so here it is handed the address this window uses,
+# `http://127.0.0.1:$APP_PORT`, which inside a computer's container is that container: a recording
+# made there was never saved. So each computer relays the app's and the server's ports to the
+# server's container, and the port of an Intelligence gateway on this machine to this machine
+# (COMPUTER_LOOPBACK_RELAYS in docs/configuration.md). docker-compose.yml hands the setting to the
+# one computer and to the supervisor, which tells every computer it makes. One set in the
+# environment or in .env wins.
+loopback_relays() {
+  local relays="$APP_PORT=server:3001" gateway
+  if [ "$SERVER_PORT" != "$APP_PORT" ]; then
+    relays="$relays,$SERVER_PORT=server:3001"
+  fi
+  gateway="$(printf '%s' "$(setting INTELLIGENCE_GATEWAY_WS_URL "")" \
+    | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://(localhost|127\.0\.0\.1|\[::1\]):([0-9]+)(/.*)?$#\2#p')"
+  if [ -n "$gateway" ] && [ "$gateway" != "$APP_PORT" ] && [ "$gateway" != "$SERVER_PORT" ]; then
+    relays="$relays,$gateway=host.docker.internal:$gateway"
+  fi
+  printf '%s' "$relays"
+}
+COMPUTER_LOOPBACK_RELAYS="$(setting COMPUTER_LOOPBACK_RELAYS "$(loopback_relays)")"
+export COMPUTER_LOOPBACK_RELAYS
 # Per-Bot computers on that network too, where the server can open them, or no supervisor at all.
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then
   COMPOSE_PROJECT="$(docker compose config --format json 2>/dev/null | bun -e 'process.stdout.write(JSON.parse(await Bun.stdin.text()).name ?? "")' 2>/dev/null || true)"

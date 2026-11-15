@@ -1045,6 +1045,23 @@ test("hands the shared computer the loopback addresses it relays, and this machi
   ).toBe("");
 });
 
+/**
+ * Each person's computer is made by the supervisor, not by Compose, and Record runs in a Bot's browser there. A
+ * recording made on one was never saved from a checkout ("Not saved to your Learning space"): the setting reached the
+ * one Compose computer and not the supervisor, which is what tells the computers it makes.
+ */
+test("hands the supervisor the loopback addresses for the computers it makes", () => {
+  expect(
+    runComposeConfig({
+      COMPUTER_LOOPBACK_RELAYS: "3010=server:3001,3001=server:3001",
+    }).services.supervisor?.environment.COMPUTER_LOOPBACK_RELAYS,
+  ).toBe("3010=server:3001,3001=server:3001");
+  expect(
+    runComposeConfig({}).services.supervisor?.environment
+      .COMPUTER_LOOPBACK_RELAYS,
+  ).toBe("");
+});
+
 test("tells the shared computer which edition it runs in", () => {
   expect(
     runComposeConfig({ OPENBOT_EDITION: "personal" }).services["agent-computer"]

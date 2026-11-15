@@ -25,7 +25,8 @@ use openbot_desktop_lib::{
     local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
+    superseded_images, telemetry, tray, troubleshooting, uninstall, update_ready, upgrade,
+    windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -2002,6 +2003,7 @@ async fn upgrade_and_start_now(
                 engine::StepLine::here("OpenBot is updated.")
                     .logged(format!("OpenBot is on {}.", planned.to)),
             );
+            remove_superseded_images(&app, &selected);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
@@ -4166,7 +4168,8 @@ async fn start_stack_now<R: tauri::Runtime>(
         return Err(Problem::plain(UPGRADE_INTERRUPTED));
     }
     let menus = app.clone();
-    let started = start_stack_inner(app, root, api_url, gateway_ws_url, model, harness).await;
+    let started =
+        start_stack_inner(app, root.clone(), api_url, gateway_ws_url, model, harness).await;
     // The menu bar says whether OpenBot is running.
     refresh_menus(&menus);
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
@@ -4174,8 +4177,37 @@ async fn start_stack_now<R: tauri::Runtime>(
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
         // Attribution after Start, in the background: OpenBot is already open.
         desktop_telemetry::link_account_after_start(&menus);
+        // What an earlier update could not remove yet, now that OpenBot answers again.
+        remove_superseded_images(&menus, &root);
     }
     started
+}
+
+/**
+Remove the images of releases this installation was updated from, once OpenBot has started and
+answered: straight after the update that replaced them, and after every later Start while any are
+left. See `superseded_images`.
+
+In the background, on its own thread: nothing waits on it and nothing is said about it. An image
+that cannot go yet stays for the next Start. On the engine this Start ran on, which is the one the
+installation's images are in.
+*/
+fn remove_superseded_images<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) {
+    let Some(address) = app
+        .state::<Shell>()
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|owned| owned.root == root)
+        .map(|owned| owned.address.clone())
+    else {
+        return;
+    };
+    let root = root.to_path_buf();
+    std::thread::spawn(move || {
+        superseded_images::remove(&address, &root);
+    });
 }
 
 async fn start_stack_inner<R: tauri::Runtime>(

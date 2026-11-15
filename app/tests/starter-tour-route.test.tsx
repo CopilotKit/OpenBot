@@ -34,6 +34,7 @@ import {
   MY_CAPABILITIES_PATH,
   SETUP_CHECKLIST_PATH,
 } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import {
   CONVERSATIONS_PATH,
@@ -47,6 +48,7 @@ import {
   problemResponse,
 } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
 const NativeResponse = globalThis.Response;
@@ -219,13 +221,13 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({
+      if (url.pathname === botGrantsPath(BOT))
+        return botGrantsResponse({
           tools: [],
           skills: [],
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,

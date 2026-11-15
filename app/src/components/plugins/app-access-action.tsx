@@ -18,6 +18,7 @@ import {
   appAccessKeys,
   botAppQueryOptions,
 } from "@/lib/app-access/queries";
+import { appSetupQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -111,11 +112,11 @@ function disabledSentence(
   // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
   // beside the sentence goes to where it is fixed.
   if (edition === "personal")
-    return access.unavailable === "composio_unconfigured"
+    return access.unavailable === "directory_unavailable"
       ? `${name} isn't set up yet. Set it up to connect it.`
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
-    case "composio_unconfigured":
+    case "directory_unavailable":
       return `${name} isn't set up yet. An admin has to turn it on.`;
     case "scheme_unreadable":
     case "oauth_client_missing":
@@ -209,6 +210,7 @@ function AdminAction({
   const paths = useManagePaths();
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const setup = useQuery(appSetupQueryOptions()).data;
   const name = access.displayName;
 
   const oneClick =
@@ -252,10 +254,11 @@ function AdminAction({
     );
   }
 
+  // The directory's own page: Composio's unless this OpenBot's directory is Arcade's.
   const page =
     access.state === "disabled" &&
-    access.unavailable === "composio_unconfigured"
-      ? access.provider === "arcade"
+    access.unavailable === "directory_unavailable"
+      ? setup?.directoryProvider === "arcade"
         ? "arcade"
         : "composio"
       : access.key;

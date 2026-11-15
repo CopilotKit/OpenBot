@@ -32,6 +32,7 @@ import {
   askPersonReplayStart,
   askPersonStored,
 } from "./ask-person-replay.fixture";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
 import { conversationOf, conversationPath } from "./conversations-api";
 import {
@@ -43,6 +44,7 @@ import {
   lookupsReplayStart,
   lookupsStored,
 } from "./parallel-lookups.fixture";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /*
  * Opening a conversation joins its thread, and the join replays the thread onto the screen. A Bot's
@@ -166,14 +168,14 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/join-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("join-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("join-bot"))
         return NativeResponse.json({
           bot: { id: "join-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/join-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("join-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       {

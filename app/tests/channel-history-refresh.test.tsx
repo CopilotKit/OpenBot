@@ -18,7 +18,9 @@ import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { generativeUiProviderOptions, OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
 /**
@@ -103,15 +105,15 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/refresh-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("refresh-bot"))
+        return botGrantsResponse();
       // What the Bot's runs are offered is read from these, as the server answers them.
       if (url.pathname === botPath("refresh-bot"))
         return NativeResponse.json({
           bot: { id: "refresh-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/refresh-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("refresh-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))

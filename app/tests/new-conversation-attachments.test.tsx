@@ -38,6 +38,8 @@ import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -171,10 +173,9 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ tools: [], skills: [] });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
           url.pathname,

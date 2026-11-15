@@ -2,10 +2,13 @@ import type {
   RecorderConnectionsResponse,
   RecordingsPage,
 } from "@openbot/shared/recorder-api";
-import { recorderPaths } from "@openbot/shared/recorder-api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { BROWSER_CLOSED_POLL_MS, BROWSER_POLL_MS } from "@/lib/browser/queries";
-import { client } from "@/lib/client";
+import {
+  listRecorderConnections,
+  listRecordings,
+} from "@/lib/api/generated/recorder/recorder";
+import { organizationId } from "@/lib/api/request";
 import {
   askConnectWait,
   type ConnectWait,
@@ -42,13 +45,30 @@ export const recorderConnectionsQueryOptions = (options?: {
 }) =>
   queryOptions({
     queryKey: recorderKeys.connections(),
-    // Two top-level keys, so no envelope key: without one, client() returns the Response.
-    queryFn: async (): Promise<RecorderConnectionsResponse> =>
-      (
-        await client(recorderPaths.connections, {
-          fallback: "Couldn't load your connected browsers.",
-        })
-      ).json(),
+    // The whole list, as the screen shows it: every page, read to the end. A repeated cursor ends it
+    // too, since a server handing back the cursor it was given would never end the list.
+    queryFn: async (): Promise<RecorderConnectionsResponse> => {
+      const answer: RecorderConnectionsResponse = {
+        connections: [],
+        extensionIds: [],
+      };
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const page = await listRecorderConnections(
+          organizationId(),
+          "me",
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load your connected browsers." },
+        );
+        answer.connections.push(...page.recorderConnections);
+        // Every page says which Recorders this OpenBot trusts; they are the same on each.
+        answer.extensionIds = page.extensionIds;
+        if (cursor) seen.add(cursor);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && !seen.has(cursor));
+      return answer;
+    },
     refetchInterval: options?.awaiting
       ? 2000
       : options?.listed
@@ -135,15 +155,13 @@ export const recordingsQueryOptions = (options?: { waiting?: boolean }) =>
   infiniteQueryOptions({
     queryKey: recorderKeys.recordings(),
     initialPageParam: "",
-    queryFn: async ({ pageParam }): Promise<RecordingsPage> => {
-      const suffix = pageParam
-        ? `?cursor=${encodeURIComponent(pageParam)}`
-        : "";
-      const response = await client(`${recorderPaths.recordings}${suffix}`, {
-        fallback: "Couldn't load your recordings. Reload the page.",
-      });
-      return response.json();
-    },
+    queryFn: ({ pageParam }): Promise<RecordingsPage> =>
+      listRecordings(
+        organizationId(),
+        "me",
+        pageParam ? { cursor: pageParam } : undefined,
+        { fallback: "Couldn't load your recordings. Reload the page." },
+      ),
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,
     refetchInterval: (query) =>
