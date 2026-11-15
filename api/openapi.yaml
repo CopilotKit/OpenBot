@@ -15402,7 +15402,7 @@ paths:
         - Sign-in requests
       operationId: createSignInRequest
       summary: Ask a person to sign a Bot in to a website
-      description: 'Open a sign-in request: a Bot in the person''s open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot''s browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use.'
+      description: 'Open a sign-in request: a Bot in the person''s open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot''s browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use. On an OpenBot with no computers for Bots there is nowhere to sign a Bot in, and the answer is 503, as the computers answer there: nothing was opened. The deployment''s botComputers says so beforehand.'
       security:
         - webSession: []
         - appOAuth:
@@ -15447,6 +15447,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInComputersUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}:
@@ -20339,6 +20341,7 @@ components:
         - ssoRequired
         - builtInBots
         - isolatedBots
+        - botComputers
       properties:
         edition:
           type: string
@@ -20385,6 +20388,9 @@ components:
         isolatedBots:
           type: boolean
           description: Whether this OpenBot can give a Bot a computer of its own. Whether a person may is their Isolated Bots switch.
+        botComputers:
+          type: boolean
+          description: 'Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).'
     AllowlistEntry:
       type: string
       minLength: 1
@@ -36803,6 +36809,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    SignInComputersUnavailable:
+      description: This OpenBot has no computers for Bots, so there is nowhere to sign a Bot in. Nothing was opened.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noComputers:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: This OpenBot has no computers for Bots.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
     SignInRequestNotFound:
       description: The person has no such sign-in request, the saved login named is not one of theirs for this site, or the organization does not exist.
       content:
@@ -38052,6 +38076,7 @@ components:
         ssoRequired: false
         builtInBots: true
         isolatedBots: false
+        botComputers: true
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
