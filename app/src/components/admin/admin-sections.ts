@@ -7,6 +7,7 @@ import {
   IconLockAccess,
   IconShieldCheck,
   IconUsers,
+  IconUsersGroup,
   IconZoomQuestion,
 } from "@tabler/icons-react";
 import type { LinkOptions } from "@tanstack/react-router";
@@ -28,7 +29,8 @@ const team = managePaths("team");
 
 /**
  * Admin's pages, grouped by the thing a Bot has that each one sets for everybody, in the fixed order
- * of `lib/primitives.ts`, then Vault, then the team itself. The sidebar and the overview both draw
+ * of `lib/primitives.ts`, then Vault, then the organization itself: its people and the teams they are
+ * in, what they may do, and how they sign in. The sidebar and the overview both draw
  * this list, so the two can never disagree about where a page is.
  *
  * Conversations has no group: it is where work happens, not something to set. Memory has none
@@ -151,13 +153,19 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     ],
   },
   {
-    title: "Team",
+    title: "Organization",
     items: [
       {
         title: "People",
         description: "Review members, manage admin roles, and remove access.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Teams",
+        description: "Put people in teams, and give a team its own Bots.",
+        icon: IconUsersGroup,
+        linkOptions: { to: "/admin/teams" },
       },
       {
         title: "Permissions",

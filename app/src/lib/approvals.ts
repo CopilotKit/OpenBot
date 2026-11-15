@@ -371,15 +371,15 @@ export const setTeamApprovalSettings = (input: {
   actionKinds?: Partial<Record<ActionKind, ActionKindPolicy>>;
 }) =>
   updateApprovalSettings(organizationId(), input, once(), {
-    fallback: "The team setting could not be saved.",
+    fallback: "The organization setting could not be saved.",
   });
 export const createTeamApprovalRule = (input: ApprovalRuleInput) =>
   createOrganizationRule(organizationId(), input, once(), {
-    fallback: "The team rule could not be saved.",
+    fallback: "The organization rule could not be saved.",
   });
 export const revokeTeamApprovalRule = (id: string) =>
   deleteOrganizationRule(organizationId(), id, once(), {
-    fallback: "The team rule could not be removed.",
+    fallback: "The organization rule could not be removed.",
   });
 /**
  * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
@@ -417,7 +417,7 @@ export const updateTeamApprovalRule = (
   input: Partial<ApprovalRuleInput>,
 ) =>
   updateOrganizationRule(organizationId(), id, input, once(), {
-    fallback: "The team rule could not be changed.",
+    fallback: "The organization rule could not be changed.",
   });
 
 /** The inbox's key, which every approval write invalidates: requests, rules and settings alike. */

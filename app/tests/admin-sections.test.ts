@@ -4,7 +4,7 @@ import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
 const to = (linkOptions: unknown) => (linkOptions as { to?: string }).to;
 
 describe("Admin's groups", () => {
-  test("follow the eight, then Vault, then the team", () => {
+  test("follow the eight, then Vault, then the organization", () => {
     expect(ADMIN_SECTIONS.map((section) => section.title)).toEqual([
       "Routines",
       "Skills",
@@ -13,8 +13,25 @@ describe("Admin's groups", () => {
       "Approvals",
       "Activity",
       "Vault",
-      "Team",
+      "Organization",
     ]);
+  });
+
+  test("keep People and Teams together, under the organization", () => {
+    const organization = ADMIN_SECTIONS.find(
+      (section) => section.title === "Organization",
+    );
+    expect(organization?.items.map((entry) => entry.title)).toEqual([
+      "People",
+      "Teams",
+      "Permissions",
+      "Identity providers",
+      "Providers",
+    ]);
+    // No group calls everybody a team: a team is one named group inside the organization.
+    expect(ADMIN_SECTIONS.map((section) => section.title)).not.toContain(
+      "Team",
+    );
   });
 
   test("rename Plugins, Audit, Credentials and Check-ins, and keep their addresses", () => {
@@ -53,6 +70,7 @@ describe("Admin's groups", () => {
         "/admin/proactive",
         "/admin/providers",
         "/admin/skills",
+        "/admin/teams",
         "/admin/what-if",
       ].sort(),
     );

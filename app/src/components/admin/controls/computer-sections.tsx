@@ -65,8 +65,8 @@ import {
 
 const MODE_NAMES: Record<NetworkMode, string> = {
   allow_all: "Allow all network access",
-  defaults_plus_allowlist: "Defaults plus team allowlist",
-  allowlist_only: "Team allowlist only",
+  defaults_plus_allowlist: "Defaults plus organization allowlist",
+  allowlist_only: "Organization allowlist only",
 };
 
 /**

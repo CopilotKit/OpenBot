@@ -42,6 +42,10 @@ import { vendoredMarkFor } from "./vendored-marks";
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
 const { Route: PeopleRoute } = await import("@/routes/_authed/admin/people");
+const { Route: TeamsRoute } = await import("@/routes/_authed/admin/teams");
+const { Route: NewTeamRoute } = await import(
+  "@/routes/_authed/admin/teams_.new"
+);
 const { Route: IdentityProvidersRoute } = await import(
   "@/routes/_authed/admin/identity-providers"
 );
@@ -165,11 +169,13 @@ const component = (route: { options: { component?: unknown } }) =>
 
 test.each([
   ["People", PeopleRoute, "Here, you're the only person, and the admin."],
+  ["Teams", TeamsRoute, "Here, you're the only person."],
+  ["New team", NewTeamRoute, undefined],
   ["Identity providers", IdentityProvidersRoute, "Here, nobody signs in."],
   ["Permissions", PermissionsRoute, undefined],
   ["Describe who can do what", PermissionsDescribeRoute, undefined],
   ["Approvals", ApprovalsRoute, "Set your own in Settings → Approvals."],
-  ["Describe team rules", ApprovalsDescribeRoute, "Set your own in"],
+  ["Describe organization rules", ApprovalsDescribeRoute, "Set your own in"],
   ["Guidance for auto-review", GuidanceRoute, "Set your own in"],
   [
     "Automatic learning",
@@ -203,6 +209,8 @@ test.each([
           isOverviewRead(path) ||
           path.startsWith(COMPUTER_ACTIONS_PATH) ||
           path.startsWith(PEOPLE_PATH) ||
+          path.endsWith("/teams") ||
+          path.endsWith("/members") ||
           path.startsWith(IDENTITY_PROVIDERS_PATH),
       ),
     ).toEqual([]);

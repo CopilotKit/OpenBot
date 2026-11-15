@@ -266,8 +266,11 @@ function AdminAction({
     access.state !== "shared_not_connected"
       ? ["Set it up", `Set up ${name}`]
       : access.requestKind
-        ? ["Connect the team account", `Connect the team ${name} account`]
-        : ["Reconnect the team account", `Reconnect the team ${name} account`];
+        ? ["Connect the shared account", `Connect the shared ${name} account`]
+        : [
+            "Reconnect the shared account",
+            `Reconnect the shared ${name} account`,
+          ];
   /*
    * A broker with no key is set up on its directory, which is a page of its own in the personal
    * edition. There `/connections/composio` would read as an app called "composio" and say there is

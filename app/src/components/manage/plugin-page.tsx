@@ -829,7 +829,7 @@ export function PluginPage({
                     {server.ownerGrants !== "any"
                       ? "Only an admin can give it to a Bot."
                       : shared
-                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        ? "Bot owners who give it to their Bots let those Bots use the shared account."
                         : "People can let Bots they own use it, on the account of whoever is asking."}
                   </ItemDescription>
                 </ItemContent>
@@ -1105,9 +1105,9 @@ export function PluginPage({
                    */
                   <Item size="sm">
                     <ItemContent>
-                      <ItemTitle>Team account</ItemTitle>
+                      <ItemTitle>Shared account</ItemTitle>
                       <ItemDescription>
-                        {`${title} connects only as one shared account. Make it shared above, then connect the team account here and give it to Bots.`}
+                        {`${title} connects only as one shared account. Make it shared above, then connect that account here and give it to Bots.`}
                       </ItemDescription>
                     </ItemContent>
                   </Item>
@@ -1116,9 +1116,9 @@ export function PluginPage({
                     account={brokeredAccount}
                     edition={paths.edition}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
-                    disconnectedDescription="No team account is connected. Bots with these tools are refused."
-                    heading="Team account"
-                    notice="Sign in as the team account, not your own."
+                    disconnectedDescription="No shared account is connected. Bots with these tools are refused."
+                    heading="Shared account"
+                    notice="Sign in as the shared account, not your own."
                     provider={provider}
                     title={title}
                   />

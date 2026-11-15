@@ -183,9 +183,9 @@ function draw(
   );
 }
 
-test("team rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
+test("organization rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
   const view = draw(<ApprovalSettings />);
-  await view.findByText("Ask before taking action (team rule)");
+  await view.findByText("Ask before taking action (organization rule)");
   const mine = view.getByRole("combobox", {
     name: "Behaviour for Any action on Gmail",
   });
@@ -197,7 +197,8 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   expect(
     view.getByText(/An admin limits this to "Ask every time"/),
   ).toBeTruthy();
-  expect(view.queryByText("Team settings")).toBeNull();
+  expect(view.getByText(/Organization rules are locked/)).toBeTruthy();
+  expect(view.queryByText("Organization settings")).toBeNull();
 });
 
 test("a member changes a saved rule in place", async () => {
@@ -505,7 +506,7 @@ test("personal approvals keep the person's controls without team-only explanatio
     "personal",
   );
   await view.findByText("Rules for every Bot");
-  expect(view.queryByText(/Team rules are locked/)).toBeNull();
+  expect(view.queryByText(/Organization rules are locked/)).toBeNull();
   expect(view.queryByText("Shared Bots")).toBeNull();
   expect(view.getByRole("switch", { name: "Extra vigilant" })).toBeTruthy();
   expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
