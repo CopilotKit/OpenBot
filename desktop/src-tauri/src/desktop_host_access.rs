@@ -33,12 +33,61 @@ fn folder(root: &Path) -> String {
 }
 
 // A native message dialog is deliberately small. Refuse content that cannot be reviewed here;
-// truncating it would authorize bytes the person never saw.
-fn reviewable(value: &str) -> HostAccessResult<()> {
-    if value.chars().count() > 2_000 || value.lines().count() > 24 || value.contains('\0') {
-        return Err(refused("This operation is too large for native approval. Ask the Bot for a smaller edit or command."));
+// truncating it would authorize bytes the person never saw. The refusal reaches the Bot and the
+// Computer page, so it says how long the content is and what a dialog shows: told only "too large",
+// a Bot guessed at a size and retried.
+const MAX_REVIEW_CHARS: usize = 2_000;
+const MAX_REVIEW_LINES: usize = 24;
+
+/// What a dialog is asked to show, named in its refusal.
+#[derive(Clone, Copy)]
+enum Reviewed {
+    File,
+    Command,
+}
+
+fn reviewable(value: &str, what: Reviewed) -> HostAccessResult<()> {
+    match too_long_to_review(value, what) {
+        Some(message) => Err(refused(message)),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+fn too_long_to_review(value: &str, what: Reviewed) -> Option<String> {
+    let (this, split) = match what {
+        Reviewed::File => ("This file", "Split it into smaller files."),
+        Reviewed::Command => ("This command", "Split it into shorter commands."),
+    };
+    if value.contains('\0') {
+        return Some(format!(
+            "{this} has a NUL character, and an approval dialog can't show it. Remove it and try again."
+        ));
+    }
+    let chars = value.chars().count();
+    let lines = value.lines().count();
+    let has = match (chars > MAX_REVIEW_CHARS, lines > MAX_REVIEW_LINES) {
+        (true, true) => format!("{} characters and {} lines", grouped(chars), grouped(lines)),
+        (true, false) => format!("{} characters", grouped(chars)),
+        (false, true) => format!("{} lines", grouped(lines)),
+        (false, false) => return None,
+    };
+    Some(format!(
+        "{this} is too long to show in an approval dialog: it has {has}, and a dialog shows at most {} characters and {MAX_REVIEW_LINES} lines. {split}",
+        grouped(MAX_REVIEW_CHARS)
+    ))
+}
+
+/// A count with thousands separators: 56,120.
+fn grouped(count: usize) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 fn bot_label(name: Option<&str>, id: &str) -> String {
@@ -204,7 +253,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
     }
 
     fn confirm_write(&self, request: &WritePrompt) -> HostAccessResult<()> {
-        reviewable(&request.content)?;
+        reviewable(&request.content, Reviewed::File)?;
         let bot = bot_label(request.bot_name.as_deref(), &request.bot_id);
         self.confirm("Allow this file change?", format!(
             "Bot: {bot}\nFolder: {}\nFile: {}\n\nNew content:\n{}\n\nAllow this exact change once? OpenBot keeps the previous contents when replacing a file.",
@@ -213,7 +262,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
     }
 
     fn confirm_command(&self, request: &CommandPrompt) -> HostAccessResult<()> {
-        reviewable(&request.command)?;
+        reviewable(&request.command, Reviewed::Command)?;
         let list = self.allow_list()?;
         let allowed_here = list.allows(&request.bot_id, &request.root);
         let offer_always =
@@ -437,9 +486,82 @@ mod tests {
 
     #[test]
     fn approval_never_silently_truncates_requested_changes() {
-        assert!(reviewable("hello\nworld").is_ok());
-        assert!(reviewable(&"x".repeat(2_001)).is_err());
-        assert!(reviewable(&"x\n".repeat(25)).is_err());
-        assert!(reviewable("hello\0hidden").is_err());
+        for what in [Reviewed::File, Reviewed::Command] {
+            assert!(reviewable("hello\nworld", what).is_ok());
+            assert!(reviewable(&"x".repeat(2_001), what).is_err());
+            assert!(reviewable(&"x\n".repeat(25), what).is_err());
+            assert!(reviewable("hello\0hidden", what).is_err());
+        }
+    }
+
+    fn refusal(result: HostAccessResult<()>) -> String {
+        match result {
+            Err(HostAccessError::Denied(message)) => message,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// FOUND DOGFOODING: the refusal said only "This operation is too large for native approval.
+    /// Ask the Bot for a smaller edit or command.", so a Bot guessed at a size, retried and spent
+    /// many turns. It now says how long the content is and what a dialog shows.
+    #[test]
+    fn a_refusal_for_too_many_characters_says_how_many_and_the_limit() {
+        assert_eq!(
+            refusal(reviewable(&"x".repeat(56_120), Reviewed::File)),
+            "This file is too long to show in an approval dialog: it has 56,120 characters, and a dialog shows at most 2,000 characters and 24 lines. Split it into smaller files."
+        );
+    }
+
+    #[test]
+    fn a_refusal_for_too_many_lines_says_how_many_and_the_limit() {
+        assert_eq!(
+            refusal(reviewable(&"x\n".repeat(31), Reviewed::Command)),
+            "This command is too long to show in an approval dialog: it has 31 lines, and a dialog shows at most 2,000 characters and 24 lines. Split it into shorter commands."
+        );
+    }
+
+    #[test]
+    fn a_refusal_for_both_names_both() {
+        let message = refusal(reviewable(&"y\n".repeat(1_500), Reviewed::File));
+        assert!(
+            message.contains("it has 3,000 characters and 1,500 lines, and a dialog"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_for_a_nul_character_says_so() {
+        assert_eq!(
+            refusal(reviewable("hello\0hidden", Reviewed::File)),
+            "This file has a NUL character, and an approval dialog can't show it. Remove it and try again."
+        );
+        assert_eq!(
+            refusal(reviewable("echo\0", Reviewed::Command)),
+            "This command has a NUL character, and an approval dialog can't show it. Remove it and try again."
+        );
+    }
+
+    #[test]
+    fn content_at_exactly_the_limits_is_shown() {
+        // 24 lines of 82 characters and 23 line breaks: exactly 2,000 characters and 24 lines.
+        let mut content = vec!["x".repeat(82); MAX_REVIEW_LINES].join("\n");
+        content.push_str(&"x".repeat(MAX_REVIEW_CHARS - content.chars().count()));
+        assert_eq!(content.chars().count(), MAX_REVIEW_CHARS);
+        assert_eq!(content.lines().count(), MAX_REVIEW_LINES);
+        for what in [Reviewed::File, Reviewed::Command] {
+            assert!(reviewable(&content, what).is_ok());
+            // Characters, not bytes: 2,000 two-byte characters still fit.
+            assert!(reviewable(&"é".repeat(MAX_REVIEW_CHARS), what).is_ok());
+            assert!(reviewable(&"x\n".repeat(MAX_REVIEW_LINES), what).is_ok());
+        }
+    }
+
+    #[test]
+    fn counts_are_grouped_in_thousands() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(2_000), "2,000");
+        assert_eq!(grouped(56_120), "56,120");
+        assert_eq!(grouped(1_234_567), "1,234,567");
     }
 }
