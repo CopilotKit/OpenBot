@@ -30,7 +30,7 @@ import {
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
 import { APPROVALS_PATH, approvalInboxResponse } from "./approvals-api";
-import { answerBotAttention, answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
@@ -150,6 +150,8 @@ let questions: {
 let failing = new Set<string>();
 /** Conversations a turn is running in right now, as the sidebar's live list says. */
 let busy: string[] = [];
+/** What each Bot is waiting on the person for, as the server counts it. */
+let waitingBots: ReturnType<typeof attentionOf>[] = [];
 const sent: { method: string; path: string }[] = [];
 
 function serving() {
@@ -248,7 +250,7 @@ function serving() {
       });
       if (approvals) return approvals;
     }
-    const waiting = answerBotAttention(input, init, { bots: [] });
+    const waiting = answerBotAttention(input, init, { bots: waitingBots });
     if (waiting) return waiting;
     const schedules = answerScheduleLists(input, init);
     if (schedules) return schedules;
@@ -270,6 +272,7 @@ beforeEach(() => {
   questions = [];
   failing = new Set();
   busy = [];
+  waitingBots = [];
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
@@ -507,8 +510,18 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
       failedAt: now,
     }),
   ];
+  // The server counts both as failed, since that is the status of both.
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 0, ready: 0, failed: 2 },
+    }),
+  ];
   serving();
   const { region } = await drawAll();
+  // The Bot's row in the list says which was which.
+  expect(
+    await region("Bots page").findByText("1 failed task, 1 stopped task"),
+  ).toBeTruthy();
   // The Bots page and the Bot's own page draw the same board.
   for (const name of ["Bots page", "Bot page"]) {
     const surface = region(name);
