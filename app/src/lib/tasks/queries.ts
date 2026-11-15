@@ -213,6 +213,12 @@ export function stoppedByYou(
   return task?.status === "failed" && Boolean(task.stoppedAt);
 }
 
+/**
+ * A finished task's status in a word, on its card and on its row under Done on a Bot's Activity
+ * page. One name for one state: a row under Done never reads "Ready for review".
+ */
+export const TASK_DONE_LABEL = "Done";
+
 /** A stopped task's status in a word, on its card and on every row that lists it. */
 export const TASK_STOPPED_LABEL = "Stopped";
 

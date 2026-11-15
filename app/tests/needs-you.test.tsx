@@ -526,6 +526,18 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
     expect(stopped.queryByText("Failed")).toBeNull();
     expect(stopped.queryByText(/Couldn't finish/)).toBeNull();
     expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+    // Its own choice, so it is not drawn as a failure: the card's stop icon, and no tint.
+    const row = (title: string) =>
+      surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
+    expect(row("Chase the supplier").dataset.taskState).toBe("stopped");
+    expect(
+      row("Chase the supplier").querySelector(".tabler-icon-player-stop"),
+    ).not.toBeNull();
+    expect(row("Chase the supplier").querySelector(".bg-amber-50")).toBeNull();
+    expect(row("File the expense report").dataset.taskState).toBe("failed");
+    expect(
+      row("File the expense report").querySelector(".bg-amber-50"),
+    ).not.toBeNull();
 
     // One that couldn't finish on its own still says so.
     const failed = within(
@@ -539,6 +551,47 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
     ).toBeTruthy();
     expect(failed.queryByText("Stopped")).toBeNull();
     expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
+  }
+});
+
+test("the board says a task's line as plain text, and a working task is not offered Mark done", async () => {
+  tasks = [
+    task({
+      id: "t",
+      title: "Check the river facts",
+      next: "| Begins / headwaters | **Columbia Lake**, British Columbia |",
+    }),
+    task({
+      id: "s",
+      title: "Research the locks",
+      next: "Source: Lake Washington Ship …",
+    }),
+    task({ id: "w", title: "Draft the board update", status: "working" }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    const row = async (title: string) =>
+      (await surface.findByText(title)).closest(
+        "[data-slot=item]",
+      ) as HTMLElement;
+    expect(
+      within(await row("Check the river facts")).getByText(
+        "Begins / headwaters: Columbia Lake, British Columbia",
+      ),
+    ).toBeTruthy();
+    expect((await row("Research the locks")).textContent).not.toContain(
+      "Source:",
+    );
+    const working = within(await row("Draft the board update"));
+    expect(working.getByText("Open")).toBeTruthy();
+    expect(working.queryByRole("button", { name: "Mark done" })).toBeNull();
+    expect(
+      within(await row("Check the river facts")).getByRole("button", {
+        name: "Mark done",
+      }),
+    ).toBeTruthy();
   }
 });
 
