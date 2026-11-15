@@ -112,6 +112,12 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
 /** Every Bot delete, so what reads a Bot can tell it is being deleted from this browser. */
 export const deleteAgentMutationKey = [...agentKeys.all, "delete"] as const;
 
+/**
+ * Delete a Bot. What was read of it (the Bot itself, its handoffs) stops existing with it, so it is
+ * removed rather than read again: a read would ask for a Bot that is gone and answer 404, which the
+ * Bot's page, still up while the list of Bots is read again, used to do on its way back to Bots.
+ * Every other Bot read is refreshed.
+ */
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationKey: deleteAgentMutationKey,
@@ -120,7 +126,21 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
         fallback: FALLBACK,
       });
     },
-    onSuccess: () => invalidateAgents(queryClient),
+    onSuccess: async (_result, agentId) => {
+      // Each of one Bot's reads is keyed ["agents", <read>, <Bot id>].
+      const ofThisBot = {
+        queryKey: agentKeys.all,
+        predicate: (query: { queryKey: readonly unknown[] }) =>
+          query.queryKey[2] === agentId,
+      };
+      // A read of it already on its way is dropped too, not left to land in the cache.
+      await queryClient.cancelQueries(ofThisBot);
+      queryClient.removeQueries(ofThisBot);
+      return queryClient.invalidateQueries({
+        queryKey: agentKeys.all,
+        predicate: (query) => query.queryKey[2] !== agentId,
+      });
+    },
   });
 }
 
