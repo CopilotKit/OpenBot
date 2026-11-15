@@ -672,6 +672,70 @@ async function measured(page: Page) {
   });
 }
 
+/**
+ * How the backdrop behind an open dialog is styled, as the browser computed it: how dark it is, and
+ * the blur it asks for under the standard name and under WebKit's own.
+ */
+async function backdrop(page: Page) {
+  return page.evaluate(() => {
+    const overlay = document.querySelector("[data-slot=dialog-overlay]");
+    if (!overlay) return null;
+    const style = getComputedStyle(overlay);
+    // The last number of the colour is its alpha: `oklab(0 0 0 / 0.1)`, `rgba(0, 0, 0, 0.1)`.
+    const parts = style.backgroundColor.match(/[\d.]+/g) ?? [];
+    return {
+      covers:
+        overlay.getBoundingClientRect().width >= innerWidth &&
+        overlay.getBoundingClientRect().height >= innerHeight,
+      dim: parts.length === 4 ? Number(parts[3]) : 1,
+      opacity: Number(style.opacity),
+      blur: style.getPropertyValue("backdrop-filter"),
+      webkitBlur: style.getPropertyValue("-webkit-backdrop-filter"),
+    };
+  });
+}
+
+/*
+ * Every dialog in the app is drawn by one primitive (components/ui/dialog.tsx), whose backdrop dims
+ * the page a little and blurs it, so the dialog is not read against the words behind it. Checked in
+ * each engine as what the browser computed, in both of the blur's spellings where it has both.
+ *
+ * NOT CHECKED HERE: THAT THE BLUR IS PAINTED. Headless WebKit computes the blur and does not paint
+ * it in a screenshot, on any page: one fixed `div` with `backdrop-filter: blur(12px)` over a
+ * paragraph comes out sharp. So a WebKit screenshot of a dialog shows the page behind it dimmed and
+ * unblurred, whatever this primitive does.
+ */
+describe.skipIf(!asked)("a dialog's backdrop", () => {
+  const publish = SCREENS.find((screen) => screen.name === "publish-dialog");
+  if (!publish) throw new Error("no publish dialog");
+  for (const engine of engines)
+    for (const theme of THEMES)
+      for (const window of [WIDE, PHONE])
+        test(`is styled to dim and blur the page behind it in ${engine}, ${theme}, ${window.width}px`, async () => {
+          const page = await open(publish, engine, theme, window);
+          try {
+            if (shots) {
+              mkdirSync(shots, { recursive: true });
+              await page.screenshot({
+                path: join(
+                  shots,
+                  `dialog-backdrop-${engine}-${theme}-${window.width}.png`,
+                ),
+              });
+            }
+            const drawn = await backdrop(page);
+            expect(drawn).toMatchObject({ covers: true, opacity: 1 });
+            expect(drawn?.dim).toBeGreaterThan(0);
+            expect(drawn?.blur).toMatch(/^blur\(\d/);
+            // WebKit keeps its own spelling beside the standard one; both have to say blur.
+            if (engine === "webkit")
+              expect(drawn?.webkitBlur).toMatch(/^blur\(\d/);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+});
+
 describe.skipIf(!asked)("the team screens", () => {
   for (const screen of SCREENS) {
     if (screen.lookOnly && !shots) continue;
