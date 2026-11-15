@@ -51,6 +51,15 @@ export type DeploymentCapabilities = {
    * switch in `myCapabilitiesQueryOptions`.
    */
   isolatedBots?: boolean;
+  /**
+   * Whether this OpenBot has computers for Bots at all.
+   *
+   * Not `isolatedBots`: an OpenBot whose Bots share one computer has computers and gives no Bot one
+   * of its own. False only when the server says so. Without computers a Bot has no screen, terminal
+   * or sign-in to a website, and the server refuses every call about one, so a screen reads this
+   * and says so in place of asking.
+   */
+  botComputers?: boolean;
 };
 
 export const deploymentKeys = {
@@ -88,6 +97,8 @@ export function deploymentCapabilitiesQueryOptions() {
         voice: body.voice === true,
         builtInBots: body.builtInBots === true,
         isolatedBots: body.isolatedBots === true,
+        // The other way round from the rest: a server that doesn't say reads as having computers.
+        botComputers: body.botComputers !== false,
       };
     },
   });
@@ -119,6 +130,21 @@ export function offersMemory(
 export function useOffersMemory(): boolean {
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   return !capabilities.isPending && offersMemory(capabilities.data);
+}
+
+/**
+ * Whether this OpenBot has no computers for Bots: true only once the server has said so.
+ *
+ * `undefined` while the answer is on its way. A screen about a computer waits for it before it asks
+ * the server about one, because where there are none every such call is refused, and the refusal
+ * would be on screen as a failure before the reason was known. An answer that could not be read is
+ * false: the screen behaves as it does where there are computers, and never says "no computers"
+ * about an OpenBot that may have them.
+ */
+export function useNoBotComputers(): boolean | undefined {
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  if (capabilities.isPending) return undefined;
+  return capabilities.data?.botComputers === false;
 }
 
 /** {@link offersMemory} for a route guard, which has the query client and no component. */

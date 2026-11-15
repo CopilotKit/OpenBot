@@ -23,6 +23,7 @@ import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
+import { useNoBotComputers } from "@/lib/deployment/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -165,6 +166,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
     });
   // A command in the chat clicked opens the Computer on its terminal.
   useOpenComputerOnRequest(agentId, () => showComputer(true));
+  const noComputers = useNoBotComputers() === true;
 
   return (
     <DetailPanel
@@ -194,6 +196,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
             <div className="flex flex-wrap items-start gap-2">
               <ComputerChatControls
                 computerId={agentId}
+                noComputers={noComputers}
                 open={watch === true}
                 onOpenChange={showComputer}
               />

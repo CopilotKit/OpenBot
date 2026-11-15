@@ -19,6 +19,7 @@ import { conversationLoadFailure } from "@/lib/channels/load-failure";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
+import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 
 const chatSearchSchema = z.object({
@@ -61,6 +62,7 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
+  const noComputers = useNoBotComputers() === true;
 
   useMarkOpenChannelRead(channelId);
 
@@ -174,6 +176,7 @@ function RouteComponent() {
           <div className="flex flex-row gap-1.5">
             <ComputerChatControls
               computerId={agentId}
+              noComputers={noComputers}
               open={isWatching}
               onOpenChange={(open) => show(open ? "watch" : null)}
             />

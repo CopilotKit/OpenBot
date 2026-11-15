@@ -41,6 +41,9 @@ class RunTools:
     # chose none, and the deployment's own configuration applies.
     model: str = ""
     effort: str = ""
+    # The server retries this run itself (`openbotSendOnce`): the model is asked once per step and
+    # a failure is handed back, where the model's own client would have retried it twice first.
+    send_once: bool = False
 
 
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
@@ -52,9 +55,11 @@ OPENBOT_PROPS = {
     "openbotRun",
     "openbotDeploymentTools",
     "openbotModel",
+    "openbotSendOnce",
     "openbot_run",
     "openbot_deployment_tools",
     "openbot_model",
+    "openbot_send_once",
 }
 
 
@@ -258,6 +263,7 @@ class ToolAwareAgent(WholeThreadAgent):
             assertion=assertion if isinstance(assertion, str) else "",
             model=model,
             effort=effort,
+            send_once=props.get("openbotSendOnce") is True,
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on

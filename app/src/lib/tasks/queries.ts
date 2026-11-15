@@ -54,6 +54,11 @@ export type BotTask = {
   next: string | null;
   /** When the work it is doing now began, for how long it has been working. Null unless working. */
   workingSince?: string | null;
+  /**
+   * When its turn will next be tried, while it waits to try again after a failure that passes (a
+   * rate limit, a service that did not answer). Null or absent when it is not waiting.
+   */
+  tryingAgainAt?: string | null;
   /** When it last did something: a step of its work, or a line said in its conversation. */
   lastActivityAt?: string;
   resolvedAt: string | null;

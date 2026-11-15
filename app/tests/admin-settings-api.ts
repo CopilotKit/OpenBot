@@ -64,6 +64,8 @@ export type TodayDeployment = {
   builtInBots?: boolean;
   /** Whether this OpenBot can give a Bot a computer of its own. */
   isolatedBots?: boolean;
+  /** Whether this OpenBot has computers for Bots at all. Left out, it has. */
+  botComputers?: boolean;
 };
 
 /** The API's `deployment`, with what a test left out read as off. */
@@ -81,6 +83,7 @@ export function deploymentBody(today: TodayDeployment = {}) {
     ssoRequired: today.ssoRequired === true,
     builtInBots: today.builtInBots === true,
     isolatedBots: today.isolatedBots === true,
+    botComputers: today.botComputers !== false,
   };
 }
 

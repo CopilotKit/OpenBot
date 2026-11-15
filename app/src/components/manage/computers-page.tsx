@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconBolt,
   IconDeviceDesktop,
+  IconDeviceDesktopOff,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -53,7 +54,10 @@ import {
   type ComputerProfile,
   computerFleetQueryOptions,
 } from "@/lib/computers/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useNoBotComputers,
+} from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
@@ -139,9 +143,16 @@ export function ComputersPage({
   const admin = isOrganizationAdmin(
     useQuery(currentUserQueryOptions()).data?.role,
   );
+  /*
+   * An OpenBot with no computers for Bots has no list to read: the server refuses it, and "Couldn't
+   * load the computers. Reload the page." sent a person to retry what can never work. So the list
+   * waits until the deployment has said whether there are computers, and is not asked for where
+   * there are none.
+   */
+  const noComputers = useNoBotComputers();
   const fleet = useQuery({
     ...computerFleetQueryOptions(),
-    enabled: agentId === undefined || admin,
+    enabled: (agentId === undefined || admin) && noComputers === false,
   });
   const hostAccess = useQuery(hostAccessQueryOptions());
   const agents = useQuery(agentListQueryOptions());
@@ -332,7 +343,15 @@ export function ComputersPage({
               {setState.error.message}
             </p>
           ) : null}
-          {computers === null && problem ? (
+          {noComputers ? (
+            <PageEmpty
+              icon={IconDeviceDesktopOff}
+              title="No computers for Bots"
+            >
+              Bots can't browse or run commands on this OpenBot. Set up
+              computers for Bots, and they show up here.
+            </PageEmpty>
+          ) : computers === null && problem ? (
             <PageEmpty
               icon={IconAlertTriangle}
               title="Couldn't load the list"
@@ -521,7 +540,8 @@ export function ComputersPage({
         </DialogContent>
       </Dialog>
 
-      {agentId && !admin ? null : personal ? (
+      {/* What Stop, Reset and Update do, which is about computers: not said where there are none. */}
+      {(agentId && !admin) || noComputers ? null : personal ? (
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
           It starts again the next time it's needed. <strong>Reset</strong>{" "}

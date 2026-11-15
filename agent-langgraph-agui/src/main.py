@@ -176,6 +176,18 @@ def _chatgpt_auth_file(store: str) -> Path:
     return path
 
 
+def _retries(run) -> dict:
+    """The model client's own retries, switched off for a run the server retries itself.
+
+    Each provider's integration retries a failed call on its own (`max_retries`, two by default for
+    OpenAI and Anthropic). A delegated task's turn is retried by the server, which sorts the failure
+    first and waits as long as the provider asked. Left on under that, one rate limit is asked
+    again several times over, without the wait. So a run that carries `openbotSendOnce` asks once
+    and hands the failure back. Every other run keeps the integration's own retries.
+    """
+    return {"max_retries": 0} if getattr(run, "send_once", False) is True else {}
+
+
 def _model(plan_models=None):
     """The model this Bot thinks with, chosen by which credential the deployment gave it.
 
@@ -227,6 +239,7 @@ def _model(plan_models=None):
             # The Codex backend is the Responses API, so `reasoning.effort`; `_ChatOpenAICodex`
             # inherits `ChatOpenAI.reasoning` and sends it as it is.
             **({"reasoning": {"effort": run.effort}} if run.effort else {}),
+            **_retries(run),
         )
 
     _normalize_openai_base_url()
@@ -245,12 +258,14 @@ def _model(plan_models=None):
             model,
             **_google_genai_kwargs(prefix),
             **_provider_kwargs(prefix, named, run.effort),
+            **_retries(run),
         )
     return init_chat_model(
         model,
         model_provider=provider,
         **_google_genai_kwargs(provider),
         **_provider_kwargs(provider, model, run.effort),
+        **_retries(run),
     )
 
 

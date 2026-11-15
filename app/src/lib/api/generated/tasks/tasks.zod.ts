@@ -117,6 +117,12 @@ export const ListTasksResponse = zod.object({
           .describe(
             "When the work it is doing now began. Null or absent unless it is working.",
           ),
+        tryingAgainAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+          ),
         lastActivityAt: zod.iso
           .datetime({ offset: true })
           .optional()
@@ -264,6 +270,12 @@ export const GetTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
@@ -416,6 +428,12 @@ export const ResolveTaskResponse = zod.object({
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
         ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
         .optional()
@@ -567,6 +585,12 @@ export const ReopenTaskResponse = zod.object({
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
         ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
         .optional()
@@ -717,6 +741,12 @@ export const RetryTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })

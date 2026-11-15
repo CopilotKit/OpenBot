@@ -196,6 +196,23 @@ def _loaded_upfront_in(server_config, names):
 # A replay holds no result longer than this either (`RESULT_CHARS` in `replay`).
 INLINE_RESULT_CHARS = RESULT_CHARS
 
+# How many times Claude Code retries a failed API request on its own (code.claude.com/docs/en/errors:
+# `CLAUDE_CODE_MAX_RETRIES`, 10 by default, lowered "to surface failures faster in scripts").
+#
+# A delegated task's turn is retried by the server, which sorts the failure first and waits as long
+# as the provider asked. Under that, Claude Code's own ten retries multiply the server's and spend
+# the task's time before the server hears of the failure at all. So a run the server says it
+# retries itself (`forwardedProps.openbotSendOnce`) starts its query with none, and the failure is
+# handed back. Every other run keeps Claude Code's own retries.
+MAX_RETRIES = "CLAUDE_CODE_MAX_RETRIES"
+
+
+def sends_once(forwarded_props) -> bool:
+    """Whether the server retries this run itself, and so wants each request sent once."""
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    return props.get("openbotSendOnce") is True
+
+
 # Claude Code's switch for a model ID it does not know (code.claude.com/docs/en/env-vars).
 #
 # The Claude Code this harness ships (2.1.259, in claude-agent-sdk 0.2.152) predates Opus 5.5,
@@ -715,6 +732,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         # is the one prop it honours. Every query is built here, so a choice changed between runs
         # starts the next query on it.
         chosen = run_model(input_data.forwarded_props) if input_data else None
+        once = sends_once(input_data.forwarded_props) if input_data else False
         if self._model_only and input_data:
             # The model endpoint accepts prompts and caller-owned tools, never SDK
             # configuration or an ungoverned state-management tool.
@@ -726,6 +744,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
         options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        if once:
+            options.env[MAX_RETRIES] = "0"
         options.max_buffer_size = MESSAGE_BUFFER_BYTES
         if not self._model_only and input_data:
             # The model endpoint gets its instructions in context. A full Bot gets its standing

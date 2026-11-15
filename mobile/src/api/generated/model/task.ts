@@ -70,6 +70,11 @@ export interface Task {
    * @nullable
    */
   workingSince?: string | null;
+  /**
+   * When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
+   * @nullable
+   */
+  tryingAgainAt?: string | null;
   /** When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it. */
   lastActivityAt?: string;
   /**
