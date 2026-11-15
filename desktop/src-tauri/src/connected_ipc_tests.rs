@@ -284,7 +284,7 @@ mod connected_ipc {
         let guard = &guard[..guard.find("\n}\n").unwrap()];
         assert!(guard.contains("window_page(webview.app_handle(), &current)"));
         assert!(guard.contains("WindowPage::OwnedApp | WindowPage::LocalApp"));
-        assert!(guard.contains(".open_url(destination.as_str(), None::<&str>);\n            false"));
+        assert!(guard.contains("open_in_browser(webview.app_handle(), destination);\n            false"));
     }
 
     /// Connected to an OpenBot at an address on this computer (a developer's own, or one reached

@@ -6810,11 +6810,7 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                     desktop_connected::leaves_for_browser(webview.app_handle(), destination)
                 {
                     if leaves {
-                        use tauri_plugin_opener::OpenerExt;
-                        let _ = webview
-                            .app_handle()
-                            .opener()
-                            .open_url(destination.as_str(), None::<&str>);
+                        open_in_browser(webview.app_handle(), destination);
                     }
                     return !leaves;
                 }
@@ -6834,14 +6830,22 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             if !from_openbot {
                 return true;
             }
-            use tauri_plugin_opener::OpenerExt;
-            let _ = webview
-                .app_handle()
-                .opener()
-                .open_url(destination.as_str(), None::<&str>);
+            open_in_browser(webview.app_handle(), destination);
             false
         })
         .build()
+}
+
+/// Hand `destination` to the person's default browser, and say in the log that it did, or that the
+/// browser did not open it (`outside_links::described` names it).
+fn open_in_browser<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &tauri::Url) {
+    use tauri_plugin_opener::OpenerExt;
+    let connected = desktop_connected::connected_address(app);
+    let shown = outside_links::described(destination, connected.as_deref());
+    match app.opener().open_url(destination.as_str(), None::<&str>) {
+        Ok(()) => log::info!("[window] opened {shown} in the browser"),
+        Err(error) => log::warn!("[window] the browser did not open {shown}: {error}"),
+    }
 }
 
 /**
@@ -6915,14 +6919,10 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             // Showing an OpenBot that runs elsewhere: whatever is not the relay's own page opens
             // in the browser, as a navigation to it would (`outside_links_guard`).
             match desktop_connected::leaves_for_browser(&opener, &destination) {
-                Some(true) => {
-                    use tauri_plugin_opener::OpenerExt;
-                    let _ = opener.opener().open_url(destination.as_str(), None::<&str>);
-                }
+                Some(true) => open_in_browser(&opener, &destination),
                 Some(false) => {}
-                None => outside_links::new_window(&destination, |to| {
-                    use tauri_plugin_opener::OpenerExt;
-                    let _ = opener.opener().open_url(to, None::<&str>);
+                None => outside_links::new_window(&destination, |_| {
+                    open_in_browser(&opener, &destination);
                 }),
             }
             tauri::webview::NewWindowResponse::Deny
@@ -12434,7 +12434,11 @@ fn main() {
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
-                let _ = window.eval(outside_links::PAGE);
+                // On the relay's pages only the page's own origin is OpenBot (`page_for`).
+                let _ = window.eval(outside_links::page_for(desktop_connected::is_relay_page(
+                    window.app_handle(),
+                    payload.url(),
+                )));
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {

@@ -130,6 +130,17 @@ pub fn relay_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Stri
         .map(|live| live.relay.origin())
 }
 
+/// The address of the OpenBot the window shows through the relay, while it does.
+pub fn connected_address<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.session.address().to_owned())
+}
+
 /// Whether `url` is a page the relay serves: OpenBot's own, from the OpenBot it is connected to.
 pub fn is_relay_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> bool {
     relay_origin(app).is_some_and(|origin| origin == url.origin().ascii_serialization())
