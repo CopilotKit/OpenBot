@@ -942,6 +942,8 @@ export OPENBOT_SMOKE_COOKIE='better-auth.session_token=...'   # from a signed-in
 bun run test:smoke
 ```
 
+A deployment with sign-in needs `OPENBOT_SMOKE_COOKIE` from an administrator's session.
+
 The session is the second half of "a machine with real credentials": the routes the journey proves
 are behind `requireUser`, so a run without one answers 401 three times and says nothing about the
 release. See [development.md](development.md#quality-checks) for where the cookie comes from.
