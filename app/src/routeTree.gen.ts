@@ -51,6 +51,7 @@ import { Route as AuthedSettingsCredentialsRouteImport } from './routes/_authed/
 import { Route as AuthedSettingsLearningRouteImport } from './routes/_authed/settings/learning'
 import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/settings/memory'
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
+import { Route as AuthedSettingsOrganizationRouteImport } from './routes/_authed/settings/organization'
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
 import { Route as AuthedSettingsSetupRouteImport } from './routes/_authed/settings/setup'
 import { Route as AuthedSettingsSkillsRouteImport } from './routes/_authed/settings/skills'
@@ -69,6 +70,8 @@ import { Route as AuthedAppConnectionsKeyRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppConnectionsNewRouteImport } from './routes/_authed/_app/connections.new'
 import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_app/group/$channelId'
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
+import { Route as AuthedAppInvitationsIndexRouteImport } from './routes/_authed/_app/invitations.index'
+import { Route as AuthedAppInvitationsInvitationIdRouteImport } from './routes/_authed/_app/invitations.$invitationId'
 import { Route as AuthedAppRoutinesNewRouteImport } from './routes/_authed/_app/routines_.new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
 import { Route as AuthedAppSkillsSlugRouteImport } from './routes/_authed/_app/skills_.$slug'
@@ -332,6 +335,12 @@ const AuthedSettingsNotificationsRoute =
     path: '/notifications',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
+const AuthedSettingsOrganizationRoute =
+  AuthedSettingsOrganizationRouteImport.update({
+    id: '/organization',
+    path: '/organization',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
 const AuthedSettingsPasswordsRoute = AuthedSettingsPasswordsRouteImport.update({
   id: '/passwords',
   path: '/passwords',
@@ -428,6 +437,18 @@ const AuthedAppGroupNewRoute = AuthedAppGroupNewRouteImport.update({
   path: '/group/new',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppInvitationsIndexRoute =
+  AuthedAppInvitationsIndexRouteImport.update({
+    id: '/invitations/',
+    path: '/invitations/',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppInvitationsInvitationIdRoute =
+  AuthedAppInvitationsInvitationIdRouteImport.update({
+    id: '/invitations/$invitationId',
+    path: '/invitations/$invitationId',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppRoutinesNewRoute = AuthedAppRoutinesNewRouteImport.update({
   id: '/routines_/new',
   path: '/routines/new',
@@ -764,6 +785,7 @@ export interface FileRoutesByFullPath {
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
+  '/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
   '/settings/skills': typeof AuthedSettingsSkillsRoute
@@ -780,6 +802,7 @@ export interface FileRoutesByFullPath {
   '/connections/new': typeof AuthedAppConnectionsNewRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -805,6 +828,7 @@ export interface FileRoutesByFullPath {
   '/bots/': typeof AuthedAppBotsIndexRoute
   '/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
   '/connections/': typeof AuthedAppConnectionsIndexRoute
+  '/invitations/': typeof AuthedAppInvitationsIndexRoute
   '/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -873,6 +897,7 @@ export interface FileRoutesByTo {
   '/settings/learning': typeof AuthedSettingsLearningRoute
   '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
+  '/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/settings/setup': typeof AuthedSettingsSetupRoute
   '/settings/skills': typeof AuthedSettingsSkillsRoute
@@ -888,6 +913,7 @@ export interface FileRoutesByTo {
   '/connections/new': typeof AuthedAppConnectionsNewRoute
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
+  '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -913,6 +939,7 @@ export interface FileRoutesByTo {
   '/bots': typeof AuthedAppBotsIndexRoute
   '/capabilities': typeof AuthedAppCapabilitiesIndexRoute
   '/connections': typeof AuthedAppConnectionsIndexRoute
+  '/invitations': typeof AuthedAppInvitationsIndexRoute
   '/admin/components': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -985,6 +1012,7 @@ export interface FileRoutesById {
   '/_authed/settings/learning': typeof AuthedSettingsLearningRoute
   '/_authed/settings/memory': typeof AuthedSettingsMemoryRoute
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
+  '/_authed/settings/organization': typeof AuthedSettingsOrganizationRoute
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/_authed/settings/setup': typeof AuthedSettingsSetupRoute
   '/_authed/settings/skills': typeof AuthedSettingsSkillsRoute
@@ -1002,6 +1030,7 @@ export interface FileRoutesById {
   '/_authed/_app/connections/new': typeof AuthedAppConnectionsNewRoute
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
+  '/_authed/_app/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
   '/_authed/_app/routines_/new': typeof AuthedAppRoutinesNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
   '/_authed/_app/skills_/$slug': typeof AuthedAppSkillsSlugRoute
@@ -1027,6 +1056,7 @@ export interface FileRoutesById {
   '/_authed/_app/bots/': typeof AuthedAppBotsIndexRoute
   '/_authed/_app/capabilities/': typeof AuthedAppCapabilitiesIndexRoute
   '/_authed/_app/connections/': typeof AuthedAppConnectionsIndexRoute
+  '/_authed/_app/invitations/': typeof AuthedAppInvitationsIndexRoute
   '/_authed/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
@@ -1098,6 +1128,7 @@ export interface FileRouteTypes {
     | '/settings/learning'
     | '/settings/memory'
     | '/settings/notifications'
+    | '/settings/organization'
     | '/settings/passwords'
     | '/settings/setup'
     | '/settings/skills'
@@ -1114,6 +1145,7 @@ export interface FileRouteTypes {
     | '/connections/new'
     | '/group/$channelId'
     | '/group/new'
+    | '/invitations/$invitationId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1139,6 +1171,7 @@ export interface FileRouteTypes {
     | '/bots/'
     | '/capabilities/'
     | '/connections/'
+    | '/invitations/'
     | '/admin/components/'
     | '/admin/plugins/'
     | '/settings/components-gallery/'
@@ -1207,6 +1240,7 @@ export interface FileRouteTypes {
     | '/settings/learning'
     | '/settings/memory'
     | '/settings/notifications'
+    | '/settings/organization'
     | '/settings/passwords'
     | '/settings/setup'
     | '/settings/skills'
@@ -1222,6 +1256,7 @@ export interface FileRouteTypes {
     | '/connections/new'
     | '/group/$channelId'
     | '/group/new'
+    | '/invitations/$invitationId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1247,6 +1282,7 @@ export interface FileRouteTypes {
     | '/bots'
     | '/capabilities'
     | '/connections'
+    | '/invitations'
     | '/admin/components'
     | '/admin/plugins'
     | '/settings/components-gallery'
@@ -1318,6 +1354,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/learning'
     | '/_authed/settings/memory'
     | '/_authed/settings/notifications'
+    | '/_authed/settings/organization'
     | '/_authed/settings/passwords'
     | '/_authed/settings/setup'
     | '/_authed/settings/skills'
@@ -1335,6 +1372,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/connections/new'
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
+    | '/_authed/_app/invitations/$invitationId'
     | '/_authed/_app/routines_/new'
     | '/_authed/_app/s/$screen'
     | '/_authed/_app/skills_/$slug'
@@ -1360,6 +1398,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/bots/'
     | '/_authed/_app/capabilities/'
     | '/_authed/_app/connections/'
+    | '/_authed/_app/invitations/'
     | '/_authed/admin/components/'
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
@@ -1693,6 +1732,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsNotificationsRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/organization': {
+      id: '/_authed/settings/organization'
+      path: '/organization'
+      fullPath: '/settings/organization'
+      preLoaderRoute: typeof AuthedSettingsOrganizationRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/passwords': {
       id: '/_authed/settings/passwords'
       path: '/passwords'
@@ -1817,6 +1863,20 @@ declare module '@tanstack/react-router' {
       path: '/group/new'
       fullPath: '/group/new'
       preLoaderRoute: typeof AuthedAppGroupNewRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/invitations/': {
+      id: '/_authed/_app/invitations/'
+      path: '/invitations'
+      fullPath: '/invitations/'
+      preLoaderRoute: typeof AuthedAppInvitationsIndexRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/invitations/$invitationId': {
+      id: '/_authed/_app/invitations/$invitationId'
+      path: '/invitations/$invitationId'
+      fullPath: '/invitations/$invitationId'
+      preLoaderRoute: typeof AuthedAppInvitationsInvitationIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/routines_/new': {
@@ -2285,6 +2345,7 @@ interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsLearningRoute: typeof AuthedSettingsLearningRoute
   AuthedSettingsMemoryRoute: typeof AuthedSettingsMemoryRoute
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
+  AuthedSettingsOrganizationRoute: typeof AuthedSettingsOrganizationRoute
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
   AuthedSettingsSetupRoute: typeof AuthedSettingsSetupRoute
   AuthedSettingsSkillsRoute: typeof AuthedSettingsSkillsRoute
@@ -2307,6 +2368,7 @@ const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsLearningRoute: AuthedSettingsLearningRoute,
   AuthedSettingsMemoryRoute: AuthedSettingsMemoryRoute,
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,
+  AuthedSettingsOrganizationRoute: AuthedSettingsOrganizationRoute,
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
   AuthedSettingsSetupRoute: AuthedSettingsSetupRoute,
   AuthedSettingsSkillsRoute: AuthedSettingsSkillsRoute,
@@ -2346,6 +2408,7 @@ interface AuthedAppRouteChildren {
   AuthedAppConnectionsNewRoute: typeof AuthedAppConnectionsNewRoute
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
+  AuthedAppInvitationsInvitationIdRoute: typeof AuthedAppInvitationsInvitationIdRoute
   AuthedAppRoutinesNewRoute: typeof AuthedAppRoutinesNewRoute
   AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
   AuthedAppSkillsSlugRoute: typeof AuthedAppSkillsSlugRoute
@@ -2355,6 +2418,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
   AuthedAppCapabilitiesIndexRoute: typeof AuthedAppCapabilitiesIndexRoute
   AuthedAppConnectionsIndexRoute: typeof AuthedAppConnectionsIndexRoute
+  AuthedAppInvitationsIndexRoute: typeof AuthedAppInvitationsIndexRoute
   AuthedAppBotsAgentIdAccessRoute: typeof AuthedAppBotsAgentIdAccessRoute
   AuthedAppBotsAgentIdActivityRoute: typeof AuthedAppBotsAgentIdActivityRoute
   AuthedAppBotsAgentIdApprovalsRoute: typeof AuthedAppBotsAgentIdApprovalsRoute
@@ -2396,6 +2460,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppConnectionsNewRoute: AuthedAppConnectionsNewRoute,
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
+  AuthedAppInvitationsInvitationIdRoute: AuthedAppInvitationsInvitationIdRoute,
   AuthedAppRoutinesNewRoute: AuthedAppRoutinesNewRoute,
   AuthedAppSScreenRoute: AuthedAppSScreenRoute,
   AuthedAppSkillsSlugRoute: AuthedAppSkillsSlugRoute,
@@ -2405,6 +2470,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
   AuthedAppCapabilitiesIndexRoute: AuthedAppCapabilitiesIndexRoute,
   AuthedAppConnectionsIndexRoute: AuthedAppConnectionsIndexRoute,
+  AuthedAppInvitationsIndexRoute: AuthedAppInvitationsIndexRoute,
   AuthedAppBotsAgentIdAccessRoute: AuthedAppBotsAgentIdAccessRoute,
   AuthedAppBotsAgentIdActivityRoute: AuthedAppBotsAgentIdActivityRoute,
   AuthedAppBotsAgentIdApprovalsRoute: AuthedAppBotsAgentIdApprovalsRoute,

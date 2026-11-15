@@ -651,13 +651,17 @@ async function accountMenuMarkup(app: Awaited<ReturnType<typeof open>>) {
   return { row, menu: markup, words: menuWords(menu) };
 }
 
-test("somebody with one organization who may not create one sees the account menu exactly as it was", async () => {
+test("on an OpenBot that lists no organizations the account menu is exactly as it was, and with one listed it shows that one and its settings", async () => {
   // Before there were organizations to list: a server with no list of them.
   server.list = "not-found";
   server.organizations = [ONLY];
   server.active = ONLY.id;
-  const before = await accountMenuMarkup(await open());
+  const unlisted = await open();
+  const before = await accountMenuMarkup(unlisted);
   expect(before.words).toEqual(["Admin", "Settings", "Sign out"]);
+  expect(before.row).not.toContain("Acme");
+  expect(unlisted.view.queryByText("Organizations")).toBeNull();
+  expect(unlisted.view.queryByRole("menuitemradio")).toBeNull();
   cleanup();
   queryClient.clear();
   setCurrentOrganization(undefined);
@@ -667,9 +671,14 @@ test("somebody with one organization who may not create one sees the account men
   const app = await open();
   const now = await accountMenuMarkup(app);
   expect(requests).toContain("GET /api/v2/people/me/organizations");
-  expect(now).toEqual(before);
-  expect(app.view.queryByText("Organizations")).toBeNull();
-  expect(app.view.queryByRole("menuitemradio")).toBeNull();
+  expect(now.words).toEqual([
+    "Acme",
+    "Organization settings",
+    "Admin",
+    "Settings",
+    "Sign out",
+  ]);
+  expect(now.row).toContain("Acme");
   expect(app.view.queryByText("New organization")).toBeNull();
 });
 
