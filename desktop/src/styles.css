@@ -2093,15 +2093,16 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 }
 
 /*
- * Usage data, at the foot of the last screen of setup: a small checkbox and a line or two beside
- * it, in the footnote's size and colour. No card: it is a choice, not a step.
+ * Usage data, on the last screen of setup: a small checkbox and a line or two beside it, in the
+ * footnote's size and colour. No card: it is a choice, not a step. Under the step's words and above
+ * its rows, the lede's own gap on either side, so nothing that comes and goes below can move it.
  */
 .usage-choice {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 8px;
   align-items: start;
-  margin-top: 20px;
+  margin: 0 0 20px;
   font-size: var(--text-xs);
   line-height: 16px;
   color: var(--text-secondary);

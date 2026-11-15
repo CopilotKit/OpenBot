@@ -27,6 +27,7 @@ const PLAYWRIGHT: string = "playwright-core";
 type Box = { x: number; y: number; width: number; height: number } | null;
 type Locator = {
   click(): Promise<void>;
+  fill(value: string): Promise<void>;
   waitFor(options?: { state?: "hidden" | "visible" }): Promise<void>;
   boundingBox(): Promise<Box>;
   textContent(): Promise<string | null>;
@@ -51,6 +52,7 @@ type Page = {
   waitForTimeout(ms: number): Promise<void>;
   screenshot(options: { path: string }): Promise<unknown>;
   mouse: {
+    click(x: number, y: number): Promise<void>;
     move(x: number, y: number): Promise<void>;
     wheel(deltaX: number, deltaY: number): Promise<void>;
   };
@@ -169,6 +171,14 @@ export async function invoke(command) {
       return { outcome: "completed", stack, reason: null, conflicted: false };
     case "run_local_eval":
       return status("ready", "valid");
+    // OpenBot's own start, the step's last row: it stays there for the test to look at.
+    case "start_stack":
+      return new Promise(() => {});
+    // Usage data as a first run finds it: shared until the person says otherwise.
+    case "plugin:openbot-desktop|usage_data":
+      return { shared: true, offByEnvironment: false };
+    case "plugin:openbot-desktop|set_usage_data":
+      return { shared: false, offByEnvironment: false };
     default:
       return null;
   }
@@ -263,9 +273,17 @@ let chromium: Chromium;
 beforeAll(async () => {
   if (!asked) return;
   built = await buildWindow();
-  ({ chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium });
-  // The CI job installs full Chromium without the headless shell.
-  browser = await chromium.launch({ channel: "chromium" });
+  const playwright = (await import(PLAYWRIGHT)) as {
+    chromium: Chromium;
+    webkit: { launch(): Promise<Browser> };
+  };
+  ({ chromium } = playwright);
+  // The CI job installs full Chromium without the headless shell. `OPENBOT_APP_ENGINE=webkit` is
+  // for a look in the engine the Mac window draws with, on a machine that has it installed.
+  browser =
+    process.env.OPENBOT_APP_ENGINE === "webkit"
+      ? await playwright.webkit.launch()
+      : await chromium.launch({ channel: "chromium" });
 });
 
 afterAll(async () => {
@@ -1266,6 +1284,105 @@ describe.skipIf(!asked)(
     }, 30_000);
   },
 );
+
+/*
+ * Seen on Windows K: on "Finishing setup" the usage data checkbox sat under the step's rows, and the
+ * rows come one at a time. It was on screen and could be clicked from the step's first moment, and
+ * then moved down 49 px three times in about three seconds as the second, third and fourth rows
+ * arrived, 147 px in all. A click aimed at it landed on nothing, and the box stayed ticked. The
+ * choice sits above the rows now, under the step's own words, and holds its place for the whole step.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the step's first and last moments at each size.
+ */
+describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, holds its place from the step's first row to its last, and unticks where it was`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await toTheAiStep(page);
+        await page.getByText("Anthropic", { exact: true }).click();
+        await page
+          .getByRole("tab", { name: "Use an API key", exact: true })
+          .click();
+        await page
+          .getByLabel("Anthropic API key", { exact: true })
+          .fill("a-key-for-this-test");
+        await page
+          .getByRole("button", { name: "Continue", exact: true })
+          .click();
+        await page.getByRole("heading", { name: "Finishing setup" }).waitFor();
+        const box = page.getByRole("checkbox");
+        await box.waitFor();
+        // The entrance animation settles before anything is measured.
+        await page.waitForTimeout(600);
+        /** Where the checkbox is in the window, and whether a click at its middle reaches it. */
+        const where = async () => {
+          const at = await box.boundingBox();
+          const reached = await page.evaluate(() => {
+            const found = document.querySelector(
+              '.usage-choice input[type="checkbox"]',
+            ) as HTMLInputElement;
+            const rect = found.getBoundingClientRect();
+            return (
+              document.elementFromPoint(
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2,
+              ) === found
+            );
+          });
+          return { x: at?.x, y: at?.y, reached };
+        };
+        const rows = () => page.locator(".steps > .step").count();
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        const keep = async (moment: string) => {
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/finishing-setup-${moment}-${width}x${height}.png`,
+            });
+        };
+
+        // The step's first moment: one row, setting up, and the choice already there to click.
+        await page
+          .getByRole("listitem", { name: "Setting up OpenBot" })
+          .waitFor();
+        const first = await where();
+        expect(await rows()).toBe(1);
+        expect(first.y).toBeGreaterThan(0);
+        expect(first.reached).toBe(true);
+        await keep("first-row");
+
+        // Setting up ends, and the rest of the rows arrive one after another.
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishSetUp: () => void } }
+          ).__fake.finishSetUp(),
+        );
+        await page.getByRole("listitem", { name: "Opening OpenBot" }).waitFor();
+        await page.waitForTimeout(600);
+        expect(await rows()).toBe(4);
+        await keep("last-row");
+        expect(await where()).toEqual(first);
+
+        // A click where the box was at the step's first moment unticks it.
+        await page.mouse.click((first.x ?? 0) + 6, (first.y ?? 0) + 6);
+        await page.waitForTimeout(200);
+        expect(
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { calls: string[] } }
+            ).__fake.calls.filter(
+              (call) => call === "plugin:openbot-desktop|set_usage_data",
+            ),
+          ),
+        ).toEqual(["plugin:openbot-desktop|set_usage_data"]);
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
+  }
+});
 
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */
 async function toStart(page: Page) {
