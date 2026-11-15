@@ -1280,6 +1280,10 @@ function Setup() {
               ? "OpenBot starts once you choose what happens to the data a previous installation left."
               : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
           </p>
+          {/* The last thing setup asks: whether to share usage data. Above the rows, which come one
+              at a time: under them, on Windows K, the box moved down 147 px while a person could
+              click it, and a click aimed at it missed. */}
+          {!returningToInstallation && <UsageDataChoice />}
           {freshInstall || (
             <LocalIntelligence
               sequence={local}
@@ -1329,8 +1333,6 @@ function Setup() {
               </button>
             </div>
           )}
-          {/* The last thing setup asks, at the foot of its last screen: whether to share usage data. */}
-          {!returningToInstallation && <UsageDataChoice />}
         </div>
       </main>
     );
