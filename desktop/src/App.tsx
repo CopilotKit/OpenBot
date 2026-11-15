@@ -6,6 +6,7 @@ import { CopilotKitAccount } from "./CopilotKitAccount";
 import {
   EarlyDownloadsLine,
   earlyDownload,
+  earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
@@ -55,7 +56,13 @@ import {
 } from "./telemetry";
 import { UsageDataChoice } from "./UsageDataChoice";
 import { type Hosting, Welcome } from "./Welcome";
-import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
+import { choseThisComputer, rememberThisComputer } from "./thisComputer";
+import {
+  type Blocker,
+  fixesItself,
+  WindowsBlocker,
+  WindowsRestart,
+} from "./WindowsBlocker";
 
 type AlreadyConfigured = {
   values: Record<string, string>;
@@ -517,31 +524,55 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     }
   }, [root, model, harness, step]);
 
+  /*
+   * What this computer needs before OpenBot can run on it, which on Windows is WSL, a Windows
+   * feature or a restart: looked at, and its screen shown, which then sets about it by itself
+   * (`WindowsBlocker`). Only ever for a person who has chosen this computer. Seen on a clean
+   * Windows machine: this ran at launch, before the choice, and somebody who only wanted to
+   * connect to their company's OpenBot had WSL turned on and a restart asked for first.
+   *
+   * Answers what is in the way, nothing, or that it could not tell (said on its own screen).
+   */
+  const checkWindows = useCallback(async (): Promise<
+    Blocker | "unknown" | null
+  > => {
+    try {
+      const found = await invoke<Blocker | null>("windows_blocker");
+      setBlocker(found);
+      if (found) {
+        setInstruction(
+          await invoke<string>("windows_blocker_instruction", {
+            blocker: found,
+          }),
+        );
+      }
+      return found;
+    } catch (error) {
+      setBlockerFailure(asProblem(error));
+      return "unknown";
+    }
+  }, []);
+  // Nothing of OpenBot is on this computer and the person has not chosen it yet: Install asks.
+  const windowsUnchecked = useRef(false);
+  const [checkingWindows, setCheckingWindows] = useState(false);
+  // A launch after the restart Windows needed, with Windows ready: the install asked for goes on.
+  const [installAskedFor, setInstallAskedFor] = useState(false);
+
   useEffect(() => {
     let active = true;
-    // A restart still owed comes first: a feature switched on reads as on before it runs.
-    const windowsReady = invoke<boolean>("windows_restart_pending")
+    // A restart still owed comes first: a feature switched on reads as on before it runs. Only a
+    // fix the person's choice of this computer led to records one.
+    const restartOwed = invoke<boolean>("windows_restart_pending")
       .catch(() => false)
-      .then(async (pending) => {
-        if (pending) {
-          setRestartPending(true);
-          return false;
-        }
-        const found = await invoke<Blocker | null>("windows_blocker");
-        setBlocker(found);
-        if (found) {
-          setInstruction(
-            await invoke<string>("windows_blocker_instruction", {
-              blocker: found,
-            }),
-          );
-        }
-        return found === null;
-      })
-      .catch((error) => {
-        setBlockerFailure(asProblem(error));
-        return false;
+      .then((pending) => {
+        if (pending) setRestartPending(true);
+        return pending;
       });
+    // Chosen in an earlier run, which what Windows needed ended: straight back to it.
+    const chosenBefore = choseThisComputer();
+    const windowsBefore = chosenBefore
+      ? restartOwed.then((owed) => (owed ? "owed" : checkWindows()))
+      : null;
     // Read once and kept apart from `last_failure`, which would hold auto-start.
     invoke<Problem | null>("last_local_eval_stop_failure")
       .then((found) => {
@@ -565,10 +596,10 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     Promise.all([
       invoke<string | null>("selected_root").catch(() => null),
       invoke<string>("default_root"),
-      windowsReady,
+      restartOwed,
       interruptedRun,
     ])
-      .then(async ([selected, fallback, canResume, interrupted]) => {
+      .then(async ([selected, fallback, owed, interrupted]) => {
         if (!active) return;
         const found = selected || fallback;
         setRoot(found);
@@ -586,6 +617,31 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         if (!active) return;
         if (configured) {
           setAlreadyHeld({ ...configured.values, saved: configured.saved });
+        }
+        /*
+         * Whether the person has chosen this computer: OpenBot is installed on it, or a restart
+         * for it is owed, or an earlier run's Install found Windows not ready. Then Windows is
+         * looked at now, as it always was. Otherwise nothing is, until Install.
+         */
+        const installedHere = Boolean(
+          configured?.installation ||
+            configured?.launch ||
+            configured?.localEval,
+        );
+        let canResume = false;
+        if (!owed) {
+          if (windowsBefore || installedHere) {
+            canResume = (await (windowsBefore ?? checkWindows())) === null;
+            if (!active) return;
+            if (canResume && chosenBefore) {
+              // Windows is ready: that is over with, and the install asked for carries on.
+              rememberThisComputer(false);
+              if (!installedHere) setInstallAskedFor(true);
+            }
+          } else {
+            windowsUnchecked.current = true;
+            canResume = true;
+          }
         }
         /*
          * Setup resumes part-way only for an installation with a local Intelligence stack recorded.
@@ -676,7 +732,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       active = false;
       stop.then((unlisten) => unlisten());
     };
-  }, [recoverFromStart]);
+  }, [recoverFromStart, checkWindows]);
 
   /** True when the installation completed. */
   async function install(nextHarness = harness): Promise<boolean> {
@@ -1060,6 +1116,51 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       ...said,
     });
 
+  /** The first screen's Install, once this computer is ready for it. */
+  function installHere() {
+    // The default Bot, recorded as a choice of it would be.
+    recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
+    // The account is the first screen; OpenBot installs behind it meanwhile.
+    setStep("account");
+    void beginLocalInstall();
+  }
+
+  /*
+   * Install, with Self-hosted chosen: the person has chosen this computer. Where nothing of
+   * OpenBot was on it, this is the first look at what Windows needs. Ready, the install begins.
+   * Not ready, its screen shows and sets about it, as it did at launch before there was a choice.
+   * What OpenBot can fix itself costs a restart that ends the app, so that the person chose this
+   * computer is kept for the launch after it (`thisComputer.ts`).
+   */
+  async function chooseThisComputer() {
+    if (!windowsUnchecked.current) {
+      installHere();
+      return;
+    }
+    setCheckingWindows(true);
+    try {
+      const found = await checkWindows();
+      windowsUnchecked.current = false;
+      if (found === null) installHere();
+      else if (found !== "unknown" && fixesItself(found))
+        rememberThisComputer(true);
+    } finally {
+      setCheckingWindows(false);
+    }
+  }
+
+  // The install a launch found asked for, once Windows was ready: on with it, as Install does,
+  // unless the disk is too full, which the first screen says.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the launch has finished.
+  useEffect(() => {
+    if (!installAskedFor || checkingResume || running || !root.trim()) return;
+    setInstallAskedFor(false);
+    if (step !== "welcome") return;
+    void earlyDownloadsMeasured().then((now) => {
+      if (now?.state !== "short") installHere();
+    });
+  }, [installAskedFor, checkingResume, running, root]);
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -1088,13 +1189,15 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     );
   }
 
-  if (checkingResume) {
+  if (checkingResume || checkingWindows) {
     return (
       <main>
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">
-            Checking your saved setup…
+            {checkingWindows
+              ? "Checking this computer…"
+              : "Checking your saved setup…"}
           </p>
           <SetupProgress steps={steps} />
         </div>
@@ -1131,13 +1234,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           onConnect={() => setStep("connect_openbot")}
           onThisComputer={() => setStep("welcome")}
           saved={{ address }}
-          onInstall={() => {
-            // The default Bot, recorded as a choice of it would be.
-            recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
-            // The account is the first screen; OpenBot installs behind it meanwhile.
-            setStep("account");
-            void beginLocalInstall();
-          }}
+          onInstall={() => void chooseThisComputer()}
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
       </main>
