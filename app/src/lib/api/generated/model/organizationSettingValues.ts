@@ -9,7 +9,7 @@ import type { OrganizationSettingValuesModelAllowlist } from "./organizationSett
  * The organization's settings. Context is read only: it comes back with the settings and is never sent.
  */
 export interface OrganizationSettingValues {
-  context?: OrganizationSettingsContext;
+  readonly context?: OrganizationSettingsContext;
   /** Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in. */
   ssoRequired?: boolean;
   /** Whether what Bots do on their computers is recorded, to read in computer actions. */

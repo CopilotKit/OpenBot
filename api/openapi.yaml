@@ -20407,6 +20407,7 @@ components:
       properties:
         context:
           $ref: '#/components/schemas/OrganizationSettingsContext'
+          readOnly: true
         ssoRequired:
           type: boolean
           description: Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.
