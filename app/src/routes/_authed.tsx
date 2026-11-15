@@ -3,6 +3,10 @@ import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
+import {
+  connectedThroughDesktop,
+  signOutThroughDesktop,
+} from "../lib/auth/mutations";
 import { currentUserQueryOptions, needsOnboarding } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
@@ -16,6 +20,15 @@ export const Route = createFileRoute("/_authed")({
       currentUserQueryOptions(),
     );
     if (!user) {
+      /*
+       * Inside an OpenBot Desktop connected to an OpenBot that runs somewhere else, the desktop app
+       * holds the sign-in and this page has none to renew: the web sign-in screen would sign in a
+       * window that cannot keep it. The desktop app ends what is left of the sign-in and shows its
+       * own setup, where the person signs in again. If it cannot, the sign-in screen is still there.
+       */
+      if (await connectedThroughDesktop(context.queryClient)) {
+        await signOutThroughDesktop().catch(() => undefined);
+      }
       throw redirect({ to: "/sign" });
     }
     /*
