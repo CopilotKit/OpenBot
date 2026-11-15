@@ -99,6 +99,8 @@ afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
   setSystemTime();
+  // What the window keeps between launches (`thisComputer.ts`) is one test's own.
+  localStorage.clear();
   invokeCalls = [];
   localSteps = null;
   progressListeners.clear();
@@ -559,6 +561,8 @@ async function expectHandover(timeout?: number) {
 /** The first screen's Install, which with a CLI installs OpenBot and local Intelligence. */
 async function installLocal(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Install" }));
+  // Install first looks at what this computer needs, where nothing has yet: let that answer.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
 /** Words about the software underneath, which no local screen says. */
@@ -5491,6 +5495,150 @@ function setupRootConfiguration(
   };
 }
 
+/*
+ * Seen on a clean Windows machine: the first screen was "Turn on Windows Subsystem for Linux", and
+ * OpenBot began turning it on, with a Windows restart to follow, before the person had chosen
+ * anything. Somebody connecting to their company's OpenBot installs nothing on this computer, and
+ * got WSL and a restart first. What this computer needs is looked at once the person has chosen
+ * this computer, with Install, and never before the choice.
+ */
+const WSL_INSTRUCTION =
+  "Run `wsl --install`, restart Windows, and start OpenBot again.";
+
+/** A Windows machine with nothing of OpenBot on it, and WSL not turned on. */
+function cleanWindowsWithoutWsl(shell: Record<string, unknown> = {}) {
+  setupRootConfiguration("/tmp/openbot-clean-windows", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+    windows_restart_pending: false,
+    windows_blocker: "wsl-absent",
+    windows_blocker_instruction: WSL_INSTRUCTION,
+    ...shell,
+  });
+}
+
+/** Whether the window asked Windows anything, or changed anything on it. */
+function windowsCalls() {
+  return invokeCalls
+    .map((call) => call.command)
+    .filter((command) =>
+      [
+        "windows_blocker",
+        "windows_blocker_instruction",
+        "windows_fix",
+        "windows_restart",
+      ].includes(command),
+    );
+}
+
+test("a clean Windows machine without WSL opens at the choice, and nothing about Windows is checked or changed", async () => {
+  cleanWindowsWithoutWsl();
+  const view = await renderApp();
+  expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+    "checked",
+    true,
+  );
+  expect(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  ).toHaveProperty("disabled", false);
+  expect(buttons(view)).toEqual(["Install"]);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(view.queryByText("Before OpenBot can start")).toBeNull();
+  expect(windowsCalls()).toEqual([]);
+  expect(installationCalls()).toEqual([]);
+});
+
+test("on that machine, Install with Self-hosted chosen shows what Windows needs, as it always has", async () => {
+  cleanWindowsWithoutWsl();
+  const view = await renderApp();
+  await installLocal(view);
+  expect(
+    await view.findByRole("heading", {
+      name: "Turn on Windows Subsystem for Linux",
+    }),
+  ).toBeTruthy();
+  expect(view.getByText("wsl --install")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Install" })).toBeNull();
+  // Nothing installs until Windows is ready.
+  expect(installationCalls()).toEqual([]);
+  expect(windowsCalls()).toEqual([
+    "windows_blocker",
+    "windows_blocker_instruction",
+  ]);
+});
+
+test("on that machine, connecting to an OpenBot that runs elsewhere never asks Windows anything", async () => {
+  const signIn = deferred<null>();
+  cleanWindowsWithoutWsl({
+    check_openbot_address: { address: ELSEWHERE },
+    connect_to_openbot: () => signIn.promise,
+  });
+  const view = await renderApp();
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("OpenBot address"),
+    `${ELSEWHERE}{Enter}`,
+  );
+  await view.findByText("Finish signing in in your browser.");
+  await act(async () => signIn.resolve(null));
+  expect(view.getByText("Opening OpenBot…")).toBeTruthy();
+  expect(windowsCalls()).toEqual([]);
+  expect(installationCalls()).toEqual([]);
+});
+
+/*
+ * The restart Windows needs ends the app. The person had already chosen this computer, so the
+ * next launch goes back to what Windows needs and then on with the install, not to the choice.
+ */
+test("after the restart a first install asked for, the next launch goes back to what Windows needs, then on with the install", async () => {
+  cleanWindowsWithoutWsl();
+  const first = await renderApp();
+  await installLocal(first);
+  await first.findByRole("heading", {
+    name: "Turn on Windows Subsystem for Linux",
+  });
+  first.unmount();
+  invokeCalls = [];
+  // Opened again, with part of WSL still missing: straight to it, with no choice in between.
+  cleanWindowsWithoutWsl({ windows_blocker: "wsl-no-kernel" });
+  const again = await renderApp();
+  expect(
+    await again.findByRole("heading", {
+      name: "Finish installing Windows Subsystem for Linux",
+    }),
+  ).toBeTruthy();
+  expect(again.queryByRole("heading", { name: "Set up OpenBot" })).toBeNull();
+  again.unmount();
+  invokeCalls = [];
+  // Opened once more with Windows ready: the install the person asked for carries on.
+  const preparation = deferred<void>();
+  cleanWindowsWithoutWsl({
+    windows_blocker: null,
+    prepare_installation: () => preparation.promise,
+  });
+  const ready = await renderApp();
+  await waitFor(() =>
+    expect(installationCalls().map((call) => call.command)).toEqual([
+      "prepare_installation",
+    ]),
+  );
+  expect(ready.queryByRole("button", { name: "Install" })).toBeNull();
+  expect(ready.queryByText("Before OpenBot can start")).toBeNull();
+  ready.unmount();
+  invokeCalls = [];
+  // And that is over with: a later launch with nothing installed is the choice again.
+  cleanWindowsWithoutWsl({ windows_blocker: null });
+  const later = await renderApp();
+  expect(later.getByRole("button", { name: "Install" })).toBeTruthy();
+  expect(installationCalls()).toEqual([]);
+});
+
 test("Windows detection failure blocks setup and displays its diagnostic", async () => {
   setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),
@@ -5506,6 +5654,8 @@ test("Windows detection failure blocks setup and displays its diagnostic", async
   };
 
   const view = await renderApp();
+  // Looked at once this computer is chosen, with Install.
+  await installLocal(view);
   const alert = await view.findByRole("alert");
   expect(alert.textContent).toContain(problem.said);
   await userEvent.click(view.getByText("Technical details"));
@@ -5533,6 +5683,7 @@ test("a failed Windows blocker instruction is visible instead of an empty blocke
     return setupHandler(command, args);
   };
   const view = await renderApp();
+  await installLocal(view);
   expect((await view.findByRole("alert")).textContent).toContain(
     "The blocker instruction could not be read.",
   );
@@ -5571,6 +5722,7 @@ test("a successfully detected missing WSL feature keeps its setup instruction", 
     return setupHandler(command, args);
   };
   const view = await renderApp();
+  await installLocal(view);
   expect(await view.findByText("wsl --install")).toBeTruthy();
   expect(
     view.getByRole("heading", { name: "Turn on Windows Subsystem for Linux" }),
@@ -5597,6 +5749,7 @@ test("disabled Virtual Machine Platform displays its feature-specific fix and bl
     return setupHandler(command, args);
   };
   const view = await renderApp();
+  await installLocal(view);
   expect(
     await view.findByText(
       "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart",
