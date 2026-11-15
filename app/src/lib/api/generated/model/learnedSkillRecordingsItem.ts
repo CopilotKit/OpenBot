@@ -3,10 +3,10 @@
  */
 
 export type LearnedSkillRecordingsItem = {
-  /** Learning's id for the recording. */
+  /** The backend's id for the recording. */
   id: string;
   /** @nullable */
   title: string | null;
-  /** False when Learning no longer has the recording. */
+  /** False when the backend no longer has the recording. */
   available: boolean;
 };

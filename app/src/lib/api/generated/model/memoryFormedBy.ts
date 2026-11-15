@@ -3,7 +3,7 @@
  */
 
 /**
- * Who formed it: the person, a source, a Bot, or (intelligence) something outside OpenBot, kept in long-term memory, which can be edited or forgotten but not paused.
+ * Who formed it: the person, a source, a Bot, or the backend (one the backend holds for the person that OpenBot formed no record of, which can be edited or forgotten but not paused).
  */
 export type MemoryFormedBy =
   (typeof MemoryFormedBy)[keyof typeof MemoryFormedBy];

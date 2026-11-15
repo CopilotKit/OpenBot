@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Learning is busy. Asking again in a minute may work.
+ * The backend is busy. Asking again in a minute may work.
  */
 export type LearningBusyResponse = Problem;

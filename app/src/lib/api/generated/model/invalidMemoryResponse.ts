@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory formed outside OpenBot.
+ * A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory only the backend holds.
  */
 export type InvalidMemoryResponse = Problem;

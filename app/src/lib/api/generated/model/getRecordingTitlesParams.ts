@@ -4,7 +4,7 @@
 
 export type GetRecordingTitlesParams = {
   /**
-   * The recordings, by Learning's id for each, at most 50.
+   * The recordings, by the backend's id, at most 50.
    * @minItems 1
    * @maxItems 50
    */

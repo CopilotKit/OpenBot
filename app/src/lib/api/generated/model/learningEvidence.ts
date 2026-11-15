@@ -8,7 +8,7 @@
 export type LearningEvidence =
   | {
       kind: "conversation";
-      /** Learning's id for the conversation. */
+      /** The backend's id for the conversation. */
       threadId: string;
       /** @nullable */
       threadName: string | null;
@@ -29,7 +29,7 @@ export type LearningEvidence =
     }
   | {
       kind: "recording";
-      /** Learning's id for the recording. */
+      /** The backend's id for the recording. */
       trajectoryId: string;
       /** False when the recording is gone. */
       trajectoryPresent: boolean;

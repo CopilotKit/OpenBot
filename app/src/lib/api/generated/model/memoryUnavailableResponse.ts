@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The memory was formed outside OpenBot, and long-term memory can't be reached right now. Asking again may work.
+ * The memory is one only the backend holds, and the backend can't be reached right now. Asking again may work.
  */
 export type MemoryUnavailableResponse = Problem;

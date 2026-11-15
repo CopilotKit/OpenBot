@@ -5,7 +5,7 @@ import type { LearningAutomaticState } from "./learningAutomaticState";
 import type { LearningSpaceId } from "./learningSpaceId";
 
 /**
- * What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: Learning is switched off. unavailable: Learning couldn't be asked. pending: not asked yet.
+ * What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator's settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn't include Learning. learning_off: the backend has Learning switched off. unavailable: the backend couldn't be asked. pending: not asked yet.
  */
 export interface LearningAutomatic {
   state: LearningAutomaticState;

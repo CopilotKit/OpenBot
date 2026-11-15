@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The Learning space assigned doesn't exist yet.
+ * The Learning space assigned doesn't exist in the backend yet.
  */
 export type LearningSpaceNotFoundResponse = Problem;

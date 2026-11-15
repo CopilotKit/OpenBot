@@ -4,7 +4,7 @@
 import type { LearningSpaceId } from "./learningSpaceId";
 
 /**
- * A Learning space, by its id.
+ * A Learning space, by its id in the organization's backend.
  */
 export interface LearningTarget {
   containerId: LearningSpaceId;

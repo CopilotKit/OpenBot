@@ -3,7 +3,7 @@
  */
 
 /**
- * Learning is switched off, so there is nothing to read.
+ * Learning is switched off in the backend, so there is nothing to read.
  */
 export type LearningSpaceUnavailable =
   (typeof LearningSpaceUnavailable)[keyof typeof LearningSpaceUnavailable];

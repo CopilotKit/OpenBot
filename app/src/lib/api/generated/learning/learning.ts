@@ -508,7 +508,7 @@ export const getCreateAutomaticLearningSpaceUrl = (organizationId: string) => {
 };
 
 /**
- * Create the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
+ * Create, in the organization's backend, the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
  * @summary Create the Learning space OpenBot assigns by itself
  */
 export const createAutomaticLearningSpace = async (
@@ -671,7 +671,7 @@ export const getGetLearningOverviewUrl = (
 };
 
 /**
- * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Learning's dashboard where there is one, and why Learning can't run on this machine's model where that is known. Without a dashboard, Learning can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
+ * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into the backend dashboard where there is one, and why Learning can't run on this machine's model where that is known. A backend with no dashboard can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
  * @summary Read how Learning is going for a space
  */
 export const getLearningOverview = async (
@@ -3416,7 +3416,7 @@ export const getGetRecordingTitlesUrl = (
 };
 
 /**
- * Return the title of each recording named, by the id Learning gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
+ * Return the title of each recording named, by the id the backend gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
  * @summary Read the titles of a person's recordings
  */
 export const getRecordingTitles = async (

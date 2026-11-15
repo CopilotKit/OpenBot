@@ -3,7 +3,7 @@
  */
 
 /**
- * A Learning space's id (its container).
+ * A Learning space's id in the backend (its container).
  * @minLength 1
  * @maxLength 64
  * @pattern ^[a-z0-9]+(?:-[a-z0-9]+)*$

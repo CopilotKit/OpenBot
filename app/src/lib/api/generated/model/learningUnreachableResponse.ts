@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Learning didn't answer. Asking again may work.
+ * The backend's Learning didn't answer. Asking again may work.
  */
 export type LearningUnreachableResponse = Problem;

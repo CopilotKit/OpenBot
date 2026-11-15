@@ -21,7 +21,7 @@ export interface Memory {
   enabled: boolean;
   /** unreviewed: a Bot formed it or a source read it in, and no Bot recalls it until the person accepts it. */
   reviewState: MemoryReviewState;
-  /** Who formed it: the person, a source, a Bot, or (intelligence) something outside OpenBot, kept in long-term memory, which can be edited or forgotten but not paused. */
+  /** Who formed it: the person, a source, a Bot, or the backend (one the backend holds for the person that OpenBot formed no record of, which can be edited or forgotten but not paused). */
   formedBy: MemoryFormedBy;
   /**
    * The Bot that formed it. Only that Bot recalls it.

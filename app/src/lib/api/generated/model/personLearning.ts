@@ -16,6 +16,6 @@ export interface PersonLearning {
   autoApprove: boolean | null;
   /** @nullable */
   skills: PersonalLearnedSkill[] | null;
-  /** Why skills is null. off: Automatic learning is off. unavailable: Learning did not deliver them. */
+  /** Why skills is null. off: Automatic learning is off. unavailable: the backend did not deliver them. */
   unavailable?: PersonLearningUnavailable;
 }

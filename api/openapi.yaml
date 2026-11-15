@@ -16405,7 +16405,7 @@ paths:
         - Learning
       operationId: createAutomaticLearningSpace
       summary: Create the Learning space OpenBot assigns by itself
-      description: Create the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
+      description: Create, in the organization's backend, the Learning space OpenBot assigns when nobody chose one, with the credential this deployment holds for it, then assign it. Offered only where the settings say canCreate. Only an administrator may. Recorded on the audit trail.
       security:
         - webSession: []
         - appOAuth:
@@ -16451,7 +16451,7 @@ paths:
         - Learning
       operationId: getLearningOverview
       summary: Read how Learning is going for a space
-      description: 'Return how Learning stands in the space every Bot learns into, or in one Bot''s own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into Learning''s dashboard where there is one, and why Learning can''t run on this machine''s model where that is known. Without a dashboard, Learning can''t count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.'
+      description: 'Return how Learning stands in the space every Bot learns into, or in one Bot''s own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into the backend dashboard where there is one, and why Learning can''t run on this machine''s model where that is known. A backend with no dashboard can''t count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -17044,7 +17044,7 @@ paths:
         - Learning
       operationId: getRecordingTitles
       summary: Read the titles of a person's recordings
-      description: Return the title of each recording named, by the id Learning gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
+      description: Return the title of each recording named, by the id the backend gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -17055,7 +17055,7 @@ paths:
         - name: ids
           in: query
           required: true
-          description: The recordings, by Learning's id for each, at most 50.
+          description: The recordings, by the backend's id, at most 50.
           style: form
           explode: false
           schema:
@@ -17836,7 +17836,7 @@ paths:
         - Memory
       operationId: listMemories
       summary: List a person's memories
-      description: 'Return one page of what a person''s Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones formed for them outside OpenBot and kept in long-term memory, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of what a person''s Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot''s own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can''t either. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -17875,7 +17875,7 @@ paths:
         - Memory
       operationId: createMemory
       summary: Remember a fact
-      description: Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the deployment has long-term memory, it is copied there too. Only the person themselves may write one.
+      description: Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the backend keeps memory, it is copied there too. Only the person themselves may write one.
       security:
         - webSession: []
         - appOAuth:
@@ -17930,7 +17930,7 @@ paths:
         - Memory
       operationId: updateMemory
       summary: Change a memory
-      description: Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory formed outside OpenBot can be edited, not paused or reviewed. Editing a memory replaces its copy in long-term memory. Only the person themselves may change their memories.
+      description: Edit a memory's words, pause or resume it, or accept one a Bot formed or read in. A memory the backend holds that OpenBot formed no record of can be edited, not paused or reviewed. Editing one replaces the copy the backend holds. Only the person themselves may change their memories.
       security:
         - webSession: []
         - appOAuth:
@@ -17985,7 +17985,7 @@ paths:
         - Memory
       operationId: deleteMemory
       summary: Forget a memory
-      description: 'Forget a memory: no Bot recalls it again, its copy in long-term memory is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.'
+      description: 'Forget a memory: no Bot recalls it again, the backend''s copy is retired, and a fact read in from a source stays forgotten when the source syncs again. Only the person themselves may forget their memories.'
       security:
         - webSession: []
         - appOAuth:
@@ -18999,7 +18999,7 @@ components:
       name: skillName
       in: path
       required: true
-      description: 'A learned skill''s name as Learning publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.'
+      description: 'A learned skill''s name as OpenBot publishes it: 1 to 200 characters, no slash, backslash or control character, not . or .., and no space at either end.'
       schema:
         type: string
         minLength: 1
@@ -19048,7 +19048,7 @@ components:
       name: memoryId
       in: path
       required: true
-      description: The memory's id. A memory formed outside OpenBot has an id that starts intelligence:.
+      description: The memory's id. A memory the backend holds that OpenBot formed no record of has an id that starts intelligence:.
       schema:
         type: string
         minLength: 1
@@ -31874,13 +31874,13 @@ components:
           description: Where the caller saw or copied it.
     LearningSpaceId:
       type: string
-      description: A Learning space's id (its container).
+      description: A Learning space's id in the backend (its container).
       minLength: 1
       maxLength: 64
       pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
     LearningTarget:
       type: object
-      description: A Learning space, by its id.
+      description: A Learning space, by its id in the organization's backend.
       additionalProperties: false
       required:
         - containerId
@@ -31923,7 +31923,7 @@ components:
           description: Who reviews what people's own recordings propose.
     LearningAutomatic:
       type: object
-      description: 'What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator''s settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn''t include Learning. learning_off: Learning is switched off. unavailable: Learning couldn''t be asked. pending: not asked yet.'
+      description: 'What OpenBot last found when it looked for the space it assigns by itself. off: switched off, or the environment names a space. saved: an administrator''s settings decide. assigned: OpenBot assigned it. absent: the project has no such space yet. not_entitled: the plan doesn''t include Learning. learning_off: the backend has Learning switched off. unavailable: the backend couldn''t be asked. pending: not asked yet.'
       required:
         - state
       properties:
@@ -32141,14 +32141,14 @@ components:
             properties:
               id:
                 type: string
-                description: Learning's id for the recording.
+                description: The backend's id for the recording.
               title:
                 type:
                   - string
                   - 'null'
               available:
                 type: boolean
-                description: False when Learning no longer has the recording.
+                description: False when the backend no longer has the recording.
     LearningProposal:
       type: object
       description: A skill change Learning proposed in a space, waiting for review or reviewed.
@@ -32409,7 +32409,7 @@ components:
           enum:
             - 'off'
             - unavailable
-          description: 'Why skills is null. off: Automatic learning is off. unavailable: Learning did not deliver them.'
+          description: 'Why skills is null. off: Automatic learning is off. unavailable: the backend did not deliver them.'
     UpdatePersonLearningRequest:
       type: object
       additionalProperties: false
@@ -32531,7 +32531,7 @@ components:
           type: string
           enum:
             - learning-off
-          description: Learning is switched off, so there is nothing to read.
+          description: Learning is switched off in the backend, so there is nothing to read.
     PersonLearningReview:
       type: object
       required:
@@ -32725,7 +32725,7 @@ components:
               const: conversation
             threadId:
               type: string
-              description: Learning's id for the conversation.
+              description: The backend's id for the conversation.
             threadName:
               type:
                 - string
@@ -32778,7 +32778,7 @@ components:
               const: recording
             trajectoryId:
               type: string
-              description: Learning's id for the recording.
+              description: The backend's id for the recording.
             trajectoryPresent:
               type: boolean
               description: False when the recording is gone.
@@ -32885,7 +32885,7 @@ components:
             - import
             - bot
             - intelligence
-          description: 'Who formed it: the person, a source, a Bot, or (intelligence) something outside OpenBot, kept in long-term memory, which can be edited or forgotten but not paused.'
+          description: 'Who formed it: the person, a source, a Bot, or the backend (one the backend holds for the person that OpenBot formed no record of, which can be edited or forgotten but not paused).'
         formedByBotId:
           type:
             - string
@@ -37170,7 +37170,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     LearningAdminOnly:
-      description: The caller is not an administrator, or the licence doesn't include Learning.
+      description: The caller is not an administrator, or the backend's licence doesn't include Learning.
       content:
         application/problem+json:
           schema:
@@ -37192,14 +37192,14 @@ components:
                 type: https://open.bot/errors/learning-not-enabled
                 title: Learning isn't licensed.
                 status: 403
-                detail: Learning isn't included in your plan.
+                detail: The backend's licence doesn't include Learning.
                 code: LEARNING_NOT_ENABLED
                 category: permission
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     LearningSpaceNotFound:
-      description: The Learning space assigned doesn't exist yet.
+      description: The Learning space assigned doesn't exist in the backend yet.
       content:
         application/problem+json:
           schema:
@@ -37210,14 +37210,14 @@ components:
                 type: https://open.bot/errors/learning-space-not-found
                 title: Learning space not found.
                 status: 404
-                detail: This Learning space isn't set up yet.
+                detail: This Learning container doesn't exist in the backend yet.
                 code: LEARNING_CONTAINER_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     LearningOff:
-      description: Learning is switched off, or it has no model to learn with.
+      description: Learning is switched off in the backend, or it has no model to learn with.
       content:
         application/problem+json:
           schema:
@@ -37228,14 +37228,14 @@ components:
                 type: https://open.bot/errors/learning-off
                 title: Learning is off.
                 status: 409
-                detail: Learning is turned off. An admin has to turn it on.
+                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
                 code: LEARNING_OFF
                 category: conflict
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     LearningBusy:
-      description: Learning is busy. Asking again in a minute may work.
+      description: The backend is busy. Asking again in a minute may work.
       content:
         application/problem+json:
           schema:
@@ -37246,14 +37246,14 @@ components:
                 type: https://open.bot/errors/rate-limited
                 title: Try again shortly.
                 status: 429
-                detail: Learning is busy. Try again in a minute.
+                detail: The backend is busy. Try again in a minute.
                 code: RATE_LIMITED
                 category: rate_limit
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
     LearningUnreachable:
-      description: Learning didn't answer. Asking again may work.
+      description: The backend's Learning didn't answer. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -37264,14 +37264,14 @@ components:
                 type: https://open.bot/errors/learning-unreachable
                 title: Learning didn't answer.
                 status: 502
-                detail: Couldn't reach Learning just now. Try again in a moment.
+                detail: Couldn't reach Learning in the backend. Try again.
                 code: LEARNING_UNREACHABLE
                 category: dependency
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
     LearningUnavailable:
-      description: OpenBot couldn't read Learning just now. Asking again may work.
+      description: OpenBot couldn't read Learning from the backend just now. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -37282,7 +37282,7 @@ components:
                 type: https://open.bot/errors/learning-unavailable
                 title: Learning is unavailable.
                 status: 503
-                detail: Couldn't load your skills just now. Try again in a moment.
+                detail: Couldn't read your Skills from the backend just now. Try again.
                 code: LEARNING_UNAVAILABLE
                 category: dependency
                 retryable: true
@@ -37444,7 +37444,7 @@ components:
                 type: https://open.bot/errors/learning-proposal-not-found
                 title: Proposal not found.
                 status: 404
-                detail: This skill is gone. Refresh the list.
+                detail: The backend no longer has this skill. Refresh the list.
                 code: LEARNING_PROPOSAL_NOT_FOUND
                 category: not_found
                 retryable: false
@@ -37480,14 +37480,14 @@ components:
                 type: https://open.bot/errors/learning-insight-not-found
                 title: Insight not found.
                 status: 404
-                detail: This insight is gone. Open the skill again.
+                detail: The backend no longer has this insight. Refresh the skill.
                 code: LEARNING_INSIGHT_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     LearningCannotRun:
-      description: 'Learning can''t start: it is switched off, or it has no model to learn with.'
+      description: 'Learning can''t start: it is switched off in the backend, or it has no model to learn with.'
       content:
         application/problem+json:
           schema:
@@ -37498,7 +37498,7 @@ components:
                 type: https://open.bot/errors/learning-off
                 title: Learning is off.
                 status: 409
-                detail: Learning is turned off. An admin has to turn it on.
+                detail: Learning is switched off in the backend. Turn it on there (learning.enabled in its Helm chart).
                 code: LEARNING_OFF
                 category: conflict
                 retryable: false
@@ -37509,7 +37509,7 @@ components:
                 type: https://open.bot/errors/learning-model-not-configured
                 title: Learning has no model.
                 status: 409
-                detail: Learning has no model to learn with yet. An admin has to give it one.
+                detail: The backend has no Learning model yet. Give its Learning agent a model and key, then try again.
                 code: LEARNING_MODEL_NOT_CONFIGURED
                 category: conflict
                 retryable: false
@@ -37545,7 +37545,7 @@ components:
                 type: https://open.bot/errors/learning-proposal-unnamed
                 title: The skill has no name.
                 status: 422
-                detail: This skill has no name, so it can't be approved. Reject it, or ask Learning to try again.
+                detail: This skill has no name OpenBot can record, so it can't be approved here.
                 code: LEARNING_PROPOSAL_UNNAMED
                 category: validation
                 retryable: false
@@ -37588,7 +37588,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     InvalidMemory:
-      description: A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory formed outside OpenBot.
+      description: A field is missing, blank once trimmed or too long, the change is empty, or it pauses or reviews a memory only the backend holds.
       content:
         application/problem+json:
           schema:
@@ -37599,14 +37599,14 @@ components:
                 type: https://open.bot/errors/validation-error
                 title: Request validation failed.
                 status: 400
-                detail: This memory can be edited or forgotten, but not paused.
+                detail: A memory kept in the backend can be edited or forgotten, not paused.
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
     MemoryUnavailable:
-      description: The memory was formed outside OpenBot, and long-term memory can't be reached right now. Asking again may work.
+      description: The memory is one only the backend holds, and the backend can't be reached right now. Asking again may work.
       content:
         application/problem+json:
           schema:
@@ -37617,7 +37617,7 @@ components:
                 type: https://open.bot/errors/memory-unavailable
                 title: Memory is unavailable.
                 status: 503
-                detail: Couldn't reach this memory just now. Try again in a moment.
+                detail: This memory is kept in OpenBot's backend, which cannot be reached right now. Try again.
                 code: MEMORY_UNAVAILABLE
                 category: dependency
                 retryable: true

@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Learning can't start: it is switched off, or it has no model to learn with.
+ * Learning can't start: it is switched off in the backend, or it has no model to learn with.
  */
 export type LearningCannotRunResponse = Problem;
