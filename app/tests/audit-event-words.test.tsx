@@ -16,6 +16,7 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
+import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
@@ -113,11 +114,22 @@ const ACTIVITY = ROWS.map((row, index) => ({
   stored: STORED[index],
 })).filter((row) => !LEFT_OUT.has(row.type));
 
-async function renderAs(edition: "team" | "personal", rows = ROWS) {
+async function renderAs(
+  edition: "team" | "personal",
+  rows = ROWS,
+  /** The signed-in person's email, as the current-user query answers it. */
+  viewer = "dev@example.com",
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
+  });
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "dev",
+    email: viewer,
+    name: "Sam",
+    role: "admin",
   });
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -290,6 +302,42 @@ test("a row a person started names them, and searching their email finds it", as
       "Save a skill",
     ]),
   );
+});
+
+/**
+ * The person reading the page is "you", not their own email on every row: the personal edition's
+ * one person started nearly everything there. Their email still finds the rows.
+ */
+test("a row the reader started says you, and their email still finds it", async () => {
+  const view = await renderAs(
+    "personal",
+    [
+      {
+        ...row("y1", 30, "organization.renamed", "organization", {}, "org_2"),
+        payload: { by: "sam@example.com" },
+      },
+      {
+        ...row("y2", 29, "organization.renamed", "organization", {}, "org_2"),
+        payload: { by: "priya@northwind.test" },
+      },
+    ],
+    "sam@example.com",
+  );
+  const startedBy = () =>
+    [...view.container.querySelectorAll("tbody [data-column=bot]")].map(
+      (cell) => cell.lastElementChild?.textContent,
+    );
+  expect(startedBy()).toEqual([
+    "Started by you",
+    "Started by priya@northwind.test",
+  ]);
+  await userEvent
+    .setup({ document })
+    .type(
+      view.getByRole("searchbox", { name: "Search events" }),
+      "sam@example.com",
+    );
+  await waitFor(() => expect(startedBy()).toEqual(["Started by you"]));
 });
 
 /**
