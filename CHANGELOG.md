@@ -198,6 +198,12 @@ every deployment:
 
 ### Finding things
 
+- **Personal tags organize your Bots in this browser.** Add tags beside a Bot, search them, or
+  filter by a tag or Untagged. Tags belong to your signed-in account in this browser; they are not
+  shared or synced across devices, and clearing site data removes them.
+- **Bots can be searched, sorted and filtered.** Search names, displayed titles and descriptions;
+  sort by any of those fields in either direction; and show your own, shared or pinned Bots.
+  Hidden Bots use the same controls, while the Needs you board stays visible.
 - **Cmd/Ctrl+K opens a command palette** anywhere signed in. It finds pages, Bots and
   conversations and opens them; it can't send, approve, run or delete anything, and it never lists
   a page you can't open. In a Bot's browser the shortcut goes to the browser.
