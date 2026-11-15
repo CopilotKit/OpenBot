@@ -152,6 +152,9 @@ function serve({
       return meResponse({ user: { id: "ada", name: "Ada", role: "admin" } });
     const overview = overviewResponse(path, {});
     if (overview) return overview;
+    // The Network section names a team's policy by the team's name. This organization has none.
+    if (path.split("?")[0] === "/api/v2/organizations/default/teams")
+      return Response.json({ teams: [], canCreate: true, nextCursor: null });
     // A server's install, not OpenBot Desktop: no folders on this computer to choose.
     if (path === HOST_ACCESS_PATH)
       return Response.json({

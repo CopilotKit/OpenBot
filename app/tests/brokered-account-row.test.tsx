@@ -38,6 +38,7 @@ import {
   appAccessRequestsResponse,
 } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
+import { answerNoTeamGrants } from "./team-grants-api";
 import {
   accountsPage,
   checkResponse,
@@ -661,6 +662,9 @@ function installDeployment(deployment: Deployment): Server {
     );
     if (apps) return apps;
     if (path.startsWith("/api/plugins")) return json({ skills: [] });
+    // The app's Teams row: no teams here, and the app granted to none.
+    const teamGrants = answerNoTeamGrants(input, init);
+    if (teamGrants) return teamGrants;
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 

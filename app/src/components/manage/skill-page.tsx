@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { SkillFields } from "@/components/skills/skill-fields";
+import { SkillTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -210,6 +211,14 @@ export function SkillPage({ slug }: { slug: string }) {
       {/* A row that opens the confirmation, as deleting a Bot is on its own page. */}
       <PageSection title="Manage">
         <PageRows>
+          {/* Teams are the team edition's: with one person there is nobody to grant a skill to. */}
+          {paths.edition === "team" ? (
+            <SkillTeamGrantsRow
+              separator="after"
+              skillId={skill.slug}
+              title={skill.title}
+            />
+          ) : null}
           <Item
             render={<button onClick={() => setRemoving(true)} type="button" />}
             size="sm"
