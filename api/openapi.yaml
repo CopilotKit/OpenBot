@@ -20483,6 +20483,20 @@ components:
         - failed
         - ready_for_review
       description: 'Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.'
+    TaskSteer:
+      type: object
+      description: What the person told a task directly in its conversation, as its card says it in the conversation that started the task.
+      required:
+        - text
+        - at
+      properties:
+        text:
+          type: string
+          description: The person's words, on one line and cut short when they run long.
+        at:
+          type: string
+          format: date-time
+          description: When they said it.
     Task:
       type: object
       description: A piece of work a Bot does for a person in a conversation of its own.
@@ -20578,6 +20592,11 @@ components:
             - 'null'
           format: date-time
           description: When the person marked it done.
+        steer:
+          oneOf:
+            - $ref: '#/components/schemas/TaskSteer'
+            - type: 'null'
+          description: The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.
         createdAt:
           type: string
           format: date-time

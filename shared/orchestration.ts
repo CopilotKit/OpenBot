@@ -153,9 +153,36 @@ export function threadPath(channelId: string): string {
  * What a task says in the conversation that asked for it.
  *
  * `result`: the work finished, and this is what it found. `needs`: it waits on the person, in its
- * own thread. `failed`: it ran out of tries.
+ * own thread. `failed`: it ran out of tries. `steer`: the person typed into the task's thread when
+ * it had asked for nothing, and these are their words (see `steerWords`).
  */
-export type TaskReportKind = "result" | "needs" | "failed";
+export type TaskReportKind = "result" | "needs" | "failed" | "steer";
+
+/** The reports a conversation draws as a message of the task's. A steer is drawn under its card. */
+export type DrawnTaskReportKind = Exclude<TaskReportKind, "steer">;
+
+/** How much of what the person told a task its card quotes, in characters: one short line. */
+export const STEER_MAX = 120;
+
+/**
+ * What the person told a task directly in its thread, as the one line under its card in the
+ * conversation that asked quotes it: on one line, and cut at a word when it runs long.
+ *
+ * A steer is a message the person types in a task's thread when the task had not asked them for
+ * anything. The conversation that started the task would otherwise never hear of it, and its card
+ * would describe work the person has since changed. The words are theirs, so they are quoted, never
+ * reworded.
+ */
+export function steerWords(said: string): string {
+  const line = said.replace(/\s+/g, " ").trim();
+  const letters = Array.from(line);
+  if (letters.length <= STEER_MAX) return line;
+  const head = letters.slice(0, STEER_MAX - 1).join("");
+  // Cut at the last space when that keeps most of the line; a single long word is cut where it is.
+  const space = head.lastIndexOf(" ");
+  const kept = space > STEER_MAX / 2 ? head.slice(0, space) : head;
+  return `${kept.replace(/[\s.,;:!?-]+$/, "")}…`;
+}
 
 /**
  * What the message id of a task's report starts with, in the conversation that asked.
@@ -181,7 +208,13 @@ export function readTaskReport(
 ): { kind: TaskReportKind; taskId: string } | null {
   if (!messageId.startsWith(TASK_REPORT_PREFIX)) return null;
   const [kind, taskId] = messageId.slice(TASK_REPORT_PREFIX.length).split(":");
-  if (kind !== "result" && kind !== "needs" && kind !== "failed") return null;
+  if (
+    kind !== "result" &&
+    kind !== "needs" &&
+    kind !== "failed" &&
+    kind !== "steer"
+  )
+    return null;
   if (!taskId) return null;
   return { kind, taskId };
 }
