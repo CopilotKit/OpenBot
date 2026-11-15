@@ -64,6 +64,20 @@ const task = (id: string, status: string, rest: Record<string, unknown> = {}) =>
     ...rest,
   });
 
+/** The conversation the delegated tasks were asked for in. */
+const MAIN = {
+  id: "channel_main",
+  name: "Scout",
+  agentIds: [BOT],
+  summary: "Plan the offsite",
+  opening: "Help me plan the offsite",
+  lastMessage: null,
+  lastMessageAgentId: null,
+  createdAt: NOW,
+  pinned: false,
+  lastReadAt: null,
+};
+
 const item = (rest: Partial<ActivityItem>): ActivityItem => ({
   id: "item",
   kind: "routine",
@@ -89,22 +103,7 @@ function draw(
       return activityResponse(activity);
     if (path === TASKS_PATH) return Response.json({ tasks, nextCursor: null });
     if (path === CONVERSATIONS_PATH)
-      return Response.json(
-        conversationPage([
-          {
-            id: "channel_main",
-            name: "Scout",
-            agentIds: [BOT],
-            summary: "Plan the offsite",
-            opening: "Help me plan the offsite",
-            lastMessage: null,
-            lastMessageAgentId: null,
-            createdAt: NOW,
-            pinned: false,
-            lastReadAt: null,
-          },
-        ]),
-      );
+      return Response.json(conversationPage([MAIN]));
     return (
       answerScheduleLists(input, init, { checkIns }) ??
       answerBotsList(input, init, { visible: [{ id: BOT, name: "Scout" }] }) ??
