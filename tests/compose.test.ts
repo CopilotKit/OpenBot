@@ -1219,9 +1219,10 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
   });
   // One address: nothing the server is given names the gateway's own port on this machine, which
   // is the address a client would otherwise be handed beside OpenBot's.
-  expect(withBots.services.server.environment).not.toHaveProperty(
-    "INTELLIGENCE_BROWSER_GATEWAY_WS_URL",
-  );
+  expect(
+    withBots.services.server.environment.INTELLIGENCE_BROWSER_GATEWAY_WS_URL ??
+      "",
+  ).toBe("");
   for (const [name, value] of Object.entries(
     withBots.services.server.environment,
   )) {
@@ -1239,9 +1240,25 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
   expect(
     elsewhere.services.server.environment.INTELLIGENCE_GATEWAY_PROXY ?? "",
   ).toBe("");
-  expect(elsewhere.services.server.environment).not.toHaveProperty(
-    "INTELLIGENCE_BROWSER_GATEWAY_WS_URL",
-  );
+  expect(
+    elsewhere.services.server.environment.INTELLIGENCE_BROWSER_GATEWAY_WS_URL ??
+      "",
+  ).toBe("");
+
+  // Whoever starts the server may keep the gateway's own address for the browser instead, as
+  // `scripts/start.sh` does for a checkout with no public URL: the relay off, said by setting it
+  // empty, and the browser's address named.
+  const kept = runComposeConfig({
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
+    INTELLIGENCE_CONTAINER_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    OPENBOT_GATEWAY_PROXY: "",
+    OPENBOT_BROWSER_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
+  });
+  expect(kept.services.server.environment).toMatchObject({
+    INTELLIGENCE_GATEWAY_WS_URL: "ws://host.docker.internal:14401",
+    INTELLIGENCE_GATEWAY_PROXY: "",
+    INTELLIGENCE_BROWSER_GATEWAY_WS_URL: "ws://127.0.0.1:14401",
+  });
 
   // No managed Bot stays no managed Bot, and a remote harness keeps its own address.
   const without = runComposeConfig({

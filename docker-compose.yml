@@ -134,11 +134,19 @@ services:
       # and with Intelligence on this machine that address is OpenBot's own: the server carries the
       # socket at `/api/intelligence/client`, so the app, the Recorder and every other client are
       # given the address they already reached OpenBot at and never the gateway's own port. On
-      # exactly when the gateway has a container address, which is what an Intelligence on this
-      # machine is given (OpenBot Desktop and `scripts/start.sh` both write it for a loopback
-      # address). An Intelligence somewhere else, managed Intelligence among them, has a host of
-      # its own that the browser reaches itself, as before.
-      INTELLIGENCE_GATEWAY_PROXY: ${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:+on}
+      # when the gateway has a container address, which is what an Intelligence on this machine is
+      # given (OpenBot Desktop and `scripts/start.sh` both write it for a loopback address). An
+      # Intelligence somewhere else, managed Intelligence among them, has a host of its own that
+      # the browser reaches itself, as before.
+      #
+      # Whoever starts this service may say otherwise with OPENBOT_GATEWAY_PROXY, set empty for
+      # off, and then names the browser's own way to the gateway in
+      # OPENBOT_BROWSER_GATEWAY_WS_URL. `scripts/start.sh` does, for a checkout with no
+      # OPENBOT_PUBLIC_URL: the Recorder is not on the page and needs a whole address, which the
+      # server can only write on a public URL, so there the browser and the Recorder keep the
+      # gateway's own port. OpenBot Desktop always writes the public URL and sets neither.
+      INTELLIGENCE_GATEWAY_PROXY: ${OPENBOT_GATEWAY_PROXY-${INTELLIGENCE_CONTAINER_GATEWAY_WS_URL:+on}}
+      INTELLIGENCE_BROWSER_GATEWAY_WS_URL: ${OPENBOT_BROWSER_GATEWAY_WS_URL:-}
       # The person's own browser, where a host-side computer runs it (scripts/start.sh's personal
       # edition), listening on the host's loopback, and its container address when one is given.
       # Unset, the person's browser runs on the computers the Bots run on and shows in the page.

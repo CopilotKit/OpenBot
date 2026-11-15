@@ -35,8 +35,11 @@ never at a second host or port. Two variables say how; set one of them, not both
 
 - `INTELLIGENCE_GATEWAY_PROXY=on` has the server carry the socket itself, at
   `/api/intelligence/client` on its own address. This is the install on one machine: Compose turns
-  it on whenever Intelligence is on this machine (OpenBot Desktop, `scripts/start.sh`), and the Helm
-  chart does for a release reached with no Ingress or HTTPRoute, as over `kubectl port-forward`. The
+  it on for an Intelligence on this machine, which is OpenBot Desktop, and the Helm chart does for a
+  release reached with no Ingress or HTTPRoute, as over `kubectl port-forward`. From a checkout,
+  `scripts/start.sh` turns it on only when `OPENBOT_PUBLIC_URL` is set: the OpenBot Recorder needs
+  the socket as a whole address, and with the server in a container there is none to write without
+  a public URL. Without one a checkout keeps the gateway's own port for the browser, as before. The
   socket needs a signed-in session, and the gateway still checks the join token on it. `off` or
   unset is off, and any other value refuses to start.
 - `INTELLIGENCE_BROWSER_GATEWAY_WS_URL` names where the browser reaches the gateway when the server
@@ -247,7 +250,7 @@ call, in either language.
 
 It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, and the managed Bot and the other harnesses read it for `BOT_PROVIDER=openai`.
 
-`OPENAI_CONTAINER_BASE_URL` overrides that value inside Compose's containers only (the Bots, and the `server` service when OpenBot itself runs in Compose), for an endpoint the containers reach by a different route than the host does. Unset, the containers use `OPENAI_BASE_URL` like everything else. Compose's `server` service takes `INTELLIGENCE_CONTAINER_API_URL` and `INTELLIGENCE_CONTAINER_GATEWAY_WS_URL` the same way, in place of `INTELLIGENCE_API_URL` and `INTELLIGENCE_GATEWAY_WS_URL`. A gateway given a container address is on this machine, so the server carries the browser's socket to it (`INTELLIGENCE_GATEWAY_PROXY`, above) and the browser is given OpenBot's own address.
+`OPENAI_CONTAINER_BASE_URL` overrides that value inside Compose's containers only (the Bots, and the `server` service when OpenBot itself runs in Compose), for an endpoint the containers reach by a different route than the host does. Unset, the containers use `OPENAI_BASE_URL` like everything else. Compose's `server` service takes `INTELLIGENCE_CONTAINER_API_URL` and `INTELLIGENCE_CONTAINER_GATEWAY_WS_URL` the same way, in place of `INTELLIGENCE_API_URL` and `INTELLIGENCE_GATEWAY_WS_URL`. A gateway given a container address is on this machine, so the server carries the browser's socket to it (`INTELLIGENCE_GATEWAY_PROXY`, above) and the browser is given OpenBot's own address, unless whoever starts the service sets `OPENBOT_GATEWAY_PROXY` empty and names the browser's own address in `OPENBOT_BROWSER_GATEWAY_WS_URL`, as `scripts/start.sh` does when no `OPENBOT_PUBLIC_URL` is set.
 
 The other two providers work the same way under their own names, because they are different APIs rather than different URLs for this one: `ANTHROPIC_BASE_URL` and `GOOGLE_GENERATIVE_AI_BASE_URL`. All three are the names the API server already reads, so one line moves the built-in agents and the Bots together and a deployment cannot end up with half of itself pointed somewhere else.
 
