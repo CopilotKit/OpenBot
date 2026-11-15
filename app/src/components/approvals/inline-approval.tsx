@@ -1,5 +1,8 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalPhrase } from "@openbot/shared/tool-name";
+import {
+  approvalPhrase,
+  PRIVATE_SHARE_TOOL_REF,
+} from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
@@ -104,6 +107,11 @@ export function InlineApproval({
         ];
   // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
   const title = request ? approvalPhrase(request.action) : "";
+  // A share shows what it would send, so the person sees what leaves the conversation.
+  const shared =
+    request?.action.toolRef === PRIVATE_SHARE_TOOL_REF
+      ? (request.action.args as { preview?: unknown } | undefined)?.preview
+      : undefined;
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}
@@ -144,7 +152,16 @@ export function InlineApproval({
               }))}
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
-            />
+            >
+              {typeof shared === "string" && shared.trim() ? (
+                <blockquote
+                  aria-label="What it would send"
+                  className="max-h-52 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-muted-foreground text-xs"
+                >
+                  {shared}
+                </blockquote>
+              ) : null}
+            </DecisionCard>
           </motion.section>
         ) : null}
       </AnimatePresence>
