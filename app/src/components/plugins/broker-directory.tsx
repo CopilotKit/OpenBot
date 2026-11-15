@@ -34,6 +34,11 @@ import {
 } from "@/lib/apps/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
+  type DirectoryAppState,
+  directoryAppState,
+  directoryConnect,
+} from "@/lib/plugins/directory-state";
+import {
   consentBreadth,
   coverageWarning,
   keyNeededLine,
@@ -46,11 +51,6 @@ import {
   type PluginsProvider,
   providerVocabulary,
 } from "@/lib/plugins/provider-vocabulary";
-import {
-  type DirectoryAppState,
-  directoryAppState,
-  directoryConnect,
-} from "@/lib/plugins/directory-state";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
 
 /**
@@ -262,6 +262,16 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
       <PageSection
         description={directoryDescriptions(paths.edition).search}
         title="Apps"
+        action={
+          <Button
+            variant="outline"
+            render={
+              <Link to={personal ? "/connections/new" : "/admin/plugins/new"} />
+            }
+          >
+            Add MCP server
+          </Button>
+        }
       >
         {enableError || tabError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">

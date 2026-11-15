@@ -86,6 +86,7 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
+import { Route as AuthedAdminPluginsNewRouteImport } from './routes/_authed/admin/plugins/new'
 import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedSettingsPersonalActivityRouteImport } from './routes/_authed/settings/_personal/activity'
@@ -112,6 +113,7 @@ import { Route as AuthedAppConnectionsBrowseComposioRouteImport } from './routes
 import { Route as AuthedAppRoutinesCheckInsCheckInIdRouteImport } from './routes/_authed/_app/routines_.check-ins.$checkInId'
 import { Route as AuthedAppRoutinesGoalsGoalIdRouteImport } from './routes/_authed/_app/routines_.goals.$goalId'
 import { Route as AuthedAppRoutinesSchedulesRoutineIdRouteImport } from './routes/_authed/_app/routines_.schedules.$routineId'
+import { Route as AuthedAdminPluginsComposioAddMcpServerRouteImport } from './routes/_authed/admin/plugins/composio_.add-mcp-server'
 import { Route as AuthedSettingsPersonalPluginsSplatRouteImport } from './routes/_authed/settings/_personal/plugins.$'
 import { Route as AuthedSettingsPersonalSkillsSlugRouteImport } from './routes/_authed/settings/_personal/skills_.$slug'
 import { Route as AuthedSettingsPersonalSkillsNewRouteImport } from './routes/_authed/settings/_personal/skills_.new'
@@ -523,6 +525,11 @@ const AuthedAdminPluginsComposioRoute =
     path: '/plugins/composio',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminPluginsNewRoute = AuthedAdminPluginsNewRouteImport.update({
+  id: '/plugins/new',
+  path: '/plugins/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminSkillsSlugRoute = AuthedAdminSkillsSlugRouteImport.update({
   id: '/skills_/$slug',
   path: '/skills/$slug',
@@ -677,6 +684,12 @@ const AuthedAppRoutinesSchedulesRoutineIdRoute =
     path: '/routines/schedules/$routineId',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAdminPluginsComposioAddMcpServerRoute =
+  AuthedAdminPluginsComposioAddMcpServerRouteImport.update({
+    id: '/plugins/composio_/add-mcp-server',
+    path: '/plugins/composio/add-mcp-server',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedSettingsPersonalPluginsSplatRoute =
   AuthedSettingsPersonalPluginsSplatRouteImport.update({
     id: '/plugins/$',
@@ -795,6 +808,7 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
@@ -826,6 +840,7 @@ export interface FileRoutesByFullPath {
   '/routines/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/routines/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/admin/plugins/composio/add-mcp-server': typeof AuthedAdminPluginsComposioAddMcpServerRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -903,6 +918,7 @@ export interface FileRoutesByTo {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/settings/activity': typeof AuthedSettingsPersonalActivityRoute
@@ -934,6 +950,7 @@ export interface FileRoutesByTo {
   '/routines/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/routines/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/routines/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/admin/plugins/composio/add-mcp-server': typeof AuthedAdminPluginsComposioAddMcpServerRoute
   '/settings/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/settings/skills/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/settings/skills/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -1017,6 +1034,7 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/_authed/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/settings/_personal/activity': typeof AuthedSettingsPersonalActivityRoute
@@ -1048,6 +1066,7 @@ export interface FileRoutesById {
   '/_authed/_app/routines_/check-ins/$checkInId': typeof AuthedAppRoutinesCheckInsCheckInIdRoute
   '/_authed/_app/routines_/goals/$goalId': typeof AuthedAppRoutinesGoalsGoalIdRoute
   '/_authed/_app/routines_/schedules/$routineId': typeof AuthedAppRoutinesSchedulesRoutineIdRoute
+  '/_authed/admin/plugins/composio_/add-mcp-server': typeof AuthedAdminPluginsComposioAddMcpServerRoute
   '/_authed/settings/_personal/plugins/$': typeof AuthedSettingsPersonalPluginsSplatRoute
   '/_authed/settings/_personal/skills_/$slug': typeof AuthedSettingsPersonalSkillsSlugRoute
   '/_authed/settings/_personal/skills_/new': typeof AuthedSettingsPersonalSkillsNewRoute
@@ -1129,6 +1148,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/settings/activity'
@@ -1160,6 +1180,7 @@ export interface FileRouteTypes {
     | '/routines/check-ins/$checkInId'
     | '/routines/goals/$goalId'
     | '/routines/schedules/$routineId'
+    | '/admin/plugins/composio/add-mcp-server'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
@@ -1237,6 +1258,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/settings/activity'
@@ -1268,6 +1290,7 @@ export interface FileRouteTypes {
     | '/routines/check-ins/$checkInId'
     | '/routines/goals/$goalId'
     | '/routines/schedules/$routineId'
+    | '/admin/plugins/composio/add-mcp-server'
     | '/settings/plugins/$'
     | '/settings/skills/$slug'
     | '/settings/skills/new'
@@ -1350,6 +1373,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
+    | '/_authed/admin/plugins/new'
     | '/_authed/admin/skills_/$slug'
     | '/_authed/admin/skills_/new'
     | '/_authed/settings/_personal/activity'
@@ -1381,6 +1405,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/routines_/check-ins/$checkInId'
     | '/_authed/_app/routines_/goals/$goalId'
     | '/_authed/_app/routines_/schedules/$routineId'
+    | '/_authed/admin/plugins/composio_/add-mcp-server'
     | '/_authed/settings/_personal/plugins/$'
     | '/_authed/settings/_personal/skills_/$slug'
     | '/_authed/settings/_personal/skills_/new'
@@ -1938,6 +1963,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/plugins/new': {
+      id: '/_authed/admin/plugins/new'
+      path: '/plugins/new'
+      fullPath: '/admin/plugins/new'
+      preLoaderRoute: typeof AuthedAdminPluginsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/skills_/$slug': {
       id: '/_authed/admin/skills_/$slug'
       path: '/skills/$slug'
@@ -2120,6 +2152,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppRoutinesSchedulesRoutineIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/admin/plugins/composio_/add-mcp-server': {
+      id: '/_authed/admin/plugins/composio_/add-mcp-server'
+      path: '/plugins/composio/add-mcp-server'
+      fullPath: '/admin/plugins/composio/add-mcp-server'
+      preLoaderRoute: typeof AuthedAdminPluginsComposioAddMcpServerRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/_personal/plugins/$': {
       id: '/_authed/settings/_personal/plugins/$'
       path: '/plugins/$'
@@ -2206,10 +2245,12 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
+  AuthedAdminPluginsNewRoute: typeof AuthedAdminPluginsNewRoute
   AuthedAdminSkillsSlugRoute: typeof AuthedAdminSkillsSlugRoute
   AuthedAdminSkillsNewRoute: typeof AuthedAdminSkillsNewRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
+  AuthedAdminPluginsComposioAddMcpServerRoute: typeof AuthedAdminPluginsComposioAddMcpServerRoute
   AuthedAdminPluginsKeyBotsAgentIdRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   AuthedAdminPluginsKeyToolsToolRoute: typeof AuthedAdminPluginsKeyToolsToolRoute
 }
@@ -2241,10 +2282,13 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
+  AuthedAdminPluginsNewRoute: AuthedAdminPluginsNewRoute,
   AuthedAdminSkillsSlugRoute: AuthedAdminSkillsSlugRoute,
   AuthedAdminSkillsNewRoute: AuthedAdminSkillsNewRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
+  AuthedAdminPluginsComposioAddMcpServerRoute:
+    AuthedAdminPluginsComposioAddMcpServerRoute,
   AuthedAdminPluginsKeyBotsAgentIdRoute: AuthedAdminPluginsKeyBotsAgentIdRoute,
   AuthedAdminPluginsKeyToolsToolRoute: AuthedAdminPluginsKeyToolsToolRoute,
 }

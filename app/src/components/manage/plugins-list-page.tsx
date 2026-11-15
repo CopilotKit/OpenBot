@@ -346,6 +346,21 @@ export function PluginsListPage({
                   </ItemContent>
                 </Item>
               )}
+              <Separator />
+              <Item render={<Link to="/admin/plugins/new" />} size="sm">
+                <RowMark>
+                  <IconPlug className="size-4" />
+                </RowMark>
+                <ItemContent>
+                  <ItemTitle>Add custom MCP server</ItemTitle>
+                  <ItemDescription>
+                    Connect your own service with an HTTPS MCP endpoint.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </ItemActions>
+              </Item>
             </PageRows>
           </PageSection>
         </>
