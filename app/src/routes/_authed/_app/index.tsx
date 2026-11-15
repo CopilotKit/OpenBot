@@ -208,7 +208,7 @@ function RouteComponent() {
           }}
         >
           <StarterSuggestions
-            agentId={fallback?.id}
+            bot={fallback}
             disabled={pending}
             onSelect={async (message) => {
               if (!fallback) return;

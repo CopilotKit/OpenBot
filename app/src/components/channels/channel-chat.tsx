@@ -1773,7 +1773,7 @@ export function ChannelChat({
             starterSuggestions={
               channel.agentIds.length === 1 ? (
                 <StarterSuggestions
-                  agentId={runtimeAgentId}
+                  bot={botProfile}
                   channelId={channel.id}
                   disabled={
                     !channel.active ||
