@@ -44,7 +44,7 @@ function row(
 ) {
   return {
     id,
-    actorUserId: "dev",
+    actorUserId: "dev" as string | null,
     initiatorKind: "person",
     initiatorId: null,
     eventType,
