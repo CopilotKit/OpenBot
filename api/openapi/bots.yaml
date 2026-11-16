@@ -19,8 +19,10 @@ paths:
         list instead. scope=organization lists every Bot in the organization,
         people's private Bots included, for an admin's screens that decide what
         Bots may hold; it is refused to anybody who is not an admin of the
-        organization. A missing cursor starts at the first page and nextCursor
-        null ends the list.
+        organization. Somebody else's private Bot comes withheld there: its
+        name and avatar, and nothing from inside it (see the Bot's withheld).
+        A missing cursor starts at the first page and nextCursor null ends the
+        list.
       security:
         - webSession: []
         - appOAuth: [bots:read]
@@ -1567,6 +1569,16 @@ components:
           description: >-
             Whether the caller created it. Separate from canManage, which is
             also true for an administrator on everybody's Bots.
+        withheld:
+          type: boolean
+          description: >-
+            Whether it is somebody else's private Bot, listed for an admin's
+            screens (listBots with scope=organization) and nothing more. Such
+            a Bot carries its id, name, avatar and the caller's own state with
+            it only: title and roleDescription are empty, endpoint is null,
+            instructions and framework are absent, hasAuth, hasCallbackToken,
+            isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage
+            are false. Absent or false on every other Bot.
         assignedToMe:
           type: boolean
           description: Whether an administrator assigned this Bot to the caller.

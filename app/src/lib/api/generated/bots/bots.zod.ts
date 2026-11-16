@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: its name and avatar, and nothing from inside it (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 
@@ -133,6 +133,12 @@ export const ListBotsResponse = zod.object({
           .boolean()
           .describe(
             "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          ),
+        withheld: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
           ),
         assignedToMe: zod
           .boolean()
@@ -380,6 +386,12 @@ export const CreateBotResponse = zod.object({
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
         ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+        ),
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
@@ -508,6 +520,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -727,6 +745,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -999,6 +1023,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
         ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+        ),
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
@@ -1139,6 +1169,12 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1281,6 +1317,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
         ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+        ),
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
@@ -1422,6 +1464,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
         ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+        ),
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
@@ -1562,6 +1610,12 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1745,6 +1799,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()

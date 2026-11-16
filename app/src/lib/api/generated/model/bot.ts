@@ -49,6 +49,8 @@ export interface Bot {
   canManage: boolean;
   /** Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots. */
   mine: boolean;
+  /** Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot. */
+  withheld?: boolean;
   /** Whether an administrator assigned this Bot to the caller. */
   assignedToMe: boolean;
   /** Whether it runs at the deployment's own managed address, so it needs no callback credential of its own. */
