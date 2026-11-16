@@ -24432,6 +24432,22 @@ components:
         botId:
           type: string
           description: The Bot doing it.
+        agent:
+          type:
+            - object
+            - 'null'
+          description: The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              description: The agent's id.
+            name:
+              type: string
+              description: What the agent is called. An agent private to somebody other than the caller is named Private agent.
         conversationId:
           type: string
           description: The task's own conversation, where the person reads it and replies.

@@ -1392,6 +1392,7 @@ export * from "./takeBackBotAppHeaders";
 export * from "./takeComputerControlHeaders";
 export * from "./takeOverSignInHeaders";
 export * from "./task";
+export * from "./taskAgent";
 export * from "./taskConflictResponse";
 export * from "./taskNotFoundResponse";
 export * from "./taskOrigin";

@@ -472,6 +472,7 @@ export * from "./startedCheckInItem";
 export * from "./startedCheckInItemTask";
 export * from "./stopBotHandoffRequest";
 export * from "./task";
+export * from "./taskAgent";
 export * from "./taskConflictResponse";
 export * from "./taskNotFoundResponse";
 export * from "./taskOrigin";
