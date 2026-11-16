@@ -42,7 +42,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
 import { InlineApproval } from "@/components/approvals/inline-approval";
 import {
   ArgumentsArrivingContext,
@@ -104,6 +103,7 @@ import {
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPluginsFor,
@@ -965,24 +965,24 @@ const TranscriptMessage = memo(function TranscriptMessage({
                       taskId={report.taskId}
                       words={text}
                     >
-                      <Streamdown
+                      <BotMarkdown
                         components={markdownComponents}
                         mode={mode}
                         plugins={markdownPlugins}
                         remarkPlugins={replyRemarkPluginsFor(slackNames)}
                       >
                         {revealed}
-                      </Streamdown>
+                      </BotMarkdown>
                     </TaskReport>
                   ) : (
-                    <Streamdown
+                    <BotMarkdown
                       components={markdownComponents}
                       mode={mode}
                       plugins={markdownPlugins}
                       remarkPlugins={replyRemarkPluginsFor(slackNames)}
                     >
                       {revealed}
-                    </Streamdown>
+                    </BotMarkdown>
                   )}
                 </div>
               )}
@@ -1902,9 +1902,9 @@ export function ServerToolLine({
       running={running}
     >
       {shown ? (
-        <Streamdown components={markdownComponents} plugins={markdownPlugins}>
+        <BotMarkdown components={markdownComponents} plugins={markdownPlugins}>
           {forDisplay(shown)}
-        </Streamdown>
+        </BotMarkdown>
       ) : null}
     </ToolLine>
   );
