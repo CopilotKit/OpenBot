@@ -51,6 +51,7 @@ const skill = (
   instructions: "Do it.",
   grantedTo: [],
   tools: [],
+  usableOnYourBots: ownerUserId !== null,
 });
 
 const refundOrder = {

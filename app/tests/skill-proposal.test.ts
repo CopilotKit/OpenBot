@@ -18,7 +18,10 @@ import {
  * fix reaches the model, and everything else reaches the person unchanged.
  */
 
-const skill = (over: Partial<PluginSkill> = {}): PluginSkill => ({
+const skill = (
+  over: Partial<PluginSkill> = {},
+): PluginSkill & { usableOnYourBots: boolean } => ({
+  usableOnYourBots: false,
   id: "skill_1",
   slug: "check-a-claim",
   ownerUserId: null,

@@ -32,7 +32,7 @@ export const getListSkillsUrl = (
 };
 
 /**
- * Return one page of the skills the caller can see: the organization's and their own. An admin of the organization sees every member's. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 export const listSkills = async (
@@ -51,7 +51,7 @@ export const getGetSkillUrl = (organizationId: string, skillId: string) => {
 };
 
 /**
- * Return one skill the caller can see: the organization's or their own. An admin can read anybody's. Somebody else's skill is not found.
+ * Return one skill the caller can see, as the list shows them. An admin can read any. One the caller can't see is not found.
  * @summary Read a skill
  */
 export const getSkill = async (

@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the skills the caller can see: the organization's and their own. An admin of the organization sees every member's. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 
@@ -82,6 +82,11 @@ export const ListSkillsResponse = zod.object({
           botIds: zod
             .array(zod.string())
             .describe("The Bots that offer it, by id."),
+          usableOnYourBots: zod
+            .boolean()
+            .describe(
+              "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+            ),
         })
         .describe(
           "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
@@ -99,7 +104,7 @@ export const ListSkillsResponse = zod.object({
 });
 
 /**
- * Return one skill the caller can see: the organization's or their own. An admin can read anybody's. Somebody else's skill is not found.
+ * Return one skill the caller can see, as the list shows them. An admin can read any. One the caller can't see is not found.
  * @summary Read a skill
  */
 
@@ -156,6 +161,11 @@ export const GetSkillResponse = zod
         "Whose it is, by person id. Null when it is the organization's.",
       ),
     botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
+    usableOnYourBots: zod
+      .boolean()
+      .describe(
+        "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+      ),
   })
   .describe(
     "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
@@ -267,6 +277,11 @@ export const ReplaceSkillResponse = zod
         "Whose it is, by person id. Null when it is the organization's.",
       ),
     botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
+    usableOnYourBots: zod
+      .boolean()
+      .describe(
+        "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+      ),
   })
   .describe(
     "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
