@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,13 @@ import { parse, stringify } from "yaml";
  * that stops firing (a plugin that fails to load, a visitor that never matches) fails here rather
  * than letting the break through review.
  */
+
+/*
+ * Each lint is one run of the CLI over the whole spec: about 1 s on a laptop and 2.4 to 2.7 s on a CI
+ * runner, so a test that lints twice took 4.7 s there and one ran past Bun's 5 s default. Twenty
+ * seconds is four times the slowest seen.
+ */
+setDefaultTimeout(20_000);
 
 const ROOT = join(import.meta.dir, "../..");
 const SPEC = join(ROOT, "api/openapi.yaml");
