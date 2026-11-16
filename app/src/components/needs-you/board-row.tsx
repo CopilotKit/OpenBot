@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
  *
  * An icon in a small square (tinted where a Bot is stopped on the person), the title and one line
  * of detail, each cut to a line until the row is opened with a click, a quiet line of where and
- * when, and the row's actions on the right, or under the words where the row is too narrow for both. `more` is what opens under the row; `onSelect` opens
- * something else instead (a question's answer dialog).
+ * when, and the row's actions on the right, or under the words where the row is too narrow for
+ * both. `more` is what opens under the row; `onSelect` opens something else instead (a question's
+ * answer dialog).
  */
 export function BoardRow({
   icon,
