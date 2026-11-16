@@ -11,6 +11,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
+import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
   authorizeActionMutationOptions,
   consentActionsFrom,
@@ -73,6 +74,7 @@ export function GrantList({
         );
         return;
       }
+      finishOnReturn();
       window.location.href = authorizationUrl;
     },
   });

@@ -22,6 +22,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { desktopShell } from "@/lib/desktop/shell";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -395,9 +396,17 @@ export function useBrokeredAccount(input: {
    * question above is never asked again. The browser hands the person back to the window when the
    * sign-in is done (`/desktop-return`), and the focus that brings is when there is an answer.
    * Once per sign-in, and gone with the page.
+   *
+   * WHERE EACH ACTION IS AUTHORIZED ON ITS OWN, THE CONSENT ENDS AT THE VERIFIER, and asking the
+   * account again would not finish it: the window opens the verifier itself instead
+   * ({@link finishOnReturn}).
    */
   const pendingReturn = useRef<(() => void) | null>(null);
   const confirmOnReturn = useCallback(() => {
+    if (reconnectsInPlace) {
+      finishOnReturn();
+      return;
+    }
     if (!desktopShell() || pendingReturn.current) return;
     const asked = () => {
       pendingReturn.current = null;
@@ -405,7 +414,7 @@ export function useBrokeredAccount(input: {
     };
     pendingReturn.current = asked;
     window.addEventListener("focus", asked, { once: true });
-  }, [confirmAccount, serverId]);
+  }, [confirmAccount, serverId, reconnectsInPlace]);
   useEffect(
     () => () => {
       if (pendingReturn.current)
