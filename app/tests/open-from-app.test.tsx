@@ -9,6 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
+  type AnyRoute,
   createMemoryHistory,
   createRootRouteWithContext,
   createRoute,
@@ -66,11 +67,17 @@ function open() {
   const rootRoute = createRootRouteWithContext<RouterContext>()({
     component: Outlet,
   });
-  const authed = (
-    AuthedRoute as unknown as {
-      update: (options: unknown) => typeof AuthedRoute;
-    }
-  ).update({ id: "/_authed", getParentRoute: () => rootRoute });
+  /*
+   * The real sign-in gate's own steps, on a route of this test's own: re-parenting the app's route
+   * object would take it out of the app's route tree for every test that runs after this one.
+   */
+  const gate = AuthedRoute.options as unknown as Record<string, unknown>;
+  const authed = createRoute({
+    id: "_authed",
+    getParentRoute: () => rootRoute,
+    component: Outlet,
+    ...{ beforeLoad: gate.beforeLoad, errorComponent: gate.errorComponent },
+  } as never) as unknown as AnyRoute;
   const home = createRoute({
     path: "/",
     getParentRoute: () => authed,
