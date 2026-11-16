@@ -1,11 +1,9 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import {
-  approvalPhrase,
-  PRIVATE_SHARE_TOOL_REF,
-} from "@openbot/shared/tool-name";
+import { approvalPhrase } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
+import { shareOf, ShareText } from "@/components/approvals/share-details";
 import { DecisionCard } from "@/components/decisions/decision-card";
 import type { Tone } from "@/components/gallery/frame";
 import {
@@ -107,32 +105,8 @@ export function InlineApproval({
         ];
   // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
   const title = request ? approvalPhrase(request.action) : "";
-  // A share shows what it would send, so the person sees what leaves the conversation.
-  const share =
-    request?.action.toolRef === PRIVATE_SHARE_TOOL_REF
-      ? ((request.action.args ?? {}) as {
-          preview?: unknown;
-          audience?: unknown;
-          handOff?: unknown;
-        })
-      : undefined;
-  const shared = share?.preview;
-  /*
-   * Handed to another person's Bot, the card says who reads it. When the person also asks before
-   * changes, this one card is both asks, so it says it hands the work over and shares the text.
-   */
-  const handedTo =
-    typeof share?.handOff === "string"
-      ? share.handOff
-      : (request?.action.target as { kind?: unknown } | undefined)?.kind ===
-            "handoff" && typeof share?.audience === "string"
-        ? share.audience
-        : undefined;
-  const shareCaption = handedTo
-    ? typeof share?.handOff === "string"
-      ? `${handedTo} belongs to someone else, so this also shares the text below with them.`
-      : `${handedTo} belongs to someone else, so they can read the text below.`
-    : undefined;
+  // A share shows who reads it and what it would send, so the person sees what leaves the conversation.
+  const share = request ? shareOf(request.action) : null;
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}
@@ -159,7 +133,7 @@ export function InlineApproval({
               }
               caption={
                 request.action.policy?.reason ??
-                shareCaption ??
+                share?.caption ??
                 (handOff ? "This one is yours to do." : undefined)
               }
               error={decision.error?.message ?? null}
@@ -175,14 +149,7 @@ export function InlineApproval({
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
             >
-              {typeof shared === "string" && shared.trim() ? (
-                <blockquote
-                  aria-label="What it would send"
-                  className="max-h-52 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-muted-foreground text-xs"
-                >
-                  {shared}
-                </blockquote>
-              ) : null}
+              {share?.text ? <ShareText text={share.text} /> : null}
             </DecisionCard>
           </motion.section>
         ) : null}
