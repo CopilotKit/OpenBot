@@ -17,6 +17,7 @@ import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
 import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
+import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
 
 /** How many of one Bot's finds show before the rest open in place. */
 const FINDS_SHOWN = 3;
@@ -43,6 +44,8 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     heldByTaskOf([...list.tasks, ...list.done]),
   );
 
+  const stalledHandoffs = useStalledHandoffs(agentId);
+
   const blocked = new Map(waiting.byBot);
   // Questions and actions each wait on the person; a task does when the badge counts it.
   let waitingCount = [...waiting.byBot.values()].reduce(
@@ -58,6 +61,19 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     // Only what waits on the person says how long it has waited.
     if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);
     blocked.set(listed.task.agentId, group);
+  }
+  // A hand-off that ran out of tries waits on the person too, and the badge counts it.
+  for (const stalled of stalledHandoffs) {
+    waitingCount += 1;
+    const group = blocked.get(stalled.botId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <StalledHandoffBoardRow
+        key={`handoff-${stalled.item.id}`}
+        stalled={stalled}
+      />,
+    );
+    group.times.push(stalled.item.at);
+    blocked.set(stalled.botId, group);
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)

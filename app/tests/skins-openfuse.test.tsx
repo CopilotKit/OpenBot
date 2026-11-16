@@ -429,6 +429,8 @@ function serve(
     userId?: string;
     /** What each Bot waits on the person for, as the server counts it. */
     attention?: BotAttention[];
+    /** Fuse's own Activity. */
+    activity?: BotActivity;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -443,7 +445,7 @@ function serve(
       },
     }),
     [CONVERSATIONS_PATH]: conversationPage(channels),
-    [botOperationPath(fuse.id, "activity")]: activity,
+    [botOperationPath(fuse.id, "activity")]: options.activity ?? activity,
     [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
       checkIns: settings,
@@ -660,6 +662,45 @@ describe("the frame", () => {
     expect(
       page().getAllByRole("img", { name: "2 things need you" }).length,
     ).toBeGreaterThan(0);
+  });
+
+  /*
+   * The bell's number counted a hand-off that ran out of tries, and its sheet listed only questions
+   * and approvals, so it said 2 over one row. Every thing the number counts is a row.
+   */
+  test("the bell lists every thing its number counts, a stalled hand-off included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, { approvals: 1, handoffs: 1 }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+      activity: activityOf({
+        inProgress: [
+          {
+            id: "hop-stalled",
+            kind: "handoff",
+            title: "Book the venue for Friday",
+            detail: "Delegated to Scout",
+            status: "failed",
+            at: now,
+            channelId: "c-fuse",
+            needsYou: true,
+            stoppable: false,
+            cancellable: false,
+          },
+        ],
+      }),
+    });
+    renderAt("/connections");
+    fireEvent.click(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    );
+    const sheet = await page().findByRole("dialog");
+    expect(
+      await within(sheet).findByText("Book the venue for Friday"),
+    ).toBeTruthy();
+    // And the approval beside it: two rows under a 2.
+    expect(within(sheet).getByText("Fuse wants to open url")).toBeTruthy();
   });
 
   test("a one-to-one conversation puts its own Bot at the centre", async () => {
