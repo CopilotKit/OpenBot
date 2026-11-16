@@ -1679,7 +1679,7 @@ paths:
         - Organization settings
       operationId: getDeployment
       summary: Read what this OpenBot offers
-      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. It names no identity provider and no version: only whether single sign-on is set up and required.'
+      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
       x-openbot-singleton: true
       security:
         - {}
@@ -10036,7 +10036,7 @@ paths:
         - Organizations
       operationId: createOrganization
       summary: Create an organization
-      description: Create an organization with the caller as its owner. It starts with no Bots and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+      description: Create an organization with the caller as its owner. It starts with the starter Bots and skills a fresh install has, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
       security:
         - webSession: []
         - appOAuth:

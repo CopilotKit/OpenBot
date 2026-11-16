@@ -28,6 +28,11 @@ export type ClientOptions = {
   fallback?: string;
   /** For the calls a Bot makes on a person's behalf, which are abandoned when the turn is. */
   signal?: AbortSignal;
+  /**
+   * Headers a request carries beside the content type: the organization a tab works in, for the
+   * runtime's addresses (lib/organizations/current.ts, `organizationHeaders`).
+   */
+  headers?: Record<string, string>;
 };
 
 /**
@@ -48,12 +53,15 @@ async function request(path: string, init: RequestInit): Promise<Response> {
 
 /** Every request in this app is authenticated, and every one of them is JSON or nothing. */
 async function send(path: string, options: ClientOptions): Promise<Response> {
+  const headers = {
+    ...options.headers,
+    ...(options.body === undefined
+      ? {}
+      : { "content-type": "application/json" }),
+  };
   return request(path, {
     method: options.method,
-    headers:
-      options.body === undefined
-        ? undefined
-        : { "content-type": "application/json" },
+    headers: Object.keys(headers).length === 0 ? undefined : headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     ...(options.signal ? { signal: options.signal } : {}),
   });

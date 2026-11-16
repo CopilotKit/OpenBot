@@ -586,6 +586,11 @@ test("somebody who may create one makes an organization from the menu and is swi
   const dialog = await app.view.findByRole("dialog", {
     name: "New organization",
   });
+  // It says what a new organization is given: the starter Bots, as the server gives every one.
+  expect(dialog.textContent).toContain(
+    "A new organization starts with OpenBot's starter Bots and skills, and no conversations.",
+  );
+  expect(dialog.textContent).not.toContain("no Bots");
   // Nothing to create until it has a name.
   const create = within(dialog).getByRole("button", { name: "Create" });
   expect(create.hasAttribute("disabled")).toBe(true);

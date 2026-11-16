@@ -57,7 +57,7 @@ export const getCreateOrganizationUrl = () => {
 };
 
 /**
- * Create an organization with the caller as its owner. It starts with no Bots and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with the starter Bots and skills a fresh install has, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganization = async (

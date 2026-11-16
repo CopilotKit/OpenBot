@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
  * @summary Read what this OpenBot offers
  */
 

@@ -278,7 +278,8 @@ test("a row a person started names them, and searching their email finds it", as
       by: "priya@northwind.test",
       change: "skill_installed",
     }),
-    byPerson("p3", 28, "organization.renamed", {}),
+    // Nobody named anywhere on the row, its actor id included.
+    { ...byPerson("p3", 28, "organization.renamed", {}), actorUserId: null },
   ]);
   const startedBy = () =>
     [...view.container.querySelectorAll("tbody [data-column=bot]")].map(

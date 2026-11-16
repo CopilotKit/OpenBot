@@ -58,6 +58,23 @@ export function onOrganizationChange(listener: Listener): () => void {
   };
 }
 
+/** The header that names the organization a request is for, where its address names none. */
+export const ORGANIZATION_HEADER = "OpenBot-Organization";
+
+/**
+ * The header naming `organization`, for the runtime's addresses (/api/copilotkit), which name no
+ * organization in their path. Without it the runtime works where the session works, and a tab left
+ * in one organization after a switch in another tab wrote its message in one and ran its Bot in the
+ * other, where there is no such Bot. Empty while the organization is not known yet.
+ */
+export function organizationHeaders(
+  organization: string | undefined,
+): Record<string, string> {
+  return organization === undefined
+    ? {}
+    : { [ORGANIZATION_HEADER]: organization };
+}
+
 /** The current organization for a component, which redraws when it changes. */
 export function useCurrentOrganizationId(): string | undefined {
   return useSyncExternalStore(
