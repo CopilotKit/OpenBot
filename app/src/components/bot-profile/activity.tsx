@@ -39,6 +39,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   type ActivityEntry,
+  type ActivityGroup,
   groupActivity,
   isRoutine,
 } from "@/lib/bot-lifecycle/activity-groups";
@@ -188,6 +189,52 @@ export function ActivityRow({
   );
 }
 
+/**
+ * A Bot's activity in the groups its Activity page lists: its own activity, its tasks in their live
+ * state, its routines and its check-ins, put together by `groupActivity`. The Activity page draws
+ * these groups and the Bot page's row to it counts them, so the two never disagree.
+ */
+function useActivityGroups(agentId: string, boardAbove = false) {
+  const activity = useBotActivity(agentId);
+  const taskList = useQuery(taskListQueryOptions());
+  const channels = useInfiniteQuery(channelListQueryOptions());
+  // What the Routines page reads, to count its rows as it draws them (`routinesSummary`).
+  const routines = useQuery(routinesQueryOptions());
+  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const channel = (channelId: string) =>
+    channels.data?.find((candidate) => candidate.id === channelId);
+  const goalRoutineIds = new Set(
+    (routines.data?.routines ?? [])
+      .filter((routine) => routine.goalId)
+      .map((routine) => routine.id),
+  );
+  const ownCheckIns = (checkIns.data ?? []).filter(
+    (checkIn) => checkIn.botId === agentId && checkIn.enabled,
+  );
+  const groups = activity.data
+    ? groupActivity({
+        activity: activity.data,
+        tasks: orderTasks(
+          (taskList.data ?? []).filter((task) => task.agentId === agentId),
+          (channelId) => channel(channelId)?.busy === true,
+          Date.now(),
+        ),
+        checkIns: ownCheckIns,
+        goalRoutineIds,
+        boardAbove,
+      })
+    : [];
+  return {
+    activity,
+    taskList,
+    channel,
+    goalRoutineIds,
+    ownCheckIns,
+    groups,
+    pending: activity.isPending || taskList.isPending,
+  };
+}
+
 /** How many running or scheduled items the Bot's page shows before "All activity". */
 const GLANCE = 3;
 
@@ -217,9 +264,9 @@ function upcomingOf(activity: BotActivity | undefined) {
  * least urgent, so it lives only on the Activity page.
  */
 export function BotActivityGlance({ agentId }: { agentId: string }) {
-  const activity = useBotActivity(agentId);
+  const { activity, groups, pending } = useActivityGroups(agentId);
   const upcoming = upcomingOf(activity.data);
-  if (activity.isPending || upcoming.length === 0) return null;
+  if (pending || upcoming.length === 0) return null;
   return (
     <PageSection title="Activity">
       <PageRows>
@@ -229,7 +276,11 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
             <Separator />
           </Fragment>
         ))}
-        <AllActivityItem activity={activity.data} agentId={agentId} />
+        <AllActivityItem
+          activity={activity.data}
+          agentId={agentId}
+          groups={groups}
+        />
       </PageRows>
     </PageSection>
   );
@@ -241,14 +292,15 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
  * card's other rows.
  */
 export function BotActivityRow({ agentId }: { agentId: string }) {
-  const activity = useBotActivity(agentId);
-  if (activity.isPending || upcomingOf(activity.data).length > 0) return null;
+  const { activity, groups, pending } = useActivityGroups(agentId);
+  if (pending || upcomingOf(activity.data).length > 0) return null;
   return (
     <>
       <Separator />
       <AllActivityItem
         activity={activity.data}
         agentId={agentId}
+        groups={groups}
         title="Activity"
         withIcon
       />
@@ -259,11 +311,14 @@ export function BotActivityRow({ agentId }: { agentId: string }) {
 function AllActivityItem({
   activity,
   agentId,
+  groups,
   title = "All activity",
   withIcon = false,
 }: {
   activity: BotActivity | undefined;
   agentId: string;
+  /** What the Activity page lists, which the summary counts. */
+  groups: readonly ActivityGroup[];
   title?: string;
   withIcon?: boolean;
 }) {
@@ -281,7 +336,7 @@ function AllActivityItem({
         <ItemTitle>{title}</ItemTitle>
         <ItemDescription>
           {activity
-            ? activitySummary(activity)
+            ? activitySummary(activity, groups)
             : "Couldn't load this Bot's activity."}
         </ItemDescription>
       </ItemContent>
@@ -296,18 +351,27 @@ function AllActivityItem({
  * The Bot page's one line about its activity: what is running, what is lined up and which goals
  * wait to be asked. Finished work is only counted when there is nothing else to say. A goal that
  * runs only when asked is never "scheduled": it was, and a Bot with one routine read "2 scheduled".
+ *
+ * Counted from what the Activity page lists (`groups`, its tasks included), so the row never says
+ * there is nothing while the page it opens lists something. FOUND LIVE: it said "No tasks, routines
+ * or goals yet" over an Activity page with a finished task under Done, because it counted only the
+ * Bot's own activity. Without `groups`, the Bot's own activity alone.
  */
-export function activitySummary(activity: BotActivity): string {
+export function activitySummary(
+  activity: BotActivity,
+  groups: readonly ActivityGroup[] = groupActivity({ activity, tasks: [] }),
+): string {
   const onDemand = activity.onDemand?.length ?? 0;
+  const count = (id: ActivityGroup["id"]) =>
+    groups.find((group) => group.id === id)?.entries.length ?? 0;
+  const inProgress = count("needs_you") + count("working");
   const parts = [
-    activity.inProgress.length
-      ? `${activity.inProgress.length} in progress`
-      : null,
+    inProgress ? `${inProgress} in progress` : null,
     activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
     onDemand ? `${onDemand} on demand` : null,
   ].filter(Boolean);
   if (parts.length) return parts.join(" · ");
-  return activity.completed.length
+  return groups.length
     ? "Nothing running or scheduled"
     : "No tasks, routines or goals yet";
 }
@@ -412,15 +476,18 @@ export function BotActivitySections({
   /** The Needs you board sits above, so tasks and what the Bot asked are not listed twice. */
   boardAbove?: boolean;
 }) {
-  const activity = useBotActivity(agentId);
-  const taskList = useQuery(taskListQueryOptions());
-  const channels = useInfiniteQuery(channelListQueryOptions());
-  // What the Routines page reads, to count its rows as it draws them (`routinesSummary`).
-  const routines = useQuery(routinesQueryOptions());
-  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const {
+    activity,
+    taskList,
+    channel,
+    goalRoutineIds,
+    ownCheckIns,
+    groups,
+    pending,
+  } = useActivityGroups(agentId, boardAbove);
   const bots = useQuery(agentListQueryOptions());
   const blocked = useCheckInsBlocked();
-  if (activity.isPending || taskList.isPending) return null;
+  if (pending || activity.isPending) return null;
   if (activity.error)
     return (
       <PageSection title="Activity">
@@ -429,27 +496,6 @@ export function BotActivitySections({
         </p>
       </PageSection>
     );
-  const channel = (channelId: string) =>
-    channels.data?.find((candidate) => candidate.id === channelId);
-  const goalRoutineIds = new Set(
-    (routines.data?.routines ?? [])
-      .filter((routine) => routine.goalId)
-      .map((routine) => routine.id),
-  );
-  const ownCheckIns = (checkIns.data ?? []).filter(
-    (checkIn) => checkIn.botId === agentId && checkIn.enabled,
-  );
-  const groups = groupActivity({
-    activity: activity.data,
-    tasks: orderTasks(
-      (taskList.data ?? []).filter((task) => task.agentId === agentId),
-      (channelId) => channel(channelId)?.busy === true,
-      Date.now(),
-    ),
-    checkIns: ownCheckIns,
-    goalRoutineIds,
-    boardAbove,
-  });
   const titleOf = (channelId: string) => {
     const found = channel(channelId);
     return (found && conversationTitle(found)) || null;

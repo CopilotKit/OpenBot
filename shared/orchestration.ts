@@ -14,6 +14,10 @@ export const DELEGATE_TOOL = "delegate";
 export const REACT_TOOL = "react";
 /** Find a task thread this conversation started, to give the person its link. */
 export const LINK_TOOL = "link_to_thread";
+/** Tell a task this conversation started something more, as the person's message in its thread. */
+export const FOLLOW_UP_TOOL = "follow_up";
+/** Stop a task this conversation started, as Stop on its card does. */
+export const STOP_TOOL = "stop";
 
 /** The reactions a Bot may leave. A short list, so a reaction always reads as an acknowledgement. */
 export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂"] as const;
@@ -54,12 +58,31 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * to a task too. The routine then posted into the task's thread, which the person never opens, and
  * the follow-up was refused there. A routine, a follow-up and a goal belong to the conversation they
  * are asked for in, so the Bot sets them up in its own reply.
+ *
+ * MORE FOR A TASK GOES TO THAT TASK. "Tell it to also check the coat check" and "stop the Figma
+ * one" are about a task already started, and the only tool a Bot had for work was `delegate`, which
+ * starts another. `follow_up` and `stop` reach the task itself, and this names them for exactly
+ * those asks, as the rest of this section names the work to hand off: a harness Bot reads its
+ * tools' descriptions less closely than its instructions.
+ *
+ * A NEW DELIVERABLE IS A NEW TASK, "ALSO" OR NOT. While a task wrote a guide for EU customers, the
+ * person asked "Also write a guide for US customers", and the Bot passed it to the EU task with
+ * `follow_up`, reading "also" as more for that task. "Stop the EU one" could then only steer the
+ * task writing both. Asked without "also" or "too", the same work became tasks of their own and
+ * stopped one at a time. So what decides is whether the ask is another thing to make or do, not the
+ * word it is asked with, and `follow_up` is named for changing or adding to the work a task does.
+ *
+ * ONLY THE TASK THEY MEAN. Measured live before this was said: the LangGraph Bot did the Figma
+ * search itself instead of handing it off, and told "stop the Figma one" it stopped the only task
+ * the conversation had, the venue's, in 2 of 3 runs. Stopping work the person still wants is worse
+ * than stopping nothing, so a stop that names no task of this conversation stops nothing.
  */
 export const DELEGATING_GUIDANCE = [
   `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:`,
   "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, without a tool of an app, a computer or a search. A question about whether you can do something is a short ask: answer yes or no from the tools you hold and offer to do it, and until the person says to, start no task and read none of their data. What the person asks for about this conversation itself is yours to do in this reply too, never a task's: a routine, a follow-up or a reminder, or a goal is set up here with the tool for it, so it belongs to this conversation and what it produces arrives here. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
   `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer, so write nothing at all, not even the emoji. Never react to a message you answer or hand to a task.`,
   `- Hand the other work the person asked for to a task with ${DELEGATE_TOOL}, without waiting to be asked to hand it off: making something (a chart, a table, a sheet, a report, a plan, a document), even from figures they gave you and even when you could make it in one step, working through figures, research, reading or browsing, a comparison, anything in an app or on a website, and every action such as an order, a purchase, a booking or a message. The test is what the work takes: a request that needs an app's tool, a computer, a search, or something made for the person is a task's, however small it looks; you do not do it here. Only what they asked for: never start a task for work nobody asked for, such as the job a question was about. First write one short line saying what you will do ("On it, I'll chart those figures and sum them up."), then call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own: every figure, name, link and constraint from this conversation the work needs. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits. Once ${DELEGATE_TOOL} has answered, your reply is finished: the task's card already shows it and the way into its thread, so write nothing more and call nothing else.`,
+  `When the person adds to or changes work a task of this conversation already has ("tell it to also check the parking", "it should use last year's figures", "ask it to add a chart"), pass it on with ${FOLLOW_UP_TOOL}, naming that task by the taskId its ${DELEGATE_TOOL} answer gave: that is the whole of your reply's work, so never start a new task for it and never do it yourself, even when the task has finished. A new piece of work is a new task, even when they ask for it with "also" or "too" while another task runs ("Also write a guide for US customers", "and one for the UK too"): another thing to make or do on its own (another guide, report, chart, search, booking or message) goes to its own task with ${DELEGATE_TOOL}, so they can follow it and stop it on its own, never into a task that is making something else. ${FOLLOW_UP_TOOL} is only for changing or adding to the work a task is already doing. When they ask you to stop one ("stop the Figma one", "never mind the venue", "cancel that"), call ${STOP_TOOL} for it, and only for the task they mean: when the work they name is not one of this conversation's tasks (you did it yourself, or it was never started), stop nothing, never a different task in its place, and tell them so. Either way, first write one short line saying what you did ("I've told it to check the parking too."), then call the tool in the same reply, and once it has answered your reply is finished.`,
   `Only when the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link as a Markdown link, exactly as it comes back.`,
 ].join("\n\n");
 
@@ -91,6 +114,33 @@ export type LinkedThread = {
 
 /** What `link_to_thread` answers. */
 export type LinkResult = { threads: LinkedThread[] };
+
+/**
+ * What `follow_up` and `stop` answer when they reached the task, and what the conversation draws the
+ * task's card from: the task, and for the model what happens next.
+ */
+export type TaskActionResult = {
+  taskId: string;
+  channelId: string;
+  title: string;
+  /** For `follow_up`: the message the task was sent, as its thread shows it. */
+  message?: string;
+  /** For the model: what happens next, so it neither waits nor does the work itself. */
+  next: string;
+};
+
+/** The task, read back from a `follow_up` or `stop` result, or null for a refusal or anything else. */
+export function readTaskActionResult(text: unknown): TaskActionResult | null {
+  const result = parsedObject(text);
+  if (
+    !result ||
+    typeof result.taskId !== "string" ||
+    typeof result.channelId !== "string" ||
+    typeof result.title !== "string"
+  )
+    return null;
+  return result as TaskActionResult;
+}
 
 function parsedObject(text: unknown): Record<string, unknown> | null {
   if (typeof text !== "string") return null;

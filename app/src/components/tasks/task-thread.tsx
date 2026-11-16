@@ -10,13 +10,18 @@ import {
   IconPlayerStop,
   IconProgress,
 } from "@tabler/icons-react";
-import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import {
+  QueryClientContext,
+  useMutation,
+  useQuery,
+} from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useContext } from "react";
+import { type ReactNode, useContext, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
+import { stopTaskMutationOptions } from "@/lib/tasks/mutations";
 import {
   type BotTask,
   failureSentence,
@@ -32,6 +37,7 @@ import {
   taskQueryOptions,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
+import { queryClient } from "@/query-client";
 
 /*
  * A Bot's task threads, as the conversation that asked for them draws them: the card a task starts
@@ -218,6 +224,36 @@ function OpenThread({
   );
 }
 
+/**
+ * Stop, on a task that is working or waiting on the person: the same stop as Stop in its thread.
+ * The card reads Stopped as soon as the answer comes back, and the line saying how far it got
+ * follows in the conversation.
+ */
+function StopTask({
+  taskId,
+  onError,
+}: {
+  taskId: string;
+  onError: (message: string | null) => void;
+}) {
+  const stop = useMutation({
+    ...stopTaskMutationOptions(queryClient),
+    onMutate: () => onError(null),
+    onError: (error) => onError(error.message),
+  });
+  return (
+    <Button
+      disabled={stop.isPending}
+      onClick={() => stop.mutate(taskId)}
+      size="sm"
+      variant="ghost"
+    >
+      <IconPlayerStop data-icon="inline-start" />
+      {stop.isPending ? "Stopping…" : "Stop"}
+    </Button>
+  );
+}
+
 /** A task's icon, with the dot that says it is moving, waiting or done. */
 function StateIcon({ state }: { state: CardState }) {
   const { icon: Icon, dot } = STATE[state];
@@ -233,6 +269,21 @@ function StateIcon({ state }: { state: CardState }) {
       />
     </span>
   );
+}
+
+/**
+ * Which agent the Bot handed the task to, in one quiet line under the card's state: who is on it
+ * while it works, who did it once it is done, and who it was handed to otherwise. Nothing for a task
+ * the Bot does itself.
+ */
+export function agentLine(
+  state: CardState,
+  agent: BotTask["agent"],
+): string | null {
+  if (!agent?.name) return null;
+  if (state === "working") return `${agent.name} is on it`;
+  if (state === "done") return `Done by ${agent.name}`;
+  return `Handed to ${agent.name}`;
 }
 
 /**
@@ -263,6 +314,7 @@ export function TaskCard({
     enabled: Boolean(taskId),
   });
   const state = cardState(taskId ? task.data : undefined);
+  const [stopError, setStopError] = useState<string | null>(null);
   // The card's clock, once there is a task to time: every second while it works, and every half
   // minute otherwise.
   const now = useNow(
@@ -300,14 +352,24 @@ export function TaskCard({
       }
       action={
         channelId ? (
-          <OpenThread channelId={channelId} primary={state === "needs"}>
-            {state === "needs" ? "Go to thread" : "Open thread"}
-          </OpenThread>
+          <>
+            {taskId && (state === "working" || state === "needs") ? (
+              <StopTask onError={setStopError} taskId={taskId} />
+            ) : null}
+            <OpenThread channelId={channelId} primary={state === "needs"}>
+              {state === "needs" ? "Go to thread" : "Open thread"}
+            </OpenThread>
+          </>
         ) : null
       }
       state={state}
       title={task.data?.title ?? title}
     >
+      {taskId && agentLine(state, task.data?.agent) ? (
+        <p className="text-muted-foreground text-xs" data-slot="task-agent">
+          {agentLine(state, task.data?.agent)}
+        </p>
+      ) : null}
       {next ? (
         <p
           className={cn(
@@ -320,6 +382,11 @@ export function TaskCard({
       ) : null}
       {brief && state === "working" ? (
         <p className="line-clamp-2 text-muted-foreground text-xs">{brief}</p>
+      ) : null}
+      {stopError ? (
+        <p className="text-destructive text-xs" role="alert">
+          {stopError}
+        </p>
       ) : null}
     </TaskFrame>
   );
@@ -373,7 +440,9 @@ function TaskFrame({
             {children}
           </div>
         </div>
-        {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
+        {action ? (
+          <div className="mt-3 flex flex-wrap justify-end gap-2">{action}</div>
+        ) : null}
       </section>
       {below}
     </div>
@@ -541,14 +610,15 @@ export function TaskReport({
 /**
  * What a needs-you line says once the person has answered, by where the task is now. Never where
  * they answered: the thread, the Bots page's Needs you board and the inbox all answer it, and the
- * line can't tell which.
+ * line can't tell which. A task they stopped is the one exception: Stop withdraws what it waited
+ * for, answered or not, so that line says only the stop.
  */
 const ANSWERED: Record<CardState, string> = {
   working: "You answered this. It's carrying on.",
   needs: "You answered this. It needs you again in its thread.",
   done: "You answered this, and it's done.",
   failed: "You answered this, but it couldn't finish.",
-  stopped: "You answered this, and stopped it after.",
+  stopped: "You stopped this task, so it no longer needs this.",
 };
 
 /**
@@ -613,6 +683,8 @@ export function SentFromBot({
   const task = tasks?.find((task) => task.threadId === threadId);
   const name = bots?.find((bot) => bot.id === task?.agentId)?.name;
   const label = `Sent from ${name ?? "your Bot"}`;
+  // The agent the Bot handed it to, when it handed it to one: said after the link, as plain words.
+  const to = task?.agent?.name ? ` to ${task.agent.name}` : "";
   return (
     <div
       className="flex w-full flex-col items-end gap-1"
@@ -631,6 +703,7 @@ export function SentFromBot({
         ) : (
           label
         )}
+        {to ? <span data-slot="task-agent">{to}</span> : null}
       </p>
       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm">
         {brief}

@@ -107,6 +107,7 @@ import { Route as AuthedSettingsCredentialsNewRouteImport } from './routes/_auth
 import { Route as AuthedAppBotsAgentIdIndexRouteImport } from './routes/_authed/_app/bots.$agentId.index'
 import { Route as AuthedAppBotsAgentIdAccessRouteImport } from './routes/_authed/_app/bots.$agentId.access'
 import { Route as AuthedAppBotsAgentIdActivityRouteImport } from './routes/_authed/_app/bots.$agentId.activity'
+import { Route as AuthedAppBotsAgentIdAgentsRouteImport } from './routes/_authed/_app/bots.$agentId.agents'
 import { Route as AuthedAppBotsAgentIdApprovalsRouteImport } from './routes/_authed/_app/bots.$agentId.approvals'
 import { Route as AuthedAppBotsAgentIdAppsRouteImport } from './routes/_authed/_app/bots.$agentId.apps'
 import { Route as AuthedAppBotsAgentIdComputerRouteImport } from './routes/_authed/_app/bots.$agentId.computer'
@@ -650,6 +651,12 @@ const AuthedAppBotsAgentIdActivityRoute =
     path: '/bots/$agentId/activity',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppBotsAgentIdAgentsRoute =
+  AuthedAppBotsAgentIdAgentsRouteImport.update({
+    id: '/bots/$agentId/agents',
+    path: '/bots/$agentId/agents',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppBotsAgentIdApprovalsRoute =
   AuthedAppBotsAgentIdApprovalsRouteImport.update({
     id: '/bots/$agentId/approvals',
@@ -884,6 +891,7 @@ export interface FileRoutesByFullPath {
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
   '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
+  '/bots/$agentId/agents': typeof AuthedAppBotsAgentIdAgentsRoute
   '/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
   '/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
   '/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
@@ -1002,6 +1010,7 @@ export interface FileRoutesByTo {
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
   '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
+  '/bots/$agentId/agents': typeof AuthedAppBotsAgentIdAgentsRoute
   '/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
   '/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
   '/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
@@ -1126,6 +1135,7 @@ export interface FileRoutesById {
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
   '/_authed/_app/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
   '/_authed/_app/bots/$agentId/activity': typeof AuthedAppBotsAgentIdActivityRoute
+  '/_authed/_app/bots/$agentId/agents': typeof AuthedAppBotsAgentIdAgentsRoute
   '/_authed/_app/bots/$agentId/approvals': typeof AuthedAppBotsAgentIdApprovalsRoute
   '/_authed/_app/bots/$agentId/apps': typeof AuthedAppBotsAgentIdAppsRoute
   '/_authed/_app/bots/$agentId/computer': typeof AuthedAppBotsAgentIdComputerRoute
@@ -1248,6 +1258,7 @@ export interface FileRouteTypes {
     | '/settings/connected-accounts/'
     | '/bots/$agentId/access'
     | '/bots/$agentId/activity'
+    | '/bots/$agentId/agents'
     | '/bots/$agentId/approvals'
     | '/bots/$agentId/apps'
     | '/bots/$agentId/computer'
@@ -1366,6 +1377,7 @@ export interface FileRouteTypes {
     | '/settings/connected-accounts'
     | '/bots/$agentId/access'
     | '/bots/$agentId/activity'
+    | '/bots/$agentId/agents'
     | '/bots/$agentId/approvals'
     | '/bots/$agentId/apps'
     | '/bots/$agentId/computer'
@@ -1489,6 +1501,7 @@ export interface FileRouteTypes {
     | '/_authed/settings/connected-accounts/'
     | '/_authed/_app/bots/$agentId/access'
     | '/_authed/_app/bots/$agentId/activity'
+    | '/_authed/_app/bots/$agentId/agents'
     | '/_authed/_app/bots/$agentId/approvals'
     | '/_authed/_app/bots/$agentId/apps'
     | '/_authed/_app/bots/$agentId/computer'
@@ -2208,6 +2221,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppBotsAgentIdActivityRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/bots/$agentId/agents': {
+      id: '/_authed/_app/bots/$agentId/agents'
+      path: '/bots/$agentId/agents'
+      fullPath: '/bots/$agentId/agents'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdAgentsRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/_app/bots/$agentId/approvals': {
       id: '/_authed/_app/bots/$agentId/approvals'
       path: '/bots/$agentId/approvals'
@@ -2565,6 +2585,7 @@ interface AuthedAppRouteChildren {
   AuthedAppInvitationsIndexRoute: typeof AuthedAppInvitationsIndexRoute
   AuthedAppBotsAgentIdAccessRoute: typeof AuthedAppBotsAgentIdAccessRoute
   AuthedAppBotsAgentIdActivityRoute: typeof AuthedAppBotsAgentIdActivityRoute
+  AuthedAppBotsAgentIdAgentsRoute: typeof AuthedAppBotsAgentIdAgentsRoute
   AuthedAppBotsAgentIdApprovalsRoute: typeof AuthedAppBotsAgentIdApprovalsRoute
   AuthedAppBotsAgentIdAppsRoute: typeof AuthedAppBotsAgentIdAppsRoute
   AuthedAppBotsAgentIdComputerRoute: typeof AuthedAppBotsAgentIdComputerRoute
@@ -2620,6 +2641,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppInvitationsIndexRoute: AuthedAppInvitationsIndexRoute,
   AuthedAppBotsAgentIdAccessRoute: AuthedAppBotsAgentIdAccessRoute,
   AuthedAppBotsAgentIdActivityRoute: AuthedAppBotsAgentIdActivityRoute,
+  AuthedAppBotsAgentIdAgentsRoute: AuthedAppBotsAgentIdAgentsRoute,
   AuthedAppBotsAgentIdApprovalsRoute: AuthedAppBotsAgentIdApprovalsRoute,
   AuthedAppBotsAgentIdAppsRoute: AuthedAppBotsAgentIdAppsRoute,
   AuthedAppBotsAgentIdComputerRoute: AuthedAppBotsAgentIdComputerRoute,

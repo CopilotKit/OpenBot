@@ -228,7 +228,7 @@ export function useDrawnTool(): (name: string) => boolean {
  * they cannot use yet (not connected, lost at the vendor, or a team account nobody connected) — and neither may sit behind a disclosure for the same reason: a question
  * nobody can see is a conversation that has stopped without saying so.
  */
-function asksThePerson(result: string | undefined): boolean {
+export function asksThePerson(result: string | undefined): boolean {
   if (result === undefined) return false;
   const answer = asText(result);
   if (!answer.startsWith(REFUSAL_MARKER)) return false;

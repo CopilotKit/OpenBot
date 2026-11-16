@@ -208,6 +208,7 @@ test.each(["user", "admin"] as const)(
     // What a person makes and comes back to, beside Bots, in the order of the eight.
     expect(links(footer).map(({ to }) => to)).toEqual([
       "/bots",
+      "/agents",
       "/routines",
       "/memory",
       "/skills",
@@ -267,6 +268,7 @@ test("Admin is in the list for admins only", () => {
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
     "bots",
+    "agents",
     "routines",
     "memory",
     "skills",
@@ -362,6 +364,7 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
+    "agents",
     "routines",
     "skills",
     "connections",
@@ -372,6 +375,7 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Admin is still for an admin only, in this edition as in the other.
   expect(navigationFor("user", "personal").map((item) => item.id)).toEqual([
     "bots",
+    "agents",
     "routines",
     "skills",
     "connections",

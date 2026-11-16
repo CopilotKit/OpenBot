@@ -35,3 +35,17 @@ export function elapsed(seconds: number): string {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}`
     : `${minutes}:${rest}`;
 }
+
+/**
+ * How long something took, in the fewest words: 42s, 2m, 1h 5m. A minute and more is said in whole
+ * minutes, as a person would say it.
+ */
+export function briefDuration(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) return `${whole}s`;
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}

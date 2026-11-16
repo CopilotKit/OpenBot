@@ -16,6 +16,10 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route } from "@/routes/_authed/admin/people";
 import { ME_PATH, meResponse, PEOPLE_PATH, personBody } from "./accounts-api";
@@ -52,12 +56,15 @@ const sam = {
   role: "member" as const,
 };
 const roles: Record<string, "owner" | "admin" | "member"> = {};
+/** The organization Dana works in, as the list of her organizations says; null lists none. */
+let working: { id: string; personal: boolean } | null = null;
 const sent: unknown[] = [];
 
 beforeEach(() => {
   roles.dana = "admin";
   roles.sam = "member";
   sent.length = 0;
+  working = null;
   queryClient.clear();
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -69,7 +76,26 @@ beforeEach(() => {
     const path = String(input).split("?")[0];
     const method = init?.method ?? "GET";
     if (path === ME_PATH) return meResponse({ user: dana });
-    if (path === PEOPLE_PATH)
+    if (path === "/api/v2/people/me/organizations" && working)
+      return Response.json({
+        organizations: [
+          {
+            id: working.id,
+            slug: working.id,
+            name: working.personal ? "Sam's organization" : "Acme Freight",
+            role: "admin",
+            personal: working.personal,
+            active: true,
+          },
+        ],
+        canCreate: true,
+        nextCursor: null,
+      });
+    // People in whichever organization is being worked in.
+    if (
+      path === PEOPLE_PATH ||
+      /^\/api\/v2\/organizations\/[^/]+\/people$/.test(path)
+    )
       return Response.json({
         people: [dana, sam].map((one) =>
           personBody({ ...one, role: roles[one.id] }),
@@ -144,4 +170,51 @@ test("an owner's admin switch reads on and can't be changed, and nothing is sent
   fireEvent.click(owner);
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(sent).toEqual([]);
+});
+
+/*
+ * FOUND IN THE BIG TEST: an owner's row had its Admin switch and Remove turned off with nothing to
+ * say why. It says so under the row, and only what is true where the person is working: a person's
+ * own organization always has them as its owner; in a shared one an owner gives the Owner role in
+ * Organization settings; where OpenBot lists no organizations there is no such page to point to.
+ */
+const ownerHint = async () => {
+  const view = await draw();
+  await view.findByRole("switch", { name: "Admin: sam@acme.test" });
+  return view;
+};
+
+test("an owner's row where OpenBot lists no organizations says only that owners are admins", async () => {
+  roles.sam = "owner";
+  const view = await ownerHint();
+  expect(await view.findByText("Owners are always admins.")).toBeTruthy();
+  expect(view.queryByText(/Organization settings/)).toBeNull();
+});
+
+test("an owner's row in a shared organization points to the Owner role in Organization settings", async () => {
+  roles.sam = "owner";
+  working = { id: "default", personal: false };
+  const view = await ownerHint();
+  expect(
+    await view.findByText(
+      "Owners are always admins. An owner can change a member's role to Owner in Organization settings.",
+    ),
+  ).toBeTruthy();
+});
+
+test("an owner's row in their own organization says it always has them as owner", async () => {
+  roles.sam = "owner";
+  working = { id: "org_sam", personal: true };
+  try {
+    const view = await ownerHint();
+    await waitFor(() => expect(currentOrganizationId()).toBe("org_sam"));
+    expect(
+      await view.findByText(
+        "This is Sam Ortiz's own organization, so they're always its owner.",
+      ),
+    ).toBeTruthy();
+    expect(view.queryByText(/Organization settings/)).toBeNull();
+  } finally {
+    setCurrentOrganization("default");
+  }
 });

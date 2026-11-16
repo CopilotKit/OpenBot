@@ -4,6 +4,7 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
+  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -26,7 +27,8 @@ import { primitive } from "@/lib/primitives";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * The primary entries are what a person makes and comes back to: their Bots, then the every-Bot
+ * The primary entries are what a person makes and comes back to: their Bots and the agents they
+ * hand work to, then the every-Bot
  * pages of Routines, Memory, Skills and Apps (Connections: the apps a Bot reaches as you), in the
  * order of `lib/primitives.ts`. Each is somebody's own, so none is inside Admin. What is set once
  * for every Bot (the computer, approvals, activity) is in Settings, and a Bot's own is on its page
@@ -37,6 +39,7 @@ export type NavigationItem =
       kind?: undefined;
       id:
         | "bots"
+        | "agents"
         | "routines"
         | "memory"
         | "skills"
@@ -47,6 +50,7 @@ export type NavigationItem =
       label: string;
       to:
         | "/bots"
+        | "/agents"
         | "/routines"
         | "/memory"
         | "/skills"
@@ -96,6 +100,14 @@ export const NAVIGATION: readonly NavigationItem[] = [
     label: "Bots",
     to: "/bots",
     icon: IconBolt,
+    section: "primary",
+  },
+  {
+    // The agents Bots hand work to: the organization's, and a person's own private ones.
+    id: "agents",
+    label: "Agents",
+    to: "/agents",
+    icon: IconSitemap,
     section: "primary",
   },
   {

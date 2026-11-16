@@ -1,5 +1,9 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalDetails, approvalWords } from "@openbot/shared/tool-name";
+import {
+  approvalDetails,
+  approvalPhrase,
+  approvalWords,
+} from "@openbot/shared/tool-name";
 import {
   IconDots,
   IconHandStop,
@@ -10,8 +14,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { ShareDetails, shareOf } from "@/components/approvals/share-details";
 import { PageRows } from "@/components/layout/page-shell";
-import { BoardRow } from "@/components/needs-you/board-row";
+import {
+  BoardRow,
+  ROW_MENU_WIDTH,
+  RowMenu,
+} from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +33,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -135,15 +145,21 @@ function QuestionRow({
 /**
  * What an approval would send, a labelled line each: "Text: hello". Nothing when it sends nothing
  * the title has not said already, as a click does: its ref and snapshot are handles for the model.
+ *
+ * A share reads as its card in the conversation reads: who reads it, in a sentence, and the whole
+ * text. Its own fields (the audience's key, a count of recipients, the text's fingerprint) are the
+ * server's, and listed here as "Audience", "Recipients" and "Preview" they said less than the card.
  */
 function ApprovalDetails({
-  args,
+  action,
   className,
 }: {
-  args: unknown;
+  action: WaitingRequest["action"];
   className?: string;
 }) {
-  const details = approvalDetails(args);
+  if (shareOf(action))
+    return <ShareDetails action={action} className={className} />;
+  const details = approvalDetails(action.args);
   if (details.length === 0) return null;
   return (
     <dl
@@ -178,6 +194,8 @@ function RequestRow({
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
+  // A share says who it goes to in its title, as its card does: "wants to hand this to Ledger Bot".
+  const share = shareOf(request.action) !== null;
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -185,11 +203,14 @@ function RequestRow({
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="line-clamp-none">
-          {botName} wants to {words.action}
+          {botName} wants to{" "}
+          {share ? approvalPhrase(request.action) : words.action}
         </ItemTitle>
-        <ItemDescription className="line-clamp-none break-all">
-          {words.place}
-        </ItemDescription>
+        {share ? null : (
+          <ItemDescription className="line-clamp-none break-all">
+            {words.place}
+          </ItemDescription>
+        )}
         {request.action.policy ? (
           <p className="text-sm">
             {request.action.policy.behaviour === "hand_off"
@@ -198,7 +219,7 @@ function RequestRow({
             {request.action.policy.reason}
           </p>
         ) : null}
-        <ApprovalDetails args={request.action.args} className="mt-1" />
+        <ApprovalDetails action={request.action} className="mt-1" />
       </ItemContent>
       {request.action.policy?.behaviour === "hand_off" ? (
         <ItemFooter className="flex-wrap justify-start pl-11">
@@ -500,7 +521,14 @@ function AnswerDialog({
  * Allow for this conversation and Always allow here in the menu; for a hand-off, Don't do it and I
  * did it myself. The action's own row and the row of a task waiting on it both answer with these.
  */
-function RequestAnswers({ request }: { request: WaitingRequest }) {
+function RequestAnswers({
+  request,
+  more = null,
+}: {
+  request: WaitingRequest;
+  /** Menu items of the row it answers on (a task's Mark done and Open), put in this one's menu. */
+  more?: ReactNode;
+}) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
   const handOff = request.action.policy?.behaviour === "hand_off";
@@ -561,7 +589,7 @@ function RequestAnswers({ request }: { request: WaitingRequest }) {
               >
                 <IconDots />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className={ROW_MENU_WIDTH}>
                 <DropdownMenuItem
                   disabled={decision.isPending}
                   onClick={() => decide("allow_conversation")}
@@ -574,11 +602,22 @@ function RequestAnswers({ request }: { request: WaitingRequest }) {
                 >
                   Always allow here
                 </DropdownMenuItem>
+                {more ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    {more}
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
+          ) : more ? (
+            <RowMenu label={`More for ${words.action}`}>{more}</RowMenu>
           ) : null}
         </>
       )}
+      {handOff && more ? (
+        <RowMenu label={`More for ${words.action}`}>{more}</RowMenu>
+      ) : null}
     </>
   );
 }
@@ -602,14 +641,20 @@ function requestReason(request: WaitingRequest): ReactNode {
  */
 function RequestBoardRow({ request }: { request: WaitingRequest }) {
   const words = approvalWords(request.action);
-  const action = words.action.charAt(0).toUpperCase() + words.action.slice(1);
+  /*
+   * A share is titled as its card is, who it goes to included: "Hand this to Ledger Bot". Split as
+   * an action and its place, it read "Hand this to" over "Ledger Bot".
+   */
+  const share = shareOf(request.action) !== null;
+  const said = share ? approvalPhrase(request.action) : words.action;
+  const action = said.charAt(0).toUpperCase() + said.slice(1);
   return (
     <BoardRow
       actions={<RequestAnswers request={request} />}
-      detail={words.place}
+      detail={share ? null : words.place}
       icon={<IconHandStop />}
       meta={[requestReason(request)]}
-      more={<ApprovalDetails args={request.action.args} />}
+      more={<ApprovalDetails action={request.action} />}
       open
       title={action}
       waiting
@@ -622,7 +667,14 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
  * Answer, for a question a task waits on, from the board: the dialog with the whole question and
  * the box to answer in, so the person answers without opening the thread. And Dismiss beside it.
  */
-function QuestionAnswers({ question }: { question: WaitingQuestion }) {
+function QuestionAnswers({
+  question,
+  more = null,
+}: {
+  question: WaitingQuestion;
+  /** Menu items of the row it answers on (a task's Mark done and Open), in a menu after Dismiss. */
+  more?: ReactNode;
+}) {
   const [answering, setAnswering] = useState(false);
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
@@ -646,6 +698,9 @@ function QuestionAnswers({ question }: { question: WaitingQuestion }) {
       >
         <IconX />
       </Button>
+      {more ? (
+        <RowMenu label={`More for ${question.question}`}>{more}</RowMenu>
+      ) : null}
       <AnswerDialog
         onOpenChange={setAnswering}
         open={answering}
@@ -661,7 +716,8 @@ function QuestionAnswers({ question }: { question: WaitingQuestion }) {
  * carries its answers, so the person answers it there without opening the thread.
  */
 export type HeldAnswer = {
-  actions: ReactNode;
+  /** Given the row's folded menu items, or null while they are buttons on the row. */
+  actions: (more: ReactNode | null) => ReactNode;
   meta: ReactNode[];
   more?: ReactNode;
 };
@@ -684,9 +740,9 @@ export function useHeldAnswers(): (task: {
       : undefined;
     if (request)
       return {
-        actions: <RequestAnswers request={request} />,
+        actions: (more) => <RequestAnswers more={more} request={request} />,
         meta: [requestReason(request)],
-        more: <ApprovalDetails args={request.action.args} />,
+        more: <ApprovalDetails action={request.action} />,
       };
     const question = waiting.questions.find(
       (asked) =>
@@ -695,7 +751,7 @@ export function useHeldAnswers(): (task: {
     );
     if (question)
       return {
-        actions: <QuestionAnswers question={question} />,
+        actions: (more) => <QuestionAnswers more={more} question={question} />,
         meta: question.why ? [<span key="why">{question.why}</span>] : [],
       };
     return undefined;

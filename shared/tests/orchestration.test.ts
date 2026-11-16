@@ -184,6 +184,47 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
   });
 
+  test("more for a task already started goes to that task, and a stop to it, never a new task", () => {
+    expect(DELEGATING_GUIDANCE).toContain(
+      "pass it on with follow_up, naming that task by the taskId its delegate answer gave",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("never start a new task for it");
+    expect(DELEGATING_GUIDANCE).toContain("call stop for it");
+    // Live, told to stop work it had done itself, a Bot stopped the conversation's other task.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "stop nothing, never a different task in its place",
+    );
+  });
+
+  test("a new piece of work asked for with 'also' or 'too' is a task of its own, never a follow-up", () => {
+    /*
+     * Live, while a task wrote a guide for EU customers, "Also write a guide for US customers" was
+     * passed into that task with follow_up, so "Stop the EU one" could only steer the task writing
+     * both. Without "also" the same ask was a task of its own.
+     */
+    // The paragraph about a task already started, after the three things a turn may do.
+    const pointed =
+      DELEGATING_GUIDANCE.split("\n\n").find((paragraph) =>
+        paragraph.includes("pass it on with follow_up"),
+      ) ?? "";
+    expect(pointed).toContain(
+      'A new piece of work is a new task, even when they ask for it with "also" or "too" while another task runs',
+    );
+    expect(pointed).toContain('"Also write a guide for US customers"');
+    expect(pointed).toContain("goes to its own task with delegate");
+    expect(pointed).toContain(
+      "never into a task that is making something else",
+    );
+    expect(pointed).toContain(
+      "follow_up is only for changing or adding to the work a task is already doing",
+    );
+    // "Tell it to also check X" stays a follow-up: the rule above it is unchanged.
+    expect(pointed).toContain('"tell it to also check the parking"');
+    expect(pointed.indexOf("pass it on with follow_up")).toBeLessThan(
+      pointed.indexOf("A new piece of work is a new task"),
+    );
+  });
+
   test("a finished task is said to be done, not waiting for review", () => {
     // Told `ready_for_review`, a Bot said a finished order "may be waiting on you".
     expect(taskStands("ready_for_review")).toStartWith("done");
