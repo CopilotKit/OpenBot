@@ -44,6 +44,13 @@ every deployment:
   folders for Bots belong to OpenBot on this computer and are not shown while connected. It needs
   an OpenBot whose server honours an app's sign-in for its screens; an earlier one is refused with
   a sentence saying so.
+- **A file change or command too long to approve says how long it is.** A Bot saving a file to
+  your computer, or running a command there, was refused with "This operation is too large for
+  native approval. Ask the Bot for a smaller edit or command." and guessed at a size, retrying for
+  many turns. The refusal now gives the length and what an approval dialog shows: "This file is too
+  long to show in an approval dialog: it has 56,120 characters, and a dialog shows at most 2,000
+  characters and 24 lines. Split it into smaller files." Content with a NUL character is refused
+  with a sentence of its own. The limits themselves are unchanged.
 - **OpenBot Desktop is one address.** With CopilotKit Intelligence on the same machine, the app
   used to open a second connection, straight to Intelligence's gateway on a port of its own. It now
   opens everything on OpenBot's own address: the server carries that socket
