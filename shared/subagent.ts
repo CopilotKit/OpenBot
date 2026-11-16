@@ -10,8 +10,19 @@
 /** What the model is offered. One name, so a transcript can find every subagent by searching for it. */
 export const SUBAGENT_TOOL = "run_subagent";
 
-/** How many subagents one answer may start. The next one is refused with a sentence. */
-export const SUBAGENTS_PER_ANSWER = 5;
+/**
+ * How many of one answer's subagents run at the same time, by default. One more waits for a free
+ * place rather than being refused, so a Bot working through a long list of independent parts gets
+ * every one of them done, this many at a time. A deployment sets its own number.
+ */
+export const SUBAGENTS_AT_ONCE = 10;
+
+/**
+ * How many subagents one answer may start in all, by default: the guard against a run that never
+ * stops starting them, not a budget a long job is expected to reach. The next one is refused with a
+ * sentence telling the Bot to do the rest itself. A deployment sets its own number.
+ */
+export const SUBAGENTS_PER_ANSWER = 100;
 
 /** What a subagent hands back to the Bot that started it, and what its card is drawn from. */
 export type SubagentResult =
