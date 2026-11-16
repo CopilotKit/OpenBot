@@ -1,7 +1,9 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { BotListScopeProvider } from "@/lib/agents/list-scope";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { currentUserQueryOptions } from "../../../lib/auth/queries";
@@ -35,7 +37,11 @@ function RouteComponent() {
     <SidebarShell className="h-svh overflow-hidden">
       <AdminSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
-        <Outlet />
+        <ConnectionBanner />
+        {/* Admin's screens list every Bot in the organization (lib/agents/list-scope.tsx). */}
+        <BotListScopeProvider scope="organization">
+          <Outlet />
+        </BotListScopeProvider>
       </SidebarInset>
     </SidebarShell>
   );

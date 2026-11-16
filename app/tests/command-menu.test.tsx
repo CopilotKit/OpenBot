@@ -221,6 +221,7 @@ test("Cmd/Ctrl+K opens it, and empty it lists pages, Bots and five recent conver
     "Memory",
     "Skills",
     "Connections",
+    "Teams",
     "Settings",
   ]);
   expect(options("Bots")).toEqual(["Helper", "Budget Buddy"]);

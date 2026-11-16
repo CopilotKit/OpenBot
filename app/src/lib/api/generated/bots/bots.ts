@@ -114,7 +114,7 @@ export const getListBotsUrl = (
 };
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. hidden=true lists only the Bots the caller hid from their own list instead. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: its name and avatar, and nothing from inside it (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 export const listBots = async (

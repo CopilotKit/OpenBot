@@ -4,7 +4,10 @@
 # api/openapi.yaml, the file every client and check reads. See api/README.md.
 #
 # CopilotKit Intelligence learns skills from conversations and recordings, in Learning spaces
-# (containers) inside the organization's Intelligence project. What it proposes, the evidence behind
+# (containers) that belong to one organization. Every organization has its own spaces, and each
+# person has their own space in each organization they belong to: what is learned in one
+# organization never reaches a Bot in another, the same person's Bots included, and "every Bot"
+# below always means every Bot in the organization. What it proposes, the evidence behind
 # each proposal, approving and rejecting one, and its runs live in Intelligence: OpenBot reads and
 # changes them for a person, after checking which spaces that person may reach, and answers in the
 # shapes below. Beside them is what OpenBot keeps: which space each Bot learns into, who reviews
@@ -14,6 +17,7 @@
 # The organization's spaces (the one every Bot learns into, and each Bot's own) are an
 # administrator's, under settings/learning, picked with botId. A person's own spaces are under
 # people/{personId}, picked with containerId; an administrator may read and review them too.
+# An administrator here is an administrator of the organization in the address, and of no other.
 paths:
   /api/v2/organizations/{organizationId}/settings/learning:
     parameters:
@@ -1800,6 +1804,19 @@ components:
           oneOf:
             - $ref: '#/components/schemas/LearningAutomatic'
             - type: 'null'
+        organizationSpaceId:
+          description: >-
+            The space OpenBot keeps for this organization alone, which its
+            Bots learn into unless an administrator chooses another. Another
+            space of the organization's is named after it: this id, a hyphen,
+            then a name of the administrator's choosing. The id says nothing
+            a person can read, so a screen names the space by the
+            organization and never shows it. Null, or absent, where OpenBot
+            keeps no space for the organization alone and its default is
+            whichever space is assigned or chosen.
+          oneOf:
+            - $ref: '#/components/schemas/LearningSpaceId'
+            - type: 'null'
     LearningAutomaticResult:
       type: object
       required: [automatic]
@@ -2040,8 +2057,9 @@ components:
       enum: [closed, open, choose]
       description: >-
         Who else's Bots use the skills learned in a person's own space.
-        closed: only their own Bots. open: every Bot. choose: every Bot, for
-        the skills they open one by one.
+        closed: only their own Bots. open: every Bot in the organization.
+        choose: every Bot in the organization, for the skills they open one
+        by one. Never a Bot in another organization.
     PersonalLearnedSkill:
       type: object
       required: [name, description, open, approvedBy, sharing]

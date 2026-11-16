@@ -14,7 +14,11 @@ paths:
         Return what this OpenBot offers and how people sign in to it: the
         edition, the features the apps draw, and the sign-in options. Anybody
         may read it, signed in or not, because the sign-in screen reads it
-        first. It names no identity provider and no version: only whether
+        first. Signed in, it is answered in an organization the caller is a
+        member of, and an organization they are not in, the organization
+        `default` included, answers exactly as one that does not exist. Nobody
+        signed in reads it in the organization `default`. It names no identity
+        provider and no version: only whether
         single sign-on is set up and required.
       x-openbot-singleton: true
       security:
@@ -46,14 +50,16 @@ paths:
       operationId: getOrganizationSettings
       summary: Read the organization's settings
       description: >-
-        Return the settings an administrator sets for everybody: single
-        sign-on, recording computer actions, stopping idle computers, the
-        model and app allowlists, sharing learned skills, check-ins a day and
-        choosing a model. Beside them, read only, what an administrator needs
-        to set them: the model OpenBot runs on, the directory groups, the apps
-        an allowlist can name, the hosts every computer may reach, and whether
-        SCIM and OpenTelemetry are set up. Only an administrator may read
-        them.
+        Return the settings the organization's administrators set for its
+        members: single sign-on, recording computer actions, stopping idle
+        computers, the model and app allowlists, sharing learned skills,
+        check-ins a day and choosing a model. Each organization has its own,
+        and a new one starts with OpenBot's defaults. Beside them, read only,
+        what an administrator needs to set them: the model OpenBot runs on,
+        the directory groups of the organization's members, the apps an
+        allowlist can name, the hosts every computer may reach, and whether
+        SCIM and OpenTelemetry are set up. Only an administrator of the
+        organization may read them.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -91,7 +97,10 @@ paths:
         the audit trail with what it was before. Requiring single sign-on needs
         an identity provider registered first, and signs out everybody who
         signed in another way, apart from the administrators the deployment's
-        configuration names and the caller. Only an administrator may change
+        configuration names and the caller. Requiring single sign-on applies
+        to signing in to the whole OpenBot, so it is set only in the
+        organization `default`: sending ssoRequired in any other organization
+        answers 409. Only an administrator of the organization may change
         them.
       security:
         - webSession: []
@@ -467,8 +476,8 @@ paths:
       description: >-
         Return each permission switch as it applies to one person, so the apps
         hide what they may not use. The caller reads their own, as me; an
-        administrator reads anybody's. enforced is false where the deployment
-        keeps no switches and every default applies.
+        administrator of the organization reads any member's. enforced is
+        false where this OpenBot keeps no switches and every default applies.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -508,9 +517,12 @@ paths:
       operationId: stopPersonComputers
       summary: Stop a person's computers
       description: >-
-        Stop every Bot computer running for one person now, and record it on
-        the audit trail. Their Bots start a computer again when they next need
-        one. Only an administrator may do this.
+        Stop the computers of the organization's Bots that one person owns,
+        now, and record it on the audit trail. Their Bots start a computer
+        again when they next need one. A person's own computer is stopped
+        only from the organization `default`. A person who is not a member of
+        the organization is not found (PERSON_NOT_FOUND). Only an
+        administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -803,9 +815,9 @@ paths:
       operationId: getModelUsage
       summary: Read which models Bots ran on
       description: >-
-        Return which models Bots ran on over the last days, with how many runs,
-        refusals and people each had, and the newest 50 runs. Only an
-        administrator may read it.
+        Return which models the organization's Bots ran on over the last days,
+        with how many runs, refusals and people each had, and the newest 50
+        runs. Only an administrator of the organization may read it.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -853,9 +865,10 @@ paths:
       operationId: listComputerActions
       summary: List recorded computer actions
       description: >-
-        Return one page of the actions recorded on Bot computers while
-        recording computer actions is on, newest first. Records are kept for
-        actionRecordRetentionDays. Only an administrator may read them. A
+        Return one page of the actions recorded on the organization's Bots'
+        computers while recording computer actions is on, newest first.
+        Records are kept for actionRecordRetentionDays. Only an administrator
+        of the organization may read them. A
         missing cursor starts at the newest and nextCursor null ends the list.
       security:
         - webSession: []
@@ -985,12 +998,14 @@ components:
       name: networkPolicyId
       in: path
       required: true
-      description: organization, or group:<name> for a directory group's.
+      description: >-
+        organization, team:<id> for a team's, or group:<name> for a directory
+        group's.
       schema:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
   schemas:
     Deployment:
       type: object
@@ -1086,9 +1101,11 @@ components:
         ssoRequired:
           type: boolean
           description: >-
-            Whether people must sign in through the organization's identity
-            provider. The administrators the deployment's configuration names
-            keep social sign-in as their way in.
+            Whether people must sign in through the company's identity
+            provider. It applies to signing in to the whole OpenBot, so it is
+            set only in the organization `default`. The administrators the
+            deployment's configuration names keep social sign-in as their way
+            in.
         actionRecording:
           type: boolean
           description: Whether what Bots do on their computers is recorded, to read in computer actions.
@@ -1167,7 +1184,7 @@ components:
           description: The model OpenBot's own Bots run on, when one is set.
         directoryGroups:
           type: array
-          description: The directory groups people belong to, by name.
+          description: The directory groups the organization's members belong to, by name.
           items:
             type: string
         apps:
@@ -1299,7 +1316,15 @@ components:
           type: object
           description: >-
             What each directory group is set to, by the group's name. A group
-            absent sets nothing. Team scopes will be added when teams arrive.
+            absent sets nothing.
+          additionalProperties:
+            type: boolean
+        teams:
+          type: object
+          description: >-
+            What each team is set to, by the team's id. A team absent sets
+            nothing. A team's switch can only turn a permission on for the
+            people in it, and in the teams beneath it.
           additionalProperties:
             type: boolean
     CapabilityPage:
@@ -1343,7 +1368,20 @@ components:
           minProperties: 1
           maxProperties: 100
           description: >-
-            By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.
+            By directory group name, 1 to 200 characters.
+          propertyNames:
+            minLength: 1
+            maxLength: 200
+            pattern: ^[^\x00]*\S[^\x00]*$
+          additionalProperties:
+            $ref: '#/components/schemas/SwitchValue'
+        teams:
+          type: object
+          minProperties: 1
+          maxProperties: 100
+          description: >-
+            By team id. A team that is not one of this organization's is not
+            found.
           propertyNames:
             minLength: 1
             maxLength: 200
@@ -1357,15 +1395,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           $ref: '#/components/schemas/CapabilityId'
         allowed:
@@ -1407,15 +1445,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
           maxLength: 100
@@ -1494,13 +1532,13 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, role, group]
+          enum: [organization, role, group, team]
           description: >-
-            Whose switch: the organization's, a member role's, or a directory
-            group's. Team scopes will be added when teams arrive.
+            Whose switch: the organization's, a member role's, a team's, or a
+            directory group's.
         scopeId:
           type: string
-          description: Empty for the organization; admin or member for a role; a directory group's name for a group.
+          description: Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.
         capability:
           type: string
         allowed:
@@ -1513,10 +1551,10 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group]
+          enum: [default, organization, role, group, team]
         scopeId:
           type: string
-          description: The role or group that decided it. Empty otherwise.
+          description: The role, the group's name or the team's id that decided it. Empty otherwise.
     CapabilityPreview:
       type: object
       required: [check, people, counts, activity, warning]
@@ -1655,16 +1693,16 @@ components:
         id:
           type: string
           description: >-
-            organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.
+            organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group]
+          enum: [organization, group, team]
           description: >-
-            Whose policy: the organization's, or a directory group's.
-            Team scopes will be added when teams arrive.
+            Whose policy: the organization's, a team's, or a directory
+            group's.
         scopeId:
           type: string
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -1719,15 +1757,15 @@ components:
       properties:
         scopeKind:
           type: string
-          enum: [organization, group]
+          enum: [organization, group, team]
           description: >-
-            Whose policy: the organization's, or a directory group's.
-            Team scopes will be added when teams arrive.
+            Whose policy: the organization's, a team's, or a directory
+            group's.
         scopeId:
           type: string
           maxLength: 200
           pattern: ^[^\x00]*$
-          description: The directory group's name. Empty for the organization.
+          description: The team's id, or the directory group's name. Empty for the organization.
         mode:
           $ref: '#/components/schemas/NetworkMode'
         rules:
@@ -1961,12 +1999,24 @@ components:
     SettingsConflict:
       description: >-
         Single sign-on can't be required before an identity provider is
-        registered, or the Idempotency-Key was used for a different request.
+        registered, ssoRequired was sent in an organization other than
+        `default`, or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
             $ref: './common.yaml#/components/schemas/Problem'
           examples:
+            notTheFirstOrganization:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Requiring SSO applies to signing in to this OpenBot as a whole, so it can't be set for one organization.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             noProvider:
               value:
                 type: https://open.bot/errors/conflict

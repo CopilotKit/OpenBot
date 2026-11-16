@@ -7,7 +7,7 @@ import type { AppAccountModeChangeAccountsEndedHolder } from "./appAccountModeCh
  * The accounts the switch ended, or would end.
  */
 export type AppAccountModeChangeAccountsEnded = {
-  /** Whose accounts they are: people's own (person), or the one OpenBot holds for everybody (deployment). */
+  /** Whose accounts they are: people's own (person), or the one OpenBot holds for everybody in the organization (deployment). */
   holder: AppAccountModeChangeAccountsEndedHolder;
   /** @minimum 0 */
   count: number;

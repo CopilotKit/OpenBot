@@ -1,4 +1,16 @@
-import { hashKey, QueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  type DefaultError,
+  type DefaultedQueryObserverOptions,
+  focusManager,
+  hashKey,
+  QueryClient,
+  type QueryKey,
+  type QueryObserverOptions,
+} from "@tanstack/react-query";
+import {
+  holdReadsWhileConnectionLost,
+  retryWhileConnectionLost,
+} from "@/lib/desktop/connection-lost";
 import {
   currentOrganizationId,
   onOrganizationChange,
@@ -36,7 +48,86 @@ export function organizationScopedHash(queryKey: QueryKey): string {
     : hashKey([{ organization }, ...queryKey]);
 }
 
-export const queryClient = new QueryClient({
+/**
+ * A query that refetches when the person comes back to OpenBot does so when the page is shown again
+ * AND when its window is focused again.
+ *
+ * TanStack Query 5 listens only for the page being shown (`visibilitychange`). OpenBot Desktop's
+ * window stays shown while the person works in their browser beside it, so coming back to it never
+ * hid or showed anything: a membership or an invitation made on the web stayed unseen in Desktop
+ * until a reload. Its window being focused again is the moment that says it. A browser window
+ * beside another is the same.
+ */
+focusManager.setEventListener((handleFocus) => {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const refocused = () => handleFocus();
+  window.addEventListener("visibilitychange", refocused, false);
+  window.addEventListener("focus", refocused, false);
+  return () => {
+    window.removeEventListener("visibilitychange", refocused);
+    window.removeEventListener("focus", refocused);
+  };
+});
+
+/**
+ * The app's client. Every query's retry rule is its own, wrapped once here so that a read failing
+ * while OpenBot Desktop can't reach the OpenBot it is connected to waits for it instead of failing
+ * (`lib/desktop/connection-lost.ts`). Wrapped where options are resolved, so a query that turns its
+ * retries off is held the same way.
+ */
+class OpenBotQueryClient extends QueryClient {
+  override defaultQueryOptions<
+    TQueryFnData = unknown,
+    TError = DefaultError,
+    TData = TQueryFnData,
+    TQueryData = TQueryFnData,
+    TQueryKey extends QueryKey = QueryKey,
+    TPageParam = never,
+  >(
+    options:
+      | QueryObserverOptions<
+          TQueryFnData,
+          TError,
+          TData,
+          TQueryData,
+          TQueryKey,
+          TPageParam
+        >
+      | DefaultedQueryObserverOptions<
+          TQueryFnData,
+          TError,
+          TData,
+          TQueryData,
+          TQueryKey
+        >,
+  ): DefaultedQueryObserverOptions<
+    TQueryFnData,
+    TError,
+    TData,
+    TQueryData,
+    TQueryKey
+  > {
+    if (options._defaulted)
+      return options as DefaultedQueryObserverOptions<
+        TQueryFnData,
+        TError,
+        TData,
+        TQueryData,
+        TQueryKey
+      >;
+    const resolved = super.defaultQueryOptions(options);
+    return {
+      ...resolved,
+      ...retryWhileConnectionLost<TError>(
+        this,
+        resolved.retry ?? false,
+        resolved.retryDelay,
+      ),
+    };
+  }
+}
+
+export const queryClient = new OpenBotQueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
@@ -45,6 +136,8 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+holdReadsWhileConnectionLost(queryClient);
 
 /**
  * Moving from one organization to another drops everything the app held for the one left, in

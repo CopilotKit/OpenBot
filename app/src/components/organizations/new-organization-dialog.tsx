@@ -92,8 +92,8 @@ function NewOrganizationForm() {
         <DialogHeader>
           <DialogTitle>New organization</DialogTitle>
           <DialogDescription>
-            A new organization starts with no Bots and no conversations. You
-            switch to it as soon as it's created.
+            A new organization starts with OpenBot's starter Bots and skills,
+            and no conversations. You switch to it as soon as it's created.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">

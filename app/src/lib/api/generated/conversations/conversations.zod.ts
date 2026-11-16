@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join.
+ * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Authorization: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
  * @summary Get a token to watch a conversation live
  */
 
@@ -17,7 +17,7 @@ export const CreateConversationJoinTokenParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -70,12 +70,14 @@ export const CreateConversationJoinTokenResponse = zod
           .string()
           .min(1)
           .describe(
-            "The socket's address, without the /websocket it ends in or its query. A ws or wss address, or a path on this server.",
+            "The socket's address, without the /websocket it ends in or its query. A ws or wss address, or a path on this server, which is resolved against the address the API was called at. Where it is on this server, the socket is opened with the credential that made the token (see createConversationJoinToken).",
           ),
         topic: zod
           .string()
           .regex(createConversationJoinTokenResponseRealtimeTopicRegExp)
-          .describe("The topic to join on the socket, thread:{threadId}."),
+          .describe(
+            "The topic to join on the socket, as the realtime gateway knows the thread. Use it as given: outside the organization default it does not name threadId, so a topic made from threadId joins nothing.",
+          ),
       })
       .describe("Where to use the token."),
   })
@@ -93,7 +95,7 @@ export const ListConversationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -261,7 +263,7 @@ export const CreateConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -375,7 +377,7 @@ export const RouteConversationMessageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -456,7 +458,7 @@ export const GetConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -538,7 +540,7 @@ export const UpdateConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -602,7 +604,7 @@ export const DeleteConversationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -648,7 +650,7 @@ export const MarkConversationReadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -685,7 +687,7 @@ export const RecordConversationActivityParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -741,7 +743,7 @@ export const SignalConversationBusyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -784,7 +786,7 @@ export const ListConversationMembersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -873,7 +875,7 @@ export const AddConversationMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -926,7 +928,7 @@ export const RemoveConversationMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -969,7 +971,7 @@ export const ListConversationMessagesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -1112,7 +1114,7 @@ export const SendConversationMessageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -1146,7 +1148,7 @@ export const SendConversationMessageBody = zod.object({
     .min(1)
     .max(sendConversationMessageBodyIdMax)
     .describe(
-      "The caller's own id for the message, so a retry is the same message.",
+      "The caller's own id for the message, any string, so a retry in the same conversation is the same message. The conversation's messages list it under this id.",
     ),
   text: zod
     .string()
@@ -1187,7 +1189,7 @@ export const UploadConversationAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   conversationId: zod
     .string()
@@ -1246,7 +1248,7 @@ export const GetAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   attachmentId: zod
     .string()
@@ -1272,7 +1274,7 @@ export const DeleteAttachmentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   attachmentId: zod
     .string()
@@ -1306,7 +1308,7 @@ export const CreateConversationThreadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -1324,6 +1326,12 @@ export const CreateConversationThreadHeader = zod.object({
 
 export const CreateConversationThreadResponse = zod.object({
   threadId: zod.string().describe("The new thread's id."),
+  liveThreadId: zod
+    .string()
+    .optional()
+    .describe(
+      "The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.",
+    ),
 });
 
 /**
@@ -1336,7 +1344,7 @@ export const GetConversationThreadParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   threadId: zod.uuid().describe("The thread's id."),
 });
@@ -1346,6 +1354,12 @@ export const GetConversationThreadResponse = zod.object({
   known: zod
     .boolean()
     .describe("Whether the thread still holds the caller's conversation."),
+  liveThreadId: zod
+    .string()
+    .optional()
+    .describe(
+      "The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.",
+    ),
 });
 
 /**
@@ -1358,7 +1372,7 @@ export const CreateTranscriptionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

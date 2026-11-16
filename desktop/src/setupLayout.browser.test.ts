@@ -757,6 +757,19 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         return card.scrollHeight - card.clientHeight;
       });
       expect(overflow).toBeLessThanOrEqual(0);
+      // And with the other choice picked, OpenBot for Business: its address field and Connect.
+      await page.getByText("OpenBot for Business").click();
+      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      await page.waitForTimeout(400);
+      expect(
+        await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          return card.scrollHeight - card.clientHeight;
+        }),
+      ).toBeLessThanOrEqual(0);
+      expect(await page.getByRole("button", { name: "Connect" }).count()).toBe(
+        1,
+      );
     } finally {
       await page.close();
     }
@@ -880,7 +893,8 @@ describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
 /** Where the step's heading and its first row are: what a person is reading. */
 async function anchors(page: Page) {
   const heading = await page
-    .getByRole("heading", { name: "Starting OpenBot" })
+    // Only the Start that updates OpenBot (`#start`) asks.
+    .getByRole("heading", { name: "Updating OpenBot" })
     .boundingBox();
   const first = await page
     .getByRole("listitem", { name: "Setting up OpenBot" })
@@ -1406,7 +1420,8 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         lede: document.querySelector("main .lede")?.textContent ?? "",
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
-      expect(said.heading).toBe("Starting OpenBot");
+      // This Start updates OpenBot, and its heading says so.
+      expect(said.heading).toBe("Updating OpenBot");
       expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
@@ -1449,6 +1464,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
             above: (words?.top ?? 0) - (card?.top ?? 0),
             below: (card?.bottom ?? 0) - (bar?.bottom ?? 0),
             time: time.textContent ?? "",
+            said: document.querySelector(".journey-said")?.textContent ?? "",
             cut: time.scrollWidth > time.clientWidth,
           };
         });
@@ -1478,9 +1494,11 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       await page.waitForTimeout(600);
       const usual = await measure();
       expect(Math.abs(usual.below - usual.above)).toBeLessThanOrEqual(2);
-      expect(usual.time).toMatch(
-        /left · 190\.9 MB of 944\.4 MB · \d+s so far$/,
-      );
+      // The bytes are said with the download they count; the time line is the bar's, the whole
+      // Start's (Windows K: "304.0 MB of 317.0 MB" read as the measure of a bar a third full).
+      expect(usual.time).toMatch(/left · \d+s so far$/);
+      expect(usual.time).not.toContain("MB");
+      expect(usual.said).toBe("Downloading the update · 190.9 MB of 944.4 MB");
       expect(usual.cut).toBe(false);
       // Every byte in, its last part unpacking, and fifteen minutes on: taking longer than usual.
       await emit({
@@ -1497,8 +1515,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       });
       await page.getByText(/Taking longer than usual/).waitFor();
       const slow = await measure();
-      expect(slow.time).toBe(
-        "Taking longer than usual, still working · 944.4 MB downloaded",
+      expect(slow.time).toBe("Taking longer than usual, still working");
+      expect(slow.said).toBe(
+        "Unpacking the update (5 of 5) · 944.4 MB downloaded",
       );
       expect(slow.cut).toBe(false);
       expect({ card: slow.card, row: slow.row }).toEqual({
@@ -1560,8 +1579,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         0,
       );
       const note = page.locator(".cannot-cancel");
+      // This Start updates OpenBot (`upgrade_due` answers a move), so it is said as the update.
       expect(await note.textContent()).toBe(
-        "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
+        "You can't cancel this last step. Stopping it partway could leave the update half done.",
       );
       expect((await note.boundingBox())?.height).toBe(40);
       // OpenBot updating itself, as on Windows G.

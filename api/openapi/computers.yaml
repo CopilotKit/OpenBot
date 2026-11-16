@@ -11,10 +11,12 @@ paths:
       operationId: listComputers
       summary: List the organization's computers
       description: >-
-        Return one page of the computers Bots run on: each person's, and each
-        isolated Bot's. Where every person's Bots share one computer, each
-        entry is one person's seat on one Bot there. Ordered by whose computer
-        it is, then by Bot. Only an administrator may read them. A missing
+        Return one page of the computers the organization's Bots run on: each
+        person's, and each isolated Bot's. Where every person's Bots share one
+        computer, each entry is one person's seat on one Bot there. A computer
+        another organization's Bots run on is never listed. Ordered by whose
+        computer it is, then by Bot. Only an administrator of the organization
+        may read them. A missing
         cursor starts at the first page and nextCursor null ends the list.
       security:
         - webSession: []
@@ -61,8 +63,9 @@ paths:
         Stop one computer from the list now, and record it on the audit trail.
         Its files and sign-ins stay, and it starts again when a Bot next needs
         it. The computer is named by whose it is, person:<id> or bot:<id>;
-        botId names one Bot's seat on a shared computer. Only an administrator
-        may do this.
+        botId names one Bot's seat on a shared computer. A computer that is
+        not one of the organization's is not found. Only an administrator of
+        the organization may do this.
       security:
         - webSession: []
         - appOAuth: [computers:write]
@@ -99,7 +102,7 @@ paths:
         '403':
           $ref: './common.yaml#/components/responses/AdminOnly'
         '404':
-          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
         '500':
@@ -119,7 +122,8 @@ paths:
         Delete one computer's browser profile, and every sign-in with it, and
         record it on the audit trail. The computer is named by whose it is,
         person:<id> or bot:<id>; botId names one Bot's seat on a shared
-        computer. Only an administrator may do this.
+        computer. A computer that is not one of the organization's is not
+        found. Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth: [computers:write]
@@ -156,7 +160,7 @@ paths:
         '403':
           $ref: './common.yaml#/components/responses/AdminOnly'
         '404':
-          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
         '500':
@@ -176,7 +180,8 @@ paths:
         Move one computer onto the image this OpenBot now runs, and record it
         on the audit trail. Files and sign-ins stay; a running computer
         restarts. The computer is named by whose it is, person:<id> or
-        bot:<id>. Only an administrator may do this.
+        bot:<id>. A computer that is not one of the organization's is not
+        found. Only an administrator of the organization may do this.
       security:
         - webSession: []
         - appOAuth: [computers:write]
@@ -213,7 +218,7 @@ paths:
         '403':
           $ref: './common.yaml#/components/responses/AdminOnly'
         '404':
-          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+          $ref: '#/components/responses/OrganizationComputerNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
         '500':
@@ -2150,7 +2155,8 @@ components:
     Computer:
       type: object
       description: >-
-        One computer as an administrator sees it: a person's, or an isolated
+        One of the organization's computers as its administrator sees it: a
+        person's, or an isolated
         Bot's. Where every person's Bots share one computer, one person's
         seat on one Bot there.
       required: [id, computer, kind, running, startedAt]
@@ -2335,6 +2341,37 @@ components:
                 detail: Authorization required.
                 code: PERMISSION_DENIED
                 category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationComputerNotFound:
+      description: >-
+        The computer named is not one of the organization's Bots' computers,
+        or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            computer:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: Couldn't find that computer.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
                 retryable: false
                 requestId: req_example
                 traceId: trace_example

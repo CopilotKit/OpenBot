@@ -3,7 +3,7 @@ import { ClientError } from "@/lib/client";
 /**
  * What the conversation screen says when it has no conversation to draw.
  *
- * A conversation that is not there is not a failed load, and "Reload the page" does not bring it
+ * A conversation that is not there is not a failed load, and trying again does not bring it
  * back. Somebody who works in several organizations reaches one this way often: Back, a bookmark
  * or a link from before they switched opens a conversation of the organization they left, which
  * this one does not have. They are told where they are looking, and where it may be.
@@ -20,5 +20,5 @@ export function conversationLoadFailure(
       ? `Couldn't find this conversation in ${organization}. It may be in another of your organizations.`
       : "Couldn't find this conversation. It may have been deleted.";
   }
-  return "Couldn't load this conversation. Reload the page.";
+  return "Couldn't load this conversation. Try again in a moment.";
 }

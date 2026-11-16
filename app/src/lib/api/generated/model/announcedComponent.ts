@@ -4,7 +4,7 @@
 
 export interface AnnouncedComponent {
   /**
-   * The tool name a Bot draws it by. Trimmed.
+   * The tool name a Bot draws it by. Trimmed. It can't start with @.
    * @minLength 1
    * @pattern \S
    */

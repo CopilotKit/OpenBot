@@ -3072,14 +3072,26 @@ pub fn model_file(file: &std::path::Path) -> Result<&str, Failure> {
         .ok_or(Failure::Spawn)
 }
 
-/// `login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
-/// prints while it waits, so the window can show it (`sign_in_page`).
+/**
+`login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
+prints while it waits, so the window can show it (`sign_in_page`).
+
+Every sign-in OpenBot starts gets a new code. The CLI saves the code a `login` is waiting on in
+`saved_code` and shows it again in the next `login`, unless the one before ended by itself. OpenBot
+stops a `login` that waits too long, or is cancelled, so after "Sign-in didn't finish" Try again
+showed the code that had just timed out, and approving it said it had expired. So the saved code is
+forgotten first. This runs in the CLI's turn (`one_at_a_time`): no other `login` is waiting on it.
+*/
 pub fn account_sign_in(
     cli: &PinnedCli,
+    saved_code: Option<&std::path::Path>,
     limits: Limits,
     cancel: &Cancel,
     shown: &mut dyn FnMut(SignInPage),
 ) -> Result<AccountSignIn, Failure> {
+    if let Some(saved_code) = saved_code {
+        forget_saved_sign_in_code(saved_code);
+    }
     let arguments = account_sign_in_arguments(login_takes_mode(cli, cancel)?);
     let mut last: Option<SignInPage> = None;
     let mut watch = |so_far: &[u8]| {
@@ -3098,6 +3110,19 @@ pub fn account_sign_in(
         None,
     )?;
     normalize_account_sign_in(code, &bytes)
+}
+
+/// Remove the code an earlier `login` left saved. None saved is the usual case. A file that will
+/// not go is logged, and the sign-in goes on: at worst it shows that code again, as before.
+fn forget_saved_sign_in_code(saved_code: &std::path::Path) {
+    match std::fs::remove_file(saved_code) {
+        Ok(()) => log::info!("[account] forgot the sign-in code an earlier sign-in left waiting"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::warn!(
+            "[account] could not forget the sign-in code an earlier sign-in left waiting: {:?}",
+            error.kind()
+        ),
+    }
 }
 
 /**
@@ -5007,14 +5032,21 @@ fn setup_followed(
     })
 }
 
-/// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`
-/// answers for `attempt` with the page the CLI opened.
+/// The CopilotKit account sign-in against the installed CLI, always with a new code. While it
+/// waits, `shown_sign_in_page` answers for `attempt` with the page the CLI opened.
 pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure> {
     let showing = ShowingSignIn(attempt.to_owned());
     let attempt = Attempt::register(attempt);
+    let saved_code = crate::local_update::cli_saved_sign_in_code();
     one_at_a_time(&attempt.0, Limits::for_account_sign_in(), |limits| {
         let cli = installed()?;
-        account_sign_in(&cli, limits, &attempt.0, &mut |page| showing.show(page))
+        account_sign_in(
+            &cli,
+            saved_code.as_deref(),
+            limits,
+            &attempt.0,
+            &mut |page| showing.show(page),
+        )
     })
 }
 
@@ -8277,6 +8309,27 @@ fn main() {
             std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // `login --json` signing in with a device code, as the CLI does: it shows the code an
+        // earlier `login` left waiting (`pending-device-code.json`, `resumed`), or issues a new one
+        // and saves it there, then waits for the approval. Stopped mid-wait, it leaves the code
+        // saved; only a `login` that ends by itself forgets it.
+        "device" => {
+            let pending = dir.join("pending-device-code.json");
+            let (code, resumed) = match std::fs::read_to_string(&pending) {
+                Ok(code) => (code, true),
+                Err(_) => {
+                    let issued: usize = std::fs::read_to_string(dir.join("issued")).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0) + 1;
+                    std::fs::write(dir.join("issued"), issued.to_string()).unwrap();
+                    let code = format!("CODE-{issued:04}");
+                    std::fs::write(&pending, &code).unwrap();
+                    (code, false)
+                }
+            };
+            println!("{{\"type\":\"authentication_url\",\"url\":\"https://dashboard.copilotkit.ai/cli-auth/device?user_code={code}\",\"user_code\":\"{code}\",\"resumed\":{resumed}}}");
+            std::io::stdout().flush().unwrap();
+            std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
         // Like the real CLI, which forwards SIGTERM to its children instead of exiting: only
         // SIGKILL stops it.
         "stubborn" => {
@@ -9498,6 +9551,7 @@ fn main() {
         assert_eq!(
             account_sign_in(
                 &current.cli(),
+                None,
                 Limits::for_account_sign_in(),
                 &Cancel::default(),
                 &mut |_| {}
@@ -9513,6 +9567,7 @@ fn main() {
         assert_eq!(
             account_sign_in(
                 &older.cli(),
+                None,
                 Limits::for_account_sign_in(),
                 &Cancel::default(),
                 &mut |_| {}
@@ -9524,6 +9579,7 @@ fn main() {
         // Asked once per CLI: these bytes do not change while they run.
         account_sign_in(
             &current.cli(),
+            None,
             Limits::for_account_sign_in(),
             &Cancel::default(),
             &mut |_| {},
@@ -9568,9 +9624,13 @@ fn main() {
         let stop = cancel.clone();
         let (pages, shown) = std::sync::mpsc::channel();
         let signing_in = std::thread::spawn(move || {
-            account_sign_in(&cli, Limits::for_account_sign_in(), &cancel, &mut |page| {
-                pages.send(page).unwrap()
-            })
+            account_sign_in(
+                &cli,
+                None,
+                Limits::for_account_sign_in(),
+                &cancel,
+                &mut |page| pages.send(page).unwrap(),
+            )
         });
         let page = shown
             .recv_timeout(Duration::from_secs(20))
@@ -9599,6 +9659,64 @@ fn main() {
         }
         // Shown once: the same page printed again is not news.
         assert!(shown.try_recv().is_err());
+    }
+
+    /**
+    The first Try again after "Sign-in didn't finish" showed the code that had just timed out, on two
+    Windows computers, and approving it said it had expired; only the second Try again got a new
+    one. OpenBot stops a `login` that waits too long, and a `login` stopped mid-wait leaves its code
+    saved, which the next `login` shows again. Each sign-in OpenBot starts forgets that code first:
+    the one before is stopped, and the next shows a new code.
+    */
+    #[test]
+    fn a_sign_in_after_one_that_timed_out_shows_a_new_code() {
+        let fixture = Fixture::new("local-eval-sign-in-fresh-code", "device\n");
+        let cli = fixture.cli();
+        let pending = fixture.root.join("pending-device-code.json");
+        let limits = Limits {
+            timeout: Duration::from_secs(5),
+            grace: Duration::from_secs(1),
+            output: MAX_OUTPUT,
+        };
+        let mut first = Vec::new();
+        assert_eq!(
+            account_sign_in(
+                &cli,
+                Some(&pending),
+                limits,
+                &Cancel::default(),
+                &mut |page| first.push(page.user_code)
+            ),
+            Err(Failure::Timeout)
+        );
+        assert_eq!(first, ["CODE-0001"]);
+        #[cfg(unix)]
+        {
+            let pid: libc::pid_t = std::fs::read_to_string(fixture.root.join("pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            // SAFETY: signal 0 only checks existence. The CLI was reaped, so it is gone.
+            assert_ne!(
+                unsafe { libc::kill(pid, 0) },
+                0,
+                "the timed-out CLI lived on"
+            );
+        }
+
+        // Try again: a new code, never the one that timed out.
+        let mut second = Vec::new();
+        assert_eq!(
+            account_sign_in(
+                &cli,
+                Some(&pending),
+                limits,
+                &Cancel::default(),
+                &mut |page| second.push(page.user_code)
+            ),
+            Err(Failure::Timeout)
+        );
+        assert_eq!(second, ["CODE-0002"]);
     }
 
     /// The window asks by attempt while the sign-in waits, and hears nothing once it has ended.

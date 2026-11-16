@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
@@ -67,6 +68,7 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
       <div hidden>
         <BotsNavBadge />
       </div>
+      <ConnectionBanner />
       <UpdateBanner />
       <SelfHostBanner />
       <div

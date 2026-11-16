@@ -95,7 +95,7 @@ export function providerVocabulary(
  * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
  */
 export function directoryReadFailure(_provider: PluginsProvider): string {
-  return "Couldn't load the apps you can connect. Reload the page.";
+  return "Couldn't load the apps you can connect. Try again in a moment.";
 }
 
 /**

@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of what a person's Bots remember about them, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's memories
  */
 
@@ -17,7 +17,7 @@ export const ListMemoriesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -126,7 +126,7 @@ export const CreateMemoryParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -233,7 +233,7 @@ export const UpdateMemoryParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -344,7 +344,7 @@ export const DeleteMemoryParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -392,7 +392,7 @@ export const ListMemorySourcesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -489,7 +489,7 @@ export const CreateMemorySourceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -598,7 +598,7 @@ export const UpdateMemorySourceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -675,7 +675,7 @@ export const DeleteMemorySourceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -724,7 +724,7 @@ export const SyncMemorySourceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -800,7 +800,7 @@ export const ListMemorySourceToolsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()

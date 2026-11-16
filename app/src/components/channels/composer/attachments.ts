@@ -1,16 +1,17 @@
+import type { Attachment, AttachmentsConfig } from "@copilotkit/react-core/v2";
 import {
   deleteAttachment,
   uploadConversationAttachment,
 } from "@/lib/api/generated/conversations/conversations";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { ClientError } from "@/lib/client";
-import type { Attachment, AttachmentsConfig } from "@copilotkit/react-core/v2";
 import {
+  ACCEPTED_DOCUMENT_MIME,
   ACCEPTED_IMAGE_MIME,
   ACCEPTED_TEXT_MIME,
   attachmentUrl,
   MAX_IMAGE_BYTES,
 } from "@/lib/channels/attachments";
+import { ClientError } from "@/lib/client";
 import { newId } from "@/lib/new-id";
 
 /**
@@ -150,6 +151,7 @@ function isUploadedAttachment(body: unknown): body is UploadedAttachment {
 export const FILE_PICKER_ACCEPT = [
   ...ACCEPTED_IMAGE_MIME,
   ...ACCEPTED_TEXT_MIME,
+  ...ACCEPTED_DOCUMENT_MIME,
   ".png",
   ".jpg",
   ".jpeg",
@@ -159,6 +161,7 @@ export const FILE_PICKER_ACCEPT = [
   ".md",
   ".csv",
   ".json",
+  ".pdf",
 ].join(",");
 
 /**
@@ -192,7 +195,7 @@ export const FILE_PICKER_ACCEPT = [
  * not — and phrases its refusals for a person. The narrow list is kept where it is honest about
  * being a hint: `FILE_PICKER_ACCEPT`, above, on the file dialog.
  *
- * `maxSize` is `MAX_IMAGE_BYTES`, the larger of the two ceilings: the SDK config has only one
+ * `maxSize` is `MAX_IMAGE_BYTES`, the largest ceiling (`MAX_DOCUMENT_BYTES` is the same number): the SDK config has only one
  * number for every kind of file. The tighter `MAX_FILE_BYTES` limit for text attachments is
  * enforced by our own pre-check ahead of upload, and again by the server on arrival — which is
  * the authority either way, so letting a text file past this one number costs nothing. It is left

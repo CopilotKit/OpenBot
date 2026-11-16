@@ -586,6 +586,11 @@ test("somebody who may create one makes an organization from the menu and is swi
   const dialog = await app.view.findByRole("dialog", {
     name: "New organization",
   });
+  // It says what a new organization is given: the starter Bots, as the server gives every one.
+  expect(dialog.textContent).toContain(
+    "A new organization starts with OpenBot's starter Bots and skills, and no conversations.",
+  );
+  expect(dialog.textContent).not.toContain("no Bots");
   // Nothing to create until it has a name.
   const create = within(dialog).getByRole("button", { name: "Create" });
   expect(create.hasAttribute("disabled")).toBe(true);
@@ -651,13 +656,18 @@ async function accountMenuMarkup(app: Awaited<ReturnType<typeof open>>) {
   return { row, menu: markup, words: menuWords(menu) };
 }
 
-test("somebody with one organization who may not create one sees the account menu exactly as it was", async () => {
+test("on an OpenBot that lists no organizations the account menu is exactly as it was, and with one listed it shows that one and its settings", async () => {
   // Before there were organizations to list: a server with no list of them.
   server.list = "not-found";
   server.organizations = [ONLY];
   server.active = ONLY.id;
-  const before = await accountMenuMarkup(await open());
-  expect(before.words).toEqual(["Admin", "Settings", "Sign out"]);
+  const unlisted = await open();
+  const before = await accountMenuMarkup(unlisted);
+  // Teams are the one organization's own, so they are there with or without others to switch to.
+  expect(before.words).toEqual(["Teams", "Admin", "Settings", "Sign out"]);
+  expect(before.row).not.toContain("Acme");
+  expect(unlisted.view.queryByText("Organizations")).toBeNull();
+  expect(unlisted.view.queryByRole("menuitemradio")).toBeNull();
   cleanup();
   queryClient.clear();
   setCurrentOrganization(undefined);
@@ -667,9 +677,15 @@ test("somebody with one organization who may not create one sees the account men
   const app = await open();
   const now = await accountMenuMarkup(app);
   expect(requests).toContain("GET /api/v2/people/me/organizations");
-  expect(now).toEqual(before);
-  expect(app.view.queryByText("Organizations")).toBeNull();
-  expect(app.view.queryByRole("menuitemradio")).toBeNull();
+  expect(now.words).toEqual([
+    "Acme",
+    "Organization settings",
+    "Teams",
+    "Admin",
+    "Settings",
+    "Sign out",
+  ]);
+  expect(now.row).toContain("Acme");
   expect(app.view.queryByText("New organization")).toBeNull();
 });
 

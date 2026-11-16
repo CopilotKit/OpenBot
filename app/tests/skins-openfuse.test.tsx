@@ -59,7 +59,6 @@ import {
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { type AppsFixture, answerAppsApi } from "./apps-api";
-import { MEMORY } from "./learning-api";
 import {
   activityOf,
   answerBotAttention,
@@ -74,6 +73,7 @@ import {
   noContent,
   problem,
 } from "./conversations-api";
+import { MEMORY } from "./learning-api";
 import {
   CHECK_IN_ITEMS_PATH,
   CHECK_INS_PATH,
@@ -157,6 +157,7 @@ const scout = agent({ id: "scout", name: "Scout", title: "Research" });
 // OpenBot's default Bot: `defaultAgentProfile` prefers the picked harness over list order.
 const fuse = agent({
   id: "picked-harness",
+  packageBotId: "picked-harness",
   name: "Fuse",
   title: "Your helper",
 });
@@ -422,7 +423,16 @@ const plugins: AppsFixture = {
 
 type Call = { method: string; path: string; body: unknown };
 
-function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
+function serve(
+  options: {
+    role?: "admin" | "user";
+    userId?: string;
+    /** What each Bot waits on the person for, as the server counts it. */
+    attention?: BotAttention[];
+    /** Fuse's own Activity. */
+    activity?: BotActivity;
+  } = {},
+) {
   const calls: Call[] = [];
   const routes: Record<string, unknown> = {
     [ME_PATH]: meBody({
@@ -435,7 +445,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       },
     }),
     [CONVERSATIONS_PATH]: conversationPage(channels),
-    [botOperationPath(fuse.id, "activity")]: activity,
+    [botOperationPath(fuse.id, "activity")]: options.activity ?? activity,
     [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
       checkIns: settings,
@@ -489,7 +499,9 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       if (bots) return bots;
       const apps = answerAppsApi(input, init, plugins);
       if (apps) return apps;
-      const waiting = answerBotAttention(input, init, { bots: attention });
+      const waiting = answerBotAttention(input, init, {
+        bots: options.attention ?? attention,
+      });
       if (waiting) return waiting;
       const detail = path.match(
         /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
@@ -627,6 +639,68 @@ describe("the frame", () => {
     expect(
       page().getByRole("button", { name: "Needs you, 1 waiting" }),
     ).toBeTruthy();
+  });
+
+  /*
+   * The bell counted the approval inbox its own way, so a task that couldn't finish was in
+   * OpenBot's Bots badge and not on the bell. It shows OpenBot's count.
+   */
+  test("the bell says the same number as OpenBot's Bots badge, tasks included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, {
+          approvals: 1,
+          tasks: { needsInput: 0, ready: 0, failed: 1 },
+        }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+    });
+    renderAt("/connections");
+    expect(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    ).toBeTruthy();
+    expect(
+      page().getAllByRole("img", { name: "2 things need you" }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  /*
+   * The bell's number counted a hand-off that ran out of tries, and its sheet listed only questions
+   * and approvals, so it said 2 over one row. Every thing the number counts is a row.
+   */
+  test("the bell lists every thing its number counts, a stalled hand-off included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, { approvals: 1, handoffs: 1 }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+      activity: activityOf({
+        inProgress: [
+          {
+            id: "hop-stalled",
+            kind: "handoff",
+            title: "Book the venue for Friday",
+            detail: "Delegated to Scout",
+            status: "failed",
+            at: now,
+            channelId: "c-fuse",
+            needsYou: true,
+            stoppable: false,
+            cancellable: false,
+          },
+        ],
+      }),
+    });
+    renderAt("/connections");
+    fireEvent.click(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    );
+    const sheet = await page().findByRole("dialog");
+    expect(
+      await within(sheet).findByText("Book the venue for Friday"),
+    ).toBeTruthy();
+    // And the approval beside it: two rows under a 2.
+    expect(within(sheet).getByText("Fuse wants to open url")).toBeTruthy();
   });
 
   test("a one-to-one conversation puts its own Bot at the centre", async () => {

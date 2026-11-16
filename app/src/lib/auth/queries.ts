@@ -1,9 +1,8 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
-import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
 import { getPerson } from "@/lib/api/generated/people/people";
-import { DEPLOYMENT_ORGANIZATION } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { readDeployment } from "@/lib/deployment/queries";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { ensureCurrentOrganization } from "@/lib/organizations/queries";
 
@@ -69,10 +68,8 @@ export type SignInOptions = {
 };
 
 async function signInOptions(): Promise<SignInOptions> {
-  // The API's `deployment`, which answers before anybody has signed in.
-  const body = await getDeployment(DEPLOYMENT_ORGANIZATION, {
-    fallback: "Could not load sign-in",
-  });
+  // The API's `deployment`, which answers before anybody has signed in, and after in their own.
+  const body = await readDeployment({ fallback: "Could not load sign-in" });
   return {
     providers: body.authProviders,
     sso: body.ssoConfigured,

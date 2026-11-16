@@ -100,7 +100,7 @@ function linkFor(item: ActivityItem, agentId: string) {
   }
 }
 
-function ActivityRow({
+export function ActivityRow({
   agentId,
   item,
   live = false,
@@ -425,7 +425,7 @@ export function BotActivitySections({
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this Bot's activity. Reload the page.
+          Couldn't load this Bot's activity. Try again in a moment.
         </p>
       </PageSection>
     );
@@ -459,7 +459,7 @@ export function BotActivitySections({
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
       {taskList.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot's tasks. Reload the page.
+          Couldn't load this Bot's tasks. Try again in a moment.
         </p>
       ) : null}
       {groups.length === 0 && !taskList.error ? (

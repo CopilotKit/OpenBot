@@ -11,14 +11,21 @@ paths:
       operationId: listAuditEvents
       summary: List audit events
       description: >-
-        Return one page of the audit trail, newest first, narrowed by the
-        filters given. Each filter narrows the events, and a filter that takes
+        Return one page of the organization's audit trail, newest first,
+        narrowed by the filters given. Each organization has its own trail,
+        and an event is on the trail of the organization it happened in. What
+        happens to the organization itself is on its trail too:
+        organization.created, organization.renamed,
+        organization.member_invited, organization.invitation_canceled,
+        organization.member_joined, organization.member_removed and
+        organization.member_role_changed.
+        Each filter narrows the events, and a filter that takes
         several values separated by commas matches any of them. A value that
         names nothing in the trail matches no event rather than being refused.
         A missing cursor starts at the newest event and nextCursor null ends
         the list. A cursor belongs to the filters that made it, so changing a
         filter starts again without one; limit may change from page to page.
-        Only an administrator may read the trail.
+        Only an administrator of the organization may read its trail.
       security:
         - webSession: []
         - appOAuth: [audit-events:read]
@@ -80,7 +87,8 @@ paths:
         events; when more match, OpenBot-Export-Truncated says how many it
         holds, and narrowing the dates exports the rest. A cell a spreadsheet
         would run as a formula starts with an apostrophe. Each export is
-        recorded on the trail. Only an administrator may export the trail.
+        recorded on the trail. Only an administrator of the organization may
+        export its trail.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -262,7 +270,8 @@ components:
       in: query
       description: >-
         Events of any of these types, separated by commas, such as
-        computer.action_refused,mcp.call_rejected.
+        computer.action_refused,mcp.call_rejected or
+        organization.member_invited,organization.member_removed.
       schema:
         $ref: '#/components/schemas/AuditFilterText'
     AuditExcludedEventTypes:

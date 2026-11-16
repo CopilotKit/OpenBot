@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * No skill has that slug, it is somebody else's and the caller isn't an admin, or the organization does not exist.
+ * No skill has that slug, the caller isn't an admin and can't see it, or the organization does not exist.
  */
 export type SkillNotFoundResponse = Problem;

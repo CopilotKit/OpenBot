@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
@@ -155,7 +156,8 @@ export function ComputersPage({
     enabled: (agentId === undefined || admin) && noComputers === false,
   });
   const hostAccess = useQuery(hostAccessQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
   const requestGrant = useMutation(
     requestHostFolderGrantMutationOptions(queryClient),
@@ -177,7 +179,7 @@ export function ComputersPage({
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Reload the page."
+    ? "Couldn't load the computers. Try again in a moment."
     : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
@@ -332,7 +334,7 @@ export function ComputersPage({
                 : "Its computer"
               : personal
                 ? "Your Bots' browsers"
-                : "Computers in this deployment"
+                : "Computers in this organization"
           }
         >
           {setState.error ? (

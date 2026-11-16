@@ -106,7 +106,7 @@ export const getListComponentsUrl = (
 };
 
 /**
- * Return one page of the components Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. An admin sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the components the organization's Bots draw in conversations: charts, cards and the ones an admin wrote in Playground. Each organization has its own: what a component tells the model, whether it is published, which Bots may draw it and which data it may read are decided in one organization and change nothing in another. An admin of the organization sees every component with its draft, the Bots held back from it and the data it may read. Anybody else sees the published ones only, and those fields are null. kind=playground lists only the components written in Playground, each published one with the source a conversation draws it from. Ordered by kind, then title, then name. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List components
  */
 export const listComponents = async (
@@ -311,7 +311,7 @@ export const getAnnounceComponentsUrl = (organizationId: string) => {
 };
 
 /**
- * Tell OpenBot which components this version of the app can draw. A component OpenBot has not seen before is added and published, so every Bot can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field.
+ * Tell OpenBot which components this version of the app can draw. A component the organization has not seen before is added and published, so every one of its Bots can draw it at once. One it already has is left exactly as it is: what it tells the model, whether it is published and who may use it were decided here. A description nobody here has edited follows the one this version of OpenBot ships. In OpenBot Personal a component is also given the data it reads. Anybody signed in may announce, and the web app does it on every load. The whole list is refused if one entry is missing a field or has a name that starts with @.
  * @summary Announce the components the app can draw
  */
 export const announceComponents = async (

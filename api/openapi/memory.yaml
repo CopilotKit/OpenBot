@@ -9,6 +9,10 @@
 # does the recall, and the memories Intelligence holds for the person that OpenBot formed no record
 # of are listed here too. Without it, OpenBot's record is the whole store. A single-person OpenBot
 # keeps no memory: every operation here answers not found there.
+#
+# A person's memory is kept per organization. What their Bots remember in one organization is never
+# listed or recalled in another they belong to, and a memory named from another organization is
+# answered as not found.
 paths:
   /api/v2/organizations/{organizationId}/people/{personId}/memories:
     parameters:
@@ -19,8 +23,9 @@ paths:
       operationId: listMemories
       summary: List a person's memories
       description: >-
-        Return one page of what a person's Bots remember about them, most
-        recently changed first: the ones they wrote, the ones their Bots
+        Return one page of what a person's Bots remember about them in this
+        organization, and in no other they belong to, most recently changed
+        first: the ones they wrote, the ones their Bots
         formed and are waiting for their review, the ones read in from their
         sources, and the ones the backend holds for them that OpenBot formed
         no record of, after OpenBot's own. Paused memories are included;

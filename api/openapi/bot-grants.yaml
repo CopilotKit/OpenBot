@@ -586,6 +586,99 @@ paths:
           $ref: './common.yaml#/components/responses/AppDirectoryUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/team-grants:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Bot grants]
+      operationId: getAppTeamGrants
+      summary: Read the teams the app is granted to
+      description: >-
+        Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin
+        of the organization may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The teams the app is granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/AppTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppOrTeamNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Bot grants]
+      operationId: replaceAppTeamGrants
+      summary: Grant an app to teams
+      description: >-
+        Grant the app to exactly these teams of the organization, taking it
+        from any team left out. An empty list takes it from every team.
+        A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. A team of another organization is not found. Only an admin
+        of the organization may do this. Recorded on the audit trail.
+      security:
+        - webSession: []
+        - appOAuth: [bot-grants:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppTeamGrantsInput'
+            examples:
+              oneTeam:
+                value:
+                  teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
+      responses:
+        '200':
+          description: The teams the app is now granted to.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppTeamGrants'
+              examples:
+                granted:
+                  $ref: '#/components/examples/AppTeamGrantsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/AppOrTeamNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -641,8 +734,9 @@ paths:
       operationId: listAppAccessRequests
       summary: List requests for apps
       description: >-
-        Return one page of the requests waiting for an administrator: all of
-        them for an administrator, and only their own for anybody else. appId
+        Return one page of the organization's requests waiting for an
+        administrator: all of them for an administrator of the organization,
+        and only their own for anybody else. appId
         narrows them to one app. Newest first, and by id among requests made
         at the same moment. A missing cursor starts at the first page and
         nextCursor null ends the list.
@@ -1276,6 +1370,30 @@ components:
           oneOf:
             - $ref: '#/components/schemas/BotGrantReplayReport'
             - type: 'null'
+    AppTeamGrants:
+      type: object
+      description: The teams the app is granted to.
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          description: Each team's id, in order.
+          items:
+            type: string
+    AppTeamGrantsInput:
+      type: object
+      additionalProperties: false
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          maxItems: 100
+          description: The id of each team of this organization to grant it to.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     AppAccessRequestKind:
       type: string
       description: >-
@@ -1644,6 +1762,37 @@ components:
                 status: 404
                 detail: OpenBot has no app called asana.
                 code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AppOrTeamNotFound:
+      description: >-
+        OpenBot has no app by that id, a team named is not one of this
+        organization's, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            app:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: OpenBot has no app called asana.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            team:
+              value:
+                type: https://open.bot/errors/team-not-found
+                title: Team not found.
+                status: 404
+                detail: Couldn't find that team.
+                code: TEAM_NOT_FOUND
                 category: not_found
                 retryable: false
                 requestId: req_example
@@ -2054,6 +2203,10 @@ components:
       summary: Notion's reads, taken back.
       value:
         takenBack: [notion/notion-fetch, notion/notion-search]
+    AppTeamGrantsExample:
+      summary: Granted to one team.
+      value:
+        teams: [Tm4Qx8LpV2nWc7RbY1sKd0Ze]
     GiveableAppPageExample:
       summary: Two apps the person could give their Bots.
       value:

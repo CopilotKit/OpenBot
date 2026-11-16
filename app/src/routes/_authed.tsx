@@ -5,7 +5,12 @@ import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
+import {
+  connectedThroughDesktop,
+  signOutThroughDesktop,
+} from "../lib/auth/mutations";
 import { needsOnboarding, signedInUser } from "../lib/auth/queries";
+import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
@@ -16,6 +21,17 @@ export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context, location }) => {
     const user = await signedInUser(context.queryClient);
     if (!user) {
+      // An invitation's link is kept while they sign in, and home hands them on to it.
+      rememberInvitationLink(location.pathname);
+      /*
+       * Inside an OpenBot Desktop connected to an OpenBot that runs somewhere else, the desktop app
+       * holds the sign-in and this page has none to renew: the web sign-in screen would sign in a
+       * window that cannot keep it. The desktop app ends what is left of the sign-in and shows its
+       * own setup, where the person signs in again. If it cannot, the sign-in screen is still there.
+       */
+      if (await connectedThroughDesktop(context.queryClient)) {
+        await signOutThroughDesktop().catch(() => undefined);
+      }
       throw redirect({ to: "/sign" });
     }
     /*
@@ -24,6 +40,7 @@ export const Route = createFileRoute("/_authed")({
      * the onboarding route itself stays reachable.
      */
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
+      rememberInvitationLink(location.pathname);
       throw redirect({ to: "/onboarding" });
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.

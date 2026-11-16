@@ -197,7 +197,7 @@ describe("an app's page in the personal edition", () => {
     expect(
       await view.findByRole("button", { name: "Connect Notion" }),
     ).toBeTruthy();
-    expect(view.queryByText("Enable for this deployment")).toBeNull();
+    expect(view.queryByText("Enable for this organization")).toBeNull();
   });
 
   test("turns the app on and starts connecting your account in one press", async () => {
@@ -547,7 +547,7 @@ describe("turning an app off from its own page", () => {
 
 test("the team edition's page is unchanged", async () => {
   const view = draw("team", [notionServer]);
-  expect(await view.findByText("Enable for this deployment")).toBeTruthy();
+  expect(await view.findByText("Enable for this organization")).toBeTruthy();
   expect(view.getByText("Bot owners can give it to their Bots")).toBeTruthy();
 });
 
@@ -593,7 +593,7 @@ test("Routines is always on in the team edition too, with no switch to turn it o
   } as TodayServer;
   const view = draw("team", [routines], "routines");
   expect(await view.findByText("Always on")).toBeTruthy();
-  expect(view.queryByText("Enable for this deployment")).toBeNull();
+  expect(view.queryByText("Enable for this organization")).toBeNull();
   expect(view.queryByRole("switch", { name: /Routines/ })).toBeNull();
 });
 

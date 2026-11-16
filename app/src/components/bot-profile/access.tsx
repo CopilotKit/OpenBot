@@ -180,7 +180,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
       ) : null}
       {giveable.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your apps. Reload the page.
+          Couldn't load your apps. Try again in a moment.
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty
@@ -250,23 +250,21 @@ function YourApps({ agent }: { agent: AgentProfile }) {
 }
 
 /**
- * Your own skills, one switch each. Only on your own Bot: the server lets a person put their own
- * skill on a Bot they own, and neither half alone is enough.
+ * Your skills, one switch each. Only on your own Bot: the server lets a person put a skill on a Bot
+ * they own when the skill is their own or granted to a team they are in, and neither half alone is
+ * enough.
  *
- * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS LIST (`listSkills`); WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
+ * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS LIST (`listSkills`, its `usableOnYourBots`); WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
  * GRANTS (listBotGrants, the read "What it can use" draws from too). That read is
  * where the personal edition gives a Bot every skill the first time it is listed, so it is what
  * gives a Bot made a moment ago its skills. The skills page, read alongside it or earlier, still said
  * the Bot had none, and every switch was drawn off until the page was opened again.
  */
 function YourSkills({ agentId }: { agentId: string }) {
-  const me = useQuery(currentUserQueryOptions()).data;
   const page = useQuery(skillListQueryOptions());
   const held = useQuery(agentPluginsQueryOptions(agentId));
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
-  const skills = (page.data ?? []).filter(
-    (skill) => me && skill.ownerUserId === me.id,
-  );
+  const skills = (page.data ?? []).filter((skill) => skill.usableOnYourBots);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
   return (
     <PageSection
@@ -280,7 +278,7 @@ function YourSkills({ agentId }: { agentId: string }) {
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your skills. Reload the page.
+          Couldn't load your skills. Try again in a moment.
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty
@@ -297,7 +295,7 @@ function YourSkills({ agentId }: { agentId: string }) {
           icon={IconBox}
           title="No skills yet"
         >
-          Skills you write show up here.
+          Skills you write, and skills an admin gives your team, show up here.
         </PageEmpty>
       ) : (
         <PageRows>
@@ -385,7 +383,7 @@ function Granted({
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load what this Bot can use. Reload the page.
+        Couldn't load what this Bot can use. Try again in a moment.
       </p>
     );
   }
@@ -416,7 +414,8 @@ function Granted({
     >
       {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't check whether each app is ready for you. Reload the page.
+          Couldn't check whether each app is ready for you. Try again in a
+          moment.
         </p>
       ) : null}
       {count === 0 && kind === "skills" ? (

@@ -5,7 +5,7 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ApprovalRuleInput, approvalsKey } from "@/lib/approvals";
 import { approvalRuleKeys } from "./queries";
 
-const FALLBACK = "The team rules could not be saved.";
+const FALLBACK = "The organization rules could not be saved.";
 
 /** Where saved rules came from: the sentence the model wrote them from. */
 export type ApprovalRuleAuthoring = ApprovalRuleDraftAuthoring;

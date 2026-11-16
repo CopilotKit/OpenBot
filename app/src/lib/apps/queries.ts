@@ -62,7 +62,10 @@ export function appsQueryOptions() {
         const page = await listApps(
           organizationId(),
           { limit: PAGE, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: "Couldn't load your apps. Reload the page." },
+          {
+            signal,
+            fallback: "Couldn't load your apps. Try again in a moment.",
+          },
         );
         return { items: page.apps, nextCursor: page.nextCursor };
       }),
@@ -95,7 +98,10 @@ export function catalogueQueryOptions() {
         const page = await listAppDirectory(
           organizationId(),
           { source: "catalogue", limit: PAGE, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: "Couldn't load your apps. Reload the page." },
+          {
+            signal,
+            fallback: "Couldn't load your apps. Try again in a moment.",
+          },
         );
         return { items: page.entries, nextCursor: page.nextCursor };
       });
@@ -134,7 +140,7 @@ export function directoryAppsQueryOptions(search: string) {
           {
             signal,
             fallback:
-              "Couldn't load the apps you can connect. Reload the page.",
+              "Couldn't load the apps you can connect. Try again in a moment.",
           },
         );
         return { items: page.entries, nextCursor: page.nextCursor };

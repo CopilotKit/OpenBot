@@ -24,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
+import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,6 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   addCuratedServerMutationOptions,
@@ -90,6 +92,7 @@ import {
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
 import { toolsListError } from "@/lib/plugins/tools-error";
+import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -146,10 +149,19 @@ function BotApprovalText({
 }) {
   const exposure = useQuery(botSharedAppsQueryOptions(botId));
   const app = exposure.data?.apps.find((one) => one.serverId === serverId);
+  /* An approval that names a team is read by the team's name: one read, shared by every row. */
+  const teams = useQuery({
+    ...teamListQueryOptions(),
+    enabled: Boolean(
+      app?.approval?.members.some((member) => member.kind === "team"),
+    ),
+  });
   if (!app) return null;
   return (
     <span className="text-muted-foreground text-xs">
-      {app.approval ? describeApproval(app.approval) : "Not approved"}
+      {app.approval
+        ? describeApproval(app.approval, teams.data?.teams)
+        : "Not approved"}
     </span>
   );
 }
@@ -243,8 +255,8 @@ function ConnectionStateUnreadable() {
       <ItemContent>
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
-          Couldn't load whether you've connected an account here. Reload the
-          page, or check {paths.deploymentName}'s logs if it keeps happening.
+          Couldn't load whether you've connected an account here. Try again in a
+          moment, or check {paths.deploymentName}'s logs if it keeps happening.
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -263,6 +275,8 @@ export function PluginPage({
   // One person: adding and connecting are one step, and nothing here is about other people.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // Whose vault a secret saved here goes into: each organization has its own.
+  const vaultOwner = personal ? "OpenBot" : "this organization";
   // Routines is on for every Bot in every edition and has no off switch. See personal-defaults.ts.
   const alwaysOn = key === ALWAYS_ON_APP;
   const queryClient = useQueryClient();
@@ -279,9 +293,11 @@ export function PluginPage({
    * only ever returns the caller's, so this cannot become a list of who has connected what.
    */
   const connections = useQuery(connectionsQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds is still on this page. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
    * The row itself rather than whether there is one, because the brokered row below wants what the
    * last re-check found and that is written on this same row. Asking a second time for it would be
@@ -632,8 +648,8 @@ export function PluginPage({
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
           {personal
-            ? "Couldn't load your apps. Reload the page."
-            : "Couldn't load apps. Reload the page."}
+            ? "Couldn't load your apps. Try again in a moment."
+            : "Couldn't load apps. Try again in a moment."}
         </p>
       </PageShell>
     );
@@ -729,7 +745,7 @@ export function PluginPage({
             <Item size="sm">
               <ItemContent>
                 <ItemTitle>
-                  {personal ? "Turned on" : "Enable for this deployment"}
+                  {personal ? "Turned on" : "Enable for this organization"}
                 </ItemTitle>
                 <ItemDescription>
                   {personal
@@ -744,7 +760,7 @@ export function PluginPage({
                   aria-label={
                     personal
                       ? `Turn ${title} on or off`
-                      : `Enable ${title} for this deployment`
+                      : `Enable ${title} for this organization`
                   }
                   checked={server !== undefined}
                   onCheckedChange={(next) => {
@@ -775,8 +791,8 @@ export function PluginPage({
                   <ItemDescription>
                     {server.accountMode === "shared"
                       ? server.sharedOnly
-                        ? "One shared account for everyone. It signs in with this deployment's own client, so it can't be made personal."
-                        : "One shared account for everyone."
+                        ? "One shared account for everyone in this organization. It signs in with this deployment's own client, so it can't be made personal."
+                        : "One shared account for everyone in this organization."
                       : server.sharedOnly
                         ? "It signs in with this deployment's own client, so only a shared account can connect it."
                         : "Each person connects their own."}
@@ -829,7 +845,7 @@ export function PluginPage({
                     {server.ownerGrants !== "any"
                       ? "Only an admin can give it to a Bot."
                       : shared
-                        ? "Bot owners who give it to their Bots let those Bots use the team account."
+                        ? "Bot owners who give it to their Bots let those Bots use the shared account."
                         : "People can let Bots they own use it, on the account of whoever is asking."}
                   </ItemDescription>
                 </ItemContent>
@@ -848,6 +864,16 @@ export function PluginPage({
                   />
                 </ItemActions>
               </Item>
+              {/*
+               * Which teams may give it to their own Bots without asking. A set of teams, so a
+               * summary and a dialog. No icon, as no other row of this card has one.
+               */}
+              <AppTeamGrantsRow
+                appId={key}
+                icon={false}
+                separator="before"
+                title={title}
+              />
             </>
           ) : null}
         </PageRows>
@@ -888,7 +914,7 @@ export function PluginPage({
                       ? `${title} answers without an account, so ${personal ? "your Bots use" : "Bots use"} it as it is. Add a key only if ${title} gives you one.`
                       : personal
                         ? `What OpenBot sends to ${title}. Your Bots all use it.`
-                        : `What ${paths.deploymentName} sends to the vendor. One credential for everybody.`
+                        : "What OpenBot sends to the vendor. One credential for everybody in this organization."
           }
           title="Connection"
         >
@@ -1105,9 +1131,9 @@ export function PluginPage({
                    */
                   <Item size="sm">
                     <ItemContent>
-                      <ItemTitle>Team account</ItemTitle>
+                      <ItemTitle>Shared account</ItemTitle>
                       <ItemDescription>
-                        {`${title} connects only as one shared account. Make it shared above, then connect the team account here and give it to Bots.`}
+                        {`${title} connects only as one shared account. Make it shared above, then connect that account here and give it to Bots.`}
                       </ItemDescription>
                     </ItemContent>
                   </Item>
@@ -1116,9 +1142,9 @@ export function PluginPage({
                     account={brokeredAccount}
                     edition={paths.edition}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
-                    disconnectedDescription="No team account is connected. Bots with these tools are refused."
-                    heading="Team account"
-                    notice="Sign in as the team account, not your own."
+                    disconnectedDescription="No shared account is connected. Bots with these tools are refused."
+                    heading="Shared account"
+                    notice="Sign in as the shared account, not your own."
                     provider={provider}
                     title={title}
                   />
@@ -1555,10 +1581,10 @@ export function PluginPage({
             </DialogTitle>
             <DialogDescription>
               {dialog === "client"
-                ? `From the vendor's console. The secret is saved in ${paths.deploymentName}'s vault and never shown again.`
+                ? `From the vendor's console. The secret is saved in ${vaultOwner}'s vault and never shown again.`
                 : dialog === "instance"
                   ? "Your own hostname with this vendor. It is checked against the vendor's pattern before it is saved."
-                  : `Saved in ${paths.deploymentName}'s vault and never shown again.`}
+                  : `Saved in ${vaultOwner}'s vault and never shown again.`}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

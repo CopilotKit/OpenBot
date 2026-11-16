@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. hidden=true lists only the Bots the caller hid from their own list instead. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: its name and avatar, and nothing from inside it (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 
@@ -13,11 +13,12 @@ export const ListBotsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
 export const listBotsQueryHiddenDefault = false;
+export const listBotsQueryScopeDefault = `caller`;
 export const listBotsQueryLimitDefault = 50;
 export const listBotsQueryLimitMax = 100;
 
@@ -30,6 +31,12 @@ export const ListBotsQueryParams = zod.object({
     .boolean()
     .default(listBotsQueryHiddenDefault)
     .describe("List the Bots the caller hid instead of the ones they did not."),
+  scope: zod
+    .enum(["caller", "organization"])
+    .default(listBotsQueryScopeDefault)
+    .describe(
+      "Whose Bots: caller, the Bots the caller can see; organization, every Bot in the organization, for an admin of it only.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -82,6 +89,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether it comes with OpenBot rather than belonging to a person.",
           ),
+        packageBotId: zod
+          .string()
+          .nullish()
+          .describe(
+            "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+          ),
         endpoint: zod
           .string()
           .nullable()
@@ -120,6 +133,12 @@ export const ListBotsResponse = zod.object({
           .boolean()
           .describe(
             "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          ),
+        withheld: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
           ),
         assignedToMe: zod
           .boolean()
@@ -179,7 +198,7 @@ export const CreateBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -322,6 +341,12 @@ export const CreateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -360,6 +385,12 @@ export const CreateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -410,7 +441,7 @@ export const GetBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -444,6 +475,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
+        ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
       endpoint: zod
         .string()
@@ -483,6 +520,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -533,7 +576,7 @@ export const UpdateBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -658,6 +701,12 @@ export const UpdateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -696,6 +745,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -765,7 +820,7 @@ export const DeleteBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -798,7 +853,7 @@ export const TestBotConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -876,7 +931,7 @@ export const DuplicateBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -923,6 +978,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -961,6 +1022,12 @@ export const DuplicateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1011,7 +1078,7 @@ export const HideBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1058,6 +1125,12 @@ export const HideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1096,6 +1169,12 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1146,7 +1225,7 @@ export const UnhideBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1193,6 +1272,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1231,6 +1316,12 @@ export const UnhideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1281,7 +1372,7 @@ export const PinBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1328,6 +1419,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1366,6 +1463,12 @@ export const PinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1416,7 +1519,7 @@ export const UnpinBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1463,6 +1566,12 @@ export const UnpinBotResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1501,6 +1610,12 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1551,7 +1666,7 @@ export const IssueBotCallbackTokenParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1593,7 +1708,7 @@ export const RevokeBotCallbackTokenParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1640,6 +1755,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .describe(
           "Whether it comes with OpenBot rather than belonging to a person.",
         ),
+      packageBotId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
+        ),
       endpoint: zod
         .string()
         .nullable()
@@ -1678,6 +1799,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+        ),
+      withheld: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1728,7 +1855,7 @@ export const ReportBotDeclineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1791,7 +1918,7 @@ export const GetBotHandoffParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1833,7 +1960,7 @@ export const GetBotLifecycleParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1870,7 +1997,7 @@ export const PauseBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1927,7 +2054,7 @@ export const ResumeBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1976,7 +2103,7 @@ export const ResetBotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -2095,7 +2222,7 @@ export const GetBotActivityParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -2282,7 +2409,7 @@ export const StopBotHandoffParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -2329,7 +2456,7 @@ export const ListBotAttentionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

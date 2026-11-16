@@ -2,7 +2,11 @@ import {
   type ResearchRole,
   researchRoleOfTool,
 } from "@openbot/shared/research";
-import { asText, withoutUntrustedEnvelope } from "./tool-result";
+import {
+  asText,
+  withoutOutcomeLine,
+  withoutUntrustedEnvelope,
+} from "./tool-result";
 
 /** The research role of a call by its full `mcp__server__tool` name, or null when it plays none. */
 export function researchRoleOfCall(name: string): ResearchRole | null {
@@ -41,7 +45,12 @@ const MAX_EXCERPT = 1200;
  * which still shows everything: an error, an empty result, a shape no provider has sent yet.
  */
 export function readResearchSources(result: string): ResearchSource[] | null {
-  const whole = withoutUntrustedEnvelope(asText(result)).trim();
+  // The server's line on what the call did ("Ran: read only, …") is for the model, as the envelope
+  // is. Left on, the answer did not start with the provider's JSON, nothing was read out of it, and
+  // an opened search showed the JSON itself.
+  const whole = withoutUntrustedEnvelope(
+    withoutOutcomeLine(asText(result)),
+  ).trim();
   const text = whole.replace(CUT_MARKER, "").trim();
   const cut = text !== whole;
   const found =

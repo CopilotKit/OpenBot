@@ -13,7 +13,7 @@ export const ListSharedUseRequestsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -71,7 +71,7 @@ export const ListSharedUseRequestsResponse = zod.object({
               audience: zod
                 .enum(["owner", "people", "team"])
                 .describe(
-                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                 ),
               outsideInput: zod
                 .boolean()
@@ -80,19 +80,19 @@ export const ListSharedUseRequestsResponse = zod.object({
                 .array(
                   zod
                     .object({
-                      kind: zod.enum(["user", "group"]),
+                      kind: zod.enum(["user", "group", "team"]),
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory group's name.",
                         ),
                     })
                     .describe(
-                      "One person or directory group an audience names.",
+                      "One person, team or directory group an audience names.",
                     ),
                 )
                 .describe(
-                  "The people and groups named, when the audience is people. Empty otherwise.",
+                  "The people, teams and groups named, when the audience is people. Empty otherwise.",
                 ),
             })
             .describe(
@@ -105,7 +105,7 @@ export const ListSharedUseRequestsResponse = zod.object({
                   audience: zod
                     .enum(["owner", "people", "team"])
                     .describe(
-                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                     ),
                   outsideInput: zod
                     .boolean()
@@ -116,19 +116,19 @@ export const ListSharedUseRequestsResponse = zod.object({
                     .array(
                       zod
                         .object({
-                          kind: zod.enum(["user", "group"]),
+                          kind: zod.enum(["user", "group", "team"]),
                           value: zod
                             .string()
                             .describe(
-                              "The person's id, or the directory group's name.",
+                              "The person's id, the team's id, or the directory group's name.",
                             ),
                         })
                         .describe(
-                          "One person or directory group an audience names.",
+                          "One person, team or directory group an audience names.",
                         ),
                     )
                     .describe(
-                      "The people and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
                     ),
                 })
                 .describe(
@@ -177,7 +177,7 @@ export const CreateSharedUseRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -245,7 +245,7 @@ export const ApproveSharedUseRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   sharedUseRequestId: zod
     .string()
@@ -285,7 +285,7 @@ export const ApproveSharedUseRequestResponse = zod
         audience: zod
           .enum(["owner", "people", "team"])
           .describe(
-            "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+            "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
           ),
         outsideInput: zod
           .boolean()
@@ -294,15 +294,19 @@ export const ApproveSharedUseRequestResponse = zod
           .array(
             zod
               .object({
-                kind: zod.enum(["user", "group"]),
+                kind: zod.enum(["user", "group", "team"]),
                 value: zod
                   .string()
-                  .describe("The person's id, or the directory group's name."),
+                  .describe(
+                    "The person's id, the team's id, or the directory group's name.",
+                  ),
               })
-              .describe("One person or directory group an audience names."),
+              .describe(
+                "One person, team or directory group an audience names.",
+              ),
           )
           .describe(
-            "The people and groups named, when the audience is people. Empty otherwise.",
+            "The people, teams and groups named, when the audience is people. Empty otherwise.",
           ),
       })
       .describe(
@@ -315,7 +319,7 @@ export const ApproveSharedUseRequestResponse = zod
             audience: zod
               .enum(["owner", "people", "team"])
               .describe(
-                "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
               ),
             outsideInput: zod
               .boolean()
@@ -324,17 +328,19 @@ export const ApproveSharedUseRequestResponse = zod
               .array(
                 zod
                   .object({
-                    kind: zod.enum(["user", "group"]),
+                    kind: zod.enum(["user", "group", "team"]),
                     value: zod
                       .string()
                       .describe(
-                        "The person's id, or the directory group's name.",
+                        "The person's id, the team's id, or the directory group's name.",
                       ),
                   })
-                  .describe("One person or directory group an audience names."),
+                  .describe(
+                    "One person, team or directory group an audience names.",
+                  ),
               )
               .describe(
-                "The people and groups named, when the audience is people. Empty otherwise.",
+                "The people, teams and groups named, when the audience is people. Empty otherwise.",
               ),
           })
           .describe(
@@ -378,7 +384,7 @@ export const DeclineSharedUseRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   sharedUseRequestId: zod
     .string()
@@ -418,7 +424,7 @@ export const DeclineSharedUseRequestResponse = zod
         audience: zod
           .enum(["owner", "people", "team"])
           .describe(
-            "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+            "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
           ),
         outsideInput: zod
           .boolean()
@@ -427,15 +433,19 @@ export const DeclineSharedUseRequestResponse = zod
           .array(
             zod
               .object({
-                kind: zod.enum(["user", "group"]),
+                kind: zod.enum(["user", "group", "team"]),
                 value: zod
                   .string()
-                  .describe("The person's id, or the directory group's name."),
+                  .describe(
+                    "The person's id, the team's id, or the directory group's name.",
+                  ),
               })
-              .describe("One person or directory group an audience names."),
+              .describe(
+                "One person, team or directory group an audience names.",
+              ),
           )
           .describe(
-            "The people and groups named, when the audience is people. Empty otherwise.",
+            "The people, teams and groups named, when the audience is people. Empty otherwise.",
           ),
       })
       .describe(
@@ -448,7 +458,7 @@ export const DeclineSharedUseRequestResponse = zod
             audience: zod
               .enum(["owner", "people", "team"])
               .describe(
-                "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
               ),
             outsideInput: zod
               .boolean()
@@ -457,17 +467,19 @@ export const DeclineSharedUseRequestResponse = zod
               .array(
                 zod
                   .object({
-                    kind: zod.enum(["user", "group"]),
+                    kind: zod.enum(["user", "group", "team"]),
                     value: zod
                       .string()
                       .describe(
-                        "The person's id, or the directory group's name.",
+                        "The person's id, the team's id, or the directory group's name.",
                       ),
                   })
-                  .describe("One person or directory group an audience names."),
+                  .describe(
+                    "One person, team or directory group an audience names.",
+                  ),
               )
               .describe(
-                "The people and groups named, when the audience is people. Empty otherwise.",
+                "The people, teams and groups named, when the audience is people. Empty otherwise.",
               ),
           })
           .describe(
@@ -507,7 +519,7 @@ export const GetBotSharedUseParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -530,7 +542,7 @@ export const GetBotSharedUseResponse = zod.object({
                   audience: zod
                     .enum(["owner", "people", "team"])
                     .describe(
-                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                     ),
                   outsideInput: zod
                     .boolean()
@@ -541,19 +553,19 @@ export const GetBotSharedUseResponse = zod.object({
                     .array(
                       zod
                         .object({
-                          kind: zod.enum(["user", "group"]),
+                          kind: zod.enum(["user", "group", "team"]),
                           value: zod
                             .string()
                             .describe(
-                              "The person's id, or the directory group's name.",
+                              "The person's id, the team's id, or the directory group's name.",
                             ),
                         })
                         .describe(
-                          "One person or directory group an audience names.",
+                          "One person, team or directory group an audience names.",
                         ),
                     )
                     .describe(
-                      "The people and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
                     ),
                 })
                 .describe(
@@ -569,7 +581,7 @@ export const GetBotSharedUseResponse = zod.object({
               audience: zod
                 .enum(["owner", "people", "team"])
                 .describe(
-                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                 ),
               outsideInput: zod
                 .boolean()
@@ -578,19 +590,19 @@ export const GetBotSharedUseResponse = zod.object({
                 .array(
                   zod
                     .object({
-                      kind: zod.enum(["user", "group"]),
+                      kind: zod.enum(["user", "group", "team"]),
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory group's name.",
                         ),
                     })
                     .describe(
-                      "One person or directory group an audience names.",
+                      "One person, team or directory group an audience names.",
                     ),
                 )
                 .describe(
-                  "The people and groups named, when the audience is people. Empty otherwise.",
+                  "The people, teams and groups named, when the audience is people. Empty otherwise.",
                 ),
             })
             .describe(
@@ -625,7 +637,7 @@ export const GetBotSharedUseResponse = zod.object({
               audience: zod
                 .enum(["owner", "people", "team"])
                 .describe(
-                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                  "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                 ),
               outsideInput: zod
                 .boolean()
@@ -634,19 +646,19 @@ export const GetBotSharedUseResponse = zod.object({
                 .array(
                   zod
                     .object({
-                      kind: zod.enum(["user", "group"]),
+                      kind: zod.enum(["user", "group", "team"]),
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory group's name.",
                         ),
                     })
                     .describe(
-                      "One person or directory group an audience names.",
+                      "One person, team or directory group an audience names.",
                     ),
                 )
                 .describe(
-                  "The people and groups named, when the audience is people. Empty otherwise.",
+                  "The people, teams and groups named, when the audience is people. Empty otherwise.",
                 ),
             })
             .describe(
@@ -659,7 +671,7 @@ export const GetBotSharedUseResponse = zod.object({
                   audience: zod
                     .enum(["owner", "people", "team"])
                     .describe(
-                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people and directory groups named, or everybody in the organization.",
+                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                     ),
                   outsideInput: zod
                     .boolean()
@@ -670,19 +682,19 @@ export const GetBotSharedUseResponse = zod.object({
                     .array(
                       zod
                         .object({
-                          kind: zod.enum(["user", "group"]),
+                          kind: zod.enum(["user", "group", "team"]),
                           value: zod
                             .string()
                             .describe(
-                              "The person's id, or the directory group's name.",
+                              "The person's id, the team's id, or the directory group's name.",
                             ),
                         })
                         .describe(
-                          "One person or directory group an audience names.",
+                          "One person, team or directory group an audience names.",
                         ),
                     )
                     .describe(
-                      "The people and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
                     ),
                 })
                 .describe(

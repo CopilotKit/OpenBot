@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the apps this OpenBot has added for its Bots: the ones from its catalogue, the ones added from the app directory, and servers added by their address. Each app comes with the actions it offers and the Bots that may use each one. Anybody signed in may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the apps the organization has added for its Bots: the ones from OpenBot's catalogue, the ones added from the app directory, and servers added by their address. Each organization has its own apps, and an app added in one is not in another. Each app comes with the actions it offers and the Bots that may use each one. Any member of the organization may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the apps added here
  */
 
@@ -13,7 +13,7 @@ export const ListAppsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -130,12 +130,12 @@ export const ListAppsResponse = zod.object({
               zod
                 .enum(["personal", "shared"])
                 .describe(
-                  "Each person's own account, or one account OpenBot holds for everybody.",
+                  "Each person's own account, or one account OpenBot holds for everybody in the organization.",
                 ),
               zod.null(),
             ])
             .describe(
-              "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+              "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
             ),
           sharedAccountConnected: zod
             .boolean()
@@ -240,7 +240,7 @@ export const ListAppsResponse = zod.object({
             ),
         })
         .describe(
-          "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+          "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
         ),
     )
     .describe("By title, ignoring case, then by id."),
@@ -264,7 +264,7 @@ export const CreateAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -448,12 +448,12 @@ export const CreateAppResponse = zod
         zod
           .enum(["personal", "shared"])
           .describe(
-            "Each person's own account, or one account OpenBot holds for everybody.",
+            "Each person's own account, or one account OpenBot holds for everybody in the organization.",
           ),
         zod.null(),
       ])
       .describe(
-        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
       ),
     sharedAccountConnected: zod
       .boolean()
@@ -558,7 +558,7 @@ export const CreateAppResponse = zod
       ),
   })
   .describe(
-    "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
   );
 
 /**
@@ -575,7 +575,7 @@ export const GetAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -668,12 +668,12 @@ export const GetAppResponse = zod
         zod
           .enum(["personal", "shared"])
           .describe(
-            "Each person's own account, or one account OpenBot holds for everybody.",
+            "Each person's own account, or one account OpenBot holds for everybody in the organization.",
           ),
         zod.null(),
       ])
       .describe(
-        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
       ),
     sharedAccountConnected: zod
       .boolean()
@@ -778,7 +778,7 @@ export const GetAppResponse = zod
       ),
   })
   .describe(
-    "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
   );
 
 /**
@@ -795,7 +795,7 @@ export const ReplaceAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -948,12 +948,12 @@ export const ReplaceAppResponse = zod
         zod
           .enum(["personal", "shared"])
           .describe(
-            "Each person's own account, or one account OpenBot holds for everybody.",
+            "Each person's own account, or one account OpenBot holds for everybody in the organization.",
           ),
         zod.null(),
       ])
       .describe(
-        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
       ),
     sharedAccountConnected: zod
       .boolean()
@@ -1058,7 +1058,7 @@ export const ReplaceAppResponse = zod
       ),
   })
   .describe(
-    "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
   );
 
 /**
@@ -1075,7 +1075,7 @@ export const UpdateAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1198,12 +1198,12 @@ export const UpdateAppResponse = zod
         zod
           .enum(["personal", "shared"])
           .describe(
-            "Each person's own account, or one account OpenBot holds for everybody.",
+            "Each person's own account, or one account OpenBot holds for everybody in the organization.",
           ),
         zod.null(),
       ])
       .describe(
-        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
       ),
     sharedAccountConnected: zod
       .boolean()
@@ -1308,11 +1308,11 @@ export const UpdateAppResponse = zod
       ),
   })
   .describe(
-    "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
   );
 
 /**
- * Remove an app for everybody. Every person's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator may.
+ * Remove an app for everybody in the organization. Every member's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator of the organization may.
  * @summary Remove an app
  */
 
@@ -1325,7 +1325,7 @@ export const DeleteAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1365,7 +1365,7 @@ export const RefreshAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1470,12 +1470,12 @@ export const RefreshAppResponse = zod
         zod
           .enum(["personal", "shared"])
           .describe(
-            "Each person's own account, or one account OpenBot holds for everybody.",
+            "Each person's own account, or one account OpenBot holds for everybody in the organization.",
           ),
         zod.null(),
       ])
       .describe(
-        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody. Null for an app with no account at all, and for any other app.",
+        "Whose account an app from the directory acts in: each person's own, or one account OpenBot holds for everybody in the organization. Null for an app with no account at all, and for any other app.",
       ),
     sharedAccountConnected: zod
       .boolean()
@@ -1580,11 +1580,11 @@ export const RefreshAppResponse = zod
       ),
   })
   .describe(
-    "An app this OpenBot has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
   );
 
 /**
- * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each account that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
+ * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody in the organization (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each account that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
  * @summary Choose whose account an app acts in
  */
 
@@ -1597,7 +1597,7 @@ export const SetAppAccountModeParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1634,7 +1634,7 @@ export const SetAppAccountModeBody = zod.object({
   mode: zod
     .enum(["personal", "shared"])
     .describe(
-      "Each person's own account, or one account OpenBot holds for everybody.",
+      "Each person's own account, or one account OpenBot holds for everybody in the organization.",
     ),
   approvals: zod
     .record(
@@ -1646,7 +1646,7 @@ export const SetAppAccountModeBody = zod.object({
           members: zod
             .array(
               zod.object({
-                kind: zod.enum(["user", "group"]),
+                kind: zod.enum(["user", "group", "team"]),
                 value: zod
                   .string()
                   .min(1)
@@ -1657,7 +1657,7 @@ export const SetAppAccountModeBody = zod.object({
             .max(setAppAccountModeBodyApprovalsMembersMax),
         })
         .describe(
-          "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.",
+          "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.",
         ),
     )
     .optional()
@@ -1682,7 +1682,7 @@ export const SetAppAccountModeResponse = zod.object({
   mode: zod
     .enum(["personal", "shared"])
     .describe(
-      "Each person's own account, or one account OpenBot holds for everybody.",
+      "Each person's own account, or one account OpenBot holds for everybody in the organization.",
     ),
   applied: zod
     .boolean()
@@ -1692,7 +1692,7 @@ export const SetAppAccountModeResponse = zod.object({
       holder: zod
         .enum(["person", "deployment"])
         .describe(
-          "Whose accounts they are: people's own (person), or the one OpenBot holds for everybody (deployment).",
+          "Whose accounts they are: people's own (person), or the one OpenBot holds for everybody in the organization (deployment).",
         ),
       count: zod.int().min(setAppAccountModeResponseAccountsEndedCountMin),
     })
@@ -1708,7 +1708,7 @@ export const SetAppAccountModeResponse = zod.object({
             members: zod
               .array(
                 zod.object({
-                  kind: zod.enum(["user", "group"]),
+                  kind: zod.enum(["user", "group", "team"]),
                   value: zod
                     .string()
                     .min(1)
@@ -1723,7 +1723,7 @@ export const SetAppAccountModeResponse = zod.object({
               .max(setAppAccountModeResponseBotsItemApprovalMembersMax),
           })
           .describe(
-            "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.",
+            "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.",
           ),
       }),
     )
@@ -1746,7 +1746,7 @@ export const SetAppOAuthClientParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1806,7 +1806,7 @@ export const ListAppDirectoryParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -1973,7 +1973,7 @@ export const GetAppSetupParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -2023,7 +2023,7 @@ export const GetShortenedToolNamesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

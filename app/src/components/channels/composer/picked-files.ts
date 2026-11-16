@@ -1,6 +1,7 @@
 import {
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_DOCUMENT_BYTES,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
   mediaTypeOf,
@@ -96,6 +97,16 @@ export function screenPickedFiles(
         reject(
           file,
           `'${file.name}' is too large for a text file. The limit is ${formatBytes(MAX_FILE_BYTES)}.`,
+        ),
+      );
+      continue;
+    }
+
+    if (kind === "document" && file.size > MAX_DOCUMENT_BYTES) {
+      rejected.push(
+        reject(
+          file,
+          `'${file.name}' is too large for a PDF. The limit is ${formatBytes(MAX_DOCUMENT_BYTES)}.`,
         ),
       );
       continue;

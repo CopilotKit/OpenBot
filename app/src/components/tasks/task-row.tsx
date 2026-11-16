@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +20,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import type { ListedTask } from "@/lib/tasks/groups";
+import { countsAsWaiting, type ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
@@ -112,11 +113,18 @@ function nextLine(listed: ListedTask): string | null {
 }
 
 /**
- * Whether a row offers Mark done. Not while the task is working: there is nothing finished to mark,
- * and its conversation would carry on behind a row that said it was done.
+ * Whether a row offers Mark done: only where it does something. Not while the task is working:
+ * there is nothing finished to mark, and its conversation would carry on behind a row that said it
+ * was done. Not on a row that already reads Done, as a finished task's row under Done does: marking
+ * it changes nothing the row says.
  */
-function canMarkDone(status: TaskStatus): boolean {
-  return status !== "working" && status !== "resolved";
+function canMarkDone(listed: ListedTask, settled = false): boolean {
+  const { status } = listed;
+  return (
+    status !== "working" &&
+    status !== "resolved" &&
+    statusLabel(listed, settled) !== TASK_DONE_LABEL
+  );
 }
 
 /**
@@ -232,7 +240,7 @@ export function TaskRow({
             >
               {resolve.isPending ? "Reopening…" : "Reopen"}
             </Button>
-          ) : canMarkDone(status) ? (
+          ) : canMarkDone(listed, settled) ? (
             <Button
               disabled={busy}
               onClick={() => resolve.mutate({ id: task.id, done: true })}
@@ -257,14 +265,73 @@ export function TaskRow({
  * A task on the Needs you board: the same task, in the board's one row shape, with its actions on
  * the right. Open leads while there is something to read or answer.
  */
-export function TaskBoardRow({ listed }: { listed: ListedTask }) {
+export function TaskBoardRow({
+  listed,
+  held,
+}: {
+  listed: ListedTask;
+  /**
+   * The wait inside the task's conversation, when one is there, with its answers: the row stands
+   * for it and answers it, Allow and Deny for an action, Answer for a question, without the person
+   * opening the thread (`useHeldAnswers`).
+   */
+  held?: HeldAnswer | undefined;
+}) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
   const { state, Icon } = look(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  const openFirst = status === "ready_for_review" || status === "needs_input";
+  /*
+   * A delegated task that is done waits on nobody: its result was said in the conversation that
+   * asked. It reads Done, as its card does, untinted and uncounted, with Open no longer leading.
+   */
+  const settled = !countsAsWaiting(listed) && status === "ready_for_review";
+  const openFirst =
+    !settled && (status === "ready_for_review" || status === "needs_input");
+  if (held)
+    return (
+      <BoardRow
+        actions={
+          <>
+            {held.actions}
+            <Button
+              disabled={busy}
+              onClick={() => resolve.mutate({ id: task.id, done: true })}
+              size="sm"
+              variant="ghost"
+            >
+              {resolve.isPending ? "Saving…" : "Mark done"}
+            </Button>
+            <Button
+              render={
+                <Link
+                  params={{ channelId: task.channelId }}
+                  to="/channel/$channelId"
+                />
+              }
+              size="sm"
+              variant="ghost"
+            >
+              Open
+            </Button>
+          </>
+        }
+        detail={nextLine(listed)}
+        icon={<Icon />}
+        meta={[
+          <span key="status">{statusLabel(listed)}</span>,
+          <span key="when">{relativeTime(task.updatedAt)}</span>,
+          ...held.meta,
+        ]}
+        more={held.more}
+        open={held.more !== undefined}
+        state={state}
+        title={task.title}
+        waiting
+      />
+    );
   return (
     <BoardRow
       actions={
@@ -278,7 +345,7 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
               {again.isPending ? "Starting…" : "Try again"}
             </Button>
           ) : null}
-          {canMarkDone(status) ? (
+          {canMarkDone(listed) ? (
             <Button
               disabled={busy}
               onClick={() => resolve.mutate({ id: task.id, done: true })}
@@ -303,9 +370,11 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
         </>
       }
       detail={nextLine(listed)}
+      // What a waiting task waits for is what the person has to answer: read in full, never cut.
+      readDetail={status === "needs_input"}
       icon={<Icon />}
       meta={[
-        <span key="status">{statusLabel(listed)}</span>,
+        <span key="status">{statusLabel(listed, settled)}</span>,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">

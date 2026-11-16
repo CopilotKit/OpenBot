@@ -13,7 +13,7 @@ export const GetLearningSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -32,6 +32,10 @@ export const getLearningSettingsResponseSettingsBotsOneRevisionMax = 128;
 export const getLearningSettingsResponseAutomaticOneContainerIdMax = 64;
 
 export const getLearningSettingsResponseAutomaticOneContainerIdRegExp =
+  new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
+export const getLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
+
+export const getLearningSettingsResponseOrganizationSpaceIdOneRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
 export const GetLearningSettingsResponse = zod.object({
@@ -156,6 +160,20 @@ export const GetLearningSettingsResponse = zod.object({
       zod.null(),
     ])
     .describe("Null where OpenBot never assigns a space by itself."),
+  organizationSpaceId: zod
+    .union([
+      zod
+        .string()
+        .min(1)
+        .max(getLearningSettingsResponseOrganizationSpaceIdOneMax)
+        .regex(getLearningSettingsResponseOrganizationSpaceIdOneRegExp)
+        .describe("A Learning space's id in the backend (its container)."),
+      zod.null(),
+    ])
+    .optional()
+    .describe(
+      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's is named after it: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
+    ),
 });
 
 /**
@@ -168,7 +186,7 @@ export const UpdateLearningSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -271,6 +289,10 @@ export const updateLearningSettingsResponseSettingsBotsOneRevisionMax = 128;
 export const updateLearningSettingsResponseAutomaticOneContainerIdMax = 64;
 
 export const updateLearningSettingsResponseAutomaticOneContainerIdRegExp =
+  new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
+export const updateLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
+
+export const updateLearningSettingsResponseOrganizationSpaceIdOneRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
 export const UpdateLearningSettingsResponse = zod.object({
@@ -397,6 +419,20 @@ export const UpdateLearningSettingsResponse = zod.object({
       zod.null(),
     ])
     .describe("Null where OpenBot never assigns a space by itself."),
+  organizationSpaceId: zod
+    .union([
+      zod
+        .string()
+        .min(1)
+        .max(updateLearningSettingsResponseOrganizationSpaceIdOneMax)
+        .regex(updateLearningSettingsResponseOrganizationSpaceIdOneRegExp)
+        .describe("A Learning space's id in the backend (its container)."),
+      zod.null(),
+    ])
+    .optional()
+    .describe(
+      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's is named after it: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
+    ),
 });
 
 /**
@@ -409,7 +445,7 @@ export const CreateAutomaticLearningSpaceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -482,7 +518,7 @@ export const GetLearningOverviewParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -560,7 +596,7 @@ export const ListPublishedSkillsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -654,7 +690,7 @@ export const GetPublishedSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillName: zod
     .string()
@@ -719,7 +755,7 @@ export const ListPersonalLearningProposalsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -827,7 +863,7 @@ export const GetBotLearningStatusParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -862,7 +898,7 @@ export const ListSkillSharingRequestsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -941,7 +977,7 @@ export const ApproveSkillSharingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillSharingRequestId: zod
     .string()
@@ -994,7 +1030,7 @@ export const DeclineSkillSharingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillSharingRequestId: zod
     .string()
@@ -1045,7 +1081,7 @@ export const GetPersonLearningSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1061,7 +1097,7 @@ export const GetPersonLearningSettingsResponse = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   sharingAllowed: zod
     .boolean()
@@ -1124,7 +1160,7 @@ export const UpdatePersonLearningSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1153,7 +1189,7 @@ export const UpdatePersonLearningSettingsBody = zod.object({
     .enum(["closed", "open", "choose"])
     .optional()
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod
     .boolean()
@@ -1165,7 +1201,7 @@ export const UpdatePersonLearningSettingsResponse = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.",
+      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod.boolean().nullable(),
 });
@@ -1184,7 +1220,7 @@ export const GetPersonLearningReviewParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1333,7 +1369,7 @@ export const ListPersonLearningProposalsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1455,7 +1491,7 @@ export const GetRecordingTitlesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1505,7 +1541,7 @@ export const GetLearnedSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1574,7 +1610,7 @@ export const UpdateLearnedSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1634,7 +1670,7 @@ export const RequestSkillSharingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1681,7 +1717,7 @@ export const ListLearningProposalsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -1774,7 +1810,7 @@ export const GetLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   proposalId: zod.uuid().describe("The proposal's id."),
 });
@@ -1848,7 +1884,7 @@ export const ApproveLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   proposalId: zod.uuid().describe("The proposal's id."),
 });
@@ -1897,7 +1933,7 @@ export const RejectLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   proposalId: zod.uuid().describe("The proposal's id."),
 });
@@ -1946,7 +1982,7 @@ export const GetLearningEvidenceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   insightId: zod.uuid().describe("The insight's id, as a proposal lists it."),
 });
@@ -2055,7 +2091,7 @@ export const ListOrganizationLearningRunsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -2165,7 +2201,7 @@ export const StartOrganizationLearningRunParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -2247,7 +2283,7 @@ export const GetPersonLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2340,7 +2376,7 @@ export const ApprovePersonLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2406,7 +2442,7 @@ export const RejectPersonLearningProposalParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2472,7 +2508,7 @@ export const GetPersonLearningEvidenceParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2602,7 +2638,7 @@ export const StartPersonLearningRunParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

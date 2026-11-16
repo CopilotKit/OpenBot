@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the skills the caller can see: the organization's and their own. An admin sees everybody's. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 
@@ -13,7 +13,7 @@ export const ListSkillsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -82,6 +82,11 @@ export const ListSkillsResponse = zod.object({
           botIds: zod
             .array(zod.string())
             .describe("The Bots that offer it, by id."),
+          usableOnYourBots: zod
+            .boolean()
+            .describe(
+              "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+            ),
         })
         .describe(
           "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
@@ -99,7 +104,7 @@ export const ListSkillsResponse = zod.object({
 });
 
 /**
- * Return one skill the caller can see: the organization's or their own. An admin can read anybody's. Somebody else's skill is not found.
+ * Return one skill the caller can see, as the list shows them. An admin can read any. One the caller can't see is not found.
  * @summary Read a skill
  */
 
@@ -115,7 +120,7 @@ export const GetSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillId: zod
     .string()
@@ -156,6 +161,11 @@ export const GetSkillResponse = zod
         "Whose it is, by person id. Null when it is the organization's.",
       ),
     botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
+    usableOnYourBots: zod
+      .boolean()
+      .describe(
+        "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+      ),
   })
   .describe(
     "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
@@ -178,7 +188,7 @@ export const ReplaceSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillId: zod
     .string()
@@ -267,6 +277,11 @@ export const ReplaceSkillResponse = zod
         "Whose it is, by person id. Null when it is the organization's.",
       ),
     botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
+    usableOnYourBots: zod
+      .boolean()
+      .describe(
+        "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+      ),
   })
   .describe(
     "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
@@ -289,7 +304,7 @@ export const DeleteSkillParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   skillId: zod
     .string()
@@ -314,3 +329,105 @@ export const DeleteSkillHeader = zod.object({
 });
 
 export const DeleteSkillResponse = zod.void();
+
+/**
+ * Return the teams the skill is granted to, by id. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. Only an admin of the organization may read them.
+ * @summary Read the teams the skill is granted to
+ */
+
+export const getSkillTeamGrantsPathSkillIdMin = 2;
+export const getSkillTeamGrantsPathSkillIdMax = 40;
+
+export const getSkillTeamGrantsPathSkillIdRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$",
+);
+
+export const GetSkillTeamGrantsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  skillId: zod
+    .string()
+    .min(getSkillTeamGrantsPathSkillIdMin)
+    .max(getSkillTeamGrantsPathSkillIdMax)
+    .regex(getSkillTeamGrantsPathSkillIdRegExp)
+    .describe(
+      "The skill's slug: the command a person types after /. Lower-case letters, numbers and hyphens, 2 to 40 long, starting and ending with a letter or number.",
+    ),
+});
+
+export const GetSkillTeamGrantsResponse = zod
+  .object({
+    teams: zod.array(zod.string()).describe("Each team's id, in order."),
+  })
+  .describe("The teams the skill is granted to.");
+
+/**
+ * Grant the skill to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+ * @summary Grant a skill to teams
+ */
+
+export const replaceSkillTeamGrantsPathSkillIdMin = 2;
+export const replaceSkillTeamGrantsPathSkillIdMax = 40;
+
+export const replaceSkillTeamGrantsPathSkillIdRegExp = new RegExp(
+  "^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$",
+);
+
+export const ReplaceSkillTeamGrantsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  skillId: zod
+    .string()
+    .min(replaceSkillTeamGrantsPathSkillIdMin)
+    .max(replaceSkillTeamGrantsPathSkillIdMax)
+    .regex(replaceSkillTeamGrantsPathSkillIdRegExp)
+    .describe(
+      "The skill's slug: the command a person types after /. Lower-case letters, numbers and hyphens, 2 to 40 long, starting and ending with a letter or number.",
+    ),
+});
+
+export const replaceSkillTeamGrantsHeaderIdempotencyKeyMax = 128;
+
+export const ReplaceSkillTeamGrantsHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(replaceSkillTeamGrantsHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const replaceSkillTeamGrantsBodyTeamsItemMax = 200;
+
+export const replaceSkillTeamGrantsBodyTeamsItemRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+export const replaceSkillTeamGrantsBodyTeamsMax = 100;
+
+export const ReplaceSkillTeamGrantsBody = zod.object({
+  teams: zod
+    .array(
+      zod
+        .string()
+        .min(1)
+        .max(replaceSkillTeamGrantsBodyTeamsItemMax)
+        .regex(replaceSkillTeamGrantsBodyTeamsItemRegExp),
+    )
+    .max(replaceSkillTeamGrantsBodyTeamsMax)
+    .describe("The id of each team of this organization to grant it to."),
+});
+
+export const ReplaceSkillTeamGrantsResponse = zod
+  .object({
+    teams: zod.array(zod.string()).describe("Each team's id, in order."),
+  })
+  .describe("The teams the skill is granted to.");

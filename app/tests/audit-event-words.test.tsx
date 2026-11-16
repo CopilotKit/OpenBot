@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { AUDIT_EVENT_WORDS } from "@openbot/shared/audit-words";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -15,6 +16,7 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { OPENBOT_WORKING_EVENT_TYPES } from "@/lib/audit/outcome";
+import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
@@ -42,13 +44,16 @@ function row(
 ) {
   return {
     id,
-    actorUserId: "dev",
+    actorUserId: "dev" as string | null,
     initiatorKind: "person",
     initiatorId: null,
     eventType,
     targetType,
     targetId,
-    payload: { bot: "personal-assistant", ...payload },
+    payload: { bot: "personal-assistant", ...payload } as Record<
+      string,
+      unknown
+    >,
     createdAt: `2026-11-07T11:${String(minute).padStart(2, "0")}:00Z`,
   };
 }
@@ -109,11 +114,22 @@ const ACTIVITY = ROWS.map((row, index) => ({
   stored: STORED[index],
 })).filter((row) => !LEFT_OUT.has(row.type));
 
-async function renderAs(edition: "team" | "personal", rows = ROWS) {
+async function renderAs(
+  edition: "team" | "personal",
+  rows = ROWS,
+  /** The signed-in person's email, as the current-user query answers it. */
+  viewer = "dev@example.com",
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
+  });
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "dev",
+    email: viewer,
+    name: "Sam",
+    role: "admin",
   });
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -184,6 +200,145 @@ test("the search box still finds a row by its stored name", async () => {
       "Search the web",
     ]),
   );
+});
+
+/**
+ * What happens to an organization is on its own trail: made, renamed, a person invited, an
+ * invitation cancelled, joining, a member removed or given another role. Each reads in words, and as something that happened, never as
+ * something OpenBot blocked.
+ */
+test("what happened to an organization reads in words, and none of it as blocked", async () => {
+  const ORGANIZATION_WORDS: Record<string, string> = {
+    "organization.created": "Create an organization",
+    "organization.renamed": "Rename an organization",
+    "organization.member_invited": "Invite a person",
+    "organization.invitation_canceled": "Cancel an invitation",
+    "organization.member_joined": "Join an organization",
+    "organization.member_removed": "Remove a member",
+    "organization.member_role_changed": "Change a member's role",
+  };
+  const types = Object.keys(ORGANIZATION_WORDS);
+  /*
+   * Short enough for Activity's What column, as the people events are: at 700px the longer words
+   * ("Change a person's role in an organization") ran to three lines. Each still differs from every
+   * other event's words, so a filter chip never names two kinds of row.
+   */
+  for (const type of types) {
+    const words = ORGANIZATION_WORDS[type] as string;
+    expect(words.length).toBeLessThanOrEqual(
+      AUDIT_EVENT_WORDS["person.role_changed"]?.length ?? 0,
+    );
+    const shared = Object.entries(AUDIT_EVENT_WORDS).filter(
+      ([other, said]) => other !== type && said === words,
+    );
+    expect(shared).toEqual([]);
+  }
+  const view = await renderAs(
+    "team",
+    types.map((eventType, index) => ({
+      ...row(`o${index}`, 40 - index, eventType, "organization", {}, "org_2"),
+      payload: {},
+    })),
+  );
+  const lines = whats(view.container);
+  expect(lines.map((line) => line.textContent)).toEqual(
+    types.map((type) => ORGANIZATION_WORDS[type]),
+  );
+  // Admin still finds each row's stored name on hover.
+  expect(lines.map((line) => line.getAttribute("title"))).toEqual(types);
+  const decisions = [
+    ...view.container.querySelectorAll("tbody [data-column=decision]"),
+  ].map((cell) => cell.textContent);
+  expect(decisions).toHaveLength(types.length);
+  for (const decision of decisions) {
+    expect(decision).not.toContain("Blocked");
+    expect(decision).not.toContain("Did not happen");
+  }
+});
+
+/**
+ * A real-product pass read "Started by a person" on every row a person started, with nobody named,
+ * and searching the person's email found nothing. The server sends who in `payload.by`.
+ */
+test("a row a person started names them, and searching their email finds it", async () => {
+  const byPerson = (
+    id: string,
+    minute: number,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ) => ({
+    ...row(id, minute, eventType, "organization", {}, "org_2"),
+    payload,
+  });
+  const view = await renderAs("team", [
+    byPerson("p1", 30, "organization.member_invited", {
+      by: "priya@northwind.test",
+    }),
+    byPerson("p2", 29, "configuration.changed", {
+      by: "priya@northwind.test",
+      change: "skill_installed",
+    }),
+    // Nobody named anywhere on the row, its actor id included.
+    { ...byPerson("p3", 28, "organization.renamed", {}), actorUserId: null },
+  ]);
+  const startedBy = () =>
+    [...view.container.querySelectorAll("tbody [data-column=bot]")].map(
+      (cell) => cell.lastElementChild?.textContent,
+    );
+  expect(startedBy()).toEqual([
+    "Started by priya@northwind.test",
+    "Started by priya@northwind.test",
+    // A row that names nobody reads as it always has.
+    "Started by a person",
+  ]);
+  await userEvent
+    .setup({ document })
+    .type(
+      view.getByRole("searchbox", { name: "Search events" }),
+      "priya@northwind.test",
+    );
+  await waitFor(() =>
+    expect(whats(view.container).map((line) => line.textContent)).toEqual([
+      "Invite a person",
+      "Save a skill",
+    ]),
+  );
+});
+
+/**
+ * The person reading the page is "you", not their own email on every row: the personal edition's
+ * one person started nearly everything there. Their email still finds the rows.
+ */
+test("a row the reader started says you, and their email still finds it", async () => {
+  const view = await renderAs(
+    "personal",
+    [
+      {
+        ...row("y1", 30, "organization.renamed", "organization", {}, "org_2"),
+        payload: { by: "sam@example.com" },
+      },
+      {
+        ...row("y2", 29, "organization.renamed", "organization", {}, "org_2"),
+        payload: { by: "priya@northwind.test" },
+      },
+    ],
+    "sam@example.com",
+  );
+  const startedBy = () =>
+    [...view.container.querySelectorAll("tbody [data-column=bot]")].map(
+      (cell) => cell.lastElementChild?.textContent,
+    );
+  expect(startedBy()).toEqual([
+    "Started by you",
+    "Started by priya@northwind.test",
+  ]);
+  await userEvent
+    .setup({ document })
+    .type(
+      view.getByRole("searchbox", { name: "Search events" }),
+      "sam@example.com",
+    );
+  await waitFor(() => expect(startedBy()).toEqual(["Started by you"]));
 });
 
 /**

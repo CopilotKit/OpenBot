@@ -101,7 +101,7 @@ export const getGetDeploymentUrl = (organizationId: string) => {
 };
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
  * @summary Read what this OpenBot offers
  */
 export const getDeployment = async (
@@ -269,7 +269,7 @@ export const getGetOrganizationSettingsUrl = (organizationId: string) => {
 };
 
 /**
- * Return the settings an administrator sets for everybody: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 export const getOrganizationSettings = async (
@@ -477,7 +477,7 @@ export const getUpdateOrganizationSettingsUrl = (organizationId: string) => {
 };
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Only an administrator may change them.
+ * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
  * @summary Change the organization's settings
  */
 export const updateOrganizationSettings = async (
@@ -796,7 +796,7 @@ export const getGetModelUsageUrl = (
 };
 
 /**
- * Return which models Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator may read it.
+ * Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
  * @summary Read which models Bots ran on
  */
 export const getModelUsage = async (
@@ -1013,7 +1013,7 @@ export const getListComputerActionsUrl = (
 };
 
 /**
- * Return one page of the actions recorded on Bot computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator may read them. A missing cursor starts at the newest and nextCursor null ends the list.
+ * Return one page of the actions recorded on the organization's Bots' computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator of the organization may read them. A missing cursor starts at the newest and nextCursor null ends the list.
  * @summary List recorded computer actions
  */
 export const listComputerActions = async (

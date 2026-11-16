@@ -40,7 +40,7 @@ export const getCreateConversationJoinTokenUrl = (
 };
 
 /**
- * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join.
+ * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Authorization: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
  * @summary Get a token to watch a conversation live
  */
 export const createConversationJoinToken = async (

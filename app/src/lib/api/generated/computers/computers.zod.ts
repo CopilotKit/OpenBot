@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the computers Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. Ordered by whose computer it is, then by Bot. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A computer another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's computers
  */
 
@@ -13,7 +13,7 @@ export const ListComputersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -92,7 +92,7 @@ export const ListComputersResponse = zod.object({
             ),
         })
         .describe(
-          "One computer as an administrator sees it: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.",
+          "One of the organization's computers as its administrator sees it: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.",
         ),
     )
     .describe("By whose computer it is, then by Bot."),
@@ -112,7 +112,7 @@ export const ListComputersResponse = zod.object({
 });
 
 /**
- * Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+ * Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Stop a computer
  */
 
@@ -121,7 +121,7 @@ export const StopComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -160,7 +160,7 @@ export const StopComputerResponse = zod.object({
 });
 
 /**
- * Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+ * Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Reset a computer
  */
 
@@ -169,7 +169,7 @@ export const ResetComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -208,7 +208,7 @@ export const ResetComputerResponse = zod.object({
 });
 
 /**
- * Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. Only an administrator may do this.
+ * Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Update a computer
  */
 
@@ -217,7 +217,7 @@ export const UpdateComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -274,7 +274,7 @@ export const GetComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -308,7 +308,7 @@ export const WakeComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -354,7 +354,7 @@ export const GetComputerScreenshotParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -411,7 +411,7 @@ export const GetComputerPageFrameParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -451,7 +451,7 @@ export const ReadComputerPageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -497,7 +497,7 @@ export const GetComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -592,7 +592,7 @@ export const RequestComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -695,7 +695,7 @@ export const TakeComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -801,7 +801,7 @@ export const ReleaseComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -907,7 +907,7 @@ export const CancelComputerControlParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1013,7 +1013,7 @@ export const RequestComputerSecretParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1121,7 +1121,7 @@ export const SupplyComputerSecretParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1167,7 +1167,7 @@ export const SendComputerHumanInputParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1221,7 +1221,7 @@ export const SnapshotComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1294,7 +1294,7 @@ export const NavigateComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1369,7 +1369,7 @@ export const ClickComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1446,7 +1446,7 @@ export const TypeComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1528,7 +1528,7 @@ export const PressComputerKeyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1607,7 +1607,7 @@ export const ScrollComputerParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1685,7 +1685,7 @@ export const RunComputerCommandParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1747,7 +1747,7 @@ export const ListComputerFilesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1799,7 +1799,7 @@ export const ReadComputerFileParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1851,7 +1851,7 @@ export const WriteComputerFileParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()

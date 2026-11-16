@@ -69,6 +69,7 @@ export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
   automatic: ["learning", "automatic"] as const,
+  organizationSpace: ["learning", "organization-space"] as const,
   personal: ["learning", "personal"] as const,
   review: ["learning", "review"] as const,
   peopleProposals: ["learning", "people-proposals"] as const,
@@ -109,7 +110,8 @@ export function personalLearningQueryOptions() {
     queryFn: ({ signal }): Promise<PersonalLearningSharing> =>
       getPersonLearningSettings(organizationId(), ME, {
         signal,
-        fallback: "Couldn't load your Learning settings. Reload the page.",
+        fallback:
+          "Couldn't load your Learning settings. Try again in a moment.",
       }),
   });
 }
@@ -156,6 +158,19 @@ export function autoAssignState(
         : {}),
     };
   return { state: automatic.state };
+}
+
+/**
+ * The id of the container OpenBot keeps for this organization alone, or null where it keeps none and the default is
+ * whichever container is assigned or chosen. Never drawn: lib/learning/display.ts names a container from it.
+ */
+export function learningOrganizationSpaceQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.organizationSpace,
+    retry: false,
+    queryFn: async ({ signal }): Promise<string | null> =>
+      (await readLearningConfiguration(signal)).organizationSpaceId ?? null,
+  });
 }
 
 /** Why no container was assigned automatically, or `null` when the server has nothing to say. */
@@ -365,7 +380,7 @@ export function personalReviewQueryOptions() {
     queryFn: ({ signal }): Promise<PersonalReview> =>
       getPersonLearningReview(organizationId(), ME, {
         signal,
-        fallback: "Couldn't load your skills to review. Reload the page.",
+        fallback: "Couldn't load your skills to review. Try again in a moment.",
       }),
     // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload, and
     // after a read that failed it is read again until one answers. Every person's reads go through the one project key,

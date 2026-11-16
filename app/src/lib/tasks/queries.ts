@@ -204,6 +204,18 @@ export function couldNotFinish(failure: string | null): string {
 }
 
 /**
+ * Why a task couldn't finish, as a line of its own under its status: a sentence. The server words
+ * its reason to follow "Couldn't finish:" ("this Bot isn't shared with you any more"), so on its
+ * own it starts in capitals and ends with a full stop.
+ */
+export function failureSentence(failure: string): string {
+  const said = failure.trim();
+  if (!said) return said;
+  const sentence = `${said[0]?.toUpperCase()}${said.slice(1)}`;
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/**
  * Whether the person stopped this task. Its status is `failed` either way, and only a stop sets
  * `stoppedAt`. A stop is the person's own choice, so nothing that lists the task calls it a failure.
  */

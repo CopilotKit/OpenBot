@@ -58,7 +58,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-3.5">
         {agents.isPending ? null : agents.error ? (
-          <ErrorNotice error="Couldn't load your Bots. Reload the page." />
+          <ErrorNotice error="Couldn't load your Bots. Try again in a moment." />
         ) : agents.data.length === 0 ? (
           <p className={fuseText.muted}>You don't have a Bot yet.</p>
         ) : (
@@ -135,7 +135,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
             />
           ) : null}
           <LinkRow
-            detail="Yours, shared with you, and your team's"
+            detail="Yours, shared with you, and your organization's"
             icon={IconBolt}
             render={<Link onClick={onClose} to="/bots" />}
             tint="plain"

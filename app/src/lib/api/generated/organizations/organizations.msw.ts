@@ -9,22 +9,29 @@ import type {
 } from "msw";
 
 import type {
-  AddOrganizationMemberRequest,
+  CreateOrganizationInvitationRequest,
   CreateOrganizationRequest,
+  InvitationPage,
+  InvitationResponse,
+  OrganizationInvitationPage,
+  OrganizationInvitationResponse,
   OrganizationMemberPage,
   OrganizationMemberResponse,
   OrganizationPage,
   OrganizationResponse,
+  UpdateOrganizationMemberRequest,
+  UpdateOrganizationRequest,
 } from "../model";
 
 export const getListOrganizationsResponseMock = (): OrganizationPage => ({
   organizations: [
     {
-      id: "default",
-      slug: "default",
-      name: "Acme",
-      role: "admin",
+      id: "Wm4pZ7tKc1Xb9RnQ2sYd6hLe",
+      slug: "dana",
+      name: "Dana's organization",
+      role: "owner",
       active: true,
+      personal: true,
     },
     {
       id: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
@@ -32,6 +39,7 @@ export const getListOrganizationsResponseMock = (): OrganizationPage => ({
       name: "Acme Research",
       role: "owner",
       active: false,
+      personal: false,
     },
   ],
   canCreate: true,
@@ -45,6 +53,7 @@ export const getCreateOrganizationResponseMock = (): OrganizationResponse => ({
     name: "Acme Research",
     role: "owner",
     active: false,
+    personal: false,
   },
 });
 
@@ -58,6 +67,8 @@ export const getListOrganizationMembersResponseMock =
         image: null,
         role: "owner",
         joinedAt: "2026-11-14T09:12:40.000Z",
+        removable: false,
+        assignableRoles: [],
       },
       {
         id: "2fn8w1c6y4tq7h0mbe3s",
@@ -66,22 +77,122 @@ export const getListOrganizationMembersResponseMock =
         image: null,
         role: "member",
         joinedAt: "2026-11-14T09:20:05.000Z",
+        removable: true,
+        assignableRoles: ["owner", "admin"],
       },
     ],
     nextCursor: null,
   });
 
-export const getAddOrganizationMemberResponseMock =
+export const getUpdateOrganizationResponseMock = (): OrganizationResponse => ({
+  organization: {
+    id: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
+    slug: "acme-research",
+    name: "Acme Research Lab",
+    role: "owner",
+    active: true,
+    personal: false,
+  },
+});
+
+export const getUpdateOrganizationMemberResponseMock =
   (): OrganizationMemberResponse => ({
     member: {
       id: "2fn8w1c6y4tq7h0mbe3s",
       email: "sam.ortiz@acme.com",
       name: "Sam Ortiz",
       image: null,
-      role: "member",
+      role: "owner",
       joinedAt: "2026-11-14T09:20:05.000Z",
+      removable: true,
+      assignableRoles: ["admin", "member"],
     },
   });
+
+export const getListOrganizationInvitationsResponseMock =
+  (): OrganizationInvitationPage => ({
+    invitations: [
+      {
+        id: "5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11",
+        email: "sam.ortiz@acme.com",
+        role: "member",
+        status: "pending",
+        invitedBy: { name: "Dana Whitfield", email: "dana.whitfield@acme.com" },
+        createdAt: "2026-11-15T09:20:05.000Z",
+        expiresAt: "2026-11-22T09:20:05.000Z",
+      },
+      {
+        id: "0c2d7a53-1f4e-4f0a-8a57-3d1b2c9e7f42",
+        email: "lee.park@acme.com",
+        role: "admin",
+        status: "expired",
+        invitedBy: { name: "Dana Whitfield", email: "dana.whitfield@acme.com" },
+        createdAt: "2026-11-01T09:20:05.000Z",
+        expiresAt: "2026-11-08T09:20:05.000Z",
+      },
+    ],
+    nextCursor: null,
+  });
+
+export const getCreateOrganizationInvitationResponseMock =
+  (): OrganizationInvitationResponse => ({
+    invitation: {
+      id: "5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11",
+      email: "sam.ortiz@acme.com",
+      role: "member",
+      status: "pending",
+      invitedBy: { name: "Dana Whitfield", email: "dana.whitfield@acme.com" },
+      createdAt: "2026-11-15T09:20:05.000Z",
+      expiresAt: "2026-11-22T09:20:05.000Z",
+    },
+    delivery: "link",
+  });
+
+export const getListInvitationsResponseMock = (): InvitationPage => ({
+  invitations: [
+    {
+      id: "5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11",
+      organization: {
+        id: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
+        slug: "acme-research",
+        name: "Acme Research",
+      },
+      role: "member",
+      status: "pending",
+      invitedBy: { name: "Dana Whitfield", email: "dana.whitfield@acme.com" },
+      createdAt: "2026-11-15T09:20:05.000Z",
+      expiresAt: "2026-11-22T09:20:05.000Z",
+    },
+  ],
+  nextCursor: null,
+});
+
+export const getGetInvitationResponseMock = (): InvitationResponse => ({
+  invitation: {
+    id: "5b0f6f0e-6f0b-4c0e-9d57-0d6f3a5f9a11",
+    organization: {
+      id: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
+      slug: "acme-research",
+      name: "Acme Research",
+    },
+    role: "member",
+    status: "pending",
+    invitedBy: { name: "Dana Whitfield", email: "dana.whitfield@acme.com" },
+    createdAt: "2026-11-15T09:20:05.000Z",
+    expiresAt: "2026-11-22T09:20:05.000Z",
+  },
+});
+
+export const getAcceptInvitationResponseMock = (): OrganizationResponse => ({
+  organization: {
+    id: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
+    slug: "acme-research",
+    name: "Acme Research",
+    role: "member",
+    active: false,
+    personal: false,
+  },
+});
 
 export const getListOrganizationsMockHandler = (
   overrideResponse?:
@@ -163,26 +274,26 @@ export const getListOrganizationMembersMockHandler = (
   );
 };
 
-export const getAddOrganizationMemberMockHandler = (
+export const getUpdateOrganizationMockHandler = (
   overrideResponse?:
-    | OrganizationMemberResponse
+    | OrganizationResponse
     | ((
         info: Parameters<
           HttpResponseResolver<
             { organizationId: string },
-            AddOrganizationMemberRequest
+            UpdateOrganizationRequest
           >
         >[0],
-      ) => Promise<OrganizationMemberResponse> | OrganizationMemberResponse),
+      ) => Promise<OrganizationResponse> | OrganizationResponse),
   options?: RequestHandlerOptions,
 ) => {
-  return http.post<{ organizationId: string }, AddOrganizationMemberRequest>(
-    "*/api/v2/organizations/:organizationId/members",
+  return http.patch<{ organizationId: string }, UpdateOrganizationRequest>(
+    "*/api/v2/organizations/:organizationId/profile",
     async (
       info: Parameters<
         HttpResponseResolver<
           { organizationId: string },
-          AddOrganizationMemberRequest
+          UpdateOrganizationRequest
         >
       >[0],
     ) => {
@@ -191,9 +302,268 @@ export const getAddOrganizationMemberMockHandler = (
           ? typeof overrideResponse === "function"
             ? await overrideResponse(info)
             : overrideResponse
-          : getAddOrganizationMemberResponseMock(),
+          : getUpdateOrganizationResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getUpdateOrganizationMemberMockHandler = (
+  overrideResponse?:
+    | OrganizationMemberResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            UpdateOrganizationMemberRequest
+          >
+        >[0],
+      ) => Promise<OrganizationMemberResponse> | OrganizationMemberResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.patch<
+    { organizationId: string; personId: string },
+    UpdateOrganizationMemberRequest
+  >(
+    "*/api/v2/organizations/:organizationId/members/:personId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          UpdateOrganizationMemberRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getUpdateOrganizationMemberResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getRemoveOrganizationMemberMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/members/:personId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+
+export const getListOrganizationInvitationsMockHandler = (
+  overrideResponse?:
+    | OrganizationInvitationPage
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<OrganizationInvitationPage> | OrganizationInvitationPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/invitations",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListOrganizationInvitationsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getCreateOrganizationInvitationMockHandler = (
+  overrideResponse?:
+    | OrganizationInvitationResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string },
+            CreateOrganizationInvitationRequest
+          >
+        >[0],
+      ) =>
+        | Promise<OrganizationInvitationResponse>
+        | OrganizationInvitationResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string },
+    CreateOrganizationInvitationRequest
+  >(
+    "*/api/v2/organizations/:organizationId/invitations",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string },
+          CreateOrganizationInvitationRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getCreateOrganizationInvitationResponseMock(),
         { status: 201 },
       );
+    },
+    options,
+  );
+};
+
+export const getCancelOrganizationInvitationMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; invitationId: string }>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; invitationId: string }>(
+    "*/api/v2/organizations/:organizationId/invitations/:invitationId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; invitationId: string }>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+
+export const getListInvitationsMockHandler = (
+  overrideResponse?:
+    | InvitationPage
+    | ((
+        info: Parameters<HttpResponseResolver>[0],
+      ) => Promise<InvitationPage> | InvitationPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get(
+    "*/api/v2/people/me/invitations",
+    async (info: Parameters<HttpResponseResolver>[0]) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListInvitationsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetInvitationMockHandler = (
+  overrideResponse?:
+    | InvitationResponse
+    | ((
+        info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+      ) => Promise<InvitationResponse> | InvitationResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ invitationId: string }>(
+    "*/api/v2/people/me/invitations/:invitationId",
+    async (
+      info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetInvitationResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getAcceptInvitationMockHandler = (
+  overrideResponse?:
+    | OrganizationResponse
+    | ((
+        info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+      ) => Promise<OrganizationResponse> | OrganizationResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ invitationId: string }>(
+    "*/api/v2/people/me/invitations/:invitationId/accept",
+    async (
+      info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getAcceptInvitationResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getDeclineInvitationMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ invitationId: string }>(
+    "*/api/v2/people/me/invitations/:invitationId/decline",
+    async (
+      info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
     },
     options,
   );
@@ -202,5 +572,14 @@ export const getOrganizationsMock = () => [
   getListOrganizationsMockHandler(),
   getCreateOrganizationMockHandler(),
   getListOrganizationMembersMockHandler(),
-  getAddOrganizationMemberMockHandler(),
+  getUpdateOrganizationMockHandler(),
+  getUpdateOrganizationMemberMockHandler(),
+  getRemoveOrganizationMemberMockHandler(),
+  getListOrganizationInvitationsMockHandler(),
+  getCreateOrganizationInvitationMockHandler(),
+  getCancelOrganizationInvitationMockHandler(),
+  getListInvitationsMockHandler(),
+  getGetInvitationMockHandler(),
+  getAcceptInvitationMockHandler(),
+  getDeclineInvitationMockHandler(),
 ];

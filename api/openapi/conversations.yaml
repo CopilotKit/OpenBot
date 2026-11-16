@@ -74,7 +74,11 @@ paths:
         once and for about half a minute, so ask for a new one for every
         connection, and again to reconnect. Only a person in the conversation
         may have one, and it opens the thread they see there and no other. A
-        conversation no Bot has run in yet has nothing to join.
+        conversation no Bot has run in yet has nothing to join (409). Where
+        realtime.clientUrl is on this server, open it with the same
+        credential that made the token: the session, an app's access token,
+        or an API key, as Authorization: Bearer or x-api-key. So a script
+        that holds only an API key can watch a conversation live.
       security:
         - webSession: []
         - appOAuth: [conversations:read]
@@ -1687,11 +1691,18 @@ components:
               minLength: 1
               description: >-
                 The socket's address, without the /websocket it ends in or its
-                query. A ws or wss address, or a path on this server.
+                query. A ws or wss address, or a path on this server, which is
+                resolved against the address the API was called at. Where it
+                is on this server, the socket is opened with the credential
+                that made the token (see createConversationJoinToken).
             topic:
               type: string
               pattern: ^thread:.+$
-              description: The topic to join on the socket, thread:{threadId}.
+              description: >-
+                The topic to join on the socket, as the realtime gateway knows
+                the thread. Use it as given: outside the organization default
+                it does not name threadId, so a topic made from threadId joins
+                nothing.
     Conversation:
       type: object
       description: A conversation between the caller and one or more Bots.
@@ -2240,7 +2251,9 @@ components:
       properties:
         id:
           type: string
-          description: The caller's own id for the message, so a retry is the same message.
+          description: The caller's own id for the message, any string, so a retry in the
+            same conversation is the same message. The conversation's messages
+            list it under this id.
           minLength: 1
           maxLength: 160
         text:
@@ -2313,6 +2326,12 @@ components:
         threadId:
           type: string
           description: The new thread's id.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     ConversationThreadStatus:
       type: object
       required:
@@ -2324,6 +2343,12 @@ components:
         known:
           type: boolean
           description: Whether the thread still holds the caller's conversation.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
       enum:
@@ -3068,10 +3093,10 @@ components:
       value: {"transport": "webrtc"}
     ConversationThreadExample:
       summary: "A new thread id."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a"}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     ConversationThreadStatusExample:
       summary: "A thread that is still there."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true, "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     TaskPageExample:
       summary: "One task, ready to read."
       value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}

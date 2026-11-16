@@ -177,8 +177,28 @@ test("three choices, each with one plain line saying who sees what", async () =>
     view.getByText("Only the Bots you use draw on your skills."),
   ).toBeTruthy();
   expect(
-    view.getByText("Every Bot on OpenBot draws on all of your skills."),
+    view.getByText(
+      "Every Bot in your organization draws on all of your skills.",
+    ),
   ).toBeTruthy();
+  // An organization is the boundary: nothing here may read as every Bot on the whole install.
+  expect(view.queryByText(/on OpenBot/)).toBeNull();
+});
+
+test("shared skills reach the Bots of this organization, and Your skills says so", async () => {
+  const said = {
+    open: "Every Bot in your organization draws on these skills.",
+    choose: "Open a skill to let every Bot in your organization use it.",
+  } as const;
+  for (const mode of ["open", "choose"] as const) {
+    queryClient.clear();
+    answer = { ...answer, mode, sharingAllowed: true };
+    const view = draw();
+    await view.findByText("Your skills");
+    expect(view.getByText(said[mode])).toBeTruthy();
+    expect(view.queryByText(/on OpenBot/)).toBeNull();
+    cleanup();
+  }
 });
 
 test("closed is the default: Only my Bots is checked and your skills are listed without switches", async () => {
@@ -367,7 +387,7 @@ test("a read that fails says so, and a save that fails says why", async () => {
   failRead = true;
   const failed = draw();
   await failed.findByText(
-    "Couldn't load your Learning settings. Reload the page.",
+    "Couldn't load your Learning settings. Try again in a moment.",
   );
   cleanup();
   queryClient.clear();
@@ -569,7 +589,9 @@ test("while an admin has sharing off, Your skills says only your Bots use them, 
     expect(
       view.getByText("Only the Bots you use draw on these skills."),
     ).toBeTruthy();
-    expect(view.queryByText(/Every Bot on OpenBot draws on these/)).toBeNull();
+    expect(
+      view.queryByText(/Every Bot in your organization draws on these/),
+    ).toBeNull();
     expect(view.queryByText(/Open a skill to let every Bot/)).toBeNull();
     expect(view.queryByText(/Every Bot may use it/)).toBeNull();
     if (mode === "choose")

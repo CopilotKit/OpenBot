@@ -1,5 +1,5 @@
 # Connections: a person's connections to apps, the accounts they connected at each, and the consent
-# for one action; and an app's one shared account, which an administrator connects for everybody.
+# for one action; and an app's one shared account, which an administrator connects for the organization.
 #
 # One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
 # api/openapi.yaml, the file every client and check reads. See api/README.md.
@@ -659,9 +659,11 @@ paths:
       operationId: getSharedConnection
       summary: Read an app's shared account
       description: >-
-        Return the one account an app in Shared mode acts as for everybody:
-        whether it is connected, who connected it, and the app's own name
-        for the account. Anybody signed in may read it. Not found when the
+        Return the one account an app in Shared mode acts as for everybody in
+        the organization: whether it is connected, who connected it, and the
+        app's own name for the account. Each organization connects its own,
+        and one organization's shared account is never used in another. Any
+        member of the organization may read it. Not found when the
         app is connected by each person instead, as getConnection reads.
       x-openbot-singleton: true
       security:
@@ -703,13 +705,15 @@ paths:
       summary: Start connecting an app's shared account
       description: >-
         Start connecting the one account an app in Shared mode acts as for
-        everybody, and say what happens next, as connectApp does: consent
+        everybody in the organization, and say what happens next, as
+        connectApp does: consent
         answers the address of the app's sign-in page, form answers the boxes
         to fill in, connected means it is connected already. The person comes
         back to the app's page, where confirmSharedConnection checks the
         result. Where an app connects once, a shared account already connected
-        is a conflict: disconnect it first. Only an administrator may connect
-        it. The address and the values are never logged.
+        is a conflict: disconnect it first. Only an administrator of the
+        organization may connect it. The address and the values are never
+        logged.
       security:
         - webSession: []
         - appOAuth: [connections:write]
