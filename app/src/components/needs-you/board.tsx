@@ -15,6 +15,7 @@ import {
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import { countsAsWaiting } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
 
 /** How many of one Bot's finds show before the rest open in place. */
@@ -35,11 +36,33 @@ const FINDS_SHOWN = 3;
 export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const agents = useQuery(agentListQueryOptions());
   const settings = useQuery(proactiveSettingsQueryOptions());
-  const waiting = useWaitingByBot(agentId);
   const list = useNeedsYou(agentId);
+  /*
+   * The conversations the person's tasks run in, every task listed, done ones included, as the
+   * server counts them. A question or an action waiting in one is that task waiting: one row, the
+   * task's, and one count.
+   */
+  const taskChannels = new Set<string>();
+  const taskThreads = new Set<string>();
+  for (const { task } of [...list.tasks, ...list.done]) {
+    taskChannels.add(task.channelId);
+    if (task.threadId) taskThreads.add(task.threadId);
+  }
+  const waiting = useWaitingByBot(
+    agentId,
+    ({ channelId, threadId }) =>
+      (channelId !== undefined && taskChannels.has(channelId)) ||
+      (threadId !== undefined && taskThreads.has(threadId)),
+  );
 
   const blocked = new Map(waiting.byBot);
+  // Questions and actions each wait on the person; a task does when the badge counts it.
+  let waitingCount = [...waiting.byBot.values()].reduce(
+    (total, group) => total + group.rows.length,
+    0,
+  );
   for (const listed of list.tasks) {
+    if (countsAsWaiting(listed)) waitingCount += 1;
     const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
       <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
@@ -77,10 +100,6 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
-  const waitingCount = [...blocked.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
   const foundCount = list.items.length;
 
   return (

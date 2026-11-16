@@ -285,8 +285,18 @@ function RequestRow({
 /**
  * The waiting questions and actions under each Bot's header on the Needs you board, questions first,
  * each with when it was asked so the header can say how long it has waited.
+ *
+ * `heldByTask` names a conversation one of the person's tasks runs in. What waits there is the task
+ * waiting, and the board lists it once, as the task, the way the badge counts it: listed here too,
+ * one question read as two rows and "2 waiting" beside a badge of 1.
  */
-export function useWaitingByBot(agentId: string | undefined) {
+export function useWaitingByBot(
+  agentId: string | undefined,
+  heldByTask: (where: {
+    channelId?: string | undefined;
+    threadId?: string | undefined;
+  }) => boolean = () => false,
+) {
   const waiting = useWaiting(agentId);
   const byBot = new Map<string, { rows: ReactNode[]; times: string[] }>();
   const add = (botId: string, row: ReactNode, at: string) => {
@@ -295,13 +305,21 @@ export function useWaitingByBot(agentId: string | undefined) {
     group.times.push(at);
     byBot.set(botId, group);
   };
-  for (const question of waiting.questions)
+  for (const question of waiting.questions.filter(
+    (question) =>
+      !heldByTask({
+        channelId: question.channelId,
+        threadId: question.threadId,
+      }),
+  ))
     add(
       question.conversationBotId ?? question.botId,
       <QuestionBoardRow key={`question-${question.id}`} question={question} />,
       question.createdAt,
     );
-  for (const request of waiting.pending)
+  for (const request of waiting.pending.filter(
+    (request) => !heldByTask({ threadId: request.action.threadId }),
+  ))
     add(
       request.action.botId,
       <RequestBoardRow key={`request-${request.id}`} request={request} />,
