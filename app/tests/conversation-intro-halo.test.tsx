@@ -120,7 +120,11 @@ async function stylesheet(page: string): Promise<string> {
  * bounds that), not on a hook's clock: a `beforeAll` gets 5 s, and on a cold runner the two can
  * take longer.
  */
-async function ready(): Promise<{ page: string; css: string; browser: Browser }> {
+async function ready(): Promise<{
+  page: string;
+  css: string;
+  browser: Browser;
+}> {
   const page = markup();
   const css = await stylesheet(page);
   const { chromium } = await import("playwright-core");
