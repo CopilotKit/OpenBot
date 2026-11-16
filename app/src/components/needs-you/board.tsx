@@ -15,7 +15,7 @@ import {
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
-import { countsAsWaiting } from "@/lib/tasks/groups";
+import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
 
 /** How many of one Bot's finds show before the rest open in place. */
@@ -37,22 +37,10 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const agents = useQuery(agentListQueryOptions());
   const settings = useQuery(proactiveSettingsQueryOptions());
   const list = useNeedsYou(agentId);
-  /*
-   * The conversations the person's tasks run in, every task listed, done ones included, as the
-   * server counts them. A question or an action waiting in one is that task waiting: one row, the
-   * task's, and one count.
-   */
-  const taskChannels = new Set<string>();
-  const taskThreads = new Set<string>();
-  for (const { task } of [...list.tasks, ...list.done]) {
-    taskChannels.add(task.channelId);
-    if (task.threadId) taskThreads.add(task.threadId);
-  }
+  // A question or an action waiting in a task's own conversation is that task waiting: one row.
   const waiting = useWaitingByBot(
     agentId,
-    ({ channelId, threadId }) =>
-      (channelId !== undefined && taskChannels.has(channelId)) ||
-      (threadId !== undefined && taskThreads.has(threadId)),
+    heldByTaskOf([...list.tasks, ...list.done]),
   );
 
   const blocked = new Map(waiting.byBot);

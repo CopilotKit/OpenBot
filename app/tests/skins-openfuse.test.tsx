@@ -59,7 +59,6 @@ import {
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { type AppsFixture, answerAppsApi } from "./apps-api";
-import { MEMORY } from "./learning-api";
 import {
   activityOf,
   answerBotAttention,
@@ -74,6 +73,7 @@ import {
   noContent,
   problem,
 } from "./conversations-api";
+import { MEMORY } from "./learning-api";
 import {
   CHECK_IN_ITEMS_PATH,
   CHECK_INS_PATH,
@@ -423,7 +423,14 @@ const plugins: AppsFixture = {
 
 type Call = { method: string; path: string; body: unknown };
 
-function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
+function serve(
+  options: {
+    role?: "admin" | "user";
+    userId?: string;
+    /** What each Bot waits on the person for, as the server counts it. */
+    attention?: BotAttention[];
+  } = {},
+) {
   const calls: Call[] = [];
   const routes: Record<string, unknown> = {
     [ME_PATH]: meBody({
@@ -490,7 +497,9 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
       if (bots) return bots;
       const apps = answerAppsApi(input, init, plugins);
       if (apps) return apps;
-      const waiting = answerBotAttention(input, init, { bots: attention });
+      const waiting = answerBotAttention(input, init, {
+        bots: options.attention ?? attention,
+      });
       if (waiting) return waiting;
       const detail = path.match(
         /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
@@ -628,6 +637,29 @@ describe("the frame", () => {
     expect(
       page().getByRole("button", { name: "Needs you, 1 waiting" }),
     ).toBeTruthy();
+  });
+
+  /*
+   * The bell counted the approval inbox its own way, so a task that couldn't finish was in
+   * OpenBot's Bots badge and not on the bell. It shows OpenBot's count.
+   */
+  test("the bell says the same number as OpenBot's Bots badge, tasks included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, {
+          approvals: 1,
+          tasks: { needsInput: 0, ready: 0, failed: 1 },
+        }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+    });
+    renderAt("/connections");
+    expect(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    ).toBeTruthy();
+    expect(
+      page().getAllByRole("img", { name: "2 things need you" }).length,
+    ).toBeGreaterThan(0);
   });
 
   test("a one-to-one conversation puts its own Bot at the centre", async () => {

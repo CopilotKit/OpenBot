@@ -1,24 +1,21 @@
 import { IconMessageCircle } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { approvalInboxOptions } from "@/lib/approvals";
+import { useWaitingCount } from "@/components/bot-profile/attention";
 import { cn } from "@/lib/utils";
 import { IconTasksList } from "./icons";
 import { FOCUS } from "./kit";
 import { type OpenDuetTab, TASKS_LINK } from "./places";
-import { waitingCount } from "./tasks-model";
 
 const TAB =
   "relative flex flex-1 flex-col items-center justify-center gap-px rounded-[27px] transition-colors motion-reduce:transition-none";
 
 /**
  * The frosted pill at the foot of the app: Chat and Tasks, the current one on a grey capsule.
- * Tasks carries the number of things waiting on the person, counted the way its Needs input section
- * lists them, so the badge and the screen never disagree.
+ * Tasks carries the number of things waiting on the person: OpenBot's own count, the one its Bots
+ * badge shows (`useWaitingCount`), so the two never disagree.
  */
 export function TabBar({ current }: { current: OpenDuetTab }) {
-  const inbox = useQuery(approvalInboxOptions());
-  const waiting = waitingCount(inbox.data);
+  const waiting = useWaitingCount();
   const tabs = [
     { id: "chat" as const, label: "Chat", Glyph: IconMessageCircle, badge: 0 },
     {

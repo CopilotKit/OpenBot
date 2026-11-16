@@ -44,6 +44,31 @@ export function countsAsWaiting({ task, status }: ListedTask): boolean {
   );
 }
 
+/** Where a question or an action waits: its conversation, its thread, or both. */
+export type WaitingWhere = {
+  channelId?: string | undefined;
+  threadId?: string | undefined;
+};
+
+/**
+ * Whether what waits somewhere waits inside one of these tasks' own conversations. It is then that
+ * task waiting on the person, listed and counted once, as the task, the way the Bots badge counts
+ * it. Every list that shows questions and actions beside tasks leaves these out by this one rule.
+ */
+export function heldByTaskOf(
+  listed: readonly ListedTask[],
+): (where: WaitingWhere) => boolean {
+  const channels = new Set<string>();
+  const threads = new Set<string>();
+  for (const { task } of listed) {
+    channels.add(task.channelId);
+    if (task.threadId) threads.add(task.threadId);
+  }
+  return ({ channelId, threadId }) =>
+    (channelId !== undefined && channels.has(channelId)) ||
+    (threadId !== undefined && threads.has(threadId));
+}
+
 const time = (iso: string | null) => {
   const at = iso ? Date.parse(iso) : Number.NaN;
   return Number.isFinite(at) ? at : 0;

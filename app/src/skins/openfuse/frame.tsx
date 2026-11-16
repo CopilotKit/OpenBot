@@ -13,12 +13,14 @@ import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { BotsNavBadge } from "@/components/bot-profile/attention";
+import {
+  BotsNavBadge,
+  useWaitingCount,
+} from "@/components/bot-profile/attention";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { approvalInboxOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
@@ -33,14 +35,7 @@ import { chooseBot, useChosenBotId } from "./chosen-bot";
 import { FuseContext, type FuseSheetKind } from "./context";
 import { MainChatLink } from "./links";
 import { MenuSheet } from "./menu-sheet";
-import {
-  centreBot,
-  type FuseTab,
-  inColumn,
-  statusLine,
-  tabFor,
-  waitingOnYou,
-} from "./model";
+import { centreBot, type FuseTab, inColumn, statusLine, tabFor } from "./model";
 import { NotificationsSheet } from "./notifications-sheet";
 import { type FuseIcon, RoundButton } from "./ui";
 
@@ -86,7 +81,6 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
     enabled: Boolean(params.channelId),
   });
   const attention = useQuery(botAttentionQueryOptions());
-  const inbox = useQuery(approvalInboxOptions());
   const user = useQuery(currentUserQueryOptions());
   const userId = user.data?.id;
   const chosenId = useChosenBotId(userId);
@@ -125,7 +119,8 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   // A conversation's computer or Bot settings, open beside the transcript.
   const sidePanelOpen = search.watch === true || search.settings === true;
   const column = inColumn(pathname, sidePanelOpen);
-  const waiting = waitingOnYou(inbox.data).count;
+  // OpenBot's own count, the one its Bots badge shows: never a count of the skin's own.
+  const waiting = useWaitingCount();
   const status = statusLine({
     attention: attention.data?.find((entry) => entry.botId === bot?.id),
     channels: channels.data,
