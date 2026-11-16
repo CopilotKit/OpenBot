@@ -1449,6 +1449,10 @@ a:hover {
 .step .mark.bad {
   color: var(--bad);
 }
+/* A step that ended without doing what it set out to, and stops nothing: quiet, not red. */
+.step .mark.note {
+  color: var(--text-secondary);
+}
 
 .step .detail {
   grid-area: detail;
