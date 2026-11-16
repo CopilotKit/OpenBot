@@ -31,8 +31,8 @@ import { useSwitchOrganization } from "./use-switch-organization";
  *
  * Waiting, it offers Accept and Decline. Accepting does not move the person: they keep working
  * where they were, and the row then offers the switch. Expired, declined or canceled, it says so
- * and offers nothing. A refusal (it expired or was canceled meanwhile) is drawn under the row in
- * the server's own sentence.
+ * and offers nothing. A refusal is drawn under the row in the server's own sentence while the
+ * invitation still waits; one that expired or was canceled meanwhile is said by the row itself.
  */
 export function InvitationRow({
   invitation,
@@ -60,7 +60,13 @@ export function InvitationRow({
   const switching = useSwitchOrganization();
   const current = useCurrentOrganizationId();
   const busy = accept.isPending || decline.isPending;
-  const failure = accept.error ?? decline.error;
+  /*
+   * Only while the invitation still waits. A refusal that changed it (it expired or was canceled
+   * meanwhile) has the row read again, and the row's own line then says what happened, so the
+   * refusal under it would say the same thing twice in two wordings.
+   */
+  const failure =
+    invitation.status === "pending" ? (accept.error ?? decline.error) : null;
   const { name } = invitation.organization;
 
   return (
