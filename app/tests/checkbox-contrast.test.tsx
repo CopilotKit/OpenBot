@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, Page } from "playwright-core";
@@ -141,13 +141,14 @@ function contrast(a: Rgb, b: Rgb): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
+/**
+ * The page's script, built before any test starts. This waits for the bundle, not on a hook's
+ * clock: a `beforeAll` gets 5 s, and on a cold runner bundling can take longer. Each test starts
+ * its own browser, inside the test's own time.
+ */
 let script: string;
+if (asked) script = await bundle();
 const browsers: Browser[] = [];
-
-beforeAll(async () => {
-  if (!asked) return;
-  script = await bundle();
-});
 
 afterAll(async () => {
   await Promise.all(browsers.map((browser) => browser.close()));
