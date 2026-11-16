@@ -164,8 +164,12 @@ describe("how a Bot that holds delegate is told to work", () => {
     // "When you hold delegate, you are the person's point of contact" is a sentence a Bot can say
     // back about itself, and the section is only given to a run that holds the tool.
     expect(DELEGATING_GUIDANCE).not.toContain("When you hold");
-    expect(DELEGATING_GUIDANCE.startsWith("You are the person's point of contact,")).toBe(true);
-    expect(DELEGATING_GUIDANCE).toContain("Hand the other work the person asked for to a task with delegate");
+    expect(
+      DELEGATING_GUIDANCE.startsWith("You are the person's point of contact,"),
+    ).toBe(true);
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Hand the other work the person asked for to a task with delegate",
+    );
   });
 
   test("a brief is not told to stop short: the work's own checks stay in it", () => {
