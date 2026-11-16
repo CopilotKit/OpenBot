@@ -77,11 +77,11 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * the conversation had, the venue's, in 2 of 3 runs. Stopping work the person still wants is worse
  * than stopping nothing, so a stop that names no task of this conversation stops nothing.
  *
- * THE BRIEF SAYS WHAT TO DO AND CHECK, NOT HOW TO REPORT. The task is told how to report by its own
- * frame (`frameBrief`). A Claude Bot's briefs ended "Report back with the sheet link, how many emails
- * were included, and anything you could not confirm", and the task answered that list item by item
- * beside its frame's. Told only "never how to report back", Claude still wrote such a line in 4 of 4
- * replayed briefs; told to end the brief at what to check, in 2 of 4. What the work must check stays.
+ * NOTHING HERE ON HOW THE TASK REPORTS. Claude's briefs often end "report back with ... anything you
+ * could not confirm", and the task's report is shaped after the brief instead (`BRIEF_CLOSE`). Told
+ * here to end a brief at what to check, Claude wrote shorter briefs that dropped the work's own
+ * checks: of 24 replayed briefs for "emails from the last day", 4 kept a rolling 24 hours (17 before),
+ * and the task then took a 30-hour-old email as the last day's.
  */
 export const DELEGATING_GUIDANCE = [
   `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:`,

@@ -160,12 +160,12 @@ describe("how a Bot answers a short ask itself", () => {
  * order itself, and wrote 👍 as a reply beside its 👍 reaction.
  */
 describe("how a Bot that holds delegate is told to work", () => {
-  test("a brief says what to do and check, and ends there, leaving how to report to the task", () => {
-    // A Claude Bot's briefs ended "Report back with the sheet link, how many emails were included,
-    // and anything you could not confirm", and the task answered that list item by item.
-    expect(DELEGATING_GUIDANCE).toContain(
-      "Say in it what to do and what to check, and end it there: no line on what to report back, mention or confirm in the result, since the task is told how to report already.",
-    );
+  test("a brief is not told to stop short: the work's own checks stay in it", () => {
+    // Told to end a brief at what to check, Claude wrote shorter briefs: of 24 replayed briefs for
+    // "emails from the last day", 4 kept a rolling 24 hours (17 without the line), and the task then
+    // took a 30-hour-old email as the last day's. How the task reports is shaped after the brief.
+    expect(DELEGATING_GUIDANCE).not.toContain("end it there");
+    expect(DELEGATING_GUIDANCE).not.toContain("how to report");
     expect(DELEGATING_GUIDANCE).toContain(
       "every figure, name, link and constraint from this conversation the work needs",
     );
