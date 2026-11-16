@@ -2,7 +2,10 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
-import { useWaitingByBot } from "@/components/approvals/waiting";
+import {
+  useHeldAnswers,
+  useWaitingByBot,
+} from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
@@ -45,6 +48,8 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   );
 
   const stalledHandoffs = useStalledHandoffs(agentId);
+  // A task waiting on something in its thread is answered on its own row.
+  const heldAnswer = useHeldAnswers();
 
   const blocked = new Map(waiting.byBot);
   // Questions and actions each wait on the person; a task does when the badge counts it.
@@ -56,7 +61,13 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     if (countsAsWaiting(listed)) waitingCount += 1;
     const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
-      <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
+      <TaskBoardRow
+        held={
+          listed.status === "needs_input" ? heldAnswer(listed.task) : undefined
+        }
+        key={`task-${listed.task.id}`}
+        listed={listed}
+      />,
     );
     // Only what waits on the person says how long it has waited.
     if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);

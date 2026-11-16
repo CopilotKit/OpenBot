@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -264,7 +265,18 @@ export function TaskRow({
  * A task on the Needs you board: the same task, in the board's one row shape, with its actions on
  * the right. Open leads while there is something to read or answer.
  */
-export function TaskBoardRow({ listed }: { listed: ListedTask }) {
+export function TaskBoardRow({
+  listed,
+  held,
+}: {
+  listed: ListedTask;
+  /**
+   * The wait inside the task's conversation, when one is there, with its answers: the row stands
+   * for it and answers it, Allow and Deny for an action, Answer for a question, without the person
+   * opening the thread (`useHeldAnswers`).
+   */
+  held?: HeldAnswer | undefined;
+}) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
@@ -278,6 +290,40 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
   const settled = !countsAsWaiting(listed) && status === "ready_for_review";
   const openFirst =
     !settled && (status === "ready_for_review" || status === "needs_input");
+  if (held)
+    return (
+      <BoardRow
+        actions={
+          <>
+            {held.actions}
+            <Button
+              render={
+                <Link
+                  params={{ channelId: task.channelId }}
+                  to="/channel/$channelId"
+                />
+              }
+              size="sm"
+              variant="ghost"
+            >
+              Open
+            </Button>
+          </>
+        }
+        detail={nextLine(listed)}
+        icon={<Icon />}
+        meta={[
+          <span key="status">{statusLabel(listed)}</span>,
+          <span key="when">{relativeTime(task.updatedAt)}</span>,
+          ...held.meta,
+        ]}
+        more={held.more}
+        open={held.more !== undefined}
+        state={state}
+        title={task.title}
+        waiting
+      />
+    );
   return (
     <BoardRow
       actions={

@@ -1,11 +1,15 @@
 import { IconBell, IconHandStop } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { WaitingForYou } from "@/components/approvals/waiting";
+import { useHeldAnswers, WaitingForYou } from "@/components/approvals/waiting";
 import { ActivityRow } from "@/components/bot-profile/activity";
 import { useWaitingCount } from "@/components/bot-profile/attention";
 import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
 import { useStalledHandoffs } from "@/components/needs-you/stalled-handoffs";
-import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
+import {
+  countsAsWaiting,
+  heldByTaskOf,
+  type ListedTask,
+} from "@/lib/tasks/groups";
 import { FuseEmpty, FuseSheet, LinkRow } from "./ui";
 
 /**
@@ -17,7 +21,16 @@ import { FuseEmpty, FuseSheet, LinkRow } from "./ui";
 export function NotificationsSheet({ onClose }: { onClose: () => void }) {
   const waiting = useWaitingCount();
   const { tasks, done } = useNeedsYou();
-  const waitingTasks = tasks.filter(countsAsWaiting);
+  /*
+   * A task waiting on a question or an action in its own conversation is listed once, as that wait's
+   * own row, where it is answered; every other task waiting on the person is its task row.
+   */
+  const heldAnswer = useHeldAnswers();
+  const answeredHere = (listed: ListedTask) =>
+    listed.status === "needs_input" && heldAnswer(listed.task) !== undefined;
+  const waitingTasks = tasks.filter(
+    (listed) => countsAsWaiting(listed) && !answeredHere(listed),
+  );
   const stalledHandoffs = useStalledHandoffs();
   return (
     <FuseSheet
@@ -34,7 +47,11 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
           />
         ) : (
           <>
-            <WaitingForYou heldByTask={heldByTaskOf([...tasks, ...done])} />
+            <WaitingForYou
+              heldByTask={heldByTaskOf(
+                [...tasks, ...done].filter((listed) => !answeredHere(listed)),
+              )}
+            />
             <NeedsYouRows
               items={[]}
               lead={stalledHandoffs.map(({ botId, item }) => (
