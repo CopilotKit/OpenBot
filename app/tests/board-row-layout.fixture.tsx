@@ -14,8 +14,8 @@ import { queryClient } from "@/query-client";
  * Rows of the Needs you board in the board's own card, at the width of the column it sits in, as a
  * page of its own for board-row-layout.test.tsx to bundle and load in a real browser.
  *
- * Two rows: a task the person stopped, with all three of its buttons (Try again, Mark done, Open),
- * and one ready to read, with two. `?width=<px>` is the column's width.
+ * Three rows: a task the person stopped, with all three of its buttons (Try again, Mark done, Open),
+ * one waiting on the person for an approval, and one ready to read. `?width=<px>` is the column's width.
  */
 const width = Number(new URLSearchParams(location.search).get("width") ?? 650);
 const now = new Date().toISOString();
@@ -53,6 +53,13 @@ const ready = task("ready", {
   next: "The planned dates for the remaining elevators are projections, not confirmed completions.",
 });
 
+// What a waiting task says it waits for, as the server writes it: read whole, never cut short.
+const waiting = task("waiting", {
+  title: "Ask Pipeline Bot for the pipeline code word",
+  status: "needs_input",
+  next: "Waiting for your approval: hand this to Pipeline Bot, which acts as Dana and can read the deals pipeline",
+});
+
 const router = createRouter({
   routeTree: createRootRoute({
     component: () => (
@@ -60,6 +67,9 @@ const router = createRouter({
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           <div data-row="stopped">
             <TaskBoardRow listed={{ task: stopped, status: "failed" }} />
+          </div>
+          <div data-row="waiting">
+            <TaskBoardRow listed={{ task: waiting, status: "needs_input" }} />
           </div>
           <div data-row="ready">
             <TaskBoardRow

@@ -310,6 +310,8 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
         </>
       }
       detail={nextLine(listed)}
+      // What a waiting task waits for is what the person has to answer: read in full, never cut.
+      readDetail={status === "needs_input"}
       icon={<Icon />}
       meta={[
         <span key="status">{statusLabel(listed)}</span>,
