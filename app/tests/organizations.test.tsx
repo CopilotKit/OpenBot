@@ -675,6 +675,7 @@ test("on an OpenBot that lists no organizations the account menu is exactly as i
   expect(now.words).toEqual([
     "Acme",
     "Organization settings",
+    "Teams",
     "Admin",
     "Settings",
     "Sign out",
