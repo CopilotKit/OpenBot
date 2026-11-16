@@ -72,3 +72,46 @@ test("an ordinary sentence is said as it came", () => {
     "I drafted a reply. Want me to send it?",
   );
 });
+
+test("a line made only of sources or citations is left out: it is not what the task found", () => {
+  // The Bot closed its research on the list of what it read, cut short where the server cuts.
+  expect(
+    taskLine(
+      "[The Seattle Times](https://www.seattletimes.com/seattle-news/smith-tower-history/); [SAH Archipedia](https://sah-archipedia.org/buildings/WA-01-033-0083); [KING 5](https://www.king5.com/article/news/history/smith-tower-…",
+    ),
+  ).toBeNull();
+  expect(
+    taskLine(
+      "[HistoryLink: New Central Library](https://www.historylink.org/File/5370); [Seattle Public Library: Central Library History](https://www.spl.org/hours-and-locations/central-library); [Hoffman Construction](https://www.hoffmancorp.com/projects/seattle-central-library)…",
+    ),
+  ).toBeNull();
+  // As a list, bare addresses, or numbered and bracketed citations, it is the same.
+  expect(
+    taskLine(
+      "- [HistoryLink](https://www.historylink.org/File/5370)\n- [Seattle Times](https://www.seattletimes.com/a)",
+    ),
+  ).toBeNull();
+  expect(
+    taskLine(
+      "https://www.historylink.org/File/5370, https://www.spl.org/central",
+    ),
+  ).toBeNull();
+  expect(taskLine("[1] [2] [3]")).toBeNull();
+  expect(taskLine("【4†source】【7†source】")).toBeNull();
+});
+
+test("a sentence that cites a source keeps its words", () => {
+  expect(
+    taskLine(
+      "It opened on July 4, 1914 ([HistoryLink](https://www.historylink.org/File/5370)).",
+    ),
+  ).toBe("It opened on July 4, 1914 (HistoryLink).");
+  expect(
+    taskLine(
+      "Read more in [the Seattle Times](https://www.seattletimes.com/a) and [KING 5](https://www.king5.com/b).",
+    ),
+  ).toBe("Read more in the Seattle Times and KING 5.");
+  expect(taskLine("The tower is 462 feet tall [1].")).toBe(
+    "The tower is 462 feet tall [1].",
+  );
+});

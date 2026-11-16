@@ -112,11 +112,18 @@ function nextLine(listed: ListedTask): string | null {
 }
 
 /**
- * Whether a row offers Mark done. Not while the task is working: there is nothing finished to mark,
- * and its conversation would carry on behind a row that said it was done.
+ * Whether a row offers Mark done: only where it does something. Not while the task is working:
+ * there is nothing finished to mark, and its conversation would carry on behind a row that said it
+ * was done. Not on a row that already reads Done, as a finished task's row under Done does: marking
+ * it changes nothing the row says.
  */
-function canMarkDone(status: TaskStatus): boolean {
-  return status !== "working" && status !== "resolved";
+function canMarkDone(listed: ListedTask, settled = false): boolean {
+  const { status } = listed;
+  return (
+    status !== "working" &&
+    status !== "resolved" &&
+    statusLabel(listed, settled) !== TASK_DONE_LABEL
+  );
 }
 
 /**
@@ -232,7 +239,7 @@ export function TaskRow({
             >
               {resolve.isPending ? "Reopening…" : "Reopen"}
             </Button>
-          ) : canMarkDone(status) ? (
+          ) : canMarkDone(listed, settled) ? (
             <Button
               disabled={busy}
               onClick={() => resolve.mutate({ id: task.id, done: true })}
@@ -278,7 +285,7 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
               {again.isPending ? "Starting…" : "Try again"}
             </Button>
           ) : null}
-          {canMarkDone(status) ? (
+          {canMarkDone(listed) ? (
             <Button
               disabled={busy}
               onClick={() => resolve.mutate({ id: task.id, done: true })}
