@@ -27,21 +27,28 @@ info:
 
 
     An OpenBot install holds one or more organizations, and a person may be a
-    member of several. Every install has the organization `default`, which is
-    where everybody starts. organizationId is an organization's id or its
-    slug, and the caller must be a member of it: an organization the caller
-    is not in answers exactly as one that does not exist.
+    member of several. Where an install allows more than one, everybody has
+    an organization of their own, made for them when they first sign in, and
+    joins others by invitation. Otherwise, and on an install for one person
+    with no sign-in, everybody works in the organization `default`.
+    organizationId is an organization's id or its slug, and the caller must
+    be a member of it: an organization the caller is not in answers exactly
+    as one that does not exist, `default` included.
 
 
-    A program of your own signs its requests in one of two ways, and both
-    work on /api/v2 only. An API key acts as the person who made it. Keys
-    start `obk_` and are sent as `Authorization: Bearer <key>` or in an
-    `x-api-key` header. To get a first key, sign in to OpenBot's web app, open
-    Settings, then API keys, and create one. The key is shown once. Only a
-    person signed in to the web app can make or delete keys: a key or an
-    app's sign-in cannot. An app that signs people in uses OAuth 2.1
-    instead, described under the appOAuth security scheme: its client ids,
-    redirect addresses, endpoints and how long tokens last.
+    A program of your own signs its requests in one of two ways. An API key
+    acts as the person who made it, in every organization they are a member
+    of, like a personal access token: the address names the organization
+    each request is for. Keys start `obk_` and are sent as
+    `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+    and on the socket a join token is spent on (createConversationJoinToken).
+    To get a first key, sign in to OpenBot's web app, open Settings, then API
+    keys, and create one. The key is shown once. Only a person signed in to
+    the web app can make or delete keys: a key or an app's sign-in cannot.
+    An app that signs people in uses OAuth 2.1 instead, described under the
+    appOAuth security scheme: its client ids, redirect addresses, endpoints,
+    how long tokens last and the four addresses outside /api/v2 a token also
+    works at.
 
 
     An install for one person on one computer has no sign-in. It signs
@@ -64,7 +71,7 @@ tags:
   - { name: People, description: "The people in the organization: who they are, what they may do, and what is theirs alone (their standing instructions, preferences and first-run onboarding). An administrator sees everybody; anybody else sees themselves, as me." }
   - { name: Linked accounts, description: "A person's accounts at other services, such as Slack and GitHub, that OpenBot knows are theirs, so a Bot answering there knows who it is talking to." }
   - { name: Identity providers, description: "The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them." }
-  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, inside the organization, on the API only, and only a person signed in to OpenBot can make or manage one." }
+  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one." }
   - { name: Sessions, description: "Where a person is signed in to OpenBot, so they can see each browser and device and sign one out." }
   - { name: Organization settings, description: "What an administrator sets for everybody, and what this OpenBot offers: sign-in, recording, idle computers, allowlists, the setup checklist, and which models Bots ran on." }
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
@@ -474,15 +481,27 @@ components:
         `/.well-known/oauth-authorization-server/api/auth`. The person is
         sent to `/api/auth/oauth2/authorize`. The code is exchanged, and a
         token refreshed, at `/api/auth/oauth2/token`, with a form-encoded
-        body (`application/x-www-form-urlencoded`) that carries `client_id`.
-        A token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`.
+        body (`application/x-www-form-urlencoded`) that carries `client_id`
+        and no secret: the token and revocation endpoints take no client
+        authentication (`none` in the metadata's
+        `token_endpoint_auth_methods_supported`). A wrong `code_verifier` is
+        answered 400 `invalid_grant`, and the code cannot be used again. A
+        token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`; revoking a
+        token the server does not know, or one already revoked, answers 200.
 
 
         Tokens. An access token starts `oba_` and lasts one hour. A refresh
         token starts `obr_`, is issued only when the `offline_access` scope
         is asked for, and rotates on every use: each refresh answers a new
         refresh token and ends the one it was given. Access tokens work on
-        /api/v2 only.
+        /api/v2, and on four addresses outside it that an app's screens need,
+        each with the scope given: `GET /api/me`, who is signed in
+        (people:read); the chat runtime at `/api/copilotkit` and everything
+        under it (conversations:write); a file's download at
+        `GET /api/attachments/{attachmentId}`, the address a sent message
+        keeps (conversations:read); and the relayed realtime socket at
+        `/api/intelligence/client/websocket` (conversations:read). They work
+        nowhere else.
 
 
         Organization. An access token carries no memory of which
@@ -591,11 +610,15 @@ components:
       scheme: bearer
       bearerFormat: OpenBot API key
       description: >-
-        Automation. An API key acts as the person who created it, inside one
-        organization. A key starts `obk_` and is sent as
+        Automation. An API key acts as the person who created it, in every
+        organization they are a member of, like a personal access token: the
+        address of each request names the organization, and one the person
+        is not in answers not found. A key starts `obk_` and is sent as
         `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
-        only. A person makes one in the web app, signed in, under Settings,
-        then API keys (createApiKey).
+        and on the relayed realtime socket at
+        `/api/intelligence/client/websocket`, where a join token the key made
+        is spent (createConversationJoinToken). A person makes one in the web
+        app, signed in, under Settings, then API keys (createApiKey).
     recorderConnection:
       type: http
       scheme: bearer
@@ -614,8 +637,8 @@ components:
       in: path
       required: true
       description: >-
-        The organization, by its id or its slug. Every install has one
-        addressed as `default`.
+        The organization, by its id or its slug. One the caller is not a
+        member of answers as one that does not exist, `default` included.
       schema:
         type: string
         minLength: 1
