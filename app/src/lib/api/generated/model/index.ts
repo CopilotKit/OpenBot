@@ -933,6 +933,7 @@ export * from "./listNotificationTransportsParams";
 export * from "./listOrganizationInvitationsParams";
 export * from "./listOrganizationLearningRunsParams";
 export * from "./listOrganizationMembersParams";
+export * from "./listOrganizationsHeaders";
 export * from "./listOrganizationsParams";
 export * from "./listPeopleParams";
 export * from "./listPersonalLearningProposalsParams";

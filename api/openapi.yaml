@@ -9999,7 +9999,7 @@ paths:
         - Organizations
       operationId: listOrganizations
       summary: List the caller's organizations
-      description: 'Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller''s role in it. active marks the one the caller''s session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app''s token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller''s own when it sends none. To work in another one, set it as the session''s active organization (POST /api/auth/organization/set-active). Made with an app''s token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller''s role in it. active marks the one the caller''s session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app''s token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller''s own when it sends none. The header is checked against the caller''s membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session''s active organization (POST /api/auth/organization/set-active). Made with an app''s token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -10008,6 +10008,14 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - name: OpenBot-Organization
+          in: header
+          required: false
+          description: 'For a request signed in with an app''s token: the organization it works in, by id or slug, which the list marks active. Without it the caller''s own is active. One the caller is not a member of answers not found, and one that is not a single id or slug 400. Ignored for a session and an API key.'
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
       responses:
         '200':
           description: One page of organizations.
@@ -10027,6 +10035,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
