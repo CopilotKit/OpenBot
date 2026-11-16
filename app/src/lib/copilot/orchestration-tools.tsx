@@ -26,7 +26,8 @@ import { queryClient } from "@/query-client";
  * place, with the latest thing the person told the task in its thread on a line under it; `react`
  * draws nothing of its own, since the reaction is drawn under the person's message;
  * `link_to_thread` is the list of threads it found, each a way in; `follow_up` and `stop` are the
- * card of the task they reached, as it stands now, with what the task was told on the line under it.
+ * card of the task they reached, as it stands now. What a follow-up told the task is the line under
+ * the task's first card, said once: not a second time under this one.
  *
  * RENDER ONLY. The three run on the server, where the task is opened and
  * the reaction stored, so nothing here registers a tool or decides anything.
@@ -46,7 +47,10 @@ const followUpParameters = z.object({
   message: z.string().optional(),
 });
 
-const stopParameters = z.object({ task: z.string().optional() });
+const stopParameters = z.object({
+  task: z.string().optional(),
+  said: z.string().optional(),
+});
 
 /**
  * The card of the task a `follow_up` or `stop` reached, live: Working again once it was told more,
@@ -57,26 +61,21 @@ function TaskActionCard({
   status,
   running,
   refused,
-  steer,
 }: {
   result: unknown;
   status: string;
   running: string;
   refused: string;
-  steer?: boolean;
 }) {
   const answer = typeof result === "string" ? asText(result) : undefined;
   const reached = readTaskActionResult(answer);
   if (reached)
     return (
-      <>
-        <TaskCard
-          channelId={reached.channelId}
-          taskId={reached.taskId}
-          title={reached.title}
-        />
-        {steer ? <TaskSteer taskId={reached.taskId} /> : null}
-      </>
+      <TaskCard
+        channelId={reached.channelId}
+        taskId={reached.taskId}
+        title={reached.title}
+      />
     );
   /*
    * Not reached: the Bot is told why, in words meant for it, and says so to the person itself. The
@@ -160,7 +159,6 @@ export function OrchestrationTools() {
         result={result}
         running="Telling the task"
         status={status}
-        steer
       />
     ),
   });
