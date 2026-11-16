@@ -43,6 +43,7 @@ import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
@@ -63,7 +64,7 @@ const PROVIDER_NAMES: Record<string, string> = {
  * The address is the title, so this is everything else worth knowing at a glance while deciding
  * whether somebody should still have access.
  */
-function describe(person: Person): string {
+function describe(person: Person, organization: string | undefined): string {
   const providers = person.providers
     .map((provider) => PROVIDER_NAMES[provider] ?? provider)
     .join(", ");
@@ -72,7 +73,7 @@ function describe(person: Person): string {
     : "never signed in";
 
   if (person.revoked)
-    return `Access removed · ${providers || "no provider"} · ${when}`;
+    return `${organization ? `Removed from ${organization}` : "Access removed"} · ${providers || "no provider"} · ${when}`;
   if (person.configuredAdmin) {
     return `Admin by configuration · ${when}`;
   }
@@ -82,6 +83,20 @@ function describe(person: Person): string {
 /** What a person is called: their name, or their address when they have not given one. */
 function nameOf(person: Person): string {
   return person.name?.trim() || person.email;
+}
+
+/**
+ * The organization a removal takes somebody out of, where that is all it does: an OpenBot where
+ * everybody has an organization of their own and may create others (`canCreate`, the server's
+ * verdict). There, Remove ends the person's membership of this organization alone, and their
+ * account, sessions, API keys and other organizations stay theirs. Undefined where OpenBot keeps one
+ * organization, where removing somebody still takes them out of OpenBot.
+ */
+function useRemovalOrganization(): string | undefined {
+  const choices = useOrganizationChoices();
+  if (!choices?.canCreate) return undefined;
+  return choices.organizations.find((one) => one.id === choices.currentId)
+    ?.name;
 }
 
 function PeoplePage() {
@@ -106,6 +121,7 @@ function PeoplePage() {
   // Kept while its dialog closes, so the question does not lose its name on the way out.
   const [removing, setRemoving] = useState<Person | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const organization = useRemovalOrganization();
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -182,7 +198,7 @@ function PeoplePage() {
                       <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription>
                         {person.name ? `${person.email} · ` : ""}
-                        {describe(person)}
+                        {describe(person, organization)}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
@@ -258,6 +274,7 @@ function PeoplePage() {
           <RemovePersonDialog
             onOpenChange={setRemoveOpen}
             open={removeOpen}
+            organization={organization}
             person={removing}
           />
         ) : null}
@@ -268,15 +285,18 @@ function PeoplePage() {
 
 /**
  * Asks before removing somebody's access, naming them and saying what ends, and then removes it.
- * A refusal stays in the dialog.
+ * A refusal stays in the dialog. Where everybody has an organization of their own (`organization`
+ * given), what ends is their membership of this one; where OpenBot keeps one, it is OpenBot.
  */
 function RemovePersonDialog({
   onOpenChange,
   open,
+  organization,
   person,
 }: {
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  organization: string | undefined;
   person: Person;
 }) {
   const remove = useMutation(setPersonAccessMutationOptions(queryClient));
@@ -300,12 +320,24 @@ function RemovePersonDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Remove {nameOf(person)} from OpenBot?</DialogTitle>
-          <DialogDescription>
-            They're signed out everywhere and can't sign in again. Their API
-            keys, app sign-ins and connected credentials stop working. They keep
-            their record and history, and Restore lets them sign in again.
-          </DialogDescription>
+          <DialogTitle>
+            Remove {nameOf(person)} from {organization ?? "OpenBot"}?
+          </DialogTitle>
+          {organization ? (
+            <DialogDescription>
+              They lose access to {organization}'s Bots and conversations, and
+              the apps they connected here are disconnected. They keep their
+              account, their own organization and any other they're in. Restore
+              puts them back with their role and teams.
+            </DialogDescription>
+          ) : (
+            <DialogDescription>
+              They're signed out everywhere and can't sign in again. Their API
+              keys, app sign-ins and connected credentials stop working. They
+              keep their record and history, and Restore lets them sign in
+              again.
+            </DialogDescription>
+          )}
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
