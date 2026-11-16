@@ -6,7 +6,17 @@ import {
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type ComponentProps, Fragment, useId, useState } from "react";
+import {
+  type ComponentProps,
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react";
+import { RosterTagEditor } from "@/components/bots/roster-tags";
+import { readBotTags, rosterTagKey } from "@/lib/agents/roster-tags";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
@@ -78,13 +88,65 @@ export function BotRoster() {
     sort: "default",
   });
   const controlId = useId();
-  const filtering = filters.query.trim() !== "" || filters.scope !== "all";
+  const userId = useQuery(currentUserQueryOptions()).data?.id;
+  const [tagSelection, setTagSelection] = useState<{
+    userId: string | undefined;
+    value: string;
+  }>({ userId: undefined, value: "all" });
+  const tagFilter = tagSelection.userId === userId ? tagSelection.value : "all";
+  const setTagFilter = (value: string) => setTagSelection({ userId, value });
+  const filtering =
+    filters.query.trim() !== "" ||
+    filters.scope !== "all" ||
+    tagFilter !== "all";
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const agents = useQuery(agentListQueryOptions());
   const hidden = useQuery(agentListQueryOptions(true));
   const attention = useQuery(botAttentionQueryOptions());
   const list = useNeedsYou();
+  const [tagRevision, setTagRevision] = useState(0);
+  const tags = useMemo(() => {
+    // The revision invalidates local reads after a save or another tab's storage event.
+    void tagRevision;
+    return new Map(
+      [...(agents.data ?? []), ...(hidden.data ?? [])].map((agent) => [
+        agent.id,
+        readBotTags(userId, agent.id),
+      ]),
+    );
+  }, [agents.data, hidden.data, userId, tagRevision]);
+  useEffect(() => {
+    if (!userId) return;
+    const prefix = rosterTagKey(userId, "");
+    const changed = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(prefix))
+        setTagRevision((revision) => revision + 1);
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [userId]);
+  const tagChoices = new Map<string, string>();
+  for (const names of tags.values()) {
+    for (const name of names) {
+      const key = `tag:${name.toLocaleLowerCase()}`;
+      if (!tagChoices.has(key)) tagChoices.set(key, name);
+    }
+  }
+  const tagProps = {
+    userId,
+    tags,
+    onTagsChanged: () => setTagRevision((revision) => revision + 1),
+  };
+  const matchesTag = (agent: AgentProfile) => {
+    const names = tags.get(agent.id) ?? [];
+    return (
+      tagFilter === "all" ||
+      (tagFilter === "untagged"
+        ? names.length === 0
+        : names.some((name) => `tag:${name.toLocaleLowerCase()}` === tagFilter))
+    );
+  };
   const byId = new Map((attention.data ?? []).map((bot) => [bot.botId, bot]));
 
   if (agents.isPending)
@@ -102,8 +164,12 @@ export function BotRoster() {
     );
   }
   // Every Bot stays in its own section; what it waits on is on the board above, by name.
-  const visible = filterRoster(agents.data, filters);
-  const hiddenMatches = filterRoster(hidden.data ?? [], filters);
+  const visible = filterRoster(agents.data.filter(matchesTag), filters, tags);
+  const hiddenMatches = filterRoster(
+    (hidden.data ?? []).filter(matchesTag),
+    filters,
+    tags,
+  );
   const { pinned, yours, shared } = groupRoster(visible);
   const available = agents.data.length;
   const hiddenCount = hidden.data?.length ?? 0;
@@ -137,7 +203,7 @@ export function BotRoster() {
               type="search"
               name="query"
               autoComplete="off"
-              placeholder="Name, title or description"
+              placeholder="Name, title, description or tag"
               value={filters.query}
               onChange={(event) =>
                 setFilters({ ...filters, query: event.target.value })
@@ -193,14 +259,42 @@ export function BotRoster() {
               <option value="description-desc">Description: Z–A</option>
             </RosterSelect>
           </label>
+          {userId ? (
+            <label
+              className="flex flex-col gap-1 text-sm"
+              htmlFor={`${controlId}-tag`}
+            >
+              Filter by tag
+              <RosterSelect
+                id={`${controlId}-tag`}
+                name="tag"
+                value={tagFilter}
+                onChange={(event) => setTagFilter(event.target.value)}
+              >
+                <option value="all">All tags</option>
+                <option value="untagged">Untagged</option>
+                {[...tagChoices]
+                  .sort((a, b) => a[1].localeCompare(b[1]))
+                  .map(([key, name]) => (
+                    <option key={key} value={key}>
+                      Tag: {name}
+                    </option>
+                  ))}
+                {tagFilter.startsWith("tag:") && !tagChoices.has(tagFilter) ? (
+                  <option value={tagFilter}>Tag: {tagFilter.slice(4)}</option>
+                ) : null}
+              </RosterSelect>
+            </label>
+          ) : null}
           {filtering || filters.sort !== "default" ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() =>
-                setFilters({ query: "", scope: "all", sort: "default" })
-              }
+              onClick={() => {
+                setFilters({ query: "", scope: "all", sort: "default" });
+                setTagFilter("all");
+              }}
             >
               Clear filters
             </Button>
@@ -229,19 +323,19 @@ export function BotRoster() {
        */}
       {pinned.length ? (
         <PageSection title="Pinned">
-          <RosterRows agents={pinned} byId={byId} />
+          <RosterRows agents={pinned} byId={byId} {...tagProps} />
         </PageSection>
       ) : null}
       {yours.length ? (
         <PageSection title="Yours">
-          <RosterRows agents={yours} byId={byId} />
+          <RosterRows agents={yours} byId={byId} {...tagProps} />
         </PageSection>
       ) : null}
       {shared.length ? (
         <PageSection
           title={personal ? "Included with OpenBot" : "Shared with you"}
         >
-          <RosterRows agents={shared} byId={byId} />
+          <RosterRows agents={shared} byId={byId} {...tagProps} />
         </PageSection>
       ) : null}
       {!filtering && available === 0 ? (
@@ -273,7 +367,12 @@ export function BotRoster() {
       ) : null}
       <DoneTasks done={list.done} />
       {hiddenMatches.length ? (
-        <HiddenSection agents={hiddenMatches} byId={byId} personal={personal} />
+        <HiddenSection
+          agents={hiddenMatches}
+          byId={byId}
+          personal={personal}
+          {...tagProps}
+        />
       ) : null}
     </>
   );
@@ -288,11 +387,12 @@ function HiddenSection({
   agents,
   byId,
   personal,
+  ...tagProps
 }: {
   agents: AgentProfile[];
   byId: Map<string, BotAttention>;
   personal: boolean;
-}) {
+} & TagProps) {
   const [open, setOpen] = useState(false);
   return (
     <PageSection
@@ -304,24 +404,49 @@ function HiddenSection({
       description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid.${personal ? "" : " Only your list changes."}`}
       title="Hidden"
     >
-      {open ? <RosterRows agents={agents} byId={byId} /> : null}
+      {open ? <RosterRows agents={agents} byId={byId} {...tagProps} /> : null}
     </PageSection>
   );
 }
 
+type TagProps = {
+  userId: string | undefined;
+  tags: ReadonlyMap<string, readonly string[]>;
+  onTagsChanged: () => void;
+};
+
 function RosterRows({
   agents,
   byId,
+  userId,
+  tags,
+  onTagsChanged,
 }: {
   agents: AgentProfile[];
   byId: Map<string, BotAttention>;
-}) {
+} & TagProps) {
   return (
     <PageRows>
       {agents.map((agent, index) => (
         <Fragment key={agent.id}>
           {index > 0 ? <Separator /> : null}
-          <RosterRow agent={agent} state={byId.get(agent.id)} />
+          <div className="flex items-center gap-1">
+            <RosterRow
+              agent={agent}
+              state={byId.get(agent.id)}
+              tags={tags.get(agent.id) ?? []}
+            />
+            {userId ? (
+              <RosterTagEditor
+                key={`${userId}:${agent.id}`}
+                userId={userId}
+                botId={agent.id}
+                name={agent.name}
+                tags={tags.get(agent.id) ?? []}
+                onSaved={onTagsChanged}
+              />
+            ) : null}
+          </div>
         </Fragment>
       ))}
     </PageRows>
@@ -336,9 +461,11 @@ function RosterRows({
 function RosterRow({
   agent,
   state,
+  tags,
 }: {
   agent: AgentProfile;
   state: BotAttention | undefined;
+  tags: readonly string[];
 }) {
   const summary = state
     ? [state.paused ? "Paused" : "", attentionSummary(state)]
@@ -348,6 +475,7 @@ function RosterRow({
   const waiting = state ? waitingOnYou(state) : 0;
   return (
     <Item
+      className="min-w-0 flex-1"
       render={<Link params={{ agentId: agent.id }} to="/bots/$agentId" />}
       size="sm"
     >
@@ -359,6 +487,18 @@ function RosterRow({
         <ItemDescription>
           {summary || shownSubtitle(agent.title)}
         </ItemDescription>
+        {tags.length ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="max-w-full break-words rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (

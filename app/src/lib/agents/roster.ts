@@ -51,6 +51,7 @@ export type RosterFilters = {
 export function filterRoster(
   agents: readonly AgentProfile[],
   { query, scope, sort }: RosterFilters,
+  tags: ReadonlyMap<string, readonly string[]> = new Map(),
 ): AgentProfile[] {
   const needle = query.trim().toLocaleLowerCase();
   const filtered = agents.filter((agent) => {
@@ -58,9 +59,12 @@ export function filterRoster(
     if (scope === "shared" && agent.mine) return false;
     if (scope === "pinned" && !agent.pinned && !agent.assignedToMe)
       return false;
-    return [agent.name, shownSubtitle(agent.title), agent.roleDescription].some(
-      (value) => (value ?? "").toLocaleLowerCase().includes(needle),
-    );
+    return [
+      agent.name,
+      shownSubtitle(agent.title),
+      agent.roleDescription,
+      ...(tags.get(agent.id) ?? []),
+    ].some((value) => (value ?? "").toLocaleLowerCase().includes(needle));
   });
   if (sort === "default") return filtered;
   const value = (agent: AgentProfile) =>
