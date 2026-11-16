@@ -49,6 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   addCuratedServerMutationOptions,
@@ -292,9 +293,11 @@ export function PluginPage({
    * only ever returns the caller's, so this cannot become a list of who has connected what.
    */
   const connections = useQuery(connectionsQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds is still on this page. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
    * The row itself rather than whether there is one, because the brokered row below wants what the
    * last re-check found and that is written on this same row. Asking a second time for it would be

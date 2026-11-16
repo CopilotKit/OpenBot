@@ -896,6 +896,7 @@ export * from "./listBotAttentionParams";
 export * from "./listBotComponentsParams";
 export * from "./listBotGrantsParams";
 export * from "./listBotsParams";
+export * from "./listBotsScope";
 export * from "./listCapabilitiesParams";
 export * from "./listCheckInItemsParams";
 export * from "./listCheckInsParams";

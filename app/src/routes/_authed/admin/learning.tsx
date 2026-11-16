@@ -52,6 +52,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   createLearningContainer,
@@ -260,8 +261,9 @@ export function LearningPage() {
   const formId = useId();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
   const automatic = useQuery(learningAutomaticQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
-  const hiddenAgents = useQuery(agentListQueryOptions(true));
+  const scope = useBotListScope();
+  const agents = useQuery(agentListQueryOptions(false, scope));
+  const hiddenAgents = useQuery(agentListQueryOptions(true, scope));
   const roster = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
   const [draft, setDraft] = useState<LearningParticipation | null>(null);
   const [selected, setSelected] = useState("");

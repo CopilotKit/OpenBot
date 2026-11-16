@@ -335,6 +335,7 @@ export * from "./listBotAppsParams";
 export * from "./listBotAttentionParams";
 export * from "./listBotGrantsParams";
 export * from "./listBotsParams";
+export * from "./listBotsScope";
 export * from "./listCheckInItemsParams";
 export * from "./listCheckInsParams";
 export * from "./listComputerActionsParams";

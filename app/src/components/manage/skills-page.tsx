@@ -19,6 +19,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { skillListQueryOptions } from "@/lib/skills/queries";
@@ -39,8 +40,10 @@ import { skillListQueryOptions } from "@/lib/skills/queries";
 export function SkillsPage() {
   const paths = useManagePaths();
   const skillList = useQuery(skillListQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
 
   const skills = skillList.data ?? [];
   const newSkill = (size: "lg" | "sm") => (

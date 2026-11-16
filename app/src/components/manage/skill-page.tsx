@@ -36,6 +36,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
@@ -60,9 +61,11 @@ export function SkillPage({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const skillList = useQuery(skillListQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
 
