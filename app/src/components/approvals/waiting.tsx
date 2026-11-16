@@ -11,7 +11,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { PageRows } from "@/components/layout/page-shell";
-import { BoardRow, RowMenu } from "@/components/needs-you/board-row";
+import {
+  BoardRow,
+  ROW_MENU_WIDTH,
+  RowMenu,
+} from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -569,7 +573,7 @@ function RequestAnswers({
               >
                 <IconDots />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className={ROW_MENU_WIDTH}>
                 <DropdownMenuItem
                   disabled={decision.isPending}
                   onClick={() => decide("allow_conversation")}

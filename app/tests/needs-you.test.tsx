@@ -213,7 +213,7 @@ function serving() {
       return Response.json({ checkInItem: { ...found, status: "dismissed" } });
     }
     const acted = path.match(
-      /^\/api\/v2\/organizations\/default\/tasks\/(.+)\/(resolve|reopen|retry)$/,
+      /^\/api\/v2\/organizations\/default\/tasks\/(.+)\/(resolve|reopen|retry|stop)$/,
     );
     if (acted) {
       const [, id, action] = acted;
@@ -224,7 +224,15 @@ function serving() {
             ? { ...entry, status: "resolved", resolvedAt: now }
             : action === "reopen"
               ? { ...entry, status: "ready_for_review", resolvedAt: null }
-              : { ...entry, status: "working", failure: null },
+              : action === "stop"
+                ? {
+                    ...entry,
+                    status: "failed",
+                    failure: "you stopped it",
+                    failedAt: now,
+                    stoppedAt: now,
+                  }
+                : { ...entry, status: "working", failure: null },
       );
       const found = tasks.find((entry) => entry.id === id);
       return found
@@ -765,6 +773,120 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
   expect(
     within(dialog).getByRole("button", { name: "Send answer" }),
   ).toBeTruthy();
+});
+
+/*
+ * FOUND IN THE BIG TEST: a task's card and its Activity row had Stop, and its row on the Needs you
+ * board did not, though the design puts Stop on all three. A working task and one waiting on the
+ * person (on a question in its thread, answered from the row) each offer Stop on the board, and
+ * Stop is the same stop as the card's: the task is stopped and its row reads Stopped.
+ */
+test("a working task and a task waiting on the person each offer Stop on the board, and read Stopped once stopped", async () => {
+  const asked = "Which region is the refund note for: EU, US or UK?";
+  tasks = [
+    task({
+      id: "w",
+      title: "Draft the EU refunds guide",
+      origin: "delegated",
+      status: "working",
+    }),
+    task({
+      id: "q",
+      title: "Draft a regional refund-policy note",
+      origin: "delegated",
+      status: "needs_input",
+      next: `Waiting for your answer: ${asked}`,
+    }),
+  ];
+  questions = [
+    {
+      id: "question-q",
+      botId: "inbox",
+      threadId: "t-q",
+      channelId: "c-q",
+      question: asked,
+      createdAt: now,
+    },
+  ];
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 1, ready: 0, failed: 0 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  const surface = region("Bots page");
+  const row = async (title: string) =>
+    (await surface.findByText(title)).closest(
+      "[data-slot=item]",
+    ) as HTMLElement;
+  for (const [title, id] of [
+    ["Draft the EU refunds guide", "w"],
+    ["Draft a regional refund-policy note", "q"],
+  ] as const) {
+    fireEvent.click(
+      within(await row(title)).getByRole("button", { name: "Stop" }),
+    );
+    await waitFor(() =>
+      expect(sent).toContainEqual({
+        method: "POST",
+        path: `${TASKS}/${id}/stop`,
+      }),
+    );
+    await waitFor(async () =>
+      expect(within(await row(title)).getByText("Stopped")).toBeTruthy(),
+    );
+    // Stopped, it is not offered Stop again.
+    expect(
+      within(await row(title)).queryByRole("button", { name: "Stop" }),
+    ).toBeNull();
+  }
+});
+
+/*
+ * FOUND IN THE BIG TEST: the Bots badge said 16 and the board "18 waiting". The two were tasks under
+ * a Bot no longer shared with the person ("This Bot isn't shared with you any more"), which the
+ * server's count leaves out with every Bot they can't reach. The board says the badge's number, from
+ * the same answer: such a task is still listed, to mark done, and is not counted.
+ */
+test("the board says the badge's count: a task under a Bot no longer shared is listed and not counted", async () => {
+  tasks = [
+    task({
+      id: "q",
+      title: "Order Fernhill seeds",
+      origin: "delegated",
+      status: "needs_input",
+      next: "Waiting for your answer: tomato or basil?",
+    }),
+    task({
+      id: "lost",
+      agentId: "gone",
+      title: "History of freight forwarding",
+      origin: "delegated",
+      status: "failed",
+      failure: "this Bot isn't shared with you any more",
+      failedAt: now,
+      canTryAgain: false,
+    }),
+  ];
+  // As the server answers: the Inbox Bot's task, and nothing for a Bot the person can't reach.
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 1, ready: 0, failed: 0 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  const surface = region("Bots page");
+  await surface.findByText("History of freight forwarding");
+  await surface.findByText("Order Fernhill seeds");
+  await waitFor(() => expect(surface.getByText("1 waiting")).toBeTruthy());
+  // Listed under its Bot, with Mark done, and nothing there waits on the person.
+  const lost = surface
+    .getByText("History of freight forwarding")
+    .closest("[data-needs-you-bot]") as HTMLElement;
+  expect(within(lost).getByText(/nothing waiting on you/)).toBeTruthy();
+  expect(within(lost).getByRole("button", { name: "Mark done" })).toBeTruthy();
 });
 
 /*

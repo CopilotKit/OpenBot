@@ -316,21 +316,51 @@ export function TaskBoardRow({
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const stop = useMutation(stopTaskMutationOptions(queryClient));
   const { state, Icon } = look(listed);
-  const busy = resolve.isPending || again.isPending;
-  const error = resolve.error ?? again.error;
+  const busy = resolve.isPending || again.isPending || stop.isPending;
+  const error = resolve.error ?? again.error ?? stop.error;
   const openFirst = status === "ready_for_review" || status === "needs_input";
   const said = boardStatus(listed);
   const markDone = () => resolve.mutate({ id: task.id, done: true });
   const markDoneWords = resolve.isPending ? "Saving…" : "Mark done";
+  // Stop, as on its card and its Activity row: while it works or waits on the person.
+  const canStop = status === "working" || status === "needs_input";
+  const stopWords = stop.isPending ? "Stopping…" : "Stop";
   const openLink = (
     <Link params={{ channelId: task.channelId }} to="/channel/$channelId" />
   );
   /*
-   * Mark done and Open come after the row's answers, and fold into its menu where the row's line has
-   * no room for them (`BoardRow`).
+   * Stop, Mark done and Open come after the row's answers, and fold into its menu where the row's
+   * line has no room for them (`BoardRow`).
    */
   const secondary = (openVariant: "default" | "outline" | "ghost") => [
+    ...(canStop
+      ? [
+          {
+            key: "stop",
+            button: (
+              <Button
+                disabled={busy}
+                onClick={() => stop.mutate(task.id)}
+                size="sm"
+                variant="ghost"
+              >
+                <IconPlayerStop data-icon="inline-start" />
+                {stopWords}
+              </Button>
+            ),
+            menuItem: (
+              <DropdownMenuItem
+                disabled={busy}
+                onClick={() => stop.mutate(task.id)}
+              >
+                {stopWords}
+              </DropdownMenuItem>
+            ),
+          },
+        ]
+      : []),
     ...(held || canMarkDone(listed)
       ? [
           {
@@ -377,9 +407,16 @@ export function TaskBoardRow({
           <span key="status">{boardStatus(listed).label}</span>,
           <span key="when">{relativeTime(task.updatedAt)}</span>,
           ...held.meta,
+          error ? (
+            <span className="text-destructive" key="error" role="alert">
+              {error.message}
+            </span>
+          ) : null,
         ]}
         more={held.more}
         open={held.more !== undefined}
+        // What it waits on is what the person answers: read in full, at a phone's width too.
+        readDetail
         secondary={secondary("ghost")}
         state={state}
         title={task.title}

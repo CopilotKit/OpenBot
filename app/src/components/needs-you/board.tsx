@@ -6,6 +6,7 @@ import {
   useHeldAnswers,
   useWaitingByBot,
 } from "@/components/approvals/waiting";
+import { useWaitingOnYou } from "@/components/bot-profile/attention";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
@@ -51,14 +52,18 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   // A task waiting on something in its thread is answered on its own row.
   const heldAnswer = useHeldAnswers();
 
+  /*
+   * ONE COUNT, THE BADGE'S. How many things wait on the person is the number the Bots badge shows
+   * (`waitingOnYou`, the server's rule), read from the same answer, for every Bot or for this one:
+   * the board counted its own rows and said "18 waiting" beside a badge of 16. The two it had over
+   * were tasks under a Bot no longer shared with the person, which the server leaves out, as it
+   * leaves out every Bot they can't reach: there is nothing left there for them to read, answer or
+   * try again, only to mark done. Those rows are still listed, and are not counted.
+   */
+  const waitingOn = useWaitingOnYou();
+  const waitingCount = waitingOn(agentId);
   const blocked = new Map(waiting.byBot);
-  // Questions and actions each wait on the person; a task does when the badge counts it.
-  let waitingCount = [...waiting.byBot.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
   for (const listed of list.tasks) {
-    if (countsAsWaiting(listed)) waitingCount += 1;
     const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
       <TaskBoardRow
@@ -75,7 +80,6 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   }
   // A hand-off that ran out of tries waits on the person too, and the badge counts it.
   for (const stalled of stalledHandoffs) {
-    waitingCount += 1;
     const group = blocked.get(stalled.botId) ?? { rows: [], times: [] };
     group.rows.push(
       <StalledHandoffBoardRow
@@ -148,7 +152,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                 botId={botId}
                 key={botId}
                 note={
-                  group.times.length
+                  group.times.length && waitingOn(botId)
                     ? `waiting since ${relativeTime(
                         group.times.reduce((first, at) =>
                           Date.parse(at) < Date.parse(first) ? at : first,

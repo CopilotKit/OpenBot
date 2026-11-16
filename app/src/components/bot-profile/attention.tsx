@@ -65,6 +65,18 @@ export function useWaitingCount(): number {
   return waitingAcross(useQuery(botAttentionQueryOptions()).data);
 }
 
+/**
+ * The same count, read live, for one Bot or, given none, across all of them: what a list of what
+ * waits on the person says beside its rows, so it says the badge's number and never its own.
+ */
+export function useWaitingOnYou(): (botId?: string) => number {
+  const bots = useQuery(botAttentionQueryOptions()).data;
+  return (botId) =>
+    waitingAcross(
+      botId === undefined ? bots : bots?.filter((bot) => bot.botId === botId),
+    );
+}
+
 const count = (total: number, one: string, many: string) =>
   `${total} ${total === 1 ? one : many}`;
 
