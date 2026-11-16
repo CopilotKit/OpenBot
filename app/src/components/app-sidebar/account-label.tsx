@@ -1,11 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  type ReactNode,
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -16,6 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAnythingCut } from "@/hooks/use-anything-cut";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { OpenBotVersion } from "../layout/openbot-version";
@@ -80,27 +75,13 @@ export function AccountLabel() {
 }
 
 /**
- * Whether any line inside the element given `ref` is cut short: measured after every render, since
- * the words decide it, and again whenever the row is resized, as dragging the sidebar does.
+ * The account menu's popup: at least as wide as the account row, and wider where a row's words need
+ * it (an organization's long name), up to 24rem and never past the window's edge.
  */
-function useAnythingCut() {
-  const ref = useRef<HTMLButtonElement>(null);
-  const [cut, setCut] = useState(false);
-  const measure = useCallback(() => {
-    const lines = ref.current?.querySelectorAll<HTMLElement>(".truncate");
-    setCut(
-      [...(lines ?? [])].some((line) => line.scrollWidth > line.clientWidth),
-    );
-  }, []);
-  useLayoutEffect(measure);
-  useLayoutEffect(() => {
-    if (!ref.current) return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [measure]);
-  return { ref, cut };
-}
+export const accountMenuClassName =
+  "w-max min-w-(--anchor-width) max-w-[min(24rem,var(--available-width))] p-1.5";
+/** The spacing of each of the account menu's rows. */
+export const accountMenuItemClassName = "gap-2 px-2 py-1.5";
 
 /**
  * The account row as the sidebar draws it: a button that opens the account menu (`children`, the
@@ -109,7 +90,7 @@ function useAnythingCut() {
  */
 export function AccountMenu({ children }: { children: ReactNode }) {
   const { person, organization } = useAccountNames();
-  const { ref, cut } = useAnythingCut();
+  const { ref, cut } = useAnythingCut<HTMLButtonElement>();
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
