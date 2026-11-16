@@ -1,5 +1,9 @@
 import { offersStandingRule } from "@openbot/shared/standing-rule";
-import { approvalDetails, approvalWords } from "@openbot/shared/tool-name";
+import {
+  approvalDetails,
+  approvalPhrase,
+  approvalWords,
+} from "@openbot/shared/tool-name";
 import {
   IconDots,
   IconHandStop,
@@ -10,6 +14,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { ShareDetails, shareOf } from "@/components/approvals/share-details";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   BoardRow,
@@ -140,15 +145,21 @@ function QuestionRow({
 /**
  * What an approval would send, a labelled line each: "Text: hello". Nothing when it sends nothing
  * the title has not said already, as a click does: its ref and snapshot are handles for the model.
+ *
+ * A share reads as its card in the conversation reads: who reads it, in a sentence, and the whole
+ * text. Its own fields (the audience's key, a count of recipients, the text's fingerprint) are the
+ * server's, and listed here as "Audience", "Recipients" and "Preview" they said less than the card.
  */
 function ApprovalDetails({
-  args,
+  action,
   className,
 }: {
-  args: unknown;
+  action: WaitingRequest["action"];
   className?: string;
 }) {
-  const details = approvalDetails(args);
+  if (shareOf(action))
+    return <ShareDetails action={action} className={className} />;
+  const details = approvalDetails(action.args);
   if (details.length === 0) return null;
   return (
     <dl
@@ -183,6 +194,8 @@ function RequestRow({
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
+  // A share says who it goes to in its title, as its card does: "wants to hand this to Ledger Bot".
+  const share = shareOf(request.action) !== null;
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -190,11 +203,14 @@ function RequestRow({
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle className="line-clamp-none">
-          {botName} wants to {words.action}
+          {botName} wants to{" "}
+          {share ? approvalPhrase(request.action) : words.action}
         </ItemTitle>
-        <ItemDescription className="line-clamp-none break-all">
-          {words.place}
-        </ItemDescription>
+        {share ? null : (
+          <ItemDescription className="line-clamp-none break-all">
+            {words.place}
+          </ItemDescription>
+        )}
         {request.action.policy ? (
           <p className="text-sm">
             {request.action.policy.behaviour === "hand_off"
@@ -203,7 +219,7 @@ function RequestRow({
             {request.action.policy.reason}
           </p>
         ) : null}
-        <ApprovalDetails args={request.action.args} className="mt-1" />
+        <ApprovalDetails action={request.action} className="mt-1" />
       </ItemContent>
       {request.action.policy?.behaviour === "hand_off" ? (
         <ItemFooter className="flex-wrap justify-start pl-11">
@@ -625,14 +641,20 @@ function requestReason(request: WaitingRequest): ReactNode {
  */
 function RequestBoardRow({ request }: { request: WaitingRequest }) {
   const words = approvalWords(request.action);
-  const action = words.action.charAt(0).toUpperCase() + words.action.slice(1);
+  /*
+   * A share is titled as its card is, who it goes to included: "Hand this to Ledger Bot". Split as
+   * an action and its place, it read "Hand this to" over "Ledger Bot".
+   */
+  const share = shareOf(request.action) !== null;
+  const said = share ? approvalPhrase(request.action) : words.action;
+  const action = said.charAt(0).toUpperCase() + said.slice(1);
   return (
     <BoardRow
       actions={<RequestAnswers request={request} />}
-      detail={words.place}
+      detail={share ? null : words.place}
       icon={<IconHandStop />}
       meta={[requestReason(request)]}
-      more={<ApprovalDetails args={request.action.args} />}
+      more={<ApprovalDetails action={request.action} />}
       open
       title={action}
       waiting
@@ -720,7 +742,7 @@ export function useHeldAnswers(): (task: {
       return {
         actions: (more) => <RequestAnswers more={more} request={request} />,
         meta: [requestReason(request)],
-        more: <ApprovalDetails args={request.action.args} />,
+        more: <ApprovalDetails action={request.action} />,
       };
     const question = waiting.questions.find(
       (asked) =>
