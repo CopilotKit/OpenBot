@@ -59,7 +59,11 @@ import {
   threadWorkOf,
 } from "@/components/tasks/thread-work";
 import { foldTurnWork, NO_TURN_WORK } from "@/components/tasks/turn-work";
-import { isTaskThread, WorkedFor } from "@/components/tasks/worked-for";
+import {
+  isTaskThread,
+  useWaitingToolCalls,
+  WorkedFor,
+} from "@/components/tasks/worked-for";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   Dialog,
@@ -2163,7 +2167,9 @@ export function ChatTranscript({
    */
   const queryClient = useContext(QueryClientContext);
   const taskThread = isTaskThread(threadId, items, queryClient);
-  const folds = taskThread ? foldTurnWork(items, busy) : NO_TURN_WORK;
+  // What waits on the person's approval stays out of the fold, its card with it.
+  const waiting = useWaitingToolCalls(queryClient);
+  const folds = taskThread ? foldTurnWork(items, busy, waiting) : NO_TURN_WORK;
   // What the task read and made, for its Details pane beside the thread (`thread-work.ts`).
   useEffect(() => {
     if (taskThread && threadId)

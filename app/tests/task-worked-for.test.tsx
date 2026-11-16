@@ -279,6 +279,11 @@ test("a run of steps holding one still waiting on the person stays out of the fo
   // The turn is over (the task waits on the person): the run and its card stay where they are, and
   // what the Bot said last reads as the turn's words, so nothing is left to fold.
   expect([...foldTurnWork(items, false).inside]).toEqual([]);
+  // A turn the person typed into the thread can still read as running while its step waits on
+  // their approval: the inbox says it waits, so the run and its card stay out all the same.
+  expect([
+    ...foldTurnWork(items, true, new Set(["checkout-pay"])).inside,
+  ]).toEqual(["on-it"]);
   // While the turn still runs, the step is only working, and folds with the rest.
   expect([...foldTurnWork(items, true).inside]).toEqual([
     "on-it",

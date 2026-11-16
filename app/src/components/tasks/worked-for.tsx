@@ -5,9 +5,17 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { type ReactNode, useContext, useEffect, useRef } from "react";
+import {
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { TranscriptItem } from "@/components/channels/tool-activity";
 import { ToolLine } from "@/components/channels/tool-line";
+import { type ApprovalInboxData, approvalInboxOptions } from "@/lib/approvals";
 import { briefDuration, useSecondsSince } from "@/lib/elapsed";
 import {
   type BotTask,
@@ -27,6 +35,33 @@ import { stepsIn, type TurnWork } from "./turn-work";
  * How long is the server's: the time the turn's runs took, added up, never the time it waited on
  * the person (listTaskTurns). A turn the server has no record of yet says how many steps it took.
  */
+
+const NOTHING_WAITING: ReadonlySet<string> = new Set();
+const NO_CLIENT = () => () => undefined;
+
+/**
+ * The tool calls held for the person's approval, by id: the approval inbox's open requests, as the
+ * cards under a run's line read them (`PendingApprovals`). Read from the inbox the conversation
+ * already keeps loaded, and followed as it changes; with no query client, nothing waits.
+ */
+export function useWaitingToolCalls(
+  client: QueryClient | undefined,
+): ReadonlySet<string> {
+  const key = approvalInboxOptions().queryKey;
+  const inbox = useSyncExternalStore(
+    client ? (change) => client.getQueryCache().subscribe(change) : NO_CLIENT,
+    () => client?.getQueryData<ApprovalInboxData>(key),
+  );
+  return useMemo(() => {
+    const ids = (inbox?.requests ?? []).flatMap((request) =>
+      (request.status === "pending" || request.left) &&
+      request.action.toolCallId
+        ? [request.action.toolCallId]
+        : [],
+    );
+    return ids.length ? new Set(ids) : NOTHING_WAITING;
+  }, [inbox]);
+}
 
 /**
  * Whether a thread is a task's: its first message is a Bot's brief, or a task the person has read

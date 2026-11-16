@@ -55,19 +55,23 @@ function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
 }
 
 /**
- * Whether a run of tool lines still waits on the person: a step with no answer in a turn that is
- * over is held for them (an approval, whose card the run draws under its line), and a step whose
- * answer asks them to connect or consent is a question. Either stays out of the fold, card and all.
- * FOUND BY THE APPROVALS JOURNEYS: a payment's approval card folded into "Worked for 5s", so the
- * thread showed nothing to answer.
+ * Whether a run of tool lines still waits on the person: a step held for their approval (`waiting`,
+ * the approval inbox's open requests by tool call; its card is drawn under the run's line), a step
+ * with no answer in a turn that is over, and a step whose answer asks them to connect or consent.
+ * Any of these stays out of the fold, card and all. FOUND BY THE APPROVALS JOURNEYS: a payment's
+ * approval card folded into "Worked for 5s", so the thread showed nothing to answer, in a task's
+ * turn and in a turn the person typed into the thread alike.
  */
 function waitsOnThePerson(
   item: Extract<TranscriptItem, { kind: "tools" }>,
   inFlight: boolean,
+  waiting: ReadonlySet<string>,
 ): boolean {
   return item.steps.some(
     (step) =>
-      (step.result === undefined && !inFlight) || asksThePerson(step.result),
+      waiting.has(step.toolCall.id) ||
+      (step.result === undefined && !inFlight) ||
+      asksThePerson(step.result),
   );
 }
 
@@ -80,11 +84,13 @@ function isPersons(item: TranscriptItem): boolean {
 
 /**
  * The folds of a task thread's turns. `running` says the last turn is still under way: the person's
- * browser is streaming it, or the task reads Working.
+ * browser is streaming it, or the task reads Working. `waiting` is the tool calls held for the
+ * person's approval (`useWaitingToolCalls`).
  */
 export function foldTurnWork(
   items: readonly TranscriptItem[],
   running: boolean,
+  waiting: ReadonlySet<string> = new Set(),
 ): TurnWorkFolds {
   const folds: TurnWorkFolds = { at: new Map(), inside: new Set() };
   // Where each turn starts: just after what the person (or the brief) said.
@@ -120,7 +126,7 @@ export function foldTurnWork(
       const item = items[index];
       if (!item || index === answer) continue;
       if (
-        (item.kind === "tools" && !waitsOnThePerson(item, inFlight)) ||
+        (item.kind === "tools" && !waitsOnThePerson(item, inFlight, waiting)) ||
         (item.kind === "tool" && isWorkStep(item)) ||
         (item.kind === "text" && item.role === "assistant")
       )
