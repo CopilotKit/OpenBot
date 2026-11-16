@@ -3,7 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
-import { taskKeys } from "@/lib/tasks/queries";
+import { type BotTask, taskKeys } from "@/lib/tasks/queries";
 import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 import {
   type AgentChannel,
@@ -319,11 +319,63 @@ export function applyChannelWork(
  * marked stale, and read when they are next drawn.
  */
 export function refreshTaskCards(
-  queryClient: Pick<QueryClient, "invalidateQueries">,
+  queryClient: QueryClient,
   activity: ChannelActivityEvent,
 ): void {
   if (!activity.workAt) return;
-  void queryClient.invalidateQueries({ queryKey: taskKeys.ones });
+  readTasksOfConversation(queryClient, activity.channelId);
+}
+
+/** Cards waiting on a read under way, to read once more when it lands. */
+const readAgainAfter = new Set<string>();
+
+/**
+ * THE CARDS OF ONE CONVERSATION READ THEIR TASKS AGAIN, AND A READ UNDER WAY IS NEVER THROWN AWAY.
+ *
+ * Every card on screen used to read its task again on any conversation's work changing, and each
+ * read cancelled the one before it. Found under load, five conversations working at once: the
+ * person's events came every 100 to 300 ms, a task's read took longer than that, so each card's
+ * read was cancelled and started again until the events paused. A card left open read Done for 12 s
+ * after its task needed the person, with no Stop on it, and every page's reads kept the server busy
+ * enough that Stop itself answered in seconds. Now only the cards of the conversation the event is
+ * about read again (the one that asked for a task, or the task's own), and a read already under way
+ * is let finish, then read once more, since it may have begun before the change.
+ */
+function readTasksOfConversation(queryClient: QueryClient, channelId: string) {
+  const cache = queryClient.getQueryCache();
+  for (const query of cache.findAll({ queryKey: taskKeys.ones })) {
+    const card = query.state.data as BotTask | undefined;
+    // A task with no conversation that asked for it (a check-in's) is read on any change, as before.
+    if (
+      card?.originChannelId &&
+      card.originChannelId !== channelId &&
+      card.channelId !== channelId
+    )
+      continue;
+    const hash = query.queryHash;
+    if (query.state.fetchStatus !== "fetching") {
+      void queryClient.invalidateQueries(
+        { queryKey: query.queryKey, exact: true },
+        { cancelRefetch: false },
+      );
+      continue;
+    }
+    if (readAgainAfter.has(hash)) continue;
+    readAgainAfter.add(hash);
+    const stop = cache.subscribe((event) => {
+      if (
+        event.query.queryHash !== hash ||
+        event.query.state.fetchStatus === "fetching"
+      )
+        return;
+      stop();
+      readAgainAfter.delete(hash);
+      void queryClient.invalidateQueries(
+        { queryKey: query.queryKey, exact: true },
+        { cancelRefetch: false },
+      );
+    });
+  }
 }
 
 /**
@@ -458,8 +510,17 @@ export function useChannelEvents() {
          * reported back, or the person told one something in its thread. Its task cards read
          * their tasks again, so a card open here says so at once, not on its next slow read.
          */
-        if (activity.work !== undefined && activity.busy === undefined)
-          void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+        if (activity.work !== undefined && activity.busy === undefined) {
+          readTasksOfConversation(queryClient, activity.channelId);
+          // The lists (the Bots page, the sidebar's count) finish any read under way first.
+          void queryClient.invalidateQueries(
+            {
+              queryKey: taskKeys.all,
+              predicate: (query) => query.queryKey[1] !== "one",
+            },
+            { cancelRefetch: false },
+          );
+        }
 
         /*
          * A tab looking at the channel somebody just deleted in another tab.

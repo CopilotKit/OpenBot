@@ -24,8 +24,12 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
+import { StillWorkingError } from "@/components/channels/composer/queue";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
 import { newId } from "../../lib/new-id";
+
+/** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
+export const STILL_WORKING_RETRY_MS = 500;
 
 export function ConversationView({
   messages,
@@ -305,15 +309,26 @@ export function ConversationView({
    * The one answer to a failed send, used by both paths that can produce a run. See the drain's
    * `catch` for why restoring rather than releasing, and `heldBack` for why the hold.
    */
+  /**
+   * A drain refused because the Bot still had the turn (`StillWorkingError`) asked nothing of the
+   * server, so it is not held back: it goes again on this tick, until the Bot is free.
+   */
+  const [busyRetry, setBusyRetry] = useState(0);
   const restoreFailedRun = useCallback(
-    (messages: readonly QueuedMessage[]) => {
+    (messages: readonly QueuedMessage[], error?: unknown) => {
       if (messages.length === 0) {
         return;
       }
+      const stillWorking = error instanceof StillWorkingError;
       // Before the restore, not after: the effect reads both off refs, and the guard has to be
       // true by the moment the queue is non-empty again rather than one statement later.
-      heldBack.current = true;
+      heldBack.current = !stillWorking;
       apply({ messages, type: "restore" });
+      if (stillWorking)
+        setTimeout(
+          () => setBusyRetry((tick) => tick + 1),
+          STILL_WORKING_RETRY_MS,
+        );
     },
     [apply],
   );
@@ -367,8 +382,8 @@ export function ConversationView({
        */
       if (next.restoreIfRunFails.length > 0) {
         const carried = next.restoreIfRunFails;
-        void started.catch(() => {
-          restoreFailedRun(carried);
+        void started.catch((error: unknown) => {
+          restoreFailedRun(carried, error);
         });
       }
       return started;
@@ -397,8 +412,10 @@ export function ConversationView({
    * said is finished. The cost is that anything parked when that happens stays on screen unrun,
    * under a notice that explains why, which is the honest half of the trade.
    *
-   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`.
+   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`. A drain the Bot
+   * was only too busy for is no failure: it goes again on `busyRetry`.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `busyRetry` is the trigger to try a drain the Bot was too busy for again.
   useEffect(() => {
     if (inFlight) {
       /*
@@ -418,7 +435,7 @@ export function ConversationView({
       return;
     }
     const carried = next.restoreIfRunFails;
-    void startRef.current(next.run).catch(() => {
+    void startRef.current(next.run).catch((error: unknown) => {
       /*
        * Swallowed on purpose, and only here. A failed send from the composer throws so the composer
        * can put the words back in the box; the box for these is the queue they came out of, and the
@@ -450,9 +467,9 @@ export function ConversationView({
        * are back in the box, so the decision belongs to the call sites — this one, and the join in
        * `submit`, which answers the same question from the same list.
        */
-      restoreFailedRun(carried);
+      restoreFailedRun(carried, error);
     });
-  }, [apply, disabled, inFlight, restoreFailedRun]);
+  }, [apply, disabled, inFlight, restoreFailedRun, busyRetry]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">

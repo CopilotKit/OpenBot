@@ -21,7 +21,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { delay, HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
@@ -76,6 +76,8 @@ let task = {
   updatedAt: "2026-11-12T22:00:00.000Z",
 };
 const requests: string[] = [];
+/** How long the server takes to answer a read of the task. */
+let taskReadMs = 0;
 /** The stops asked for, with the key each was asked with, so a retry is the same stop. */
 const stops: { taskId: string; key: string | null }[] = [];
 const server = setupServer(
@@ -100,26 +102,31 @@ const server = setupServer(
     },
   ),
   // Tasks and reactions, at the API's addresses and in its shapes, as the server answers them.
-  http.get("*/api/v2/organizations/:organizationId/tasks/:id", ({ params }) =>
-    params.id === task.id
-      ? HttpResponse.json({ task })
-      : HttpResponse.json(
-          {
-            type: "https://open.bot/errors/not-found",
-            title: "Not found.",
-            status: 404,
-            detail: "Couldn't find that task.",
-            code: "NOT_FOUND",
-            category: "not_found",
-            retryable: false,
-            requestId: "req_test",
-            traceId: "trace_test",
-          },
-          {
-            status: 404,
-            headers: { "content-type": "application/problem+json" },
-          },
-        ),
+  http.get(
+    "*/api/v2/organizations/:organizationId/tasks/:id",
+    async ({ params }) => {
+      // As long as a loaded server takes to read a task.
+      if (taskReadMs > 0) await delay(taskReadMs);
+      return params.id === task.id
+        ? HttpResponse.json({ task })
+        : HttpResponse.json(
+            {
+              type: "https://open.bot/errors/not-found",
+              title: "Not found.",
+              status: 404,
+              detail: "Couldn't find that task.",
+              code: "NOT_FOUND",
+              category: "not_found",
+              retryable: false,
+              requestId: "req_test",
+              traceId: "trace_test",
+            },
+            {
+              status: 404,
+              headers: { "content-type": "application/problem+json" },
+            },
+          );
+    },
   ),
   http.get("*/api/v2/organizations/:organizationId/reactions", ({ request }) =>
     HttpResponse.json({
@@ -564,6 +571,62 @@ test("a card that had stopped reading its task reads it again when the conversat
   };
   await view.findByText("Couldn't finish", {}, { timeout: 6_000 });
   expect(stateOf(view)).toBe("failed");
+}, 20_000);
+
+/*
+ * Found under load, five conversations working at once: work events came every 100 to 300 ms, a
+ * read of a task took longer, and every event cancelled every card's read and started it again. A
+ * card left open read Done for 12 s after its task needed the person, so it showed no Stop, and a
+ * Stop click waiting for one timed out.
+ */
+test("a card left open reads its task's change while work events come faster than a read answers", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  task = {
+    ...task,
+    // Asked for in the conversation "channel_main".
+    originConversationId: "channel_main",
+    status: "ready_for_review",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: null,
+    lastActivityAt: ago(60),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+    client,
+  );
+  await view.findByText("Done");
+  // Steered in its thread, it raised an approval: it needs the person now.
+  task = { ...task, status: "needs_input", next: WAITING, workingSince: null };
+  taskReadMs = 300;
+  let tick = 0;
+  // Its own conversation's work changes, among five others', every 50 ms.
+  const storm = setInterval(() => {
+    tick += 1;
+    act(() =>
+      refreshTaskCards(client, {
+        channelId:
+          tick % 6 === 0 ? "channel_main" : `channel_other_${tick % 6}`,
+        lastMessage: null,
+        lastMessageAt: null,
+        lastMessageAgentId: null,
+        work: [],
+        workAt: `2026-11-16T17:00:${String(tick % 60).padStart(2, "0")}.000000Z`,
+      }),
+    );
+  }, 50);
+  try {
+    await view.findByText("Needs you", {}, { timeout: 2_000 });
+    expect(stateOf(view)).toBe("needs");
+    expect(view.getByRole("button", { name: "Stop" })).toBeTruthy();
+  } finally {
+    clearInterval(storm);
+    taskReadMs = 0;
+  }
 }, 20_000);
 
 test("last activity moves when the task does something, and keeps ageing when it does not", async () => {

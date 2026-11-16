@@ -28,6 +28,7 @@ import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
@@ -1543,9 +1544,8 @@ export function ChannelChat({
       agentRef.current.isRunning ||
       turnsGoingAway(channel.id) > 0
     ) {
-      throw new Error(
-        "This Bot is still working on something. Wait for it, or stop it first.",
-      );
+      // Its own kind, so a drained queue tries again once the Bot is free (`StillWorkingError`).
+      throw new StillWorkingError();
     }
 
     const turn = {};
