@@ -37,6 +37,7 @@ function composeServices() {
           restart?: string;
           networks?: string[];
           user?: string;
+          init?: boolean;
           volumes?: Array<
             | string
             | {
@@ -1313,4 +1314,29 @@ test("the computer is given NET_RAW, so ping works on Podman as on Docker", () =
   ).services["agent-computer"];
   expect(computer?.cap_add ?? []).toContain("NET_RAW");
   expect(computer?.cap_drop ?? []).not.toContain("NET_RAW");
+});
+
+/*
+ * Quitting OpenBot Desktop during a restart once waited over three minutes and failed: Docker could
+ * not stop the picked harness's container because a process in it was a zombie. The harness was
+ * PID 1 and never reaps a process it did not start itself, so nothing did. A container whose
+ * program starts others runs Docker's own init as PID 1, which reaps them and passes signals on.
+ *
+ * PostgreSQL reaps its own, and the services kept for older apps run nothing that starts another.
+ * Any other service, a new one included, has to say `init: true` or be named here with its reason.
+ */
+test("runs an init in every container whose program starts others, so a stop is never held up", () => {
+  const needsNoInit = [
+    "postgres",
+    "worker",
+    "migrate",
+    "agent-bot",
+    "agent-langgraph",
+  ];
+  for (const [name, service] of Object.entries(composeServices())) {
+    expect({ name, init: service.init }).toEqual({
+      name,
+      init: needsNoInit.includes(name) ? undefined : true,
+    });
+  }
 });
