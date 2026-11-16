@@ -18,7 +18,7 @@ OAuth error code or a transport error.
 
 use super::address::Metadata;
 use super::credentials::Store;
-use super::{host_of, http, transport, Kind, CLIENT_ID};
+use super::{host_of, http, kind_of, transport, Kind, CLIENT_ID};
 use crate::problem::Problem;
 use crate::provider_oauth::{pkce_challenge, random, read_callback_request};
 use std::io::Write;
@@ -51,6 +51,22 @@ pub const NOT_SIGNED_IN_HEADING: &str = "Sign-in didn't finish";
 /// And its sentence.
 pub const NOT_SIGNED_IN_PAGE: &str =
     "Go back to the OpenBot app to try again. You can close this tab.";
+/// The heading when the person signed in and that OpenBot then refused the app (`access-refused`).
+pub const NOT_LET_IN_HEADING: &str = "You signed in, but OpenBot didn't let the app in";
+/// And its sentence: the app says the same, with the address.
+pub const NOT_LET_IN_PAGE: &str =
+    "Ask whoever runs your OpenBot to give you access, then sign in again. You can close this tab.";
+
+/// How the browser tab's page ends the sign-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ending {
+    /// Signed in, and the OpenBot serves the app to the new sign-in.
+    SignedIn,
+    /// Signed in, and the OpenBot then refused the app.
+    NotLetIn,
+    /// Refused, cancelled, not this sign-in's answer, or anything else that went wrong.
+    NotSignedIn,
+}
 
 /// What the tab's answer allows the page to load: its own inline styles, and nothing else.
 pub const END_PAGE_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'";
@@ -128,8 +144,9 @@ Sign in to the OpenBot at `address` in the person's browser.
 
 `open` is handed the address to open, the system browser in the app. The wait ends when the browser
 comes back with a code, when the person refuses, when `attempt` is cancelled, or after `wait`.
-Returns once the code is exchanged, the OpenBot has answered `/api/copilotkit/info` with the new token, and the
-refresh token is in `store`.
+Returns once the code is exchanged, the OpenBot has answered `/api/copilotkit/info` with the new
+token, and the refresh token is in `store`. The browser tab is answered only then, with the page
+for how it ended (`Ending`).
 */
 pub fn sign_in(
     address: &str,
@@ -168,17 +185,44 @@ pub fn sign_in(
     open(authorize.as_str())
         .map_err(|error| failed(format!("could not open the browser: {error}")))?;
 
-    let code = wait_for_code(&listener, &state, attempt, wait, &host)?;
+    let (code, mut tab) = wait_for_code(&listener, &state, attempt, wait, &host)?;
     drop(listener);
 
+    // The browser's request is held while the code is exchanged and the OpenBot is asked whether
+    // it lets the app in, so the tab says what the app is about to say, not "signed in" before
+    // the app knows. That takes a moment; the browser shows it as loading.
+    let signed_in = finish(address, &host, metadata, store, &code, &redirect, &verifier);
+    let ending = match &signed_in {
+        Ok(_) => Ending::SignedIn,
+        Err(problem) if kind_of(problem) == Some(Kind::AccessRefused) => Ending::NotLetIn,
+        Err(_) => Ending::NotSignedIn,
+    };
+    page(&mut tab, "200 OK", ending);
+    signed_in
+}
+
+/// The rest of a sign-in once the browser is back with a code: the exchange, the check that the
+/// OpenBot serves the app to the new sign-in, and the refresh token kept. Tokens the app will not
+/// use are revoked.
+fn finish(
+    address: &str,
+    host: &str,
+    metadata: &Metadata,
+    store: Store,
+    code: &str,
+    redirect: &str,
+    verifier: &str,
+) -> Result<Session, Problem> {
+    let host = host.to_owned();
+    let failed = |detail: String| Kind::SignInFailed.problem(&host, detail);
     let granted = token_request(
         &metadata.token_endpoint,
         &[
             ("grant_type", "authorization_code"),
-            ("code", &code),
-            ("redirect_uri", &redirect),
+            ("code", code),
+            ("redirect_uri", redirect),
             ("client_id", CLIENT_ID),
-            ("code_verifier", &verifier),
+            ("code_verifier", verifier),
         ],
     )
     .map_err(|refused| match refused {
@@ -205,8 +249,8 @@ pub fn sign_in(
         }),
         refreshing: Mutex::new(()),
     };
-    // The app's screens start with who is signed in. An OpenBot that refuses its own new token
-    // there is one from before it honoured an app's sign-in on the addresses the screens need.
+    // The app's screens start here. An OpenBot that refuses its own new token there does not
+    // let the app in (`serves_the_app`).
     if let Err(problem) = session.serves_the_app() {
         session.revoke();
         return Err(problem);
@@ -356,7 +400,15 @@ impl Session {
         })
     }
 
-    /// Whether the OpenBot serves the app's screens to this sign-in: `GET /api/copilotkit/info` with the token.
+    /**
+    Whether the OpenBot serves the app's screens to this sign-in: `GET /api/copilotkit/info` with
+    the token.
+
+    - 401 or 403: the person signed in, and that OpenBot does not let this sign-in in on the app's
+      screens (`access-refused`). Updating OpenBot is not the way on, so it is not `too-old`.
+    - 404: its release does not serve that address (`too-old`).
+    - Anything else that is not a success: `sign-in-failed`.
+    */
     fn serves_the_app(&self) -> Result<(), Problem> {
         let access = self.live.lock().unwrap().access.clone();
         let answered = http()
@@ -366,15 +418,16 @@ impl Session {
             .header(reqwest::header::ACCEPT, "application/json")
             .send()
             .map_err(|error| Kind::Unreachable.problem(&self.host, transport(error)))?;
+        let said = || {
+            format!(
+                "GET /api/copilotkit/info answered {} to a new sign-in",
+                answered.status()
+            )
+        };
         match answered.status().as_u16() {
             200..=299 => Ok(()),
-            401 | 404 => Err(Kind::TooOld.problem(
-                &self.host,
-                format!(
-                    "GET /api/copilotkit/info answered {} to a new sign-in",
-                    answered.status()
-                ),
-            )),
+            401 | 403 => Err(Kind::AccessRefused.problem(&self.host, said())),
+            404 => Err(Kind::TooOld.problem(&self.host, said())),
             status => Err(Kind::SignInFailed.problem(
                 &self.host,
                 format!("GET /api/copilotkit/info answered {status}"),
@@ -392,17 +445,23 @@ impl Session {
         self.store.forget(&self.address)
     }
 
-    /// Best effort: a token that could not be revoked ends by itself, the access token within the
-    /// hour.
+    /**
+    Best effort: a token that could not be revoked ends by itself, the access token within the
+    hour.
+
+    The access token first. Revoking the refresh token also ends every access token issued with
+    it (RFC 7009 §2.1; OpenBot deletes them), and OpenBot answers 400 `invalid_request` to the
+    revocation of a token it no longer has, so the other order always failed on the second one.
+    */
     fn revoke(&self) {
         let Some(endpoint) = &self.revocation_endpoint else {
             return;
         };
-        let (refresh, access) = {
+        let (access, refresh) = {
             let live = self.live.lock().unwrap();
-            (live.refresh.clone(), live.access.clone())
+            (live.access.clone(), live.refresh.clone())
         };
-        for (token, hint) in [(refresh, "refresh_token"), (access, "access_token")] {
+        for (token, hint) in [(access, "access_token"), (refresh, "refresh_token")] {
             if token.is_empty() {
                 continue;
             }
@@ -437,9 +496,12 @@ pub fn sign_out_saved(
     store.forget(address)
 }
 
+/// One revocation (RFC 7009): form-encoded, `client_id` in the body as a public client sends it.
+/// A failure says the status and the OAuth error code, and nothing the request carried.
 fn revoke_token(endpoint: &str, token: &str, hint: &str) -> Result<(), String> {
     let answered = http()?
         .post(endpoint)
+        .header(reqwest::header::ACCEPT, "application/json")
         .form(&[
             ("token", token),
             ("token_type_hint", hint),
@@ -447,11 +509,25 @@ fn revoke_token(endpoint: &str, token: &str, hint: &str) -> Result<(), String> {
         ])
         .send()
         .map_err(transport)?;
-    if answered.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("it answered {}", answered.status()))
+    let status = answered.status();
+    if status.is_success() {
+        return Ok(());
     }
+    let body: serde_json::Value = answered.json().unwrap_or(serde_json::Value::Null);
+    // The error code only, and only its own characters: a description may quote what was sent.
+    let code: String = body
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(64)
+        .collect();
+    Err(if code.is_empty() {
+        format!("it answered {status}")
+    } else {
+        format!("it answered {status} {code}")
+    })
 }
 
 /// One request to the token endpoint: form-encoded, with the client's id in the body.
@@ -495,14 +571,16 @@ fn token_request(endpoint: &str, form: &[(&str, &str)]) -> Result<Granted, Refus
     })
 }
 
-/// Wait for the browser to come back to the listener with this sign-in's code.
+/// Wait for the browser to come back to the listener with this sign-in's code. The code comes
+/// with the browser's request, still unanswered: the tab's page is chosen once the app knows how
+/// the sign-in ended.
 fn wait_for_code(
     listener: &TcpListener,
     state: &str,
     attempt: &Attempt,
     wait: Duration,
     host: &str,
-) -> Result<String, Problem> {
+) -> Result<(String, TcpStream), Problem> {
     let deadline = Instant::now() + wait;
     loop {
         if attempt.cancelled() {
@@ -515,7 +593,7 @@ fn wait_for_code(
         }
         match listener.accept() {
             Ok((mut stream, _)) => match callback(&mut stream, state) {
-                Callback::Code(code) => return Ok(code),
+                Callback::Code(code) => return Ok((code, stream)),
                 Callback::Refused(error) if error == "access_denied" => {
                     return Err(Kind::SignInCancelled.problem(host, "consent was not given"))
                 }
@@ -538,13 +616,15 @@ fn wait_for_code(
 }
 
 enum Callback {
+    /// This sign-in's code. The browser's request is not answered yet.
     Code(String),
     /// The OpenBot sent the browser back with an OAuth error code.
     Refused(String),
     NotOurs,
 }
 
-/// Read one request to the listener and answer the browser tab.
+/// Read one request to the listener, and answer the browser tab unless it brought this sign-in's
+/// code (`sign_in` answers that one).
 fn callback(stream: &mut TcpStream, state: &str) -> Callback {
     let Ok(request) = read_callback_request(stream, Duration::from_secs(2)) else {
         return Callback::NotOurs;
@@ -553,16 +633,16 @@ fn callback(stream: &mut TcpStream, state: &str) -> Callback {
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let parsed = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok();
     let Some(parsed) = parsed.filter(|url| method == "GET" && url.path() == CALLBACK_PATH) else {
-        page(stream, "404 Not Found", false);
+        page(stream, "404 Not Found", Ending::NotSignedIn);
         return Callback::NotOurs;
     };
     let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
     if query.get("state").map(String::as_str) != Some(state) {
-        page(stream, "400 Bad Request", false);
+        page(stream, "400 Bad Request", Ending::NotSignedIn);
         return Callback::NotOurs;
     }
     if let Some(error) = query.get("error") {
-        page(stream, "200 OK", false);
+        page(stream, "200 OK", Ending::NotSignedIn);
         // Only the code's own characters: it goes into the log.
         return Callback::Refused(
             error
@@ -573,23 +653,20 @@ fn callback(stream: &mut TcpStream, state: &str) -> Callback {
         );
     }
     match query.get("code").filter(|code| !code.is_empty()) {
-        Some(code) => {
-            page(stream, "200 OK", true);
-            Callback::Code(code.clone())
-        }
+        Some(code) => Callback::Code(code.clone()),
         None => {
-            page(stream, "400 Bad Request", false);
+            page(stream, "400 Bad Request", Ending::NotSignedIn);
             Callback::NotOurs
         }
     }
 }
 
-/// The browser tab's page: signed in, or the sign-in did not finish (`end_page`).
-pub fn end_page_for(signed_in: bool) -> String {
-    if signed_in {
-        end_page(SIGNED_IN_HEADING, SIGNED_IN_PAGE)
-    } else {
-        end_page(NOT_SIGNED_IN_HEADING, NOT_SIGNED_IN_PAGE)
+/// The browser tab's page for how the sign-in ended (`end_page`).
+pub fn end_page_for(ending: Ending) -> String {
+    match ending {
+        Ending::SignedIn => end_page(SIGNED_IN_HEADING, SIGNED_IN_PAGE),
+        Ending::NotLetIn => end_page(NOT_LET_IN_HEADING, NOT_LET_IN_PAGE),
+        Ending::NotSignedIn => end_page(NOT_SIGNED_IN_HEADING, NOT_SIGNED_IN_PAGE),
     }
 }
 
@@ -717,8 +794,10 @@ pub fn end_page(heading: &str, sentence: &str) -> String {
 }
 
 /// Answer the browser tab with its page, which loads nothing (`END_PAGE_POLICY`).
-fn page(stream: &mut TcpStream, status: &str, signed_in: bool) {
-    let body = end_page_for(signed_in);
+fn page(stream: &mut TcpStream, status: &str, ending: Ending) {
+    let body = end_page_for(ending);
+    // A tab closed meanwhile does not hold the app up.
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let _ = stream.write_all(
         format!(
             "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
@@ -827,23 +906,31 @@ mod tests {
         assert!(openbot.honours(&session.access().unwrap()));
     }
 
-    /// The tab's two pages are OpenBot's: its orb and name on a card, in light and dark as the
-    /// system is, saying what happened and to go back to the app. Served by this app from
+    /// The tab's pages are OpenBot's: its orb and name on a card, in light and dark as the
+    /// system is, saying what happened and what to do next. Served by this app from
     /// 127.0.0.1, so everything is inline: no script, no stylesheet, font or image from anywhere.
     #[test]
     fn the_tabs_pages_look_like_openbot_and_load_nothing_from_anywhere() {
-        for (signed_in, heading, sentence) in [
-            (true, SIGNED_IN_HEADING, SIGNED_IN_PAGE),
-            (false, NOT_SIGNED_IN_HEADING, NOT_SIGNED_IN_PAGE),
+        for (ending, heading, sentence) in [
+            (Ending::SignedIn, SIGNED_IN_HEADING, SIGNED_IN_PAGE),
+            (Ending::NotLetIn, NOT_LET_IN_HEADING, NOT_LET_IN_PAGE),
+            (
+                Ending::NotSignedIn,
+                NOT_SIGNED_IN_HEADING,
+                NOT_SIGNED_IN_PAGE,
+            ),
         ] {
-            let html = end_page_for(signed_in);
+            let html = end_page_for(ending);
             assert!(html.starts_with("<!doctype html>"), "{html}");
             assert!(html.contains(&format!("<h1>{heading}</h1>")), "{html}");
             assert!(html.contains(&format!("<p>{sentence}</p>")), "{html}");
-            assert!(
-                sentence.contains("Go back to the OpenBot app"),
-                "{sentence}"
-            );
+            if ending != Ending::NotLetIn {
+                assert!(
+                    sentence.contains("Go back to the OpenBot app"),
+                    "{sentence}"
+                );
+            }
+            assert!(!heading.contains('\u{2014}') && !sentence.contains('\u{2014}'));
             assert!(html.contains("<title>OpenBot</title>"), "{html}");
             assert!(html.contains("class=\"orb\""), "{html}");
             assert!(
@@ -856,18 +943,22 @@ mod tests {
                 assert!(!html.contains(outside), "{outside} in {html}");
             }
         }
-        assert!(!SIGNED_IN_PAGE.contains('\u{2014}') && !NOT_SIGNED_IN_PAGE.contains('\u{2014}'));
     }
 
-    /// Writes the tab's two pages, exactly as `page` serves them, under the build folder
+    /// Writes the tab's pages, exactly as `page` serves them, under the build folder
     /// (`target/end-pages`) for a look in a browser. Run on purpose: `--ignored`.
     #[test]
     #[ignore]
     fn write_the_tabs_pages_for_a_look() {
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/end-pages");
         std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("signed-in.html"), end_page_for(true)).unwrap();
-        std::fs::write(folder.join("not-signed-in.html"), end_page_for(false)).unwrap();
+        for (name, ending) in [
+            ("signed-in.html", Ending::SignedIn),
+            ("not-let-in.html", Ending::NotLetIn),
+            ("not-signed-in.html", Ending::NotSignedIn),
+        ] {
+            std::fs::write(folder.join(name), end_page_for(ending)).unwrap();
+        }
     }
 
     #[test]
@@ -935,25 +1026,70 @@ mod tests {
         assert_eq!(WAIT, Duration::from_secs(600));
     }
 
-    /// An OpenBot that signs the app in and then refuses the new token on `/api/copilotkit/info` is on a
-    /// release that cannot serve the app. Nothing is kept, and the tokens are revoked.
+    /// The OpenBot signs the person in, and then the app's first call with the new token
+    /// (`/api/copilotkit/info`) is refused. 401 and 403 are that OpenBot not letting this sign-in
+    /// in: the person is told so, with who to ask. Only 404, an address its release does not serve,
+    /// is a release this app cannot connect to. Either way the browser tab says the same as the
+    /// app, both tokens are revoked while they still work, and nothing is kept.
     #[test]
-    fn an_openbot_that_refuses_its_own_new_token_is_too_old() {
-        let openbot = FakeOpenBot::start(Shape::MeRefuses);
-        let (address, metadata) = check(&openbot);
+    fn a_new_sign_in_refused_on_the_first_call_says_why_in_the_app_and_the_tab() {
+        for (status, kind, ending) in [
+            (401, Kind::AccessRefused, Ending::NotLetIn),
+            (403, Kind::AccessRefused, Ending::NotLetIn),
+            (404, Kind::TooOld, Ending::NotSignedIn),
+        ] {
+            let openbot = FakeOpenBot::start(Shape::InfoAnswers(status));
+            let (address, metadata) = check(&openbot);
+            let store = in_memory();
+            let browser = Browser::approves();
+            let problem = sign_in(
+                &address,
+                &metadata,
+                store.clone(),
+                &Attempt::default(),
+                Duration::from_secs(20),
+                browser.opener(),
+            )
+            .expect_err("refused");
+            assert_eq!(kind_of(&problem), Some(kind), "{status}");
+            assert_eq!(problem.said, kind.said(&host_of(&address)), "{status}");
+            assert!(
+                problem
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains(&status.to_string())),
+                "{status}: {:?}",
+                problem.detail
+            );
+
+            // The tab was answered once the app knew, and says what the app says.
+            let tab = browser.tab();
+            assert!(tab.starts_with("HTTP/1.1 200"), "{tab}");
+            assert!(tab.contains(&end_page_for(ending)), "{status}: {tab}");
+            assert!(!tab.contains(SIGNED_IN_HEADING), "{status}: {tab}");
+
+            assert_eq!(store.get(&address).unwrap(), None);
+            assert_eq!(openbot.live_tokens(), 0, "the unused sign-in was revoked");
+            assert_eq!(
+                openbot.revoke_ended(),
+                [true, true],
+                "{status}: each revocation ended a token that still worked"
+            );
+        }
+    }
+
+    /// Sign-out against an OpenBot whose revocation fails: the failure is only logged, and the
+    /// sign-in is still forgotten on this computer.
+    #[test]
+    fn sign_out_forgets_the_sign_in_when_the_openbot_cannot_revoke_it() {
+        let openbot = FakeOpenBot::start(Shape::RevokeBroken);
         let store = in_memory();
-        let problem = sign_in(
-            &address,
-            &metadata,
-            store.clone(),
-            &Attempt::default(),
-            Duration::from_secs(20),
-            Browser::approves().opener(),
-        )
-        .expect_err("too old");
-        assert_eq!(kind_of(&problem), Some(Kind::TooOld));
-        assert_eq!(store.get(&address).unwrap(), None);
-        assert_eq!(openbot.live_tokens(), 0, "the unused sign-in was revoked");
+        let session = openbot.sign_in(store.clone());
+        assert!(store.get(&openbot.address()).unwrap().is_some());
+        session.sign_out().unwrap();
+        assert_eq!(openbot.revoke_requests().len(), 2);
+        assert_eq!(store.get(&openbot.address()).unwrap(), None);
+        assert!(session.access().is_err());
     }
 
     /// The fake checks S256 as the real one does: a code presented with another verifier is
@@ -1106,9 +1242,11 @@ mod tests {
         );
     }
 
-    /// Sign-out revokes both tokens at the OpenBot, then forgets the sign-in here.
+    /// Sign-out revokes both tokens at the OpenBot, then forgets the sign-in here. The access
+    /// token goes first: revoking the refresh token also ends the access tokens issued with it,
+    /// and the OpenBot answers 400 to a revocation of a token it no longer has.
     #[test]
-    fn sign_out_revokes_then_forgets() {
+    fn sign_out_revokes_each_token_while_it_still_works_then_forgets() {
         let openbot = FakeOpenBot::start(Shape::Current);
         let store = in_memory();
         let session = openbot.sign_in(store.clone());
@@ -1120,9 +1258,11 @@ mod tests {
 
         let revoked = openbot.revoke_requests();
         assert_eq!(revoked.len(), 2);
-        assert_eq!(revoked[0]["token"], refresh);
-        assert_eq!(revoked[0]["token_type_hint"], "refresh_token");
-        assert_eq!(revoked[1]["token"], access);
+        assert_eq!(revoked[0]["token"], access);
+        assert_eq!(revoked[0]["token_type_hint"], "access_token");
+        assert_eq!(revoked[1]["token"], refresh);
+        assert_eq!(revoked[1]["token_type_hint"], "refresh_token");
+        assert_eq!(openbot.revoke_ended(), [true, true]);
         assert!(revoked
             .iter()
             .all(|request| request["client_id"] == "openbot-desktop-oauth"));
