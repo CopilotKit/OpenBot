@@ -90,7 +90,7 @@ export async function readDeployment(options: {
       error.status !== 404
     )
       throw error;
-    const own = (await listOrganizations({ limit: 1 }, options))
+    const own = (await listOrganizations({ limit: 1 }, undefined, options))
       .organizations[0];
     if (!own) throw error;
     return getDeployment(own.id, options);
