@@ -288,7 +288,7 @@ function DelegationForm({
                       id="delegation-instructions"
                       maxLength={4000}
                       onChange={(event) => setInstructions(event.target.value)}
-                      placeholder="Send research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself."
+                      placeholder="For example: send anything about numbers to the agent that works with figures, and answer greetings yourself."
                       rows={4}
                       value={instructions}
                     />
