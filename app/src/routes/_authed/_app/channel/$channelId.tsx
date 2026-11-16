@@ -1,4 +1,4 @@
-import { IconSettings } from "@tabler/icons-react";
+import { IconListDetails, IconSettings } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
@@ -14,6 +14,7 @@ import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { TaskDetails } from "@/components/tasks/task-details";
 import { Button } from "@/components/ui/button";
 import { conversationLoadFailure } from "@/lib/channels/load-failure";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
@@ -26,11 +27,14 @@ import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
+import { taskListQueryOptions } from "@/lib/tasks/queries";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
   /** Opens the Bot's screen in the shared detail pane. */
   watch: z.boolean().optional(),
+  /** Opens a task's details (who ran it, what it read and made) in the shared detail pane. */
+  details: z.boolean().optional(),
 });
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -51,7 +55,7 @@ export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
 
 function RouteComponent() {
   const { channelId } = Route.useParams();
-  const { settings, watch } = Route.useSearch();
+  const { settings, watch, details } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
   /*
    * While the conversation's own read is on its way, it is named from the sidebar's list when the
@@ -73,6 +77,12 @@ function RouteComponent() {
   const isSettingsOpen = settings === true;
   const prefersReducedMotion = useReducedMotion();
   const isWatching = watch === true;
+  // A task's own conversation: its details open beside it.
+  const { data: task } = useQuery({
+    ...taskListQueryOptions(),
+    select: (tasks) => tasks.find((one) => one.channelId === channelId),
+  });
+  const isShowingDetails = details === true && task !== undefined;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
   const noComputers = useNoBotComputers() === true;
@@ -99,8 +109,8 @@ function RouteComponent() {
   // A command in the chat clicked opens the Computer on its terminal.
   useOpenComputerOnRequest(agentId, () => show("watch"));
 
-  // Settings and watch share one pane; opening either clears the other URL flag.
-  const show = (next: "settings" | "watch" | null) => {
+  // Settings, watch and a task's details share one pane; opening one clears the others' URL flags.
+  const show = (next: "settings" | "watch" | "details" | null) => {
     // Dismissal applies only to the current browser-activity run.
     if (next !== "watch" && isWatching) autoWatch.dismiss();
     return navigate({
@@ -108,6 +118,7 @@ function RouteComponent() {
         ...previous,
         settings: next === "settings" ? true : undefined,
         watch: next === "watch" ? true : undefined,
+        details: next === "details" ? true : undefined,
       }),
     });
   };
@@ -115,16 +126,23 @@ function RouteComponent() {
   return (
     <DetailPanel
       onClose={() => show(null)}
-      open={(isSettingsOpen || isWatching) && agentId !== undefined}
+      open={
+        (isSettingsOpen || isWatching || isShowingDetails) &&
+        agentId !== undefined
+      }
       detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
-      title={isWatching ? "Computer" : undefined}
+      title={
+        isWatching ? "Computer" : isShowingDetails ? "Task details" : undefined
+      }
       waiting={
         channel.data ? (
           <ConversationApprovals threadId={channel.data.threadId} />
         ) : null
       }
       detail={
-        agentId === undefined ? null : isWatching ? (
+        agentId === undefined ? null : isShowingDetails && task ? (
+          <TaskDetails task={task} />
+        ) : isWatching ? (
           // Manual watch remains active even when there is no current browser action.
           <ComputerViewPanel agentId={agentId} name={channel?.data?.name} />
         ) : (
@@ -185,6 +203,18 @@ function RouteComponent() {
             </motion.span>
           </div>
           <div className="flex flex-row gap-1.5">
+            {task ? (
+              <Button
+                aria-label="Task details"
+                aria-pressed={isShowingDetails}
+                className={isShowingDetails ? "bg-foreground/5" : undefined}
+                onClick={() => show(isShowingDetails ? null : "details")}
+                variant="ghost"
+                size="icon"
+              >
+                <IconListDetails className="size-4.5" />
+              </Button>
+            ) : null}
             <ComputerChatControls
               computerId={agentId}
               noComputers={noComputers}

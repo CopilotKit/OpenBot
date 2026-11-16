@@ -17,6 +17,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
+import type { TranscriptItem } from "@/components/channels/tool-activity";
+import { foldTurnWork } from "@/components/tasks/turn-work";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -204,4 +206,40 @@ test("a turn the server has not listed says how many steps it took", async () =>
     ),
   );
   expect(view.getByText(ANSWER)).toBeTruthy();
+});
+
+test("a step the app draws as its own card folds too, and what is drawn for the person stays out", () => {
+  const step = (
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    result?: string,
+  ) => ({
+    kind: "tool" as const,
+    id,
+    toolCall: {
+      id,
+      type: "function" as const,
+      function: { name, arguments: JSON.stringify(args) },
+    },
+    ...(result === undefined ? {} : { result }),
+  });
+  const items: TranscriptItem[] = [
+    { kind: "text", id: "brief", role: "user", text: "Read the page." },
+    // A command it ran, drawn as Claude Code's command card: a step of the work.
+    step(
+      "bash",
+      "Bash",
+      { command: "curl -s https://example.com" },
+      "<html>…</html>",
+    ),
+    // A request for the person's help: drawn for them, never folded away.
+    step("help", "computer_request_help", { reason: "A captcha" }, "Done."),
+    // A step still waiting (an approval on its way): stays out until it has an answer.
+    step("waiting", "computer_click", { ref: "e1" }),
+    { kind: "text", id: "answer", role: "assistant", text: "Done." },
+  ];
+  const folds = foldTurnWork(items, false);
+  expect([...folds.inside]).toEqual(["bash"]);
+  expect(folds.at.get("bash")?.askId).toBe("brief");
 });

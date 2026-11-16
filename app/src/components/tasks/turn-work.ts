@@ -1,14 +1,21 @@
-import type { TranscriptItem } from "@/components/channels/tool-activity";
+import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
+import {
+  asksThePerson,
+  type TranscriptItem,
+} from "@/components/channels/tool-activity";
 import { isPersonSentMessage } from "@/components/channels/transcript-turns";
+import { claudeCodeCall } from "@/lib/copilot/coding-calls";
 
 /*
  * A task's thread, read the way dots reads one: what it was asked, one "Worked for 2m" row, and
  * what it came back with. The steps it took and the lines it said on the way fold into that row,
  * which opens to them.
  *
- * Only plain work folds: a run of tool lines (`tools`) and what the Bot said before its answer.
- * Anything drawn (a chart, a table, an app's card, an approval) stays where it is, because it is
- * either part of the answer or something the person has to act on, and neither may sit behind a
+ * Only work folds: a run of tool lines (`tools`), a step the app draws as a card of its own (a
+ * command it ran, a file it changed, a page it opened on its computer, a subtask), and what the Bot
+ * said before its answer. What is drawn for the person (a chart, a table, an app's card, a
+ * question, a request for help, an approval still waiting) stays where it is, because it is either
+ * part of the answer or something the person has to act on, and neither may sit behind a
  * disclosure. A turn still running keeps its newest line out, since it may be the answer arriving.
  */
 
@@ -33,6 +40,19 @@ export type TurnWorkFolds = {
 
 /** No folds: a thread that is not a task's. */
 export const NO_TURN_WORK: TurnWorkFolds = { at: new Map(), inside: new Set() };
+
+/**
+ * Whether a call drawn on its own is a step of the work: Claude Code's own tools, the Bot computer's
+ * (but not its requests to the person), an app's call, a subtask. Finished, and asking nothing.
+ */
+function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
+  if (item.result === undefined || asksThePerson(item.result)) return false;
+  const { name, arguments: args } = item.toolCall.function;
+  if (name.startsWith("mcp__") || name === SUBAGENT_TOOL) return true;
+  if (name.startsWith("computer_"))
+    return !name.startsWith("computer_request_");
+  return claudeCodeCall(name, args);
+}
 
 function isPersons(item: TranscriptItem): boolean {
   return (
@@ -84,6 +104,7 @@ export function foldTurnWork(
       if (!item || index === answer) continue;
       if (
         item.kind === "tools" ||
+        (item.kind === "tool" && isWorkStep(item)) ||
         (item.kind === "text" && item.role === "assistant")
       )
         rows.push({ item, index });
@@ -106,7 +127,12 @@ export function foldTurnWork(
 export function stepsIn(work: TurnWork): number {
   return work.rows.reduce(
     (count, { item }) =>
-      count + (item.kind === "tools" ? item.steps.length : 0),
+      count +
+      (item.kind === "tools"
+        ? item.steps.length
+        : item.kind === "tool"
+          ? 1
+          : 0),
     0,
   );
 }

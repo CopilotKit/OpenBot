@@ -54,6 +54,10 @@ import {
   SentFromBot,
   TaskReport,
 } from "@/components/tasks/task-thread";
+import {
+  publishThreadWork,
+  threadWorkOf,
+} from "@/components/tasks/thread-work";
 import { foldTurnWork, NO_TURN_WORK } from "@/components/tasks/turn-work";
 import { isTaskThread, WorkedFor } from "@/components/tasks/worked-for";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -2158,9 +2162,13 @@ export function ChatTranscript({
    * row (`foldTurnWork`). Worked out on every render, as `items` is.
    */
   const queryClient = useContext(QueryClientContext);
-  const folds = isTaskThread(threadId, items, queryClient)
-    ? foldTurnWork(items, busy)
-    : NO_TURN_WORK;
+  const taskThread = isTaskThread(threadId, items, queryClient);
+  const folds = taskThread ? foldTurnWork(items, busy) : NO_TURN_WORK;
+  // What the task read and made, for its Details pane beside the thread (`thread-work.ts`).
+  useEffect(() => {
+    if (taskThread && threadId)
+      publishThreadWork(threadId, threadWorkOf(visible));
+  });
   const taskWork = {
     folds,
     lastAskId: [...folds.at.values()].at(-1)?.askId,
