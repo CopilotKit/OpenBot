@@ -7433,7 +7433,7 @@ paths:
         - Skills
       operationId: listSkills
       summary: List skills
-      description: 'Return one page of the skills the caller can see: the organization''s and their own. An admin of the organization sees every member''s. Another organization''s skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization''s that are granted to no team. An organization''s skill granted to teams is listed only to those teams'' people. An admin of the organization sees every skill. Another organization''s skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -7476,7 +7476,7 @@ paths:
         - Skills
       operationId: getSkill
       summary: Read a skill
-      description: 'Return one skill the caller can see: the organization''s or their own. An admin can read anybody''s. Somebody else''s skill is not found.'
+      description: Return one skill the caller can see, as the list shows them. An admin can read any. One the caller can't see is not found.
       security:
         - webSession: []
         - appOAuth:
@@ -26343,6 +26343,7 @@ components:
         - tools
         - ownerId
         - botIds
+        - usableOnYourBots
       properties:
         slug:
           type: string
@@ -26372,6 +26373,9 @@ components:
           description: The Bots that offer it, by id.
           items:
             type: string
+        usableOnYourBots:
+          type: boolean
+          description: 'Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot''s Skills page offers these.'
     SkillPage:
       type: object
       required:
@@ -37145,7 +37149,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SkillNotFound:
-      description: No skill has that slug, it is somebody else's and the caller isn't an admin, or the organization does not exist.
+      description: No skill has that slug, the caller isn't an admin and can't see it, or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -41828,6 +41832,7 @@ components:
             ownerId: user_3f1c9a
             botIds:
               - general-assistant
+            usableOnYourBots: true
           - slug: weekly-report
             title: Weekly report
             summary: Sum up the week's work for the team.
@@ -41837,6 +41842,7 @@ components:
             botIds:
               - general-assistant
               - research-assistant
+            usableOnYourBots: false
         nextCursor: null
     SkillExample:
       summary: A person's own skill, offered by one Bot.
@@ -41850,6 +41856,7 @@ components:
         ownerId: user_3f1c9a
         botIds:
           - general-assistant
+        usableOnYourBots: true
     SkillTeamGrantsExample:
       summary: Granted to one team.
       value:

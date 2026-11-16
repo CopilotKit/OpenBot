@@ -11,8 +11,11 @@ paths:
       operationId: listSkills
       summary: List skills
       description: >-
-        Return one page of the skills the caller can see: the organization's
-        and their own. An admin of the organization sees every member's.
+        Return one page of the skills the caller can see: their own, the
+        ones granted to a team they are in, and the organization's that are
+        granted to no team. An organization's skill granted to teams is
+        listed only to those teams' people. An admin of the organization
+        sees every skill.
         Another organization's skills are never listed. Ordered by title, then
         slug. A missing cursor starts at the first page and nextCursor null
         ends the list.
@@ -57,8 +60,8 @@ paths:
       operationId: getSkill
       summary: Read a skill
       description: >-
-        Return one skill the caller can see: the organization's or their own.
-        An admin can read anybody's. Somebody else's skill is not found.
+        Return one skill the caller can see, as the list shows them. An admin
+        can read any. One the caller can't see is not found.
       security:
         - webSession: []
         - appOAuth: [skills:read]
@@ -293,7 +296,7 @@ components:
       description: >-
         A named instruction a person runs with / in a conversation, on a Bot
         that offers it.
-      required: [slug, title, summary, instructions, tools, ownerId, botIds]
+      required: [slug, title, summary, instructions, tools, ownerId, botIds, usableOnYourBots]
       properties:
         slug:
           type: string
@@ -323,6 +326,12 @@ components:
           description: The Bots that offer it, by id.
           items:
             type: string
+        usableOnYourBots:
+          type: boolean
+          description: >-
+            Whether the caller may put it on a Bot they own: it is their own,
+            or it is granted to a team they are in. A Bot's Skills page offers
+            these.
     SkillInput:
       type: object
       additionalProperties: false
@@ -400,8 +409,8 @@ components:
   responses:
     SkillNotFound:
       description: >-
-        No skill has that slug, it is somebody else's and the caller isn't an
-        admin, or the organization does not exist.
+        No skill has that slug, the caller isn't an admin and can't see it,
+        or the organization does not exist.
       content:
         application/problem+json:
           schema:
@@ -523,6 +532,7 @@ components:
             tools: [google-calendar/list_events]
             ownerId: user_3f1c9a
             botIds: [general-assistant]
+            usableOnYourBots: true
           - slug: weekly-report
             title: Weekly report
             summary: Sum up the week's work for the team.
@@ -530,6 +540,7 @@ components:
             tools: []
             ownerId: null
             botIds: [general-assistant, research-assistant]
+            usableOnYourBots: false
         nextCursor: null
     SkillTeamGrantsExample:
       summary: Granted to one team.
@@ -545,3 +556,4 @@ components:
         tools: [google-calendar/list_events]
         ownerId: user_3f1c9a
         botIds: [general-assistant]
+        usableOnYourBots: true

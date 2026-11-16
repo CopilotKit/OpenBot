@@ -29,6 +29,8 @@ export type TodaySkill = {
   tools?: string[];
   ownerUserId?: string | null;
   grantedTo?: string[];
+  /** Whether the person asking may put it on a Bot they own. The server works it out; false here. */
+  usableOnYourBots?: boolean;
 };
 
 /** The API's skill, from what today's page said about it. */
@@ -41,6 +43,7 @@ export function skillBody(today: TodaySkill) {
     tools: today.tools ?? [],
     ownerId: today.ownerUserId ?? null,
     botIds: today.grantedTo ?? [],
+    usableOnYourBots: today.usableOnYourBots ?? false,
   };
 }
 

@@ -23,6 +23,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: ["google-calendar/list_events"],
       ownerId: "user_3f1c9a",
       botIds: ["general-assistant"],
+      usableOnYourBots: true,
     },
     {
       slug: "weekly-report",
@@ -33,6 +34,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
       tools: [],
       ownerId: null,
       botIds: ["general-assistant", "research-assistant"],
+      usableOnYourBots: false,
     },
   ],
   nextCursor: null,
@@ -47,6 +49,7 @@ export const getGetSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  usableOnYourBots: true,
 });
 
 export const getReplaceSkillResponseMock = (): Skill => ({
@@ -58,6 +61,7 @@ export const getReplaceSkillResponseMock = (): Skill => ({
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
+  usableOnYourBots: true,
 });
 
 export const getGetSkillTeamGrantsResponseMock = (): SkillTeamGrants => ({
