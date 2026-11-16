@@ -228,8 +228,13 @@ function approvalParts(action: {
    * Pipeline Bot". It read "openbot/share private information on handoff:" and a person's id.
    */
   if (action.toolRef === PRIVATE_SHARE_TOOL_REF) {
-    const audience = (action.args as { audience?: unknown } | undefined)
-      ?.audience;
+    const { audience, handOff } = (action.args ?? {}) as {
+      audience?: unknown;
+      handOff?: unknown;
+    };
+    // One card for a hand-off that also shares: "hand this to Pipeline Bot".
+    if (typeof handOff === "string" && handOff.trim())
+      return { action: "hand this to", place: handOff.trim(), joiner: "" };
     return {
       action: "share private information with",
       place:

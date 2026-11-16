@@ -274,5 +274,13 @@ describe("naming what an approval asks to do", () => {
     expect(
       approvalWords({ toolRef: "bot/message_bot", scope: "Pipeline Bot" }),
     ).toEqual({ action: "ask", place: "Pipeline Bot" });
+    // One card for a hand-off that also shares: it names the Bot the work is handed to.
+    expect(
+      approvalWords({
+        toolRef: "openbot/share_private_information",
+        scope: "handoff:usr_dana",
+        args: { audience: "Pipeline Bot", handOff: "Pipeline Bot" },
+      }),
+    ).toEqual({ action: "hand this to", place: "Pipeline Bot" });
   });
 });
