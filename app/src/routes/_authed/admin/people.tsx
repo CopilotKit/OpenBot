@@ -191,6 +191,13 @@ function PeoplePage() {
             {rows.map((person, index) => {
               const isSelf = person.id === currentUser.data?.id;
               const busy = setRole.isPending || setAccess.isPending;
+              /*
+               * An owner governs the organization as an admin does, so their Admin switch reads on.
+               * Their role is not this switch's to change (only an owner gives ownership away, in
+               * Organization settings), and the server keeps the owner, so neither switch nor
+               * Remove is offered for them.
+               */
+              const owner = person.role === "owner";
 
               return (
                 <StaggerItem index={index} key={person.id}>
@@ -227,7 +234,9 @@ function PeoplePage() {
                       </Button>
                       <Button
                         aria-label={`${person.revoked ? "Restore" : "Remove"} ${nameOf(person)}`}
-                        disabled={busy || isSelf || person.configuredAdmin}
+                        disabled={
+                          busy || isSelf || person.configuredAdmin || owner
+                        }
                         onClick={() => {
                           // Removing is asked about first. Restoring ends nothing, so it applies at once.
                           if (person.revoked) {
@@ -247,8 +256,10 @@ function PeoplePage() {
                       </Button>
                       <Switch
                         aria-label={`Admin: ${person.email}`}
-                        checked={person.role === "admin"}
-                        disabled={busy || person.configuredAdmin || isSelf}
+                        checked={isOrganizationAdmin(person.role)}
+                        disabled={
+                          busy || person.configuredAdmin || isSelf || owner
+                        }
                         onCheckedChange={(checked) =>
                           setRole.mutate({
                             userId: person.id,
