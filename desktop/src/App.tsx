@@ -933,6 +933,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         invoke<ReleaseMove | null>("upgrade_due", {
           root: root.trim(),
         }).catch(() => null));
+      // Headed as an update while it is one, and not by the next Start that is not.
+      setReleaseDue(Boolean(due));
       let outcome: ReleaseOutcome | null = null;
       if (due) {
         outcome = await invoke<ReleaseOutcome>("upgrade_and_start", startWith);
@@ -1528,7 +1530,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <div className="sheet connection-sheet">
           <h1>
             {localStarting || installingAfresh
-              ? "Starting OpenBot"
+              ? // A Start that moves the installation to this app's release is an update, and says
+                // so: "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated.
+                releaseDue && !installingAfresh
+                ? "Updating OpenBot"
+                : "Starting OpenBot"
               : "OpenBot is stopped"}
           </h1>
           <p className="lede">

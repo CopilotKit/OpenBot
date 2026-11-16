@@ -3747,7 +3747,9 @@ test("relaunch upgrades an older installation to this app's release as part of S
     running: true,
     detail: said,
   });
-  expect(view.getByRole("heading", { name: "Starting OpenBot" })).toBeTruthy();
+  // Headed as the update it is: "Starting OpenBot" read as if nothing were being updated.
+  expect(view.getByRole("heading", { name: "Updating OpenBot" })).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Starting OpenBot" })).toBeNull();
   expect(view.getByText(said)).toBeTruthy();
   await act(async () =>
     moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
@@ -3834,14 +3836,11 @@ async function handsOverWithoutRunning() {
     await expectHandover();
     // While the window is asked to show OpenBot, and after it answered and OpenBot's page loads.
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
-    expect(
-      view.getByRole("heading", { name: "Starting OpenBot" }),
-    ).toBeTruthy();
+    const heading = updates ? "Updating OpenBot" : "Starting OpenBot";
+    expect(view.getByRole("heading", { name: heading })).toBeTruthy();
     await act(async () => showing.resolve(null));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
-    expect(
-      view.getByRole("heading", { name: "Starting OpenBot" }),
-    ).toBeTruthy();
+    expect(view.getByRole("heading", { name: heading })).toBeTruthy();
     expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull();
     expect(
       view.queryByRole("button", { name: "Change AI connection" }),
@@ -3966,7 +3965,7 @@ test("the journey says the update step running now, never one that finished, on 
   for (const [events, said, bytes] of upgrade) {
     for (const event of events) await emitProgress(event);
     expect(
-      view.getByRole("heading", { name: "Starting OpenBot" }),
+      view.getByRole("heading", { name: "Updating OpenBot" }),
     ).toBeTruthy();
     // A download's measure is said with the download it counts, never as the bar's own caption: on
     // Windows K the time line read "About 2 minutes left · 304.0 MB of 317.0 MB" beside a bar a

@@ -893,7 +893,8 @@ describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
 /** Where the step's heading and its first row are: what a person is reading. */
 async function anchors(page: Page) {
   const heading = await page
-    .getByRole("heading", { name: "Starting OpenBot" })
+    // Only the Start that updates OpenBot (`#start`) asks.
+    .getByRole("heading", { name: "Updating OpenBot" })
     .boundingBox();
   const first = await page
     .getByRole("listitem", { name: "Setting up OpenBot" })
@@ -1419,7 +1420,8 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         lede: document.querySelector("main .lede")?.textContent ?? "",
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
-      expect(said.heading).toBe("Starting OpenBot");
+      // This Start updates OpenBot, and its heading says so.
+      expect(said.heading).toBe("Updating OpenBot");
       expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
@@ -1577,8 +1579,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         0,
       );
       const note = page.locator(".cannot-cancel");
+      // This Start updates OpenBot (`upgrade_due` answers a move), so it is said as the update.
       expect(await note.textContent()).toBe(
-        "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
+        "You can't cancel this last step. Stopping it partway could leave the update half done.",
       );
       expect((await note.boundingBox())?.height).toBe(40);
       // OpenBot updating itself, as on Windows G.
