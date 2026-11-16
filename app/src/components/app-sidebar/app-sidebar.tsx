@@ -14,10 +14,8 @@ import { openNewOrganization } from "@/components/organizations/new-organization
 import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import {
-  DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   InputGroup,
@@ -72,7 +70,7 @@ import {
 import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { AccountLabel } from "./account-label";
+import { AccountMenu } from "./account-label";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
@@ -604,14 +602,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               ),
             )}
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
-                }
-              >
-                <AccountLabel />
-              </DropdownMenuTrigger>
+            <AccountMenu>
               <DropdownMenuContent
                 align="start"
                 className="p-1.5"
@@ -663,7 +654,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </AccountMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
