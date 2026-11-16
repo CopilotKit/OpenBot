@@ -86,6 +86,8 @@ services:
     # everything else the image would have started.
     entrypoint: ["/app/bin/openbot", "server"]
     working_dir: /app/server
+    # Docker's init as PID 1, to reap what this process starts; see `agent-harness` below.
+    init: true
     # The deployment's settings, `.env`. Optional, because `docker compose config` and a first start
     # both come before anything wrote it. `scripts/start.sh` names a file of its own instead, `.env`
     # with its run's environment on top (scripts/server-env.ts), removed once the container exists.
@@ -314,6 +316,9 @@ services:
     # address, no keys, no licence. The server's executable is in the image, and from here it has
     # none of those either, so it does not start.
     entrypoint: ["/app/bin/openbot-computer"]
+    # A Bot's shell and browser start processes of their own. Docker's init as PID 1 reaps them;
+    # see `agent-harness` below.
+    init: true
     # A Bot's shell runs `ping`, which needs raw ICMP sockets. Docker grants NET_RAW by default and
     # Podman does not, so without this ping fails with "Operation not permitted" on Podman (the
     # Desktop's engine on Windows), even as root. Asked for here so both engines give the same.
@@ -400,6 +405,8 @@ services:
     # Pulled like the server's; see server above.
     image: ${SUPERVISOR_IMAGE:-ghcr.io/copilotkit/openbot-supervisor:${OPENBOT_BACKEND_TAG:-see-backend-images.env}}
     pull_policy: ${IMAGE_PULL_POLICY:-missing}
+    # Docker's init as PID 1, to reap what this process starts; see `agent-harness` below.
+    init: true
     # The same file, because this process does not read these itself: it forwards every EGRESS_PROXY
     # key out of its own environment into each computer it creates, so it has to be given them first.
     env_file:
@@ -489,6 +496,14 @@ services:
     profiles: ["harness"]
     image: ${PICKED_HARNESS_IMAGE:-busybox:1.37}
     pull_policy: missing
+    # DOCKER'S INIT AS PID 1, here and on every service that starts other processes. A harness runs
+    # its agent's CLI and tools as child processes, and nothing in the image reaps the ones that
+    # finish: no harness image has an init, and the server's and computer's entrypoints above drop
+    # whatever their image had. A process left a zombie cannot be killed, so `docker stop` waited
+    # on it and quitting OpenBot Desktop failed after minutes with "PID ... is zombie and can not be
+    # killed". The init reaps them and passes `docker stop`'s signal on. PostgreSQL reaps its own,
+    # and the services kept for older apps start nothing.
+    init: true
     ports:
       # Loopback, and on the image's own port on both sides. The server is a host process, so it
       # reaches this the same way it reaches the managed Bot: over the published port, not the
@@ -550,6 +565,8 @@ services:
     # second stack's start moved it and the first stack's Bot was no longer the image it was built as.
     image: ${LANGGRAPH_IMAGE:-${COMPOSE_PROJECT_NAME:-openbot}-agent-langgraph-agui:latest}
     pull_policy: ${IMAGE_PULL_POLICY:-build}
+    # Docker's init as PID 1, to reap what this process starts; see `agent-harness` above.
+    init: true
     ports:
       # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
       # on the machine before they can even try it. Nothing legitimate reaches a Bot from another

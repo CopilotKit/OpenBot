@@ -105,6 +105,12 @@ every deployment:
   of OpenBot stopped at "Opening OpenBot". The uninstaller now stops every container in OpenBot's
   own machine first, which takes their rules with them, and removes OpenBot's rules itself if they
   won't stop. Your own machines' and Docker's rules are never touched.
+- **Quitting OpenBot no longer fails on a stuck process.** Quitting during a restart could wait
+  minutes and fail, and the next start said "OpenBot had trouble shutting down last time": Docker
+  couldn't stop the harness's container because a finished process in it had never been cleaned
+  up. Every OpenBot container whose program starts other processes now runs Docker's own init
+  (`init: true` in `docker-compose.yml`), which cleans them up and passes the stop on, so the
+  containers stop at once.
 - **CopilotKit Intelligence 0.16.0-rc.13, CLI `copilotkit@7334f7d`.** OpenBot Desktop's back end
   moves to Intelligence 0.16.0-rc.13 and the Helm chart to 0.16.0-rc.12, and the bundled CLI to its
   production build. The CLI is `6bfaa0f5c`, which added `telemetry link`, with `--app-path` added to
