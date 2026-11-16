@@ -43,6 +43,7 @@ import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
@@ -122,6 +123,11 @@ function PeoplePage() {
   const [removing, setRemoving] = useState<Person | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const organization = useRemovalOrganization();
+  /*
+   * INITIAL_ADMIN_EMAILS names the admins of the deployment's first organization (`default`, as the
+   * API addresses it) and of no other, so only its People page says so.
+   */
+  const inFirstOrganization = useCurrentOrganizationId() === "default";
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -133,7 +139,11 @@ function PeoplePage() {
       title="People"
     >
       <PageSection
-        description="Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+        description={
+          inFirstOrganization
+            ? "Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+            : undefined
+        }
         title="Who is here"
       >
         {failure ? (

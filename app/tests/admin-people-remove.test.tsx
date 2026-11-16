@@ -22,6 +22,10 @@ import {
   within,
 } from "@testing-library/react";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { Route } from "@/routes/_authed/admin/people";
 import { ME_PATH, meResponse, PEOPLE_PATH, personBody } from "./accounts-api";
@@ -72,12 +76,15 @@ let refusal: string | null = null;
  * and has no list of them to answer (the address is not served), as before organizations.
  */
 let severalOrganizations = false;
+/** Which of the person's organizations they are working in, where there are several. */
+let activeOrganization = "default";
 
 beforeEach(() => {
   removed.clear();
   writes.length = 0;
   refusal = null;
   severalOrganizations = false;
+  activeOrganization = "default";
   queryClient.clear();
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -99,7 +106,7 @@ beforeEach(() => {
             name: "Acme Freight",
             role: "admin",
             personal: false,
-            active: true,
+            active: activeOrganization === "default",
           },
           {
             id: "org_dana",
@@ -107,7 +114,7 @@ beforeEach(() => {
             name: "Dana's organization",
             role: "owner",
             personal: true,
-            active: false,
+            active: activeOrganization === "org_dana",
           },
         ],
         canCreate: true,
@@ -252,6 +259,38 @@ test("with several organizations, Remove says it takes them out of this one alon
   expect(
     view.getByText(/sam@acme\.test · Removed from Acme Freight/),
   ).toBeTruthy();
+});
+
+/*
+ * INITIAL_ADMIN_EMAILS names the admins of the deployment's first organization, `default`, and
+ * nowhere else. On another organization's People page the line saying those addresses are always
+ * admins was false there.
+ */
+test("the INITIAL_ADMIN_EMAILS line shows in the first organization only", async () => {
+  const LINE =
+    "Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here.";
+  severalOrganizations = true;
+  const first = await draw();
+  expect(await first.findByText(LINE)).toBeTruthy();
+  cleanup();
+
+  activeOrganization = "org_dana";
+  queryClient.clear();
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: false,
+    edition: "team",
+  });
+  try {
+    const second = await draw();
+    await second.findByText("Who is here");
+    await waitFor(() => expect(currentOrganizationId()).toBe("org_dana"));
+    await settleReactWork();
+    expect(second.queryByText(LINE)).toBeNull();
+  } finally {
+    setCurrentOrganization("default");
+  }
 });
 
 test("a removal the server refuses is said in the dialog, and the person stays", async () => {
