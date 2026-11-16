@@ -208,6 +208,15 @@ export function TaskDetails({ task }: { task: BotTask }) {
               {bot ? setupSummary(bot, personal ? "personal" : "team") : null}
             </span>
             {model ? <ModelLine model={model} /> : null}
+            {task.agent ? (
+              // A task the Bot handed to one of its agents: the agent did the work.
+              <span
+                className="truncate text-muted-foreground text-xs"
+                data-slot="task-agent"
+              >
+                Handed to {task.agent.name}
+              </span>
+            ) : null}
           </div>
         </div>
       </Section>

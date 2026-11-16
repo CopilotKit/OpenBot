@@ -219,3 +219,28 @@ test("the Details pane says who ran it and on which model, and lists what it mad
   // No computer was used, so none is named.
   expect(view.queryByRole("region", { name: "Computer" })).toBeNull();
 });
+
+test("the Details pane names the agent a task was handed to, and none for a task the Bot did itself", async () => {
+  publishThreadWork("thread_task", threadWorkOf(thread));
+  const draw = (agent: BotTask["agent"]) =>
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TaskDetails task={{ ...task, agent }} />
+      </QueryClientProvider>,
+    );
+  const handed = draw({ id: "bag_facts", name: "Fact finder" });
+  const ranBy = handed.getByRole("region", { name: "Ran by" });
+  expect(ranBy.textContent).toContain("Handed to Fact finder");
+  handed.unmount();
+
+  const itself = draw(null);
+  expect(
+    itself
+      .getByRole("region", { name: "Ran by" })
+      .querySelector("[data-slot=task-agent]"),
+  ).toBeNull();
+});
