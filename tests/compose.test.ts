@@ -1195,6 +1195,27 @@ test("hands the desktop's host-access token to the server and nothing else", () 
   expect(holders).toEqual(["server"]);
 });
 
+/**
+ * The personal edition only admits requests carrying its install's token. OpenBot Desktop hands it
+ * to Compose in its environment and `scripts/start.sh` writes it into `.env`; either way it reaches
+ * the server and no other service.
+ */
+test("hands the install's token to the server and nothing else", () => {
+  const holders = Object.entries(composeServices())
+    .filter(([, service]) =>
+      Object.keys(service.environment ?? {}).includes("OPENBOT_INSTALL_TOKEN"),
+    )
+    .map(([name]) => name);
+  expect(holders).toEqual(["server"]);
+
+  const given = runComposeConfig({
+    OPENBOT_INSTALL_TOKEN: "sentinel-install-token",
+  }).services.server?.environment;
+  expect(given?.OPENBOT_INSTALL_TOKEN).toBe("sentinel-install-token");
+  const none = runComposeConfig({}).services.server?.environment;
+  expect(none?.OPENBOT_INSTALL_TOKEN ?? "").toBe("");
+});
+
 test("addresses the server's Bots and endpoints from inside the network", () => {
   const withBots = runComposeConfig({
     MANAGED_AGENT_AG_UI_URL: "http://127.0.0.1:4201/",

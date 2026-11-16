@@ -92,6 +92,9 @@ pub struct HostEnvironment {
     pub app_answers: Check<bool>,
     /// For a handoff: the owned app's address, None when it is not running or another process holds its port.
     pub app_url: Check<Option<String>>,
+    /// For a handoff, asked after `app_url` answered: the install's token that app's server was given
+    /// (`install_token`), sent with the request for a code. None for a server from a release before it.
+    pub install_token: Check<Option<String>>,
 }
 
 /// How long the host gives each message before it answers `timed-out`.
@@ -265,7 +268,7 @@ fn handoff(
         return Err(Refusal::NotInstalled);
     }
     let app_url = (env.app_url)().ok_or(Refusal::NotRunning)?;
-    let response = client
+    let mut request = client
         .post(format!(
             "{}{CONNECT_CODES_PATH}",
             app_url.trim_end_matches('/')
@@ -275,7 +278,13 @@ fn handoff(
         .header(
             "Idempotency-Key",
             format!("{:032x}", rand::random::<u128>()),
-        )
+        );
+    // The personal edition only admits requests carrying its install's token. Asked only now, once
+    // the app is proved to be this OpenBot's: the token goes to nobody else.
+    if let Some(token) = (env.install_token)().filter(|token| !token.trim().is_empty()) {
+        request = request.header(crate::install_token::HEADER, token);
+    }
+    let response = request
         .json(&json!({ "via": "desktop" }))
         .send()
         .map_err(|error| {
@@ -678,26 +687,33 @@ mod tests {
     struct Asked {
         app_answers: AtomicUsize,
         app_url: AtomicUsize,
+        install_token: AtomicUsize,
     }
 
     /// A computer's OpenBot as a test describes it.
     struct Computer {
         installed: bool,
         app_url: Option<String>,
+        install_token: Option<String>,
     }
 
-    /// Installed, running at `app_url`.
+    /// Installed, running at `app_url`, from a release before the install's token.
     fn running(app_url: &str) -> Computer {
         Computer {
             installed: true,
             app_url: Some(app_url.to_string()),
+            install_token: None,
         }
     }
 
     fn environment(computer: Computer) -> (Arc<HostEnvironment>, Arc<Asked>) {
         let asked = Arc::new(Asked::default());
-        let (a, c) = (asked.clone(), asked.clone());
-        let Computer { installed, app_url } = computer;
+        let (a, c, t) = (asked.clone(), asked.clone(), asked.clone());
+        let Computer {
+            installed,
+            app_url,
+            install_token,
+        } = computer;
         let answers = app_url.is_some();
         let environment = HostEnvironment {
             installed: Box::new(move || installed),
@@ -708,6 +724,10 @@ mod tests {
             app_url: Box::new(move || {
                 c.app_url.fetch_add(1, Ordering::SeqCst);
                 app_url.clone()
+            }),
+            install_token: Box::new(move || {
+                t.install_token.fetch_add(1, Ordering::SeqCst);
+                install_token.clone()
             }),
         };
         (Arc::new(environment), asked)
@@ -882,6 +902,60 @@ mod tests {
             json!({ "via": "desktop" })
         );
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 1);
+        // A server from a release before the install's token is asked as it always was.
+        assert!(!head.contains("x-openbot-install-token"));
+    }
+
+    /// The personal edition only admits requests carrying its install's token, and the host is a
+    /// process of its own, so it sends the one the app's server was given.
+    #[test]
+    fn handoff_sends_the_install_token_the_server_was_given() {
+        let (url, listener) = fake_app();
+        let app = answer_once(listener, reply("201 Created", MINTED));
+        let (environment, asked) = environment(Computer {
+            install_token: Some("install-token-abc".into()),
+            ..running(&url)
+        });
+        assert_eq!(
+            ask(json!({ "type": "handoff" }), true, &environment),
+            json!({ "ok": true, "openbotUrl": url, "code": "obc_fixture" })
+        );
+        let (head, _) = app.join().unwrap();
+        let sent: Vec<&str> = head
+            .lines()
+            .filter_map(|line| {
+                line.split_once(':')
+                    .filter(|(name, _)| name.eq_ignore_ascii_case(crate::install_token::HEADER))
+                    .map(|(_, value)| value.trim())
+            })
+            .collect();
+        assert_eq!(sent, ["install-token-abc"]);
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 1);
+    }
+
+    /// Asked only for a handoff, and only once the app is proved to be this OpenBot's.
+    #[test]
+    fn the_install_token_is_asked_for_by_a_handoff_alone() {
+        let (url, listener) = fake_app();
+        let with_token = |computer: Computer| Computer {
+            install_token: Some("install-token-abc".into()),
+            ..computer
+        };
+        for message in ["ping", "address"] {
+            let (environment, asked) = environment(with_token(running(&url)));
+            ask(json!({ "type": message }), true, &environment);
+            assert_eq!(asked.install_token.load(Ordering::SeqCst), 0, "{message}");
+        }
+        let (environment, asked) = environment(with_token(Computer {
+            app_url: None,
+            ..running(&url)
+        }));
+        assert_eq!(
+            ask(json!({ "type": "handoff" }), true, &environment),
+            not("not-running")
+        );
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 0);
+        assert_untouched(&listener);
     }
 
     #[test]
@@ -1104,6 +1178,7 @@ mod tests {
                 std::thread::sleep(Duration::from_secs(3));
                 None
             }),
+            install_token: Box::new(|| None),
         };
         let deadlines = Deadlines {
             ping: Duration::from_millis(100),
@@ -1144,6 +1219,7 @@ mod tests {
             installed: Box::new(|| panic!("a broken check")),
             app_answers: Box::new(|| true),
             app_url: Box::new(|| None),
+            install_token: Box::new(|| None),
         };
         let (status, replies) = serve_all(
             &[json!({ "type": "ping" }), json!({ "type": "handoff" })],
