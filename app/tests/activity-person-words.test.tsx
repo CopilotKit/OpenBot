@@ -121,6 +121,7 @@ const SKILLS: Skill[] = [
   instructions: "",
   grantedTo: [BOT],
   tools: [],
+  usableOnYourBots: true,
 }));
 
 async function renderAs(edition: "team" | "personal") {
