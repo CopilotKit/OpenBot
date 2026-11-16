@@ -20,7 +20,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import { countsAsWaiting, type ListedTask } from "@/lib/tasks/groups";
+import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
@@ -303,14 +303,8 @@ export function TaskBoardRow({
   const { state, Icon } = look(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  /*
-   * A delegated task that is done waits on nobody: its result was said in the conversation that
-   * asked. It reads Done, as its card does, untinted and uncounted, with Open no longer leading.
-   */
-  const settled = !countsAsWaiting(listed) && status === "ready_for_review";
-  const openFirst =
-    !settled && (status === "ready_for_review" || status === "needs_input");
-  const said = boardStatus(listed, settled);
+  const openFirst = status === "ready_for_review" || status === "needs_input";
+  const said = boardStatus(listed);
   if (held)
     return (
       <BoardRow

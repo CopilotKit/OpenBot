@@ -96,6 +96,8 @@ function draw(
   activity: Partial<BotActivity>,
   tasks: readonly unknown[],
   checkIns: readonly unknown[] = [],
+  /** Drawn under the Needs you board, as OpenFuse's Activity draws it. */
+  boardAbove = false,
 ) {
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathOf(input);
@@ -112,7 +114,9 @@ function draw(
   }) as typeof fetch;
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => <BotActivitySections agentId={BOT} />,
+      component: () => (
+        <BotActivitySections agentId={BOT} boardAbove={boardAbove} />
+      ),
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -389,6 +393,28 @@ test("a stopped task has a Stopped group of its own, after Done and before Faile
   expect(stopped.getByText(/^Stopped · /)).toBeTruthy();
   expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
   expect(stopped.getByRole("button", { name: "Mark done" })).toBeTruthy();
+});
+
+/*
+ * A delegated task that has finished leaves the Needs you board. Under the board, as OpenFuse's
+ * Activity draws these groups, it is still listed under Done, so it is never on neither. One that
+ * waits on the person is on the board, and not listed a second time here.
+ */
+test("under the board, a finished delegated task is still listed under Done; one waiting is left to the board", async () => {
+  const view = draw(
+    {},
+    [
+      task("d", "ready_for_review", { title: "Check the venue's doors time" }),
+      task("q", "needs_input", { title: "Order Fernhill seeds" }),
+    ],
+    [],
+    true,
+  );
+  await view.findByText("Check the venue's doors time");
+  expect(sections(view.container)).toEqual([
+    { heading: "Done", rows: ["Check the venue's doors time"] },
+  ]);
+  expect(view.queryByText("Order Fernhill seeds")).toBeNull();
 });
 
 test("a task's line is plain text that says something, or it is left out", async () => {

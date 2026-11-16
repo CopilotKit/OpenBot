@@ -24,11 +24,14 @@ import {
 } from "@testing-library/react";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { BotNeedsYou } from "@/components/needs-you/board";
+import { taskKeys } from "@/lib/tasks/queries";
 import { queryClient } from "@/query-client";
 import {
   TASKS_VIEW_STORAGE_KEY,
   TasksScreen,
+  type TasksView,
 } from "@/skins/openduet/tasks-screen";
+import { NotificationsSheet } from "@/skins/openfuse/notifications-sheet";
 import { APPROVALS_PATH, approvalInboxResponse } from "./approvals-api";
 import {
   activityOf,
@@ -293,9 +296,12 @@ beforeEach(() => {
   queryClient.clear();
 });
 
-/** The Bots page, the Inbox Bot's page and OpenDuet's Tasks on its Up next list, side by side. */
-async function drawAll() {
-  window.localStorage.setItem(TASKS_VIEW_STORAGE_KEY, "up_next");
+/**
+ * The Bots page, the Inbox Bot's page and OpenDuet's Tasks, side by side, OpenDuet on its Up next
+ * list unless a test opens Active.
+ */
+async function drawAll(duet: TasksView = "up_next") {
+  window.localStorage.setItem(TASKS_VIEW_STORAGE_KEY, duet);
   const rootRoute = createRootRoute();
   const routeTree = rootRoute.addChildren([
     createRoute({
@@ -339,6 +345,30 @@ async function drawAll() {
   );
   const region = (name: string) => within(view.getByRole("region", { name }));
   return { view, region };
+}
+
+/** OpenFuse's bell, opened: its sheet of what every Bot waits on the person for. */
+async function drawBell() {
+  const rootRoute = createRootRoute({
+    component: () => <NotificationsSheet onClose={() => {}} />,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/channel/$channelId",
+        component: () => null,
+      }),
+    ]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  return within(await within(document.body).findByRole("dialog"));
 }
 
 test("an item says what it is, why, which Bot found it and where, with Work on it and Dismiss", async () => {
@@ -716,14 +746,11 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
     expect(
       row("Order Fernhill seeds").querySelector(".bg-amber-50"),
     ).not.toBeNull();
-    // Listed, and not waiting on the person: no tint, and a done one reads Done, as its card does.
+    // Listed, and not waiting on the person: no tint. A finished delegated one is not listed.
     expect(
       row("Draft the board update").querySelector(".bg-amber-50"),
     ).toBeNull();
-    const done = row("Check the venue's doors time");
-    expect(done.querySelector(".bg-amber-50")).toBeNull();
-    expect(within(done).getByText("Done")).toBeTruthy();
-    expect(within(done).queryByText("Ready for review")).toBeNull();
+    expect(surface.queryByText("Check the venue's doors time")).toBeNull();
   }
   // The Bot's own badge on the Bots page says the same number.
   const bots = region("Bots page");
@@ -851,13 +878,89 @@ test("a board with nothing waiting on the person never says it is waiting", asyn
   const { region } = await drawAll();
   for (const name of ["Bots page", "Bot page"]) {
     const surface = region(name);
-    await surface.findByText("Check the venue's doors time");
+    await surface.findByText("Draft the board update");
+    expect(surface.queryByText("Check the venue's doors time")).toBeNull();
     expect(surface.getByText("Your tasks")).toBeTruthy();
     expect(surface.queryByText("Waiting on you")).toBeNull();
     expect(surface.queryByText(/\d+ waiting/)).toBeNull();
     expect(surface.getByText(/nothing waiting on you/)).toBeTruthy();
     expect(surface.queryByText(/waiting since/)).toBeNull();
   }
+});
+
+/*
+ * A delegated task that has finished waits on nobody: its result line is already in the conversation
+ * that asked for it, and it is listed on its Bot's Activity page under Done. So it leaves every list
+ * of what needs the person, the board on the Bots page and on the Bot's page, OpenDuet's Tasks and
+ * OpenFuse's bell, and they all agree. One that still waits on the person stays on each.
+ */
+test("a finished delegated task leaves the board, OpenDuet's Tasks and the bell; one still waiting stays", async () => {
+  tasks = [
+    task({
+      id: "q",
+      title: "Order Fernhill seeds",
+      origin: "delegated",
+      status: "needs_input",
+      next: "Waiting for your answer: tomato or basil?",
+    }),
+    task({
+      id: "d",
+      title: "Check the venue's doors time",
+      origin: "delegated",
+      next: "Doors open at 7:00 p.m.",
+    }),
+  ];
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 1, ready: 0, failed: 0 },
+    }),
+  ];
+  serving();
+  const { region, view } = await drawAll("active");
+  for (const name of ["Bots page", "Bot page", "OpenDuet"]) {
+    const surface = region(name);
+    await surface.findByText("Order Fernhill seeds");
+    expect(surface.queryByText("Check the venue's doors time")).toBeNull();
+    expect(surface.queryByText("Doors open at 7:00 p.m.")).toBeNull();
+  }
+  // OpenDuet has no Ready for review group for it to sit under either.
+  expect(
+    region("OpenDuet").queryByRole("region", { name: "Ready for review" }),
+  ).toBeNull();
+  view.unmount();
+  const bell = await drawBell();
+  await bell.findByText("Order Fernhill seeds");
+  expect(bell.queryByText("Check the venue's doors time")).toBeNull();
+});
+
+/*
+ * A Bot whose only task has finished has nothing waiting on the person: its page draws no board, as
+ * when nothing ever waited, and the bell says the person is all caught up.
+ */
+test("a Bot whose only task has finished has nothing on the board", async () => {
+  tasks = [
+    task({
+      id: "d",
+      title: "Check the venue's doors time",
+      origin: "delegated",
+      next: "Doors open at 7:00 p.m.",
+    }),
+  ];
+  serving();
+  const { region, view } = await drawAll("active");
+  // Looked at once the tasks have loaded, so nothing is missing only because it is still coming.
+  await waitFor(() =>
+    expect(queryClient.getQueryState(taskKeys.list)?.status).toBe("success"),
+  );
+  for (const name of ["Bots page", "Bot page", "OpenDuet"]) {
+    const surface = region(name);
+    expect(surface.queryByText("Check the venue's doors time")).toBeNull();
+    expect(surface.queryByRole("heading", { name: "Needs you" })).toBeNull();
+  }
+  view.unmount();
+  const bell = await drawBell();
+  expect(await bell.findByText("You're all caught up")).toBeTruthy();
+  expect(bell.queryByText("Check the venue's doors time")).toBeNull();
 });
 
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {

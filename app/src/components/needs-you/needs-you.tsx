@@ -20,7 +20,7 @@ import {
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { readFailure } from "@/lib/read-failure";
-import { type ListedTask, orderTasks } from "@/lib/tasks/groups";
+import { type ListedTask, onTheBoard, orderTasks } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
 /** How many items show before the rest fold behind "Show more". */
@@ -44,7 +44,10 @@ export function useBotName() {
  *
  * - `tasks`: every task not yet resolved, in OpenDuet's order (ready for review, needs input,
  *   failed, working). A working task stays beside the ones that need the person, because it is the
- *   item they just started and it comes back here when it is ready.
+ *   item they just started and it comes back here when it is ready. A delegated task that has
+ *   finished is not here (`onTheBoard`): its result is in the conversation that asked for
+ *   it and it is on its Bot's Activity page under Done, so the board, OpenDuet's Tasks and
+ *   OpenFuse's bell all leave it out.
  * - `done`: tasks marked done this week, for Reopen.
  * - `items`: open items, newest first.
  *
@@ -72,7 +75,7 @@ export function useNeedsYou(agentId?: string) {
       tasks: readFailure(taskList),
       checkIns: readFailure(suggestions),
     },
-    tasks: listed.filter(({ status }) => status !== "resolved"),
+    tasks: listed.filter(onTheBoard),
     done: listed.filter(({ status }) => status === "resolved"),
     items: (suggestions.data ?? []).filter(
       (item) => agentId === undefined || item.botId === agentId,
