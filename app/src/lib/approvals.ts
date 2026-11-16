@@ -486,7 +486,16 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
       decideApproval(id, choice),
-    onSuccess: settle(queryClient),
+    /*
+     * The badge that counted it is read again at once, as for an answered question: left to its
+     * poll, it kept the old count for seconds beside a board that already showed the new one.
+     */
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: botLifecycleKeys.attention,
+      });
+      return settle(queryClient)();
+    },
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>

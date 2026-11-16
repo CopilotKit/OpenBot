@@ -1,8 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { decideApprovalMutationOptions } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { answerBotAttention, attentionOf } from "./bots-api";
 import { awayFromOpenBot } from "./desktop-notifications.fixture";
@@ -121,6 +126,37 @@ test("the badge adds up what waits on the person across every Bot", async () => 
   const { view } = draw();
   const badge = await view.findByText("3");
   expect(badge.getAttribute("aria-label")).toBe("3 things need you");
+});
+
+test("allowing or denying an action reads the badge again at once, as answering a question does", async () => {
+  serving([attention("expenses", { approvals: 1 })]);
+  const answered = global.fetch;
+  const decided: string[] = [];
+  // The decision, at the API's address, and every other read as before.
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (/\/approvals\/[^/]+\/decide$/.test(pathOf(input))) {
+      decided.push(pathOf(input));
+      return Response.json({ id: "approval-1", status: "completed" });
+    }
+    return answered(input, init);
+  }) as unknown as typeof fetch;
+  const { view, client } = draw();
+  await view.findByText("1");
+
+  // Decided on the Needs you board: the server no longer counts it.
+  served = [attention("expenses", {})];
+  await act(async () => {
+    await new MutationObserver(
+      client,
+      decideApprovalMutationOptions(client),
+    ).mutate({ id: "approval-1", choice: "deny" });
+  });
+  expect(decided).toHaveLength(1);
+  // Well inside the badge's own poll, which is 15 seconds away.
+  await waitFor(() => expect(view.queryByText("1")).toBeNull(), {
+    timeout: 2_000,
+  });
+  expect(view.container.innerHTML).toBe("");
 });
 
 test("with only unread messages the badge is a dot, not a number", async () => {

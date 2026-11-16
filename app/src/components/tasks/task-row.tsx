@@ -27,9 +27,12 @@ import {
   tryTaskAgainMutationOptions,
 } from "@/lib/tasks/mutations";
 import {
+  canTryAgain,
   couldNotFinish,
+  failureSentence,
   stoppedByYou,
   TASK_DONE_LABEL,
+  TASK_FAILED_LABEL,
   TASK_STATUS_LABEL,
   TASK_STOPPED,
   TASK_STOPPED_LABEL,
@@ -110,6 +113,23 @@ function nextLine(listed: ListedTask): string | null {
   const said = taskLine(task.next);
   if (said) return said;
   return status === "working" ? "Just started." : null;
+}
+
+/**
+ * A task's status and line on the Needs you board. One that couldn't finish says so in its card's
+ * words, Couldn't finish, and its line is why, said once: the board read "Failed" beside a card
+ * that said "Couldn't finish", and "Couldn't finish: …" beside "Failed".
+ */
+function boardStatus(
+  listed: ListedTask,
+  settled = false,
+): { label: string; line: string | null } {
+  if (listed.status === "failed" && !stopped(listed))
+    return {
+      label: TASK_FAILED_LABEL,
+      line: listed.task.failure ? failureSentence(listed.task.failure) : null,
+    };
+  return { label: statusLabel(listed, settled), line: nextLine(listed) };
 }
 
 /**
@@ -210,7 +230,7 @@ export function TaskRow({
           </ItemDescription>
         ) : null}
         <ItemFooter className="mt-2 flex-wrap justify-start">
-          {status === "failed" ? (
+          {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
               onClick={() => again.mutate(task.id)}
@@ -290,6 +310,7 @@ export function TaskBoardRow({
   const settled = !countsAsWaiting(listed) && status === "ready_for_review";
   const openFirst =
     !settled && (status === "ready_for_review" || status === "needs_input");
+  const said = boardStatus(listed, settled);
   if (held)
     return (
       <BoardRow
@@ -318,10 +339,10 @@ export function TaskBoardRow({
             </Button>
           </>
         }
-        detail={nextLine(listed)}
+        detail={said.line}
         icon={<Icon />}
         meta={[
-          <span key="status">{statusLabel(listed)}</span>,
+          <span key="status">{boardStatus(listed).label}</span>,
           <span key="when">{relativeTime(task.updatedAt)}</span>,
           ...held.meta,
         ]}
@@ -336,7 +357,7 @@ export function TaskBoardRow({
     <BoardRow
       actions={
         <>
-          {status === "failed" ? (
+          {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
               onClick={() => again.mutate(task.id)}
@@ -369,12 +390,12 @@ export function TaskBoardRow({
           </Button>
         </>
       }
-      detail={nextLine(listed)}
+      detail={said.line}
       // What a waiting task waits for is what the person has to answer: read in full, never cut.
       readDetail={status === "needs_input"}
       icon={<Icon />}
       meta={[
-        <span key="status">{statusLabel(listed, settled)}</span>,
+        <span key="status">{said.label}</span>,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">

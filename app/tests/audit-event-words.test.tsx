@@ -256,6 +256,37 @@ test("what happened to an organization reads in words, and none of it as blocked
   }
 });
 
+/*
+ * Found in testing: a Bot's owner switching an app on for their own Bot read "Share an app", and
+ * off "Stop sharing an app". Nothing was shared with anybody: they gave their Bot the app.
+ */
+test("an owner giving their Bot an app, and taking it back, reads as that", async () => {
+  const view = await renderAs("team", [
+    row(
+      "a1",
+      41,
+      "app_access.owner_granted",
+      "mcp_server",
+      {},
+      "composio-gmail",
+    ),
+    row(
+      "a2",
+      40,
+      "app_access.owner_revoked",
+      "mcp_server",
+      {},
+      "composio-gmail",
+    ),
+  ]);
+  const lines = whats(view.container);
+  expect(lines.map((line) => line.textContent)).toEqual([
+    "Give a Bot an app",
+    "Take an app from a Bot",
+  ]);
+  expect(view.container.textContent).not.toContain("Share");
+});
+
 /**
  * A real-product pass read "Started by a person" on every row a person started, with nobody named,
  * and searching the person's email found nothing. The server sends who in `payload.by`.

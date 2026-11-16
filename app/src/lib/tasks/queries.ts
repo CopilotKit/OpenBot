@@ -50,6 +50,12 @@ export type BotTask = {
    * Stopped. Null once it carries on.
    */
   stoppedAt?: string | null;
+  /**
+   * False when trying it again can't change how it ends: it couldn't finish for a reason asking
+   * again gets the same answer to (a Bot it asked isn't shared with the person). Absent from a
+   * server that does not say, which reads as true.
+   */
+  canTryAgain?: boolean;
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
   /** When the work it is doing now began, for how long it has been working. Null unless working. */
@@ -204,15 +210,32 @@ export function couldNotFinish(failure: string | null): string {
 }
 
 /**
- * Why a task couldn't finish, as a line of its own under its status: a sentence. The server words
- * its reason to follow "Couldn't finish:" ("this Bot isn't shared with you any more"), so on its
- * own it starts in capitals and ends with a full stop.
+ * A task that couldn't finish, in a word or two: what its card in the conversation says, and its
+ * row on the Needs you board, so the two never name one state twice.
+ */
+export const TASK_FAILED_LABEL = "Couldn't finish";
+
+/**
+ * Why a task couldn't finish, as a line of its own after a status that already says so: a
+ * sentence. The server words its reason to follow "Couldn't finish:" ("Pipeline Bot isn't shared
+ * with you"), so on its own it starts in capitals and ends with a full stop.
  */
 export function failureSentence(failure: string): string {
   const said = failure.trim();
   if (!said) return said;
   const sentence = `${said[0]?.toUpperCase()}${said.slice(1)}`;
   return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/**
+ * Whether Try again is offered: only on a task that couldn't finish, and not on one the server says
+ * asking again can't change, which would only be refused the same way again.
+ */
+export function canTryAgain(task: {
+  status: TaskStatus;
+  canTryAgain?: boolean;
+}): boolean {
+  return task.status === "failed" && task.canTryAgain !== false;
 }
 
 /**

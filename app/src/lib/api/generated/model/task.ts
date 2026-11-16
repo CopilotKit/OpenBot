@@ -65,6 +65,8 @@ export interface Task {
    * @nullable
    */
   stoppedAt?: string | null;
+  /** Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true. */
+  canTryAgain?: boolean;
   /**
    * When the work it is doing now began. Null or absent unless it is working.
    * @nullable

@@ -43,6 +43,7 @@ import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
@@ -122,6 +123,11 @@ function PeoplePage() {
   const [removing, setRemoving] = useState<Person | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const organization = useRemovalOrganization();
+  /*
+   * INITIAL_ADMIN_EMAILS names the admins of the deployment's first organization (`default`, as the
+   * API addresses it) and of no other, so only its People page says so.
+   */
+  const inFirstOrganization = useCurrentOrganizationId() === "default";
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -133,7 +139,11 @@ function PeoplePage() {
       title="People"
     >
       <PageSection
-        description="Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+        description={
+          inFirstOrganization
+            ? "Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
+            : undefined
+        }
         title="Who is here"
       >
         {failure ? (
@@ -181,6 +191,13 @@ function PeoplePage() {
             {rows.map((person, index) => {
               const isSelf = person.id === currentUser.data?.id;
               const busy = setRole.isPending || setAccess.isPending;
+              /*
+               * An owner governs the organization as an admin does, so their Admin switch reads on.
+               * Their role is not this switch's to change (only an owner gives ownership away, in
+               * Organization settings), and the server keeps the owner, so neither switch nor
+               * Remove is offered for them.
+               */
+              const owner = person.role === "owner";
 
               return (
                 <StaggerItem index={index} key={person.id}>
@@ -217,7 +234,9 @@ function PeoplePage() {
                       </Button>
                       <Button
                         aria-label={`${person.revoked ? "Restore" : "Remove"} ${nameOf(person)}`}
-                        disabled={busy || isSelf || person.configuredAdmin}
+                        disabled={
+                          busy || isSelf || person.configuredAdmin || owner
+                        }
                         onClick={() => {
                           // Removing is asked about first. Restoring ends nothing, so it applies at once.
                           if (person.revoked) {
@@ -237,8 +256,10 @@ function PeoplePage() {
                       </Button>
                       <Switch
                         aria-label={`Admin: ${person.email}`}
-                        checked={person.role === "admin"}
-                        disabled={busy || person.configuredAdmin || isSelf}
+                        checked={isOrganizationAdmin(person.role)}
+                        disabled={
+                          busy || person.configuredAdmin || isSelf || owner
+                        }
                         onCheckedChange={(checked) =>
                           setRole.mutate({
                             userId: person.id,

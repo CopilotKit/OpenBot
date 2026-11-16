@@ -111,6 +111,12 @@ export const ListTasksResponse = zod.object({
           .describe(
             "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
           ),
+        canTryAgain: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+          ),
         workingSince: zod.iso
           .datetime({ offset: true })
           .nullish()
@@ -264,6 +270,12 @@ export const GetTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
         ),
       workingSince: zod.iso
         .datetime({ offset: true })
@@ -422,6 +434,12 @@ export const ResolveTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
@@ -579,6 +597,12 @@ export const ReopenTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
@@ -735,6 +759,12 @@ export const RetryTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
         ),
       workingSince: zod.iso
         .datetime({ offset: true })

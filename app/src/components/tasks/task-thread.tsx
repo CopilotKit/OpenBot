@@ -24,6 +24,7 @@ import {
   reactionsQueryOptions,
   stoppedByYou,
   TASK_DONE_LABEL,
+  TASK_FAILED_LABEL,
   TASK_STOPPED,
   TASK_STOPPED_LABEL,
   type TaskStatus,
@@ -85,7 +86,7 @@ const STATE: Record<
     text: "text-emerald-700 dark:text-emerald-400",
   },
   failed: {
-    label: "Couldn't finish",
+    label: TASK_FAILED_LABEL,
     icon: IconAlertTriangle,
     dot: "bg-destructive",
     text: "text-destructive",
@@ -276,18 +277,16 @@ export function TaskCard({
     );
   /*
    * What it waits for is said once, on the needs-you line the task posts, not here as well: the
-   * card says only that it needs the person, and leads into the thread.
+   * card says only that it needs the person, and leads into the thread. Why it couldn't finish is
+   * said once too, on the line it reports under the card, which also says what to do about it: the
+   * card said the same reason a second time just above it.
    */
   const next =
-    state === "failed"
-      ? task.data?.failure
-        ? failureSentence(task.data.failure)
-        : null
-      : state === "stopped"
-        ? TASK_STOPPED
-        : state === "working" && !taskId
-          ? "Starting…"
-          : null;
+    state === "stopped"
+      ? TASK_STOPPED
+      : state === "working" && !taskId
+        ? "Starting…"
+        : null;
   return (
     <TaskFrame
       below={children}
@@ -408,7 +407,21 @@ export function TaskReport({
      * it) is not finished: its link reads as needing them, as the task's card does, not as done.
      */
     const waiting = live === "needs";
-    const ResultIcon = waiting ? IconHandStop : IconCircleCheck;
+    /*
+     * A result whose task then couldn't finish (an admin dismissed the Request access it waited on)
+     * has no failed line under it, and the card says only that it couldn't finish: why is said here,
+     * once, and the link doesn't read as done.
+     */
+    const failedSince = live === "failed";
+    const reason =
+      failedSince && task.data?.failure
+        ? failureSentence(task.data.failure)
+        : null;
+    const ResultIcon = waiting
+      ? IconHandStop
+      : failedSince
+        ? IconAlertTriangle
+        : IconCircleCheck;
     return (
       <div
         className="w-full space-y-2"
@@ -422,7 +435,7 @@ export function TaskReport({
         {channelId ? (
           <Link
             className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
-            data-state={waiting ? "needs" : "done"}
+            data-state={waiting ? "needs" : failedSince ? "failed" : "done"}
             params={{ channelId }}
             to="/channel/$channelId"
           >
@@ -431,12 +444,22 @@ export function TaskReport({
                 "size-3.5 shrink-0",
                 waiting
                   ? STATE.needs.text
-                  : "text-emerald-600 dark:text-emerald-400",
+                  : failedSince
+                    ? STATE.failed.text
+                    : "text-emerald-600 dark:text-emerald-400",
               )}
             />
             <span className="truncate">{title ?? "Task"}</span>
             <IconArrowUpRight className="size-3.5 shrink-0" />
           </Link>
+        ) : null}
+        {reason ? (
+          <p className="text-sm">
+            <span className={cn("font-medium text-xs", STATE.failed.text)}>
+              {TASK_FAILED_LABEL}
+            </span>
+            <span className="text-muted-foreground"> · {reason}</span>
+          </p>
         ) : null}
         {children}
       </div>
@@ -515,13 +538,17 @@ export function TaskReport({
   );
 }
 
-/** What a needs-you line says once the person has answered, by where the task is now. */
+/**
+ * What a needs-you line says once the person has answered, by where the task is now. Never where
+ * they answered: the thread, the Bots page's Needs you board and the inbox all answer it, and the
+ * line can't tell which.
+ */
 const ANSWERED: Record<CardState, string> = {
-  working: "You answered this in its thread. It's carrying on.",
-  needs: "You answered this in its thread. It needs you again there.",
-  done: "You answered this in its thread, and it's done.",
-  failed: "You answered this in its thread, but it couldn't finish.",
-  stopped: "You answered this in its thread, and stopped it after.",
+  working: "You answered this. It's carrying on.",
+  needs: "You answered this. It needs you again in its thread.",
+  done: "You answered this, and it's done.",
+  failed: "You answered this, but it couldn't finish.",
+  stopped: "You answered this, and stopped it after.",
 };
 
 /**
