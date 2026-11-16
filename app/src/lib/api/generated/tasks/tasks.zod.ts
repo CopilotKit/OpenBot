@@ -1034,6 +1034,19 @@ export const StopTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
       conversationId: zod
         .string()
         .describe(
