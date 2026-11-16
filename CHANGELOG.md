@@ -124,6 +124,10 @@ every deployment:
   measured 3.9 and stopped with "It needs 4". The CLI in Intelligence 0.16.0-rc.12 counts the
   engine's CPUs instead, since containers share CPU time rather than hold it: an engine of 4 CPUs or
   more passes whatever runs in it. Memory and disk are still measured free, as before.
+- **Confirming a character with a Chinese, Japanese or Korean input method no longer sends the
+  message.** Pressing Enter to confirm the character sent the half-finished message instead. The
+  chat composer now holds the key while a character is still being composed, so the confirming
+  Enter commits the character and only an Enter outside a composition sends.
 
 ### Pages and routines
 
