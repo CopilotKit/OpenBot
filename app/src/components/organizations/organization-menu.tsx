@@ -14,7 +14,16 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import type { OwnOrganizations } from "@/lib/organizations/queries";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useAnythingCut } from "@/hooks/use-anything-cut";
+import type {
+  OrganizationSummary,
+  OwnOrganizations,
+} from "@/lib/organizations/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,7 +33,8 @@ import { cn } from "@/lib/utils";
  *
  * Drawn only where OpenBot lists the person's organizations (`useOrganizationChoices`), so for
  * everybody else the menu is the one it always was. The rows take the menu's own item spacing from
- * `itemClassName`, and a long name is cut short where the menu is as narrow as the sidebar.
+ * `itemClassName`. The account menu grows to a long name (`accountMenuClassName`), and a name too
+ * long even for that reads whole in a tooltip.
  */
 export function OrganizationMenuItems({
   choices,
@@ -59,18 +69,12 @@ export function OrganizationMenuItems({
           value={choices.currentId}
         >
           {choices.organizations.map((organization) => (
-            <DropdownMenuRadioItem
-              // Room on the right for the check, which the menu's item spacing would take back.
-              className={cn(itemClassName, "pr-8")}
-              closeOnClick
+            <OrganizationRow
+              className={itemClassName}
               disabled={switching.pending}
               key={organization.id}
-              value={organization.id}
-            >
-              {/* The person's own organization carries a person's mark; one they share, a building. */}
-              {organization.personal ? <IconUserCircle /> : <IconBuilding />}
-              <span className="min-w-0 truncate">{organization.name}</span>
-            </DropdownMenuRadioItem>
+              organization={organization}
+            />
           ))}
         </DropdownMenuRadioGroup>
         {choices.organizations.length > 0 ? (
@@ -111,5 +115,48 @@ export function OrganizationMenuItems({
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+/**
+ * One organization to switch to. A name the menu still cuts short reads whole in a tooltip, on
+ * hover and when the keyboard highlights the row (the menu highlights a row by focusing it), as the
+ * account row's own tooltip does. Cutting is only paint: the row's name for assistive technology is
+ * always the whole name.
+ */
+function OrganizationRow({
+  className,
+  disabled,
+  organization,
+}: {
+  className: string;
+  disabled: boolean;
+  organization: OrganizationSummary;
+}) {
+  const { ref, cut } = useAnythingCut<HTMLDivElement>();
+  return (
+    <Tooltip disabled={!cut}>
+      <TooltipTrigger
+        // The row is the menu's radio item first, and says so, whatever the tooltip names it.
+        data-slot="dropdown-menu-radio-item"
+        render={
+          <DropdownMenuRadioItem
+            // Room on the right for the check, which the menu's item spacing would take back.
+            className={cn(className, "pr-8")}
+            closeOnClick
+            disabled={disabled}
+            ref={ref}
+            value={organization.id}
+          />
+        }
+      >
+        {/* The person's own organization carries a person's mark; one they share, a building. */}
+        {organization.personal ? <IconUserCircle /> : <IconBuilding />}
+        <span className="min-w-0 truncate">{organization.name}</span>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={12}>
+        <span className="min-w-0 break-words">{organization.name}</span>
+      </TooltipContent>
+    </Tooltip>
   );
 }

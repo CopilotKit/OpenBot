@@ -70,14 +70,16 @@ import {
 import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { AccountMenu } from "./account-label";
+import {
+  AccountMenu,
+  accountMenuClassName,
+  accountMenuItemClassName as userMenuItemClassName,
+} from "./account-label";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
-
-const userMenuItemClassName = "gap-2 px-2 py-1.5";
 
 /**
  * Cap layout animation because `layout` measures every animated row on each reorder.
@@ -605,7 +607,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <AccountMenu>
               <DropdownMenuContent
                 align="start"
-                className="p-1.5"
+                className={accountMenuClassName}
                 side="top"
                 sideOffset={8}
               >
