@@ -236,6 +236,10 @@ export function acceptInvitationMutationOptions(queryClient: QueryClient) {
         )
       ).organization,
     onSuccess: () => invalidateOrganizations(queryClient),
+    // A refusal means the invitation changed under the page (it expired, or was canceled or
+    // answered elsewhere), so it is read again: the row then says what it is now and offers
+    // nothing to press, beside the server's sentence.
+    onError: () => invalidateOrganizations(queryClient),
   });
 }
 
@@ -249,5 +253,7 @@ export function declineInvitationMutationOptions(queryClient: QueryClient) {
         { fallback: DECLINE_FALLBACK },
       ),
     onSuccess: () => invalidateOrganizations(queryClient),
+    // As for accepting: a refusal means the invitation is no longer what the row shows.
+    onError: () => invalidateOrganizations(queryClient),
   });
 }

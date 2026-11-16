@@ -1101,6 +1101,49 @@ describe("invitations, for the person invited", () => {
     expect((await page.findByRole("alert")).textContent).toBe(
       "This invitation has expired. Ask whoever invited you to send a new one.",
     );
+    /*
+     * Found in the Northwind story: beside the refusal the row still said "Expires in 7 days" and
+     * offered Accept until a reload. The refusal means the invitation changed, so the row is read
+     * again and says what it is now, with nothing left to press.
+     */
+    expect(
+      await page.findByText(
+        "This invitation has expired. Ask Lee Park to send a new one.",
+      ),
+    ).toBeTruthy();
+    expect(page.queryByText(/Expires in/)).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Accept invitation to Acme Research",
+      }),
+    ).toBeNull();
+  });
+
+  test("on the list, an invitation refused as expired is read again: no Expires in, no Accept", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations");
+    const page = within(await app.view.findByRole("main"));
+    const accept = await page.findByRole("button", {
+      name: "Accept invitation to Acme Research",
+    });
+    (server.received[0] as ReceivedInvitation).status = "expired";
+    await app.person.click(accept);
+    expect(
+      await page.findByText(
+        "This invitation has expired. Ask Lee Park to send a new one.",
+      ),
+    ).toBeTruthy();
+    expect(page.queryByText(/Expires in/)).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Accept invitation to Acme Research",
+      }),
+    ).toBeNull();
+    expect(
+      page.queryByRole("button", {
+        name: "Decline invitation to Acme Research",
+      }),
+    ).toBeNull();
   });
 
   test.each([

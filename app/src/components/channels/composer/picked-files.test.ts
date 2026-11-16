@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_DOCUMENT_BYTES,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
 } from "@/lib/channels/attachments";
+import { FILE_PICKER_ACCEPT } from "./attachments";
 import { screenPickedFiles } from "./picked-files";
 
 function file(name: string, type: string, size = 3): File {
@@ -59,6 +61,31 @@ describe("screenPickedFiles", () => {
 
     expect(result.accepted).toEqual([]);
     expect(result.rejected[0].reason).toMatch(/too large/);
+  });
+
+  /**
+   * The Northwind story's invoice beat: a PDF invoice was refused at pick time with "isn't a file
+   * type you can attach", so the Bot never saw it. A PDF is staged like any other file, and the
+   * file dialog offers it.
+   */
+  test("accepts a PDF invoice, and the file dialog offers PDFs", () => {
+    const invoice = file("invoice-NW-4471.pdf", "application/pdf", 200_000);
+    const result = screenPickedFiles([invoice], { alreadyStaged: 0 });
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toEqual([invoice]);
+    expect(FILE_PICKER_ACCEPT.split(",")).toContain("application/pdf");
+    expect(FILE_PICKER_ACCEPT.split(",")).toContain(".pdf");
+  });
+
+  test("rejects a PDF over its limit, naming the limit", () => {
+    const big = file("scan.pdf", "application/pdf", MAX_DOCUMENT_BYTES + 1);
+    const result = screenPickedFiles([big], { alreadyStaged: 0 });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toBe(
+      "'scan.pdf' is too large for a PDF. The limit is 8MB.",
+    );
   });
 
   test("rejects an oversized image", () => {

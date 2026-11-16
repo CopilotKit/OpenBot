@@ -56,14 +56,14 @@ export const SHARING_CHOICES: {
     mode: "open",
     icon: IconUsersGroup,
     title: "Everyone's Bots",
-    description: "Every Bot on OpenBot draws on all of your skills.",
+    description: "Every Bot in your organization draws on all of your skills.",
   },
   {
     mode: "choose",
     icon: IconListCheck,
     title: "The skills I choose",
     description:
-      "Every Bot draws on the skills you open below; your own Bots use all of them.",
+      "Every Bot in your organization draws on the skills you open below. Your own Bots use all of them.",
   },
 ];
 
@@ -104,8 +104,8 @@ function emptySentence(
 /** What the Your Skills section says about who draws on them, in the mode chosen. */
 const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
   closed: "Only the Bots you use draw on these skills.",
-  open: "Every Bot on OpenBot draws on these skills.",
-  choose: "Open a skill to let every Bot on OpenBot use it.",
+  open: "Every Bot in your organization draws on these skills.",
+  choose: "Open a skill to let every Bot in your organization use it.",
 };
 
 /** How a skill was made, beside its title on the Skills page's one list. */
