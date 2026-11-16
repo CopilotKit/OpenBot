@@ -90,6 +90,11 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
+// No page replaces this one here, so the running screen comes once the window was sent to OpenBot.
+// The test of the handover itself holds it as the app does.
+const { handover } = await import("./handover");
+const HANDOVER_HOLD_MS = handover.holdMs;
+handover.holdMs = 0;
 const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
@@ -2293,7 +2298,7 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   // The download is the journey's: what is happening, and its measure beside the time left. The row
   // keeps what this part is, and has no measure of its own.
   expect(said["downloading the update"]).toMatch(
-    /Downloading the update(About \d+ minutes|About a minute|Less than a minute) left · 300\.0 MB of 900\.0 MB · \d+s so far/,
+    /Downloading the update · 300\.0 MB of 900\.0 MB(About \d+ minutes|About a minute|Less than a minute) left · \d+s so far/,
   );
   expect(said["downloading the update"].match(/MB of/g)).toHaveLength(1);
   expect(said["downloading the update"]).toContain(
@@ -3776,6 +3781,83 @@ test("relaunch upgrades an older installation to this app's release as part of S
 });
 
 /*
+ * Found on Windows I: after an update, "OpenBot is running" with Show OpenBot and Stop OpenBot
+ * showed for about five seconds before OpenBot's home came up. The window had said running before
+ * it asked to show OpenBot, and the setup page stays on screen until OpenBot's own page replaces it.
+ * Start now goes straight from Starting to OpenBot, after an update as after any Start: the running
+ * screen never renders while the window becomes OpenBot.
+ */
+test("Start goes straight from Starting to OpenBot, after an update as after any Start, with no running screen between", async () => {
+  handover.holdMs = HANDOVER_HOLD_MS;
+  try {
+    await handsOverWithoutRunning();
+  } finally {
+    handover.holdMs = 0;
+  }
+});
+
+async function handsOverWithoutRunning() {
+  for (const updates of [true, false]) {
+    setupConnectedLocalStack(
+      updates ? "/tmp/handover-after-update" : "/tmp/handover-plain-start",
+      localStatus("ready", "valid"),
+    );
+    const moving = deferred<unknown>();
+    if (updates) withOlderDeployment(() => moving.promise);
+    const showing = deferred<null>();
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) =>
+      command === "show_openbot" ? showing.promise : previous(command, args);
+    const headings: string[] = [];
+    const seen = new MutationObserver(() => {
+      for (const heading of document.querySelectorAll("h1")) {
+        const said = heading.textContent ?? "";
+        if (headings.at(-1) !== said) headings.push(said);
+      }
+    });
+    seen.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    const view = await renderApp();
+    if (updates) {
+      await waitFor(() =>
+        expect(
+          invokeCalls.some((call) => call.command === "upgrade_and_start"),
+        ).toBe(true),
+      );
+      await act(async () =>
+        moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+      );
+    }
+    await expectHandover();
+    // While the window is asked to show OpenBot, and after it answered and OpenBot's page loads.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(
+      view.getByRole("heading", { name: "Starting OpenBot" }),
+    ).toBeTruthy();
+    await act(async () => showing.resolve(null));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(
+      view.getByRole("heading", { name: "Starting OpenBot" }),
+    ).toBeTruthy();
+    expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Change AI connection" }),
+    ).toBeNull();
+    seen.disconnect();
+    expect(headings).not.toContain("OpenBot is running");
+    expect(headings).not.toContain("OpenBot is stopped");
+    expect(
+      invokeCalls.filter((call) => call.command === "show_openbot"),
+    ).toHaveLength(1);
+    cleanup();
+    invokeCalls = [];
+  }
+}
+
+/*
  * Start updating OpenBot itself, in the Start journey: what the update is doing now, said from the
  * step running now (`upgrade::now_said`), on the one bar that covers every row. The install and the
  * start report rows of their own as well, and those never take the line over. On Windows the line
@@ -3886,9 +3968,18 @@ test("the journey says the update step running now, never one that finished, on 
     expect(
       view.getByRole("heading", { name: "Starting OpenBot" }),
     ).toBeTruthy();
-    expect(journey().querySelector(".journey-said")?.textContent).toBe(said);
-    expect(journey().querySelector(".journey-bytes")?.textContent ?? null).toBe(
-      bytes ?? null,
+    // A download's measure is said with the download it counts, never as the bar's own caption: on
+    // Windows K the time line read "About 2 minutes left · 304.0 MB of 317.0 MB" beside a bar a
+    // third full, which counts the whole Start, as the time left does.
+    expect(journey().querySelector(".journey-said")?.textContent).toBe(
+      `${said}${bytes ?? ""}`,
+    );
+    expect(
+      journey().querySelector(".journey-said .journey-bytes")?.textContent ??
+        null,
+    ).toBe(bytes ?? null);
+    expect(journey().querySelector(".journey-time")?.textContent).not.toMatch(
+      /\d B\b|[KMG]B\b/,
     );
     // One bar on the screen, the journey's, and it only moves forward.
     const bars = view.getAllByRole("progressbar");
