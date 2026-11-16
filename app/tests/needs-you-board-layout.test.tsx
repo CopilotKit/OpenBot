@@ -59,6 +59,11 @@ const NOW = new Date().toISOString();
 const DINNER = "Plan a Seattle team dinner for twelve people next Friday";
 const SEEDS = "Order the basil and tomato seeds from Fernhill Garden Supply";
 const CATERERS = "Compare quotes from the three caterers";
+/*
+ * A task the person stopped. Its line says what stopping did; cut to one line at 390 it read "You
+ * stopped this. Anything it had already..." (found in the big test's fix pass).
+ */
+const STOPPED = "Draft the EU customer refunds guide";
 const ASKED =
   "Which Seattle neighbourhood would you prefer for the team dinner: Capitol Hill, Ballard or Fremont?";
 const REPORT =
@@ -98,6 +103,11 @@ const TASK_LIST = [
   }),
   task("a", SEEDS, "needs_input", {
     next: "Waiting for your approval: click the button “Place order” on shop.example",
+  }),
+  task("s", STOPPED, "failed", {
+    failure: "you stopped it",
+    failedAt: NOW,
+    stoppedAt: NOW,
   }),
   task("f", CATERERS, "failed", {
     failure: "the caterers' site didn't answer",
@@ -322,7 +332,7 @@ async function open(
   });
   await page.goto(`${ORIGIN}${path}`);
   // Every row is drawn: the tasks, and the question outside any of them.
-  for (const words of [DINNER, SEEDS, CATERERS, REPORT])
+  for (const words of [DINNER, SEEDS, CATERERS, STOPPED, REPORT])
     await page.getByText(words, { exact: true }).first().waitFor();
   await style(page);
   await page.evaluate(() => document.fonts.ready);
@@ -405,7 +415,7 @@ async function rows(page: Page): Promise<RowLook[]> {
       // A task that waits on the person can be stopped from its row, as from its card.
       const wanted = name.startsWith("Should I")
         ? ["Answer"]
-        : name.startsWith("Compare")
+        : name.startsWith("Compare") || name.startsWith("Draft the EU")
           ? ["Try again", "Mark done", "Open"]
           : ["Stop", "Mark done", "Open"];
       // The line under the title: what the row waits on.
@@ -500,7 +510,7 @@ describe.skipIf(!asked)("a row of the Needs you board", () => {
               }
               const looks = await rows(page);
               expect(looks.map((look) => look.title).sort()).toEqual(
-                [DINNER, SEEDS, CATERERS, REPORT].sort(),
+                [DINNER, SEEDS, CATERERS, STOPPED, REPORT].sort(),
               );
               for (const look of looks)
                 expect(look).toEqual({
@@ -527,7 +537,7 @@ describe.skipIf(!asked)("a row of the Needs you board", () => {
                   .getByRole("menuitem", { name: "Mark done" })
                   .waitFor();
                 await page.getByRole("menuitem", { name: "Open" }).waitFor();
-                if (look.title !== CATERERS)
+                if (look.title !== CATERERS && look.title !== STOPPED)
                   await page.getByRole("menuitem", { name: "Stop" }).waitFor();
                 // The menu's own classes, which were not on the page until it opened.
                 await style(page);
