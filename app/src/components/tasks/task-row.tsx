@@ -438,8 +438,12 @@ export function TaskBoardRow({
       }
       secondary={secondary(openFirst ? "default" : "outline")}
       detail={said.line}
-      // What a waiting task waits for is what the person has to answer: read in full, never cut.
-      readDetail={status === "needs_input"}
+      /*
+       * Read in full, never cut: what a waiting task waits for is what the person has to answer,
+       * and a stopped task's line says what stopping did ("Anything it had already done stays
+       * done"). Cut to one line at a phone's width it read "Anything it had already...".
+       */
+      readDetail={status === "needs_input" || state === "stopped"}
       icon={<Icon />}
       meta={[
         <span key="status">{said.label}</span>,
