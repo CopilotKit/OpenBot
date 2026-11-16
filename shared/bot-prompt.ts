@@ -12,7 +12,7 @@ import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
 import { DELEGATE_TOOL, DELEGATING_GUIDANCE } from "./orchestration";
 import { RESEARCH_APP_NAMES } from "./research";
-import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
+import { SUBAGENT_TOOL } from "./subagent";
 
 const OPENING_A_PAGE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
@@ -352,7 +352,9 @@ const ORCHESTRATION_GUIDANCE_LINES = [
   "",
   "When you do use them, give each one a self-contained task with everything it needs to know, and",
   "say what answer you want back. Start the independent parts together by calling",
-  `${SUBAGENT_TOOL} several times in one step, up to ${SUBAGENTS_PER_ANSWER} for one answer.`,
+  `${SUBAGENT_TOOL} several times in one step. A long list of independent parts is work to finish,`,
+  "not a reason to stop partway: a set number run at once and the rest wait their turn, so give out",
+  "every part, in batches across several steps if that is easier, until each one is done.",
   "",
   "Keep the planning, the decisions, anything that needs the person's approval, and the final answer",
   "yourself. A subagent that reaches an action needing approval stops and hands it back to you: if it",
