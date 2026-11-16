@@ -1348,6 +1348,7 @@ export * from "./stopComputerHeaders";
 export * from "./stopHostAccessHeaders";
 export * from "./stopInactiveComputersHeaders";
 export * from "./stopPersonComputersHeaders";
+export * from "./stopTaskHeaders";
 export * from "./submitSignInCodeHeaders";
 export * from "./submitSignInCodeRequest";
 export * from "./submitSignInHeaders";

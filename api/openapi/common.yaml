@@ -178,6 +178,7 @@ paths:
   /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1resolve' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}/reopen: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1reopen' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}/retry: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1retry' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/stop: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1stop' }
   /api/v2/organizations/{organizationId}/transcriptions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1transcriptions' }
   /api/v2/organizations/{organizationId}/credentials: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials' }
   /api/v2/organizations/{organizationId}/credentials/{credentialId}/revoke: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1credentials~1{credentialId}~1revoke' }

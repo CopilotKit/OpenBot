@@ -27,6 +27,7 @@ import type {
   RetryTaskHeaders,
   ServerErrorResponse,
   ServiceUnavailableResponse,
+  StopTaskHeaders,
   TaskConflictResponse,
   TaskNotFoundResponse,
   TaskPage,
@@ -907,4 +908,146 @@ export const useRetryTask = <
   TContext
 > => {
   return useMutation(getRetryTaskMutationOptions(options), queryClient);
+};
+export const getStopTaskUrl = (organizationId: string, taskId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/tasks/${encodeURIComponent(String(taskId))}/stop`;
+};
+
+/**
+ * Stop the task's work, as Stop in its conversation does. A step it is in the middle of is cut off; the steps it finished stay done, and its conversation and the one that asked for it say how far it got. What it waits on the person for is no longer asked. Only a task that is working or waiting on the person can be stopped. The answer is the task as it stands now, which is stopped.
+ * @summary Stop a task
+ */
+export const stopTask = async (
+  organizationId: string,
+  taskId: string,
+  headers: StopTaskHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TaskResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<TaskResponse>(getStopTaskUrl(organizationId, taskId), {
+    ...options,
+    method: "POST",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getStopTaskMutationKey = () => ["stopTask"] as const;
+
+export const getStopTaskMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | TaskConflictResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof stopTask>>,
+    TError,
+    StopTaskMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof stopTask>>,
+  TError,
+  StopTaskMutationVariables,
+  TContext
+> => {
+  const mutationKey = getStopTaskMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof stopTask>>,
+    StopTaskMutationVariables
+  > = (props) => {
+    const { organizationId, taskId, headers } = props ?? {};
+
+    return stopTask(organizationId, taskId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StopTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof stopTask>>
+>;
+
+export type StopTaskMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | TaskNotFoundResponse
+  | TaskConflictResponse
+  | ServerErrorResponse
+  | ServiceUnavailableResponse
+  | UnexpectedErrorResponse;
+export type StopTaskMutationVariables = {
+  organizationId: string;
+  taskId: string;
+  headers: StopTaskHeaders;
+};
+
+/**
+ * @summary Stop a task
+ */
+export const useStopTask = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | TaskConflictResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof stopTask>>,
+      TError,
+      StopTaskMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof stopTask>>,
+  TError,
+  StopTaskMutationVariables,
+  TContext
+> => {
+  return useMutation(getStopTaskMutationOptions(options), queryClient);
 };

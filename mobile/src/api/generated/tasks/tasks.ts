@@ -114,3 +114,22 @@ export const retryTask = async (
     method: "POST",
   });
 };
+
+export const getStopTaskUrl = (organizationId: string, taskId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/tasks/${encodeURIComponent(String(taskId))}/stop`;
+};
+
+/**
+ * Stop the task's work, as Stop in its conversation does. A step it is in the middle of is cut off; the steps it finished stay done, and its conversation and the one that asked for it say how far it got. What it waits on the person for is no longer asked. Only a task that is working or waiting on the person can be stopped. The answer is the task as it stands now, which is stopped.
+ * @summary Stop a task
+ */
+export const stopTask = async (
+  organizationId: string,
+  taskId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TaskResponse> => {
+  return apiRequest<TaskResponse>(getStopTaskUrl(organizationId, taskId), {
+    ...options,
+    method: "POST",
+  });
+};

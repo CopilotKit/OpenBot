@@ -139,6 +139,32 @@ export const getRetryTaskResponseMock = (): TaskResponse => ({
   },
 });
 
+export const getStopTaskResponseMock = (): TaskResponse => ({
+  task: {
+    id: "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a",
+    botId: "general-assistant",
+    conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+    threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
+    title: "Reply to Sam about the spec",
+    why: "Sam asked for the spec by Friday.",
+    origin: "check_in",
+    suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
+    sourceApp: "Gmail",
+    sourceLink: null,
+    originConversationId: null,
+    status: "ready_for_review",
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    next: "Read the draft and send it.",
+    workingSince: null,
+    lastActivityAt: "2026-11-14T09:05:00.000Z",
+    resolvedAt: null,
+    createdAt: "2026-11-14T09:00:00.000Z",
+    updatedAt: "2026-11-14T09:05:00.000Z",
+  },
+});
+
 export const getListTasksMockHandler = (
   overrideResponse?:
     | TaskPage
@@ -284,10 +310,41 @@ export const getRetryTaskMockHandler = (
     options,
   );
 };
+
+export const getStopTaskMockHandler = (
+  overrideResponse?:
+    | TaskResponse
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; taskId: string }>
+        >[0],
+      ) => Promise<TaskResponse> | TaskResponse),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string; taskId: string }>(
+    "*/api/v2/organizations/:organizationId/tasks/:taskId/stop",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; taskId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getStopTaskResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getTasksMock = () => [
   getListTasksMockHandler(),
   getGetTaskMockHandler(),
   getResolveTaskMockHandler(),
   getReopenTaskMockHandler(),
   getRetryTaskMockHandler(),
+  getStopTaskMockHandler(),
 ];
