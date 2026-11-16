@@ -333,6 +333,10 @@ export function CopilotKitAccount({
    * and waits for the person to approve. Then the agreement.
    */
   const signIn = useCallback(async () => {
+    // Try again is a new sign-in with a new code: one still running is stopped first, and its
+    // answer is not heard (`attempt`).
+    const running = attempt.current;
+    if (running) cancelLocalEval(running).catch(() => {});
     const started = signInToCopilotKit();
     attempt.current = started.attempt;
     setSignInPage(false);

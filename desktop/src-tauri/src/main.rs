@@ -21836,6 +21836,10 @@ fn main() {
         let empty = temp_root("openbot-sign-in-no-engine");
         std::fs::create_dir_all(&empty).unwrap();
         std::env::set_var("PATH", &empty);
+        // Each sign-in forgets the CLI's saved code: this one's, not that of whoever runs the test.
+        for home in ["HOME", "APPDATA", "XDG_CONFIG_HOME"] {
+            std::env::set_var(home, &empty);
+        }
         // A CLI that waits on the browser for longer than the test does.
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-sign-in-cli", true);
         let sink = desktop_telemetry::sink::Sink::start();
