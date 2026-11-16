@@ -19,7 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import type { ListedTask } from "@/lib/tasks/groups";
+import { countsAsWaiting, type ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
@@ -264,7 +264,13 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
   const { state, Icon } = look(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  const openFirst = status === "ready_for_review" || status === "needs_input";
+  /*
+   * A delegated task that is done waits on nobody: its result was said in the conversation that
+   * asked. It reads Done, as its card does, untinted and uncounted, with Open no longer leading.
+   */
+  const settled = !countsAsWaiting(listed) && status === "ready_for_review";
+  const openFirst =
+    !settled && (status === "ready_for_review" || status === "needs_input");
   return (
     <BoardRow
       actions={
@@ -305,7 +311,7 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
       detail={nextLine(listed)}
       icon={<Icon />}
       meta={[
-        <span key="status">{statusLabel(listed)}</span>,
+        <span key="status">{statusLabel(listed, settled)}</span>,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">

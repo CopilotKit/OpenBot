@@ -88,7 +88,7 @@ type Task = {
   threadId: string | null;
   title: string;
   why: string | null;
-  origin: "check_in";
+  origin: "check_in" | "delegated";
   suggestionId: string | null;
   sourceApp: string | null;
   sourceLink: string | null;
@@ -143,6 +143,7 @@ let questions: {
   id: string;
   botId: string;
   threadId: string;
+  channelId?: string;
   question: string;
   createdAt: string;
 }[] = [];
@@ -606,6 +607,77 @@ test("the board says a task's line as plain text, and a working task is not offe
       }),
     ).toBeTruthy();
   }
+});
+
+/*
+ * A delegated task asked the person with the question tool. The question waits in the task's own
+ * thread, and the server counts it once, as the task waiting on them. The board listed it twice, the
+ * question and the task, under "2 waiting" beside a badge of 1.
+ */
+test("one wait inside a task is one row and one count, and rows that wait on nobody are not counted", async () => {
+  const asked =
+    "Which Fernhill seed packet should I order: tomato ($4.50) or basil ($3.25)?";
+  tasks = [
+    task({
+      id: "q",
+      title: "Order Fernhill seeds",
+      origin: "delegated",
+      status: "needs_input",
+      next: `Waiting for your answer: ${asked}`,
+    }),
+    task({ id: "w", title: "Draft the board update", status: "working" }),
+    task({
+      id: "d",
+      title: "Check the venue's doors time",
+      origin: "delegated",
+      next: "Doors open at 7:00 p.m.",
+    }),
+  ];
+  questions = [
+    {
+      id: "question-q",
+      botId: "inbox",
+      threadId: "t-q",
+      channelId: "c-q",
+      question: asked,
+      createdAt: now,
+    },
+  ];
+  // As the server counts it: the task waiting on the person, not its question beside it.
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 1, ready: 0, failed: 0 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    await surface.findByText("Order Fernhill seeds");
+    expect(surface.getByText("1 waiting")).toBeTruthy();
+    // The task stands for its question: no second row with Answer.
+    expect(surface.queryByText(asked)).toBeNull();
+    expect(surface.queryByRole("button", { name: "Answer" })).toBeNull();
+    const row = (title: string) =>
+      surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
+    expect(
+      row("Order Fernhill seeds").querySelector(".bg-amber-50"),
+    ).not.toBeNull();
+    // Listed, and not waiting on the person: no tint, and a done one reads Done, as its card does.
+    expect(
+      row("Draft the board update").querySelector(".bg-amber-50"),
+    ).toBeNull();
+    const done = row("Check the venue's doors time");
+    expect(done.querySelector(".bg-amber-50")).toBeNull();
+    expect(within(done).getByText("Done")).toBeTruthy();
+    expect(within(done).queryByText("Ready for review")).toBeNull();
+  }
+  // The Bot's own badge on the Bots page says the same number.
+  const bots = region("Bots page");
+  const botRow = (await bots.findByText("1 task waiting on you")).closest(
+    "[data-slot=item]",
+  ) as HTMLElement;
+  expect(within(botRow).getByText("1")).toBeTruthy();
 });
 
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {

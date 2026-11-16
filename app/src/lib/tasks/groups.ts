@@ -30,6 +30,20 @@ export function waitsOnYou(status: TaskStatus): boolean {
   );
 }
 
+/**
+ * Whether a listed task is one thing waiting on the person, by the rule the Bots badge counts by
+ * (the server's task counts): something to read, answer or try again, less a delegated task that is
+ * done. Its result was already said in the conversation that asked for it, so it is not one more
+ * thing to review. Every count of what waits on the person counts tasks by this, so the numbers
+ * agree wherever they are shown.
+ */
+export function countsAsWaiting({ task, status }: ListedTask): boolean {
+  return (
+    waitsOnYou(status) &&
+    !(task.origin === "delegated" && status === "ready_for_review")
+  );
+}
+
 const time = (iso: string | null) => {
   const at = iso ? Date.parse(iso) : Number.NaN;
   return Number.isFinite(at) ? at : 0;
