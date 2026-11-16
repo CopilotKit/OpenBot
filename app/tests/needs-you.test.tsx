@@ -159,6 +159,8 @@ let failing = new Set<string>();
 let busy: string[] = [];
 /** What each Bot is waiting on the person for, as the server counts it. */
 let waitingBots: ReturnType<typeof attentionOf>[] = [];
+/** Actions waiting on the person, as the inbox lists them. */
+let requests: unknown[] = [];
 /** What the Inbox Bot's Activity lists under way: a hand-off that ran out of tries, when a test says. */
 let stalled: ReturnType<typeof activityOf>["inProgress"] = [];
 const sent: { method: string; path: string }[] = [];
@@ -254,7 +256,7 @@ function serving() {
         enabled: true,
         rules: [],
         teamRules: [],
-        requests: [],
+        requests: requests as never[],
         questions,
       });
       if (approvals) return approvals;
@@ -285,6 +287,7 @@ beforeEach(() => {
   busy = [];
   waitingBots = [];
   stalled = [];
+  requests = [];
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
@@ -666,11 +669,16 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
     const surface = region(name);
     await surface.findByText("Order Fernhill seeds");
     expect(surface.getByText("1 waiting")).toBeTruthy();
-    // The task stands for its question: no second row with Answer.
+    // The task stands for its question: no second row, and Answer is on the task's own row.
     expect(surface.queryByText(asked)).toBeNull();
-    expect(surface.queryByRole("button", { name: "Answer" })).toBeNull();
     const row = (title: string) =>
       surface.getByText(title).closest("[data-slot=item]") as HTMLElement;
+    expect(surface.getAllByRole("button", { name: "Answer" })).toHaveLength(1);
+    expect(
+      within(row("Order Fernhill seeds")).getByRole("button", {
+        name: "Answer",
+      }),
+    ).toBeTruthy();
     expect(
       row("Order Fernhill seeds").querySelector(".bg-amber-50"),
     ).not.toBeNull();
@@ -689,6 +697,73 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
     "[data-slot=item]",
   ) as HTMLElement;
   expect(within(botRow).getByText("1")).toBeTruthy();
+  // Answered from the board, without opening the thread: the whole question, and a box to answer in.
+  fireEvent.click(bots.getByRole("button", { name: "Answer" }));
+  const dialog = await within(document.body).findByRole("dialog");
+  expect(within(dialog).getByText(asked)).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", { name: "Send answer" }),
+  ).toBeTruthy();
+});
+
+/*
+ * A task waiting on an action in its thread is one row, the task's, and that row answers it: Allow
+ * and Deny, the standing answers in its menu, why it asks and what it would send. Folded into the
+ * task, the action's own buttons were gone and the person had to open the thread to answer.
+ */
+test("a task waiting on an approval is answered from its row on the board: Allow, Deny and the menu", async () => {
+  tasks = [
+    task({
+      id: "a",
+      title: "Order the basil seeds",
+      origin: "delegated",
+      status: "needs_input",
+      next: "Waiting for your approval: click the button “Place order” on shop.example",
+    }),
+  ];
+  requests = [
+    {
+      id: "r-a",
+      action: {
+        botId: "inbox",
+        toolRef: "computer_click",
+        effect: "write",
+        scope: "shop.example",
+        threadId: "t-a",
+        args: { element: "Place order" },
+        target: null,
+        policy: {
+          behaviour: "ask",
+          source: "kind",
+          reason: "Paying, buying or moving money asks you first.",
+        },
+      },
+    },
+  ];
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 1, ready: 0, failed: 0 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  const surface = region("Bots page");
+  const row = (await surface.findByText("Order the basil seeds")).closest(
+    "[data-slot=item]",
+  ) as HTMLElement;
+  expect(surface.getByText("1 waiting")).toBeTruthy();
+  expect(
+    within(row).getByText("Paying, buying or moving money asks you first."),
+  ).toBeTruthy();
+  expect(within(row).getByRole("button", { name: "Allow" })).toBeTruthy();
+  expect(within(row).getByRole("button", { name: /^More for / })).toBeTruthy();
+  fireEvent.click(within(row).getByRole("button", { name: "Deny" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      method: "POST",
+      path: `${APPROVALS_PATH}/r-a/decide`,
+    }),
+  );
 });
 
 /*

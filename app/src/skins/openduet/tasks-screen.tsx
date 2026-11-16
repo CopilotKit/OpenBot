@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
-import { useWaitingRows } from "@/components/approvals/waiting";
+import { useHeldAnswers, useWaitingRows } from "@/components/approvals/waiting";
 import { ActivityRow } from "@/components/bot-profile/activity";
 import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
 import { useStalledHandoffs } from "@/components/needs-you/stalled-handoffs";
@@ -159,7 +159,15 @@ function ActiveView() {
         }).length
       : undefined;
   const { tasks, done } = useNeedsYou();
-  const listed = [...tasks, ...done];
+  /*
+   * A task waiting on a question or an action in its own conversation is listed once, as that wait's
+   * own row under Needs input, where it is answered.
+   */
+  const heldAnswer = useHeldAnswers();
+  const listed = [...tasks, ...done].filter(
+    (entry) =>
+      !(entry.status === "needs_input" && heldAnswer(entry.task) !== undefined),
+  );
   // A question or an action inside a task is that task waiting, listed once, as the task.
   const waiting = useWaitingRows(undefined, heldByTaskOf(listed));
   // A hand-off that ran out of tries waits on the person too: listed with what needs input.
