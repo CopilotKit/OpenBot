@@ -1,5 +1,6 @@
 import {
   OPENBOT_HARNESS_NAME,
+  reachedThroughMastra,
   summaryFor,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
@@ -124,8 +125,9 @@ type Step = (typeof STEPS)[number];
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
- * so the server never hears which was picked.
+ * The framework is kept for its connection instructions and default role description, and sent with
+ * the create. Every framework but Mastra is reached the same way, at an AG-UI address. A Mastra
+ * server is reached through Mastra's own API, which the server picks from the framework sent.
  */
 export type Runtime =
   | { kind: "builtin" }
@@ -368,6 +370,25 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setUnreachable(undefined);
+    /*
+     * A Mastra server has no AG-UI route, so the AG-UI test could only fail against it. The create
+     * names the framework and the server proves the address against Mastra's own API before it saves
+     * anything. What it refused with is shown under the address, as a failed test is.
+     */
+    if (runtime?.kind === "managed" && reachedThroughMastra(runtime.harness)) {
+      try {
+        await create(runtime);
+      } catch (error) {
+        createAgent.reset();
+        setUnreachable(
+          error instanceof Error && error.message
+            ? error.message
+            : MASTRA_UNREACHABLE,
+        );
+        focusAddress();
+      }
+      return;
+    }
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -564,6 +585,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     </form>
   );
 }
+
+/** Said when a Mastra create failed without a sentence of the server's own. */
+export const MASTRA_UNREACHABLE =
+  "Couldn't reach a Mastra server at that address.";
 
 /** How long the created view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
@@ -993,8 +1018,8 @@ export function RuntimeStep({
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
  * The framework picked on the step before is named at the top so the person can see what they are
- * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
- * stored the same way.
+ * connecting. Nothing below differs by framework but Mastra's: every other one is an AG-UI address,
+ * and a Mastra one is the address of the Mastra server itself, so its example and its hint say so.
  *
  * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
@@ -1020,6 +1045,7 @@ export function EndpointStep({
   onKey: (value: string) => void;
 }) {
   const chosen = WEB_HARNESSES.find((entry) => entry.id === harness);
+  const mastra = reachedThroughMastra(harness);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1045,7 +1071,11 @@ export function EndpointStep({
             id="new-bot-endpoint"
             inputMode="url"
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://your-agent.example.com/ag-ui"
+            placeholder={
+              mastra
+                ? "https://your-mastra-server.example.com"
+                : "https://your-agent.example.com/ag-ui"
+            }
             value={endpoint}
           />
           {endpointError ? (
@@ -1053,6 +1083,11 @@ export function EndpointStep({
               className="text-pretty"
               errors={[{ message: endpointError }]}
             />
+          ) : mastra ? (
+            <FieldDescription>
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
+            </FieldDescription>
           ) : (
             <FieldDescription>
               Any agent that speaks AG-UI works. OpenBot connects to it, so it

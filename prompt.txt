@@ -11,7 +11,7 @@ There are three supported paths, and they are different jobs:
   A. They want a server/container deployment. Use the published Docker image and an env file.
   B. They want to try OpenBot on their own machine, change OpenBot itself, or edit a tenant package
      from source. Use the clone.
-  C. They want OpenBot on a Kubernetes cluster (EKS, GKE, AKS or their own). Use the Helm chart
+  C. They want OpenBot on a Kubernetes cluster (EKS, GKE, AKS or their own). Use the Helm charts
      published with each release.
 
 There is also a desktop app, OpenBot Personal Edition, for somebody who only wants to use OpenBot
@@ -23,7 +23,7 @@ Intelligence locally. Send them to its installer instead of any path below:
   Windows (x64)        https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe
 
 OpenBot is a template to make your own and white-label, not a hosted product somebody signs up for.
-The container runs it as released, and so does the chart, on a cluster; the clone is for running
+The container runs it as released, and so do the charts, on a cluster; the clone is for running
 it locally and for changing the product, tenant package, Bots, channels, skills, or branding.
 
 A. SERVER OR ONE-CONTAINER DEPLOYMENT
@@ -169,83 +169,117 @@ server's log is `docker compose logs server`.
 computer. Pass `--keep-computers` only when they deliberately want browser sessions left signed in.
 Nothing is deleted either way: the database, files and browser profiles are volumes.
 
-C. KUBERNETES: THE HELM CHART
+C. KUBERNETES: THE HELM CHARTS
 
-Use this when they are deploying to a Kubernetes cluster. The chart is published with the GitHub
-release as `openbot-<chart version>.tgz`, with its dependencies inside (v1.0.2 attaches
-openbot-0.2.0.tgz), and no Helm repository or registry. Its full guide comes with it:
-`helm show readme https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz`.
+Use this when they are deploying to a Kubernetes cluster. Each GitHub release publishes two charts,
+with their dependencies inside, and no Helm repository or registry:
 
-One install is the whole product: OpenBot (two API replicas, one shared Bot computer, and the
-scheduled Jobs) and CopilotKit Intelligence, which the chart installs too (`intelligence.enabled`
-is on by default), self-hosted on its own PostgreSQL, Redis and object storage, wired to OpenBot
-with a project key the chart generates. Nobody signs in to Intelligence.
+- `openbot-bundle-<chart version>.tgz`: OpenBot and CopilotKit Intelligence together, on one
+  PostgreSQL server. Intelligence is self-hosted, with its own Redis and object storage, and the
+  chart makes OpenBot's organization, project and key in it. Nobody signs in to Intelligence.
+  v1.1.0 attaches openbot-bundle-0.1.0.tgz.
+- `openbot-<chart version>.tgz`: OpenBot alone, pointed at an Intelligence that already runs,
+  managed or self-hosted, by `config.intelligence.apiUrl`, `config.intelligence.gatewayWsUrl` and a
+  project key. v1.1.0 attaches openbot-0.3.0.tgz.
+
+Ask which they want. Somebody with no Intelligence yet wants `openbot-bundle`; somebody on managed
+Intelligence, or with a self-hosted one already running, wants `openbot`. Each chart's full guide
+comes with it:
+
+  helm show readme https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz
+  helm show readme https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-0.3.0.tgz
+
+Either way OpenBot runs two API replicas and one shared Bot computer. Its server migrates its own
+database as it starts and does the scheduled work itself: there is no migration Job and no CronJob.
 
 What the cluster needs first:
 - kubectl and Helm pointed at the cluster they mean. Check `kubectl config current-context` with
   them before installing anything.
-- amd64 nodes. The OpenBot image is published for linux/amd64 only, and so is the embeddings image
-  Intelligence runs. On arm64 nodes the pods sit in ImagePullBackOff.
+- amd64 or arm64 nodes. The OpenBot image is published for both. The embeddings server
+  `openbot-bundle`'s Intelligence runs for Memory is amd64 only: on arm64 nodes add
+  `--set intelligence.embeddings.enabled=false` to the install, and Memory recalls by keyword.
 - A default StorageClass (`kubectl get sc` marks it default). Every volume the install asks for uses
   it unless a `storageClass` value names another. A cluster made with eksctl has none marked
   default; the chart README shows the gp3 class to create.
-- About 3.25 vCPU of requests while it runs, plus about 0.4 vCPU while the install Jobs run. On
-  EKS, two t3.large nodes (2 vCPU each) come out short and the last pod stays Pending; use three,
-  or larger nodes.
-- A CopilotKit license for the bundled self-hosted Intelligence. They run, themselves:
+- For `openbot-bundle`, about 3.15 vCPU of requests while it runs, plus about 0.4 vCPU while the
+  install Jobs run. On EKS, two t3.large nodes come out short and the last pod stays Pending; use
+  three, or larger nodes. `openbot` alone requests about 1.1 vCPU.
+- For `openbot-bundle`, a CopilotKit license for its self-hosted Intelligence. They run,
+  themselves:
 
   npx --yes copilotkit@latest login
   npx --yes copilotkit@latest license --print
 
+  For `openbot` on managed Intelligence, the runtime key instead, which they print themselves with
+  `npx --yes copilotkit@latest project select` after the login. The license is then optional.
 - A model key: OpenAI, or Anthropic.
 
-1. They write the license and the model key into a file outside the repository that is never
-   committed. You write the skeleton; they fill in the values:
+1. They write the secrets into a file outside the repository that is never committed. You write
+   the skeleton; they fill in the values. For `openbot-bundle`, OpenBot's values go under
+   `openbot:`:
+
+  cat > ~/openbot-values.yaml <<EOF
+  openbot:
+    config:
+      singleUser: true
+    secrets:
+      licenseToken: "<their CopilotKit license>"
+      modelApiKey: "<their OpenAI API key>"
+  EOF
+
+   For `openbot` on managed Intelligence, the same values sit at the top level, with Intelligence's
+   addresses, the runtime key and OpenBot's bundled PostgreSQL (`postgresql.enabled`, off in the
+   chart's own defaults):
 
   cat > ~/openbot-values.yaml <<EOF
   config:
     singleUser: true
+    intelligence:
+      apiUrl: https://api.intelligence.copilotkit.ai
+      gatewayWsUrl: wss://realtime.intelligence.copilotkit.ai
   postgresql:
     enabled: true
   secrets:
-    licenseToken: "<their CopilotKit license>"
+    intelligenceApiKey: "<their cpk-... runtime key>"
     modelApiKey: "<their OpenAI API key>"
   EOF
 
    With Anthropic, use `anthropicApiKey` in place of `modelApiKey`, and add `provider: anthropic`
-   under `config.model` in the same file.
+   under `config.model` (`openbot.config.model` for the bundle) in the same file.
 
-2. Install:
+2. Install, with the chart they chose:
 
-  helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz \
+  helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz \
     --namespace openbot --create-namespace \
     --values ~/openbot-values.yaml \
     --timeout 15m
 
-   The first two settings turn on `config.singleUser` and OpenBot's bundled PostgreSQL
-   (`postgresql.enabled`, which is off in the chart's own defaults). The chart generates the rest:
-   the key encryption key and the computer token in the Secret `openbot-secrets`, the database
-   password in `openbot-postgresql`, OpenBot's Intelligence runtime key in `openbot-intel-api-key`
-   (all three kept on uninstall), and the routines secret in `openbot-worker-secret`, each read back
-   on every upgrade. Anybody restoring a backup of this database elsewhere needs the key encryption
-   key: tell them it is `key-encryption-key` in `openbot-secrets`, and do not read it out yourself.
+   (or `.../v1.1.0/openbot-0.3.0.tgz` for OpenBot alone). The chart generates the rest and reads it
+   back on every upgrade: the key encryption key and the computer token in the Secret
+   `openbot-secrets`, and the database password. `openbot-bundle` also generates every
+   credential Intelligence needs, in Secrets named `openbot-intel-*`, OpenBot's Intelligence key
+   among them (`openbot-intel-api-key`). All are kept on uninstall. Anybody restoring a backup of
+   this database elsewhere needs the key encryption key: tell them it is `key-encryption-key` in
+   `openbot-secrets`, and do not read it out yourself.
 
-   A first install takes several minutes. `kubectl -n openbot get pods,jobs` shows it coming up. The
-   `openbot-migrations-1` Job migrates OpenBot's database, the server waits in its
-   `wait-for-database` init container until that is done
-   (`kubectl -n openbot logs deploy/openbot-server -c wait-for-database` says what it waits for),
-   and the log of the `openbot-intelligence-bootstrap-1` Job says what Intelligence set up.
+   A first install takes several minutes. `kubectl -n openbot get pods,jobs` shows it coming up.
+   Each OpenBot server pod waits in its `wait-for-database` init container until the database
+   accepts its connection, then migrates the database as it starts; the replicas take turns
+   (`kubectl -n openbot logs deploy/openbot-server -c wait-for-database` says what it waits for).
+   With `openbot-bundle`, Intelligence's migrations Job retries until the database is up, and the
+   log of the `openbot-intelligence-bootstrap-1` Job says what Intelligence set up.
 
 3. Open it:
 
   kubectl -n openbot port-forward svc/openbot-server 3001:3001
 
    Then http://127.0.0.1:3001. Single-user mode makes whoever reaches the server its administrator,
-   so it is reached only through that port-forward. The chart refuses `config.singleUser` with a
-   `config.publicUrl` or with a LoadBalancer that has no source ranges; it does not refuse an
-   Ingress or an HTTPRoute, so do not add either to a single-user install.
+   so it is reached only through that port-forward. The chart refuses `config.singleUser` with a `config.publicUrl` or with a
+   LoadBalancer that has no source ranges; it does not refuse an Ingress or an HTTPRoute, so do not
+   add either to a single-user install.
 
-For a team, leave out `config.singleUser` and write their own values file with sign-in:
+For a team, leave out `config.singleUser` and write their own values file with sign-in (under
+`openbot:` for the bundle):
 - One provider: `config.auth.google.clientId`, `config.auth.microsoft.clientId` (set `tenantId` to
   their directory; the default `common` admits personal Microsoft accounts), or
   `config.auth.okta.clientId` with `config.auth.okta.issuer`. Its client secret goes in
@@ -255,46 +289,60 @@ For a team, leave out `config.singleUser` and write their own values file with s
 - `config.initialAdminEmails`, comma-separated. Nothing else grants the administrator role.
 - An Ingress (`ingress.enabled`, `ingress.className`, which has no default, `ingress.hosts`,
   `ingress.tls`) or a Gateway API route (`httpRoute.enabled`, `httpRoute.parentRefs`,
-  `httpRoute.hostnames`), not both. Either one sends everything to `openbot-server`, and the browser
-  reaches Intelligence's gateway through OpenBot's own address, so one host is enough.
-- A database: `postgresql.enabled: true`, or their own (below).
+  `httpRoute.hostnames`), not both. With an Intelligence in the cluster, as `openbot-bundle` runs,
+  the route sends Intelligence's gateway socket (`/client/websocket`) to Intelligence and everything
+  else to `openbot-server`, so one host is enough. Managed Intelligence's gateway the browser
+  reaches by itself.
+- A database: the bundled one, or their own (below).
 
 The database. The bundled one is not production-grade: no backups, failover or point-in-time
-recovery. A real deployment points at RDS, Cloud SQL, Azure Database or its own server, with the URL
-in a Secret rather than a values file:
+recovery. A real deployment points at RDS, Cloud SQL, Azure Database or its own server, with
+credentials in a Secret rather than a values file, and keeps `?sslmode=require` (or
+`parameters: sslmode=require`): managed databases refuse unencrypted connections. With a database
+of their own the chart no longer generates the key encryption key or the computer token, so
+`secrets.keyEncryptionKey` (`openssl rand -base64 32`) and `secrets.computerToken`
+(`openssl rand -hex 32`) are required (under `openbot.` for the bundle), and they must keep the key
+encryption key, because every stored credential is encrypted with it.
+
+- `openbot-bundle` puts both products' databases on that server. The server needs pgvector 0.8.0 or
+  later and an administrative role that can create roles, databases and extensions; neither product
+  ever connects with it. They put its URL in a Secret:
+
+  kubectl create namespace openbot
+  kubectl -n openbot create secret generic openbot-database-admin \
+    --from-literal=admin-url='postgres://ADMIN:PASSWORD@db.example.com:5432/postgres?sslmode=require'
+
+  Then `postgresql.enabled: false`, `externalDatabase.host`, `externalDatabase.parameters:
+  sslmode=require`, `externalDatabase.adminUrlSecret.name: openbot-database-admin` (key `admin-url`)
+  and `openbot.database.inRelease: false`. A setup Job creates each product's database and role
+  there before anything else installs.
+- `openbot` reads OpenBot's database URL from a Secret:
 
   kubectl create namespace openbot
   kubectl -n openbot create secret generic openbot-database \
     --from-literal=database-url='postgresql://USER:PASSWORD@HOST:5432/openbot?sslmode=require'
 
-Then `database.existingSecret: openbot-database` and `postgresql.enabled: false`. Keep
-`?sslmode=require`: managed databases refuse unencrypted connections. With a database of their own
-the chart no longer generates the key encryption key or the computer token, so
-`secrets.keyEncryptionKey` (`openssl rand -base64 32`) and `secrets.computerToken`
-(`openssl rand -hex 32`) are required, and they must keep the key encryption key, because every
-stored credential is encrypted with it. The role in the URL must own
-the `vector` extension: the first migration creates it and a later one drops it, and only its owner
-can. Let that role create it (grant `rds_superuser`, `cloudsqlsuperuser` or `azure_pg_admin`), or
-create it after `SET ROLE` to that role; never pre-create it as an administrator. Migrations run as
-the Job `openbot-migrations-<revision>`, a pre-install and pre-upgrade hook (an ordinary Job only on
-a first install with the bundled database). A failed one is kept so its log can be read.
-Intelligence keeps its own bundled PostgreSQL either way.
+  Then `database.existingSecret: openbot-database` and `postgresql.enabled: false`. The role in
+  the URL must own the `vector` extension: the first migration creates it and a later one drops it,
+  and only its owner can. Let that role create it (grant `rds_superuser`, `cloudsqlsuperuser` or
+  `azure_pg_admin`), or create it after `SET ROLE` to that role; never pre-create it as an
+  administrator. Otherwise the server stops as it starts with "must be owner of extension vector".
 
 Intelligence:
-- The bundled one needs the license; given once as `secrets.licenseToken`, it reaches OpenBot (as
-  COPILOTKIT_LICENSE_TOKEN) and Intelligence. With the license in a Secret of their own
-  (`secrets.existingSecret`), also set `intelligence.appApi.licenseSecret.existingSecret` to that
-  Secret; the chart README lists every key such a Secret holds.
-- Its Secrets have fixed `openbot-intel-*` names, so install one OpenBot release per namespace.
-- Automatic Learning is on and spends their model key: `openai/gpt-5.5` on `secrets.modelApiKey`,
-  or `anthropic/claude-sonnet-5-5` on `secrets.anthropicApiKey` when that is the only key.
-  Intelligence's dashboard is not installed; proposed skills are reviewed in OpenBot at Admin →
-  Automatic Learning.
-- To use managed Intelligence, or one already running, instead: `intelligence.enabled: false`,
-  `config.intelligence.apiUrl` and `config.intelligence.gatewayWsUrl`
-  (https://api.intelligence.copilotkit.ai and wss://realtime.intelligence.copilotkit.ai for
-  managed), and `secrets.intelligenceApiKey`, the `cpk-...` key that
-  `npx --yes copilotkit@latest project select` prints. The license is then optional.
+- `openbot-bundle`'s needs the license. Given once as `openbot.secrets.licenseToken`, it reaches
+  OpenBot (as COPILOTKIT_LICENSE_TOKEN) and Intelligence. With the license in a Secret of their own,
+  also set `intelligence.appApi.licenseSecret.existingSecret` and `.key` to it.
+- Its Secrets have fixed `openbot-intel-*` names, so install one bundle per namespace.
+- Automatic Learning is on and spends their model key: `openai/gpt-5.5` on
+  `openbot.secrets.modelApiKey`, or `anthropic/claude-sonnet-5-5` on `openbot.secrets.anthropicApiKey`
+  when that is the only key; `learning.model` names another. Intelligence's dashboard is not
+  installed; proposed skills are reviewed in OpenBot at Admin → Automatic Learning.
+- `openbot` points at managed Intelligence (https://api.intelligence.copilotkit.ai and
+  wss://realtime.intelligence.copilotkit.ai) or a self-hosted one by its own addresses, with
+  `secrets.intelligenceApiKey`, the `cpk-...` key that `npx --yes copilotkit@latest project select`
+  prints. The license is then optional. Learning runs in that Intelligence. A further `openbot`
+  release can share the bundle's Intelligence with a project of its own; the bundle's guide shows
+  how.
 
 Bot computers, `computers.mode`:
 - `shared`, the default: one computer for every person's Bots. Each person keeps a browser profile
@@ -307,19 +355,32 @@ Bot computers, `computers.mode`:
 
 - `external`: `computers.url` names one computer somebody else runs, shared like `shared`.
 
-Scheduled work runs as CronJobs with nothing to configure: `openbot-routines` fires due routines
-every five minutes (`routines.enabled`), `openbot-attachments-culler` deletes staged attachments
-nobody sent once they are 24 hours old (`attachments.culler.olderThanHours`), and in `sandbox` mode
-`openbot-culler` suspends computers idle for 30 minutes (`computers.sandbox.idleAfter`).
+Scheduled work has nothing to configure: the server does it, in whichever replica is leading. It
+fires due routines, deletes staged attachments nobody sent once they are 24 hours old
+(`attachments.culler.olderThanHours`), and in `sandbox` mode suspends computers idle for 30 minutes
+(`computers.sandbox.idleAfter`).
 
-Upgrades: `helm upgrade openbot <the new release's chart> --namespace openbot` with the same
-`--values` files and `--timeout 15m`. With `image.tag` empty the image is `v` plus the chart's appVersion (appVersion
-1.0.1 deploys ghcr.io/copilotkit/openbot:v1.0.1); `image.digest`, from the release's
-`container-images.json`, pins the exact image. Never use `--reuse-values`: it drops the new
-chart's defaults, so new settings never arrive. After a failed upgrade, pass the same values files
-again, because Helm reuses the values of the last revision that succeeded.
+Upgrades: `helm upgrade openbot <the new release's chart> --namespace openbot`, the same chart they
+installed, with the same `--values` files and `--timeout 15m`. With `image.tag` empty the image is
+`v` plus the chart's appVersion (appVersion 1.0.1 deploys ghcr.io/copilotkit/openbot:v1.0.1);
+`image.digest`, from the release's `container-images.json`, pins the exact image. Never use
+`--reuse-values`: it drops the new chart's defaults, so new settings never arrive. After a failed
+upgrade, pass the same values files again, because Helm reuses the values of the last revision that
+succeeded. Each new server pod migrates the database as it starts while the old pods keep serving.
+
+From the 0.2 chart, which installed Intelligence with OpenBot (`intelligence.enabled`, on by
+default) and ran CronJobs and a migration Job: a release that still runs that Intelligence is
+refused at upgrade to the `openbot` 0.3 chart, before anything in the cluster changes, because the
+upgrade would delete that Intelligence and its conversations. The refusal gives the choice: keep the
+release on the 0.2 chart, or install `openbot-bundle` as a new release in a namespace of its own. A
+0.2 release that already pointed at an Intelligence of its own (`intelligence.enabled: false`)
+upgrades to 0.3; the upgrade removes its CronJobs and migration Job, and a stored
+`migrations.enabled: false` is refused, so they remove `migrations` from their values or add
+`--set migrations=null`.
+
 docs/kubernetes-upgrades.md covers `bun scripts/update.ts kubernetes plan|apply|gitops`, which
-promotes a release with a backup step; the Upgrades section of the chart's guide covers the rest.
+promotes a release of the `openbot` chart with a backup step; the Upgrades section of each chart's
+guide covers the rest.
 
 WHAT YOU MUST NOT DO FOR THEM
 - Do not run `copilotkit login` or `copilotkit license --print`; the first signs in as them and the
@@ -372,30 +433,39 @@ The server refuses to start rather than running half-configured. The message nam
 
 - `.env is missing`: they skipped `cp .env.example .env`.
 
-On Kubernetes the chart refuses a bad install before creating anything, and names the value:
-- "The bundled Intelligence is self-hosted and needs the CopilotKit licence."
-  `secrets.licenseToken` is missing, usually because their secrets file was not passed.
-- "No database." They installed without `postgresql.enabled` and named no database.
+On Kubernetes each chart refuses a bad install before creating anything, and names the value:
+- "Intelligence is self-hosted here and needs the CopilotKit licence." (`openbot-bundle`)
+  `openbot.secrets.licenseToken` is missing, usually because their secrets file was not passed.
+- "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and
+  config.intelligence.gatewayWsUrl, and a project key ..." (`openbot`) One of the two addresses
+  or the key is missing.
+- "No database." They installed `openbot` without `postgresql.enabled` and named no database.
 - "Nobody could sign in." Neither `config.singleUser` nor an identity provider is set.
 - "secrets.keyEncryptionKey is required with a database of your own" or "A computer needs a
   token": an external database needs `secrets.keyEncryptionKey` and `secrets.computerToken`.
-- "This chart now installs CopilotKit Intelligence with OpenBot, and this release's values have no
-  `intelligence` key": a release from before the bundled Intelligence, usually upgraded with
-  `--reuse-values`. `--set intelligence.enabled=false` keeps the Intelligence it already uses.
+- "This release still runs the Intelligence an earlier version of this chart installed with it
+  ...": a 0.2 release with its bundled Intelligence, upgraded to the `openbot` 0.3 chart. Nothing
+  changed. Keep it on the 0.2 chart, or install `openbot-bundle` as a new release in a namespace of
+  its own.
+- "migrations.enabled is false, and there is no migration Job left for it to switch off ...":
+  remove `migrations` from their values, or add `--set migrations=null` to an upgrade that reuses
+  the stored ones.
 
 After the install:
 - A pod stays Pending: `kubectl -n openbot describe pod <pod>`. "Insufficient cpu" means another
   node; a volume claim that never binds means no default StorageClass.
-- ImagePullBackOff on the OpenBot or embeddings image: arm64 nodes, a wrong `image.tag`, or a
-  missing pull secret.
-- The migrations Job fails with "no pg_hba.conf entry for host ... no encryption": add
-  `?sslmode=require` to the database URL. With "must be owner of extension vector": another role
-  owns the extension; see "Your own database" in the chart README.
+- ImagePullBackOff on the embeddings image: arm64 nodes; install with
+  `--set intelligence.embeddings.enabled=false`. On the OpenBot image: a wrong `image.tag`, a
+  missing pull secret, or arm64 nodes on a release up to 1.0.2, which published amd64 only.
+- The server stops as it starts, or waits in `wait-for-database`, with "no pg_hba.conf entry for
+  host ... no encryption": add `?sslmode=require` to the database URL. With "must be owner of
+  extension vector": another role owns the extension; see "Your own database" in the `openbot`
+  chart's guide.
 - OpenBot logs `intelligence-entitlement-not-ready`: the self-hosted Intelligence has no valid
   license.
-- An upgrade stops with UPGRADE FAILED and the `openbot-intelligence-learning-queue-migration-<n>`
-  Job ran out of time while Intelligence's PostgreSQL restarted: run `helm upgrade` again once that
-  pod is Ready.
+- With `openbot-bundle`, an upgrade stops with UPGRADE FAILED and the
+  `openbot-intelligence-learning-queue-migration-<n>` Job ran out of time while the PostgreSQL
+  server restarted: run `helm upgrade` again once that pod is Ready.
 
 HOW TO KNOW IT WORKED
 
@@ -413,6 +483,6 @@ by TENANT_PACKAGE_DIR. Copy it, edit `agents.yaml`, and point TENANT_PACKAGE_DIR
 The server runs from `/app/server` in its image, so TENANT_PACKAGE_DIR is relative to that; the
 default is `../examples/fintech`, not `examples/fintech`.
 
-Further reading: README.md, docs/development.md, docs/deployment.md, the chart's guide
+Further reading: README.md, docs/development.md, docs/deployment.md, each chart's guide
 (`helm show readme`) and docs/kubernetes-upgrades.md for Kubernetes, and docs/configuration.md for
 every variable.

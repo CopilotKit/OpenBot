@@ -238,6 +238,80 @@ def provider_message(error: BaseException) -> str:
     return message
 
 
+def _links(error: BaseException):
+    """The error and every error it was raised from."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        yield error
+        error = error.__cause__
+
+
+def model_unreachable(error: BaseException) -> bool:
+    """Whether the run failed because nothing answered at the model's address.
+
+    The connection was refused, the host doesn't exist, or nothing answered in time: in each the
+    request never reached a model, so no provider said anything, and asking again a moment later
+    gets the same. Seen on OpenBot Desktop with an OpenAI-compatible base URL at
+    host.docker.internal:48123 and nothing listening there: `openai.APIConnectionError`, "All
+    connection attempts failed", and the person read only `RUN_FAILED`.
+
+    The SDKs' own classes, and httpx's for an SDK that lets them through (Google's). A tool's call
+    never raises one here: `_call_tool` answers its own transport errors.
+    """
+    unreached = []
+    for module, names in (
+        ("openai", ("APIConnectionError",)),  # `APITimeoutError` is one.
+        ("anthropic", ("APIConnectionError",)),
+        ("httpx", ("ConnectError", "TimeoutException")),
+        ("httpx2", ("ConnectError", "TimeoutException")),
+    ):
+        try:
+            loaded = __import__(module)
+        except ImportError:
+            continue
+        unreached.extend(getattr(loaded, name) for name in names if hasattr(loaded, name))
+    return any(isinstance(link, tuple(unreached)) for link in _links(error))
+
+
+def model_address(error: BaseException) -> str | None:
+    """Where the run tried to reach the model, as host and port.
+
+    Nothing else of the URL: a base URL can carry a user and password, and some gateways put a key
+    in the path. None when the request isn't known, or when it went to OpenBot's own sign-in proxy,
+    whose address is OpenBot's and not the model's.
+    """
+    for link in _links(error):
+        try:
+            request = getattr(link, "request", None)
+        except RuntimeError:  # httpx raises it for an error that has no request.
+            request = None
+        url = getattr(request, "url", None)
+        host = getattr(url, "host", None)
+        if not isinstance(host, str) or not host:
+            continue
+        if "/api/model-provider/" in str(getattr(url, "path", "")):
+            return None
+        shown = f"[{host}]" if ":" in host else host
+        port = getattr(url, "port", None)
+        return f"{shown}:{port}" if port else shown
+    return None
+
+
+# What the run ends with when nothing answered at the model's address, coded so the server can put
+# the step that fits its edition in place of the second sentence (it reads the address back out of
+# the first). The step here is right wherever the model is set.
+MODEL_UNREACHABLE = "OPENBOT_MODEL_UNREACHABLE"
+
+
+def unreachable_message(address: str | None) -> str:
+    at = f" at {address}" if address else ""
+    return (
+        f"OpenBot couldn't reach the AI model{at}. "
+        "Check that it's running and the address is right."
+    )
+
+
 # What a person reads when a run fails for a reason that is not the provider's.
 RUN_FAILED = "The Bot stopped before it finished answering. Try again."
 
@@ -308,6 +382,16 @@ class ToolAwareAgent(WholeThreadAgent):
                     type=EventType.RUN_ERROR,
                     message="Sign in to your model provider again.",
                     code="OPENBOT_MODEL_AUTH_REQUIRED",
+                )
+            elif model_unreachable(error):
+                # Nothing answered, so there is no provider's account to pass on: the person is
+                # told where OpenBot looked. The SDK's own words ("Connection error.") are the log's.
+                address = model_address(error)
+                logger.warning("The model couldn't be reached at %s: %r", address, error)
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=unreachable_message(address),
+                    code=MODEL_UNREACHABLE,
                 )
             elif provider_refusal(error):
                 # Raised, it ended the response stream after RUN_STARTED with no terminal event,
