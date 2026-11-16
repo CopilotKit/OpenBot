@@ -101,33 +101,6 @@ function ReactionLanded({ done }: { done: boolean }) {
         queryKey: taskKeys.reactions(threadId),
       });
   }, [done, threadId]);
-  useRenderTool({
-    name: FOLLOW_UP_TOOL,
-    parameters: followUpParameters,
-    render: ({ result, status }) => (
-      <TaskActionCard
-        refused="Couldn't pass that on"
-        result={result}
-        running="Telling the task"
-        status={status}
-        steer
-      />
-    ),
-  });
-
-  useRenderTool({
-    name: STOP_TOOL,
-    parameters: stopParameters,
-    render: ({ result, status }) => (
-      <TaskActionCard
-        refused="Couldn't stop a task"
-        result={result}
-        running="Stopping the task"
-        status={status}
-      />
-    ),
-  });
-
   return null;
 }
 
@@ -177,6 +150,33 @@ export function OrchestrationTools() {
         />
       );
     },
+  });
+
+  useRenderTool({
+    name: FOLLOW_UP_TOOL,
+    parameters: followUpParameters,
+    render: ({ result, status }) => (
+      <TaskActionCard
+        refused="Couldn't pass that on"
+        result={result}
+        running="Telling the task"
+        status={status}
+        steer
+      />
+    ),
+  });
+
+  useRenderTool({
+    name: STOP_TOOL,
+    parameters: stopParameters,
+    render: ({ result, status }) => (
+      <TaskActionCard
+        refused="Couldn't stop a task"
+        result={result}
+        running="Stopping the task"
+        status={status}
+      />
+    ),
   });
 
   return null;
