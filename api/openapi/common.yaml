@@ -112,6 +112,7 @@ tags:
   - { name: Product events, description: "What a person did with a Bot's answer, seen on screen or copied, counted so OpenBot knows which answers people use. Best effort: a client never waits on one." }
   - { name: Learning, description: "Automatic learning: the skills Learning proposed, the evidence behind them, approving and rejecting them, and its runs, in the organization's spaces and each person's own; which space each Bot learns into, who reviews what people's recordings propose, each person's sharing choices, requests to share a skill with every Bot, and the skills delivered to Bots." }
   - { name: Memory, description: "The facts a person's Bots remember about them, and the app actions those facts are read in from. Each person's are theirs alone: an administrator can't read them either." }
+  - { name: Agents, description: "The agents an organization's Bots hand work to: OpenBot's own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization's, and anybody may add a private one for their own Bots. A Bot's delegation says whether it works on one agent or hands work to several, and which." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -449,6 +450,11 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memory-sources~1{memorySourceId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/memory-sources/{memorySourceId}/sync: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1memory-sources~1{memorySourceId}~1sync' }
   /api/v2/organizations/{organizationId}/bots/{botId}/memory-source-tools: { $ref: './memory.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1memory-source-tools' }
+  /api/v2/organizations/{organizationId}/bot-agents: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bot-agents' }
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bot-agents~1{botAgentId}' }
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}/issue-callback-token: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bot-agents~1{botAgentId}~1issue-callback-token' }
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}/revoke-callback-token: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bot-agents~1{botAgentId}~1revoke-callback-token' }
+  /api/v2/organizations/{organizationId}/bots/{botId}/delegation: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1delegation' }
 components:
   securitySchemes:
     webSession:
@@ -607,6 +613,8 @@ components:
             learning:write: Approve and reject what Learning proposed and start Learning in the signed-in person's own spaces, change their Learning choices, and for an administrator change the organization's Learning settings and decide sharing requests.
             memories:read: Read the signed-in person's memories and memory sources.
             memories:write: Write, change and forget the signed-in person's memories, and add, change, sync and remove their memory sources.
+            bot-agents:read: Read the agents the signed-in person's Bots may hand work to, and for an administrator every agent in the organization.
+            bot-agents:write: Add, change and delete the signed-in person's own agents and their callback tokens, and for an administrator the organization's.
     apiKey:
       type: http
       scheme: bearer

@@ -1,3 +1,4 @@
+export * from "./agents/agents.zod";
 export * from "./api-keys/api-keys.zod";
 export * from "./app-access-requests/app-access-requests.zod";
 export * from "./approval-rules/approval-rules.zod";
