@@ -22,6 +22,7 @@ export function BoardRow({
   more,
   open: openFromParent,
   wholeDetail = false,
+  readDetail = false,
   onSelect,
 }: {
   icon: ReactNode;
@@ -43,6 +44,11 @@ export function BoardRow({
    * long, and broken anywhere rather than run off the row.
    */
   wholeDetail?: boolean;
+  /**
+   * The detail is what the person is asked for ("Waiting for your approval: …"), so it is read in
+   * full, wrapped at word breaks, at every width. Cut to one line it read "hand this to Pipeline…".
+   */
+  readDetail?: boolean;
   /** A click on the text does this instead of opening the row in place. */
   onSelect?: () => void;
 }) {
@@ -82,7 +88,7 @@ export function BoardRow({
               >
                 <RowText
                   detail={detail}
-                  open={open || wholeDetail}
+                  open={open || wholeDetail || readDetail}
                   title={title}
                   whole={wholeDetail}
                 />
@@ -90,7 +96,7 @@ export function BoardRow({
             ) : (
               <RowText
                 detail={detail}
-                open={open || wholeDetail}
+                open={open || wholeDetail || readDetail}
                 title={title}
                 whole={wholeDetail}
               />

@@ -175,7 +175,14 @@ async function measured(page: Page, row: string) {
     const item = document.querySelector(`[data-row=${name}] [data-slot=item]`);
     const title = item?.querySelector("[data-slot=item-title]");
     const words = title?.closest("button") ?? title?.parentElement;
+    const detail = title?.nextElementSibling as HTMLElement | null | undefined;
     return {
+      detail: detail
+        ? {
+            text: detail.textContent ?? "",
+            cut: detail.scrollHeight > detail.clientHeight + 1,
+          }
+        : null,
       row: box(item),
       words: box(words),
       buttons: [...(item?.querySelectorAll("button, a") ?? [])]
@@ -194,7 +201,7 @@ describe.skipIf(!asked)("a Needs you board row", () => {
       for (const { name, browser } of browsers) {
         const page = await open(browser, width);
         try {
-          for (const row of ["stopped", "ready"]) {
+          for (const row of ["stopped", "waiting", "ready"]) {
             const seen = await measured(page, row);
             if (!seen.row || !seen.words) throw new Error(`no ${row} row`);
             const share = seen.words.width / seen.row.width;
@@ -222,6 +229,26 @@ describe.skipIf(!asked)("a Needs you board row", () => {
               });
             }
           }
+        } finally {
+          await page.close();
+        }
+      }
+    }, 60_000);
+  }
+
+  for (const [label, width] of Object.entries(WIDTHS)) {
+    test(`at ${label} width (${width}px), what a waiting task waits for is read in full, not cut short`, async () => {
+      for (const { name, browser } of browsers) {
+        const page = await open(browser, width);
+        try {
+          const seen = await measured(page, "waiting");
+          expect({ browser: name, detail: seen.detail }).toEqual({
+            browser: name,
+            detail: {
+              text: "Waiting for your approval: hand this to Pipeline Bot, which acts as Dana and can read the deals pipeline",
+              cut: false,
+            },
+          });
         } finally {
           await page.close();
         }
