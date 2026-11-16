@@ -117,7 +117,7 @@ export function SkillTools({
   if (!plugins.data) {
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load the tools. Reload the page.
+        Couldn't load the tools. Try again in a moment.
       </p>
     );
   }

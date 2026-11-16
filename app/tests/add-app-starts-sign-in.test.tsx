@@ -30,12 +30,12 @@ import {
   type TodayDirectoryApp,
   type TodayServer,
 } from "./apps-api";
-import { settleReactWork } from "./settle-react-work";
 import {
   connectionPage,
   connectionsCall,
   startResponse,
 } from "./connections-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * ADDING AN APP THAT SIGNS IN IS NOT THE SAME AS BEING SIGNED IN TO IT.
@@ -388,4 +388,25 @@ describe("the Connections tile", () => {
       rows.filter((row) => row.title === "GitHub" || row.key === github.id),
     ).toHaveLength(1);
   });
+});
+
+/*
+ * Found in a dark-mode pass over Admin, Apps, Browse apps: GitHub's mark is black, and on the dark
+ * page it all but vanished. A vendor's artwork is never recoloured, so in dark mode every mark sits
+ * on a white tile, the same rule the framework marks follow (`harness-mark.tsx`).
+ */
+test("Browse apps draws each vendor's mark on a white tile in dark mode, so a black mark still shows", async () => {
+  provider = "composio";
+  apps = [
+    {
+      ...app("github", "GitHub", "consent", false),
+      logo: "https://logos.example/github.svg",
+    },
+  ];
+  const { view } = draw("team");
+  const row = await view.findByTestId("directory-github");
+  const mark = row.querySelector('img[src="https://logos.example/github.svg"]');
+  if (!mark) throw new Error("Expected GitHub's mark on its row");
+  const tile = mark.closest("[data-slot=item-media]");
+  expect(tile?.className).toContain("dark:bg-white");
 });

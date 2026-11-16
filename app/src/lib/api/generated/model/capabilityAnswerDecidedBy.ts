@@ -10,4 +10,5 @@ export const CapabilityAnswerDecidedBy = {
   organization: "organization",
   role: "role",
   group: "group",
+  team: "team",
 } as const;

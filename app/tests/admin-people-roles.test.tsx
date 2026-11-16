@@ -51,7 +51,7 @@ const sam = {
   name: "Sam Ortiz",
   role: "member" as const,
 };
-const roles: Record<string, "admin" | "member"> = {};
+const roles: Record<string, "owner" | "admin" | "member"> = {};
 const sent: unknown[] = [];
 
 beforeEach(() => {
@@ -122,4 +122,26 @@ test("the admin switch gives a member admin and back, by the member role names",
   await waitFor(async () =>
     expect((await switchFor()).getAttribute("aria-checked")).toBe("false"),
   );
+});
+
+/*
+ * Found in testing: an organization's owner showed with the Admin switch off. An owner governs the
+ * organization as an admin does, and their role is not one this switch changes (only the owner
+ * gives ownership away, in Organization settings), so it reads on and can't be changed here.
+ */
+test("an owner's admin switch reads on and can't be changed, and nothing is sent", async () => {
+  roles.sam = "owner";
+  const view = await draw();
+  const owner = await view.findByRole("switch", {
+    name: "Admin: sam@acme.test",
+  });
+  await waitFor(() => expect(owner.getAttribute("aria-checked")).toBe("true"));
+  expect(
+    owner.hasAttribute("disabled") ||
+      owner.getAttribute("aria-disabled") === "true" ||
+      owner.hasAttribute("data-disabled"),
+  ).toBe(true);
+  fireEvent.click(owner);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(sent).toEqual([]);
 });

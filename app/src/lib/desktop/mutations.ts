@@ -57,6 +57,27 @@ export function changeAiConnectionMutationOptions() {
 }
 
 /**
+ * Sign out of the OpenBot this app is connected to. The desktop app ends the sign-in there, forgets
+ * it on this computer and shows setup with the address still filled in. Like Stop, this page goes
+ * with it.
+ */
+export function signOutOfConnectedOpenBotMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("sign_out"),
+  });
+}
+
+/**
+ * Go back to OpenBot on this computer. The desktop app signs out of the OpenBot it is connected to
+ * and shows setup at the choice of where OpenBot runs. Nothing on this computer is changed by it.
+ */
+export function changeConnectionMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("change_connection"),
+  });
+}
+
+/**
  * Check for updates now. The desktop app reads its update feed and keeps the answer, so the banner
  * reads it too. Rejects with the app's own sentence when the feed couldn't be read.
  */

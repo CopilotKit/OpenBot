@@ -17,7 +17,7 @@ export const GetNotificationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -126,7 +126,7 @@ export const UpdateNotificationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -332,7 +332,7 @@ export const GetBotNotificationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -376,7 +376,7 @@ export const UpdateBotNotificationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -432,7 +432,7 @@ export const ListNotificationTransportsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

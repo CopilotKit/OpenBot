@@ -12,7 +12,7 @@ import {
   signalConversationBusy,
   updateConversation,
 } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { settingsKeys } from "@/lib/settings/queries";
 import {
   type AgentChannel,
@@ -33,7 +33,7 @@ export function createChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentIds: string[]): Promise<AgentChannel> => {
       const made = await createConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         { botIds: agentIds },
         once(),
         { fallback: "Couldn't start a conversation." },
@@ -70,7 +70,7 @@ export function recordChannelActivityMutationOptions() {
       /* Still fire-and-forget: `tryClient` does not throw, and the result is not read. */
       // Best effort: the list catches up on its next read if this one is lost.
       await recordConversationActivity(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.channelId,
         { botId: variables.agentId, at: variables.at, text: variables.text },
         once(),
@@ -96,7 +96,7 @@ export async function setChannelBusy(variables: {
 }) {
   // Best effort: a lost signal is corrected by the next one.
   await signalConversationBusy(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.channelId,
     { busy: variables.busy },
     once(),
@@ -108,7 +108,7 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { channelId: string; pinned: boolean }) => {
       await updateConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.channelId,
         { pinned: variables.pinned },
         once(),
@@ -130,7 +130,7 @@ export function renameChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { channelId: string; title: string }) => {
       await updateConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.channelId,
         { title: variables.title.trim() || null },
         once(),
@@ -159,7 +159,7 @@ export function renameChannelMutationOptions(queryClient: QueryClient) {
 export function markChannelReadMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (channelId: string) => {
-      await markConversationRead(ORGANIZATION_ID, channelId, once(), {
+      await markConversationRead(organizationId(), channelId, once(), {
         fallback: "Couldn't mark this conversation as read.",
       });
     },
@@ -208,7 +208,7 @@ export function deleteChannelMutationOptions(
   return mutationOptions({
     mutationFn: async (channelId: string) => {
       await deleteConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         once(),
         discardFailedStart ? { discardFailedStart: true } : undefined,

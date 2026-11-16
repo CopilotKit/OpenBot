@@ -10,7 +10,7 @@ import type {
   ExportAuditEventsParams,
   ListAuditEventsParams,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 export const auditKeys = {
   all: ["audit-events"] as const,
@@ -29,7 +29,7 @@ export function auditVocabularyQueryOptions() {
   return queryOptions({
     queryKey: auditKeys.vocabulary,
     queryFn: ({ signal }) =>
-      getAuditEventVocabulary(ORGANIZATION_ID, {
+      getAuditEventVocabulary(organizationId(), {
         signal,
         fallback: "Couldn't load the filters",
       }),
@@ -96,7 +96,7 @@ export function auditEventsQueryOptions(search = "") {
         ...auditFilterParams(search),
         ...(pageParam ? { cursor: pageParam } : {}),
       };
-      const page = await listAuditEvents(ORGANIZATION_ID, params, {
+      const page = await listAuditEvents(organizationId(), params, {
         signal,
         fallback: "Could not load audit events",
       });
@@ -123,7 +123,7 @@ export type AuditExport = {
 export async function exportAuditTrail(search = ""): Promise<AuditExport> {
   let truncatedAt: number | undefined;
   const csv = await exportAuditEvents(
-    ORGANIZATION_ID,
+    organizationId(),
     auditFilterParams(search),
     {
       fallback: "Couldn't export these events. Try again.",

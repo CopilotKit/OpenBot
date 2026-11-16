@@ -8,4 +8,5 @@ export type SharedAccountApprovalMembersItemKind =
 export const SharedAccountApprovalMembersItemKind = {
   user: "user",
   group: "group",
+  team: "team",
 } as const;

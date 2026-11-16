@@ -20,7 +20,9 @@ type Seen = {
   body: unknown;
 };
 const seen: Seen[] = [];
-const ORG = "/api/v2/organizations/default";
+/** The organization the signed-in person is working in: one of two they are in, and not the first. */
+const ORG = "/api/v2/organizations/org_work";
+const MINE = "/api/v2/people/me/organizations";
 const ada = {
   id: "ada",
   name: "Ada",
@@ -46,6 +48,27 @@ const server = Bun.serve({
       body: text ? JSON.parse(text) : null,
     });
     const route = `${request.method} ${url.pathname}`;
+    if (route === `GET ${MINE}`)
+      return Response.json({
+        organizations: [
+          {
+            id: "default",
+            slug: "default",
+            name: "Acme",
+            role: "member",
+            active: false,
+          },
+          {
+            id: "org_work",
+            slug: "work",
+            name: "Work",
+            role: "member",
+            active: true,
+          },
+        ],
+        canCreate: false,
+        nextCursor: null,
+      });
     if (route === `GET ${ORG}/bots`) {
       // Two pages, so a reader that stops at the first one is caught; the second hands its own cursor back.
       const cursor = url.searchParams.get("cursor");
@@ -124,7 +147,7 @@ afterAll(() => {
   server.stop(true);
 });
 
-test("a read goes to the deployment at the API's address, with the session's cookie and no key", async () => {
+test("a read goes to the deployment at the API's address, in the organization the person works in, with the session's cookie and no key", async () => {
   const original = globalThis.fetch;
   const inits: RequestInit[] = [];
   globalThis.fetch = ((
@@ -140,20 +163,27 @@ test("a read goes to the deployment at the API's address, with the session's coo
   } finally {
     globalThis.fetch = original;
   }
-  // A Bot id with a space stays one path segment.
+  // The person's organizations are asked for first, once for this sign-in, and the read goes to the
+  // one they are working in. A Bot id with a space stays one path segment.
+  const asked = {
+    method: "GET",
+    query: "",
+    cookie: COOKIE,
+    key: null,
+    contentType: null,
+    body: null,
+  };
   expect(seen).toEqual([
-    {
-      method: "GET",
-      path: `${ORG}/bots/a%20b`,
-      query: "",
-      cookie: COOKIE,
-      key: null,
-      contentType: null,
-      body: null,
-    },
+    { ...asked, path: MINE, query: "?limit=100" },
+    { ...asked, path: `${ORG}/bots/a%20b` },
   ]);
   // The session is the cookie the app holds, never the platform's own cookie jar.
-  expect(inits.map((init) => init.credentials)).toEqual(["omit"]);
+  expect(inits.map((init) => init.credentials)).toEqual(["omit", "omit"]);
+
+  // Asked once: the next request goes straight to the same organization.
+  seen.length = 0;
+  await getBot(ORGANIZATION_ID, "a b");
+  expect(seen.map((request) => request.path)).toEqual([`${ORG}/bots/a%20b`]);
 });
 
 test("every write carries an Idempotency-Key of its own, and a retry's own key is kept", async () => {

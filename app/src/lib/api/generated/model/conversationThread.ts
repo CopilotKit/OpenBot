@@ -5,4 +5,6 @@
 export interface ConversationThread {
   /** The new thread's id. */
   threadId: string;
+  /** The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId. */
+  liveThreadId?: string;
 }

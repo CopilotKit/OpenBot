@@ -13,7 +13,7 @@ export const GetWhatIfVocabularyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -39,6 +39,17 @@ export const GetWhatIfVocabularyResponse = zod
       }),
     ),
     groups: zod.array(zod.string()).describe("The directory groups, by name."),
+    teams: zod
+      .array(
+        zod.object({
+          id: zod.string(),
+          name: zod.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        "The organization's teams. An action names one in group, as team:<id>.",
+      ),
     apps: zod.array(
       zod.object({
         id: zod.string(),
@@ -69,7 +80,7 @@ export const AskWhatIfParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -114,7 +125,7 @@ export const AskWhatIfResponse = zod
             group: zod
               .string()
               .describe(
-                "A directory group's name. Empty when a person is named.",
+                "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
               ),
             initiator: zod
               .enum([
@@ -164,7 +175,7 @@ export const AskWhatIfResponse = zod
               .describe("The file's path, at most 300 characters."),
           })
           .describe(
-            "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
+            "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
           ),
         labels: zod
           .object({
@@ -201,7 +212,7 @@ export const CheckWhatIfParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -230,7 +241,9 @@ export const CheckWhatIfBody = zod.object({
         .describe("The person's id. Empty when a group is named."),
       group: zod
         .string()
-        .describe("A directory group's name. Empty when a person is named."),
+        .describe(
+          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+        ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
         .describe(
@@ -265,7 +278,7 @@ export const CheckWhatIfBody = zod.object({
       file: zod.string().describe("The file's path, at most 300 characters."),
     })
     .describe(
-      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
+      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
     ),
   question: zod
     .string()
@@ -286,7 +299,9 @@ export const CheckWhatIfResponse = zod.object({
         .describe("The person's id. Empty when a group is named."),
       group: zod
         .string()
-        .describe("A directory group's name. Empty when a person is named."),
+        .describe(
+          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+        ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
         .describe(
@@ -321,7 +336,7 @@ export const CheckWhatIfResponse = zod.object({
       file: zod.string().describe("The file's path, at most 300 characters."),
     })
     .describe(
-      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
+      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
     ),
   labels: zod
     .object({
@@ -447,7 +462,7 @@ export const ExplainAuditEventParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   auditEventId: zod.uuid().describe("The audit event's id."),
 });
@@ -461,7 +476,9 @@ export const ExplainAuditEventResponse = zod.object({
         .describe("The person's id. Empty when a group is named."),
       group: zod
         .string()
-        .describe("A directory group's name. Empty when a person is named."),
+        .describe(
+          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+        ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
         .describe(
@@ -496,7 +513,7 @@ export const ExplainAuditEventResponse = zod.object({
       file: zod.string().describe("The file's path, at most 300 characters."),
     })
     .describe(
-      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
+      "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
     ),
   labels: zod
     .object({

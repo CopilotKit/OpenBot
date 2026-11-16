@@ -3,7 +3,7 @@ import {
   createCredential,
   revokeCredential,
 } from "@/lib/api/generated/credentials/credentials";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { credentialKeys } from "./queries";
 
 const FALLBACK = "Credential operation failed";
@@ -22,7 +22,7 @@ export function createCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (input: CredentialInput) =>
       createCredential(
-        ORGANIZATION_ID,
+        organizationId(),
         input,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -36,7 +36,7 @@ export function revokeCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (credentialId: string) =>
       revokeCredential(
-        ORGANIZATION_ID,
+        organizationId(),
         credentialId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -62,7 +62,7 @@ export async function storeMcpToken(
 ): Promise<string | undefined> {
   if (!token?.trim()) return undefined;
   const credential = await createCredential(
-    ORGANIZATION_ID,
+    organizationId(),
     {
       kind: "mcp",
       provider: serverId,

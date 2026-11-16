@@ -1,6 +1,6 @@
 import { translateBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
 import type { BotGrantCheck } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /** What is wrong with one action the model named. */
 export type GrantActionProblem = { action: string; message: string };
@@ -41,7 +41,7 @@ export async function translateAppGrants(variables: {
   text: string;
 }): Promise<AppGrantTranslation> {
   const translation = await translateBotGrants(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.agentId,
     { appId: variables.app, text: variables.text },
     { "Idempotency-Key": idempotencyKey() },

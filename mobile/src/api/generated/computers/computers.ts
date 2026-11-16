@@ -61,7 +61,7 @@ export const getListComputersUrl = (
 };
 
 /**
- * Return one page of the computers Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. Ordered by whose computer it is, then by Bot. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A computer another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's computers
  */
 export const listComputers = async (
@@ -80,7 +80,7 @@ export const getStopComputerUrl = (organizationId: string) => {
 };
 
 /**
- * Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+ * Stop one computer from the list now, and record it on the audit trail. Its files and sign-ins stay, and it starts again when a Bot next needs it. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Stop a computer
  */
 export const stopComputer = async (
@@ -125,7 +125,7 @@ export const getResetComputerUrl = (organizationId: string) => {
 };
 
 /**
- * Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. Only an administrator may do this.
+ * Delete one computer's browser profile, and every sign-in with it, and record it on the audit trail. The computer is named by whose it is, person:<id> or bot:<id>; botId names one Bot's seat on a shared computer. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Reset a computer
  */
 export const resetComputer = async (
@@ -170,7 +170,7 @@ export const getUpdateComputerUrl = (organizationId: string) => {
 };
 
 /**
- * Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. Only an administrator may do this.
+ * Move one computer onto the image this OpenBot now runs, and record it on the audit trail. Files and sign-ins stay; a running computer restarts. The computer is named by whose it is, person:<id> or bot:<id>. A computer that is not one of the organization's is not found. Only an administrator of the organization may do this.
  * @summary Update a computer
  */
 export const updateComputer = async (

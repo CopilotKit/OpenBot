@@ -15,7 +15,7 @@ export const ListBotGrantsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -143,7 +143,7 @@ export const BatchUpdateBotGrantsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -235,7 +235,7 @@ export const BatchUpdateBotGrantsBody = zod
         members: zod
           .array(
             zod.object({
-              kind: zod.enum(["user", "group"]),
+              kind: zod.enum(["user", "group", "team"]),
               value: zod
                 .string()
                 .min(1)
@@ -247,7 +247,7 @@ export const BatchUpdateBotGrantsBody = zod
       })
       .optional()
       .describe(
-        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.",
+        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.",
       ),
   })
   .describe(
@@ -273,7 +273,7 @@ export const TranslateBotGrantsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -379,7 +379,7 @@ export const ReplayBotGrantsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -590,7 +590,7 @@ export const ReplaceBotGrantParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -635,7 +635,7 @@ export const ReplaceBotGrantBody = zod
         members: zod
           .array(
             zod.object({
-              kind: zod.enum(["user", "group"]),
+              kind: zod.enum(["user", "group", "team"]),
               value: zod
                 .string()
                 .min(1)
@@ -647,7 +647,7 @@ export const ReplaceBotGrantBody = zod
       })
       .optional()
       .describe(
-        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.",
+        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.",
       ),
   })
   .describe(
@@ -727,7 +727,7 @@ export const DeleteBotGrantParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -770,7 +770,7 @@ export const ListBotAppsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -957,7 +957,7 @@ export const GetBotAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1105,7 +1105,7 @@ export const GiveBotAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1157,7 +1157,7 @@ export const TakeBackBotAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1207,7 +1207,7 @@ export const ApproveBotAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1279,6 +1279,102 @@ export const ApproveBotAppResponse = zod.object({
 });
 
 /**
+ * Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin of the organization may read them.
+ * @summary Read the teams the app is granted to
+ */
+
+export const getAppTeamGrantsPathAppIdMax = 200;
+
+export const getAppTeamGrantsPathAppIdRegExp = new RegExp("\\S");
+
+export const GetAppTeamGrantsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  appId: zod
+    .string()
+    .min(1)
+    .max(getAppTeamGrantsPathAppIdMax)
+    .regex(getAppTeamGrantsPathAppIdRegExp)
+    .describe(
+      "The app's id, as listApps answers it. Percent-encode it in the path.",
+    ),
+});
+
+export const GetAppTeamGrantsResponse = zod
+  .object({
+    teams: zod.array(zod.string()).describe("Each team's id, in order."),
+  })
+  .describe("The teams the app is granted to.");
+
+/**
+ * Grant the app to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+ * @summary Grant an app to teams
+ */
+
+export const replaceAppTeamGrantsPathAppIdMax = 200;
+
+export const replaceAppTeamGrantsPathAppIdRegExp = new RegExp("\\S");
+
+export const ReplaceAppTeamGrantsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  appId: zod
+    .string()
+    .min(1)
+    .max(replaceAppTeamGrantsPathAppIdMax)
+    .regex(replaceAppTeamGrantsPathAppIdRegExp)
+    .describe(
+      "The app's id, as listApps answers it. Percent-encode it in the path.",
+    ),
+});
+
+export const replaceAppTeamGrantsHeaderIdempotencyKeyMax = 128;
+
+export const ReplaceAppTeamGrantsHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(replaceAppTeamGrantsHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const replaceAppTeamGrantsBodyTeamsItemMax = 200;
+
+export const replaceAppTeamGrantsBodyTeamsItemRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+export const replaceAppTeamGrantsBodyTeamsMax = 100;
+
+export const ReplaceAppTeamGrantsBody = zod.object({
+  teams: zod
+    .array(
+      zod
+        .string()
+        .min(1)
+        .max(replaceAppTeamGrantsBodyTeamsItemMax)
+        .regex(replaceAppTeamGrantsBodyTeamsItemRegExp),
+    )
+    .max(replaceAppTeamGrantsBodyTeamsMax)
+    .describe("The id of each team of this organization to grant it to."),
+});
+
+export const ReplaceAppTeamGrantsResponse = zod
+  .object({
+    teams: zod.array(zod.string()).describe("Each team's id, in order."),
+  })
+  .describe("The teams the app is granted to.");
+
+/**
  * Return one page of the apps a person could give Bots they own: turned on, open to owners, and connected by them where the app runs on each person's own account. Empty when an administrator turned this off for them. Only the person themselves may list them. Apps come in order of their title, and by id among apps with the same title. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the apps a person could give their own Bots
  */
@@ -1292,7 +1388,7 @@ export const ListGiveableAppsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

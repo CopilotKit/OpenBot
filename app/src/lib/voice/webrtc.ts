@@ -1,5 +1,5 @@
 import { startVoiceCall } from "@/lib/api/generated/voice/voice";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ConnectVoice, VoiceEvent } from "./types";
 
 /** WebRTC owns audio buffering and interruption truncation; the data channel carries controls. */
@@ -113,7 +113,7 @@ export const connectWebRtc: ConnectVoice = async ({
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
     const answer: unknown = await startVoiceCall(
-      ORGANIZATION_ID,
+      organizationId(),
       channelId,
       { ...(offer.sdp === undefined ? {} : { sdp: offer.sdp }) },
       { "Idempotency-Key": idempotencyKey() },

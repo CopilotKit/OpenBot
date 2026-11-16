@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Browser, Page } from "playwright-core";
+import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 
 /**
@@ -18,8 +18,14 @@ import { compile } from "tailwindcss";
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/account-version-layout.test.tsx
  *
+ * The organization the person works in reads under their name, and has the row's whole width: seen
+ * in an end-to-end test, "Ana Lindqvist's organizati..." was cut beside a build's version with
+ * nothing to show the rest. The version now sits on the name's line only, and a name that is still
+ * cut reads whole in a tooltip, on hover and on keyboard focus alike.
+ *
  * With OPENBOT_APP_SHOTS=<dir> it also saves the row with a build's and a release's version at each
- * width, as account-version-<build|release>-<width>.png.
+ * width, as account-version-<build|release>-<width>.png, and the row with a long organization in
+ * Chromium and WebKit, light and dark, as account-organization-<engine>-<theme>-<width>.png.
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 const shots = process.env.OPENBOT_APP_SHOTS;
@@ -32,6 +38,11 @@ const WIDTHS = [340, 220] as const;
 const LONG_NAME = "Alexandria Montgomery-Fitzwilliam";
 const BUILDS = ["main-20261113-9", "test-20261113-14", "internal-6e5f485bc71c"];
 const RELEASE = "v1.0.2";
+/** The name OpenBot gives a person's own organization, as it was seen cut. */
+const ORGANIZATION = "Ana Lindqvist's organization";
+/** Too long for the row at any width the sidebar can be. */
+const LONG_ORGANIZATION =
+  "Alexandria Montgomery-Fitzwilliam's organization for northern research";
 
 async function bundle(): Promise<string> {
   const built = await Bun.build({
@@ -91,7 +102,8 @@ async function stylesheet(classes: string[]): Promise<string> {
 
 let browser: Browser;
 let script: string;
-let css: string;
+/** The stylesheet built for each set of classes a page draws. */
+const built = new Map<string, string>();
 
 beforeAll(async () => {
   if (!asked) return;
@@ -105,14 +117,25 @@ afterAll(async () => {
   await browser?.close();
 });
 
-/** The row in a sidebar `width` wide, styled, for `name` on a server at `version`. */
+type Look = {
+  organization?: string;
+  theme?: "light" | "dark";
+  /** Another browser to draw it in, for the screenshots. */
+  on?: Browser;
+};
+
+/**
+ * The row in a sidebar `width` wide, styled, for `name` on a server at `version`, working in
+ * `organization` when one is given. The page is tall enough for the menu and the tooltip above it.
+ */
 async function open(
   width: number,
   name: string,
   version: string,
+  { organization, theme = "light", on = browser }: Look = {},
 ): Promise<Page> {
-  const page = await browser.newPage({
-    viewport: { width: 600, height: 200 },
+  const page = await on.newPage({
+    viewport: { width: 600, height: 320 },
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
@@ -122,7 +145,7 @@ async function open(
     if (path === "/")
       return route.fulfill({
         contentType: "text/html",
-        body: `<!doctype html><html lang="en" class="light"><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/row.js"></script></body></html>`,
+        body: `<!doctype html><html lang="en" class="${theme}"><head><meta charset="utf-8"></head><body class="bg-background text-foreground"><div id="root"></div><script type="module" src="/row.js"></script></body></html>`,
       });
     if (path === "/row.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
@@ -135,16 +158,27 @@ async function open(
     width: String(width),
     name,
     version,
+    ...(organization ? { organization } : {}),
   });
   await page.goto(`${ORIGIN}/?${query}`);
   await page.locator('[data-slot="openbot-version"]').waitFor();
+  const classes = await page.evaluate(() =>
+    [...document.querySelectorAll("[class]")].flatMap((element) => [
+      ...element.classList,
+    ]),
+  );
+  // The menu and the tooltip are drawn only once open, so their classes are read from source.
+  const popups = ["tooltip.tsx", "dropdown-menu.tsx"].flatMap((file) =>
+    readFileSync(join(APP, "src", "components", "ui", file), "utf8").split(
+      /[\s"'`]+/,
+    ),
+  );
+  const wanted = [...new Set([...classes, ...popups])].sort();
+  const key = wanted.join(" ");
+  let css = built.get(key);
   if (!css) {
-    const classes = await page.evaluate(() =>
-      [...document.querySelectorAll("[class]")].flatMap((element) => [
-        ...element.classList,
-      ]),
-    );
-    css = await stylesheet([...new Set(classes)]);
+    css = await stylesheet(wanted);
+    built.set(key, css);
   }
   await page.addStyleTag({ content: css });
   await page.evaluate(() => document.fonts.ready);
@@ -181,6 +215,166 @@ async function measured(page: Page) {
     };
   });
 }
+
+/** How the organization's name sits in the row: whether it is cut, and how wide it may be. */
+async function organizationLine(page: Page, organization: string) {
+  return page.evaluate((organization) => {
+    const line = [
+      ...document.querySelectorAll<HTMLElement>(
+        "[data-sidebar=menu-button] span",
+      ),
+    ].find(
+      (element) =>
+        element.children.length === 0 && element.textContent === organization,
+    ) as HTMLElement;
+    const button = line.closest("[data-sidebar=menu-button]") as HTMLElement;
+    const version = button.querySelector(
+      '[data-slot="openbot-version"]',
+    ) as HTMLElement;
+    const words = document.createRange();
+    words.selectNodeContents(version);
+    const box = line.getBoundingClientRect();
+    return {
+      cut: line.scrollWidth > line.clientWidth,
+      versionCut: version.scrollWidth > version.clientWidth,
+      versionText: version.textContent,
+      // The line runs to the right edge of the row, under the version, not beside it.
+      reachesVersionEdge:
+        Math.abs(box.right - words.getBoundingClientRect().right) <= 0.5,
+    };
+  }, organization);
+}
+
+/** What the tooltip says, once it shows; null when none shows. */
+async function tooltip(page: Page): Promise<string | null> {
+  const popup = page.locator('[data-slot="tooltip-content"]');
+  try {
+    await popup.waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    return null;
+  }
+  return popup.innerText();
+}
+
+describe.skipIf(!asked)("the organization in the sidebar's account row", () => {
+  for (const width of WIDTHS)
+    for (const version of BUILDS) {
+      test(`at ${width}px, ${ORGANIZATION} has the row's whole width beside ${version}`, async () => {
+        const page = await open(width, LONG_NAME, version, {
+          organization: ORGANIZATION,
+        });
+        try {
+          expect(await organizationLine(page, ORGANIZATION)).toMatchObject({
+            // At the sidebar's own width it reads whole; at its narrowest the tooltip has it.
+            ...(width === 340 ? { cut: false } : {}),
+            versionCut: false,
+            versionText: version,
+            reachesVersionEdge: true,
+          });
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+    }
+
+  for (const width of WIDTHS) {
+    test(`at ${width}px, a name still cut reads whole on hover and on keyboard focus`, async () => {
+      const page = await open(width, LONG_NAME, BUILDS[2], {
+        organization: LONG_ORGANIZATION,
+      });
+      try {
+        expect((await organizationLine(page, LONG_ORGANIZATION)).cut).toBe(
+          true,
+        );
+        const row = page.locator("[data-sidebar=menu-button]");
+
+        await row.hover();
+        const hovered = await tooltip(page);
+        expect(hovered).toContain(LONG_ORGANIZATION);
+        expect(hovered).toContain(LONG_NAME);
+
+        await page.mouse.move(590, 310);
+        await page
+          .locator('[data-slot="tooltip-content"]')
+          .waitFor({ state: "hidden" });
+        await page.keyboard.press("Tab");
+        expect(
+          await row.evaluate((element) => element === document.activeElement),
+        ).toBe(true);
+        expect(await tooltip(page)).toContain(LONG_ORGANIZATION);
+
+        // Opening the menu puts the tooltip away: it never sits over the menu.
+        await page.keyboard.press("Enter");
+        await page.locator('[role="menu"]').waitFor({ state: "visible" });
+        await page
+          .locator('[data-slot="tooltip-content"]')
+          .waitFor({ state: "hidden" });
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+  }
+
+  test("a name that reads whole offers no tooltip", async () => {
+    const page = await open(340, "Sam Rivera", RELEASE, {
+      organization: "Acme",
+    });
+    try {
+      await page.locator("[data-sidebar=menu-button]").hover();
+      expect(await tooltip(page)).toBeNull();
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test.skipIf(!shots)(
+    "screenshots in Chromium and WebKit, light and dark",
+    async () => {
+      if (!shots) return;
+      mkdirSync(shots, { recursive: true });
+      const { webkit } = await import("playwright-core");
+      const engines: [string, Browser][] = [
+        ["chromium", browser],
+        ["webkit", await (webkit as BrowserType).launch()],
+      ];
+      try {
+        for (const [engine, on] of engines)
+          for (const theme of ["light", "dark"] as const)
+            for (const width of WIDTHS)
+              for (const [label, organization] of [
+                ["organization", ORGANIZATION],
+                ["long-organization", LONG_ORGANIZATION],
+              ] as const) {
+                const page = await open(width, LONG_NAME, BUILDS[2], {
+                  organization,
+                  theme,
+                  on,
+                });
+                try {
+                  const name = `account-${label}-${engine}-${theme}-${width}`;
+                  await page.screenshot({
+                    path: join(shots, `${name}.png`),
+                    clip: { x: 0, y: 0, width: 600, height: 64 },
+                  });
+                  await page.locator("[data-sidebar=menu-button]").hover();
+                  if (await tooltip(page))
+                    await page.screenshot({
+                      path: join(shots, `${name}-tooltip.png`),
+                      clip: { x: 0, y: 0, width: 600, height: 200 },
+                      // As it rests, not partway through fading in.
+                      animations: "disabled",
+                    });
+                } finally {
+                  await page.close();
+                }
+              }
+      } finally {
+        await engines[1]?.[1].close();
+      }
+    },
+    240_000,
+  );
+});
 
 describe.skipIf(!asked)("the version in the sidebar's account row", () => {
   for (const width of WIDTHS) {

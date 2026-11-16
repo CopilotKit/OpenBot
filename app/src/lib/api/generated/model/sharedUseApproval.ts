@@ -11,6 +11,6 @@ export interface SharedUseApproval {
   audience: SharedUseAudience;
   /** Whether runs started by outside input are covered. */
   outsideInput: boolean;
-  /** The people and groups named, when the audience is people. Empty otherwise. */
+  /** The people, teams and groups named, when the audience is people. Empty otherwise. */
   members: SharedUseMember[];
 }

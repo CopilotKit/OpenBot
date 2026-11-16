@@ -1,6 +1,6 @@
 import { translateApprovalRules as translateApprovalRulesRequest } from "@/lib/api/generated/approval-rules/approval-rules";
 import type { ApprovalRuleDraftProblem } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ApprovalRuleInput } from "@/lib/approvals";
 
 /** What is wrong with one field of one rule, counted from 1 as the screen counts them. */
@@ -37,7 +37,7 @@ export async function translateApprovalRules(
   text: string,
 ): Promise<ApprovalRuleTranslation> {
   const translation = await translateApprovalRulesRequest(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     {

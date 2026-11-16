@@ -42,10 +42,10 @@ test.skipIf(!installed)(
   () => {
     expect(
       failuresAfter(
-        "address: /api/channels/events",
-        "address: /api/channels/happenings",
+        "address: /api/v2/organizations/{organizationId}/conversation-events",
+        "address: /api/v2/organizations/{organizationId}/conversation-happenings",
       ),
-    ).toEqual(["edit /channels/legacyConversationEvents/address"]);
+    ).toEqual(["edit /channels/conversationEvents/address"]);
   },
   slow,
 );
@@ -159,11 +159,11 @@ test.skipIf(!installed)(
     ).toEqual([]);
     expect(
       failuresAfter(
-        "address: /api/channels/events",
-        "address: /api/channels/happenings",
+        "address: /api/v2/organizations/{organizationId}/conversation-events",
+        "address: /api/v2/organizations/{organizationId}/conversation-happenings",
         accepted,
       ),
-    ).toEqual(["edit /channels/legacyConversationEvents/address"]);
+    ).toEqual(["edit /channels/conversationEvents/address"]);
   },
   slow,
 );

@@ -165,14 +165,22 @@ paths:
       operationId: revokePersonAccess
       summary: Remove a person's access
       description: >-
-        Stop a person from using OpenBot: their address can't sign in again,
-        and the sessions, API keys and app sign-ins they hold end at once.
-        They keep their record and their history, and restoring their access
-        lets them sign in again. Their connected credentials are retired too.
-        Only an administrator may do this, never to themselves, and never to
-        somebody the deployment's configuration names as an administrator.
-        Removing somebody already removed retires anything left and records
-        nothing new.
+        Remove a person from the organization. Where everybody has an
+        organization of their own (an OpenBot whose list of organizations
+        answers canCreate true), this ends their membership of this
+        organization alone: they lose its Bots and conversations from their
+        next request, and their account, sessions, API keys, their own
+        organization and any other they belong to are unchanged. Restoring
+        them puts the membership back with its role and teams. Where OpenBot
+        keeps one organization, it stops the person using OpenBot: their
+        address can't sign in again, and the sessions, API keys and app
+        sign-ins they hold end at once; restoring their access lets them sign
+        in again. Either way they keep their record and their history, and the
+        credentials they connected here are retired. Only an administrator may
+        do this, never to themselves, never to somebody the deployment's
+        configuration names as an administrator, and never to the
+        organization's owner. Removing somebody already removed retires
+        anything left and records nothing new.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -215,10 +223,14 @@ paths:
       operationId: restorePersonAccess
       summary: Give a person their access back
       description: >-
-        Let a removed person sign in again. What ended when they were removed
-        stays ended: they sign in afresh and make new API keys. Only an
-        administrator may do this. Restoring somebody who was never removed
-        changes nothing and records nothing.
+        Give a removed person their access back. Where everybody has an
+        organization of their own, this puts back their membership of this
+        organization with the role and teams it had; their sessions and API
+        keys, which were never ended, work here again from their next request.
+        Where OpenBot keeps one organization, it lets them sign in again, and
+        what ended when they were removed stays ended: they sign in afresh and
+        make new API keys. Only an administrator may do this. Restoring
+        somebody who was never removed changes nothing and records nothing.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -597,8 +609,8 @@ paths:
       operationId: createApiKey
       summary: Make an API key
       description: >-
-        Make an API key that acts as the person, inside this organization,
-        on the API only. The key itself is in this answer and never again:
+        Make an API key that acts as the person, in every organization they
+        are a member of, on the API. The key itself is in this answer and never again:
         OpenBot keeps only a hash of it. Only the person themselves may make
         one, signed in to OpenBot: a key can never make another key, and
         neither can an app's sign-in. A key ends when it expires, when it is

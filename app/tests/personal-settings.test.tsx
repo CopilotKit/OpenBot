@@ -185,7 +185,7 @@ describe("the personal pages under Settings", () => {
 /*
  * The Computer page in the personal edition is one person's one computer. It used to say how to give
  * each person a computer of their own (an environment variable only a team deployment sets) and list
- * "Computers in this deployment" by whose seat each was. The person's own controls stay.
+ * "Computers in this organization" by whose seat each was. The person's own controls stay.
  */
 describe("the Computer page", () => {
   /** What the one shared computer answers once the Personal Assistant has opened a page. */
@@ -245,7 +245,7 @@ describe("the Computer page", () => {
     const view = await renderPage("personal");
     const text = view.container.textContent ?? "";
     expect(text).not.toContain("COMPUTER_SUPERVISOR_URL");
-    expect(text).not.toContain("Computers in this deployment");
+    expect(text).not.toContain("Computers in this organization");
     expect(text).not.toContain("isolated Bot");
     expect(text).not.toContain("dev@openbot.local");
     expect(text).not.toContain("This person's profile");
@@ -288,7 +288,7 @@ describe("the Computer page", () => {
     title: string,
   ) {
     const section = view.getByRole("heading", {
-      name: /^(Your Bots' browsers|Computers in this deployment)$/,
+      name: /^(Your Bots' browsers|Computers in this organization)$/,
     }).parentElement?.parentElement as HTMLElement;
     return within(section)
       .getByText(title)
@@ -551,7 +551,7 @@ describe("the Computer page", () => {
     const text = view.container.textContent ?? "";
     expect(view.getByRole("heading", { name: "Computers" })).toBeTruthy();
     expect(text).toContain("COMPUTER_SUPERVISOR_URL");
-    expect(text).toContain("Computers in this deployment");
+    expect(text).toContain("Computers in this organization");
     expect(text).toContain("dev@openbot.local · Personal Assistant");
     expect(text).toContain("Leaves through network policy filter");
   });

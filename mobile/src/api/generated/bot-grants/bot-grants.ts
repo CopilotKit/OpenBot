@@ -3,6 +3,8 @@
  */
 import type {
   AppAccessApproval,
+  AppTeamGrants,
+  AppTeamGrantsInput,
   BotApp,
   BotAppGiven,
   BotAppPage,
@@ -440,6 +442,83 @@ export const approveBotApp = async (
     {
       ...options,
       method: "POST",
+    },
+  );
+};
+
+export const getGetAppTeamGrantsUrl = (
+  organizationId: string,
+  appId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/apps/${encodeURIComponent(String(appId))}/team-grants`;
+};
+
+/**
+ * Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin of the organization may read them.
+ * @summary Read the teams the app is granted to
+ */
+export const getAppTeamGrants = async (
+  organizationId: string,
+  appId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppTeamGrants> => {
+  return apiRequest<AppTeamGrants>(
+    getGetAppTeamGrantsUrl(organizationId, appId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getReplaceAppTeamGrantsUrl = (
+  organizationId: string,
+  appId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/apps/${encodeURIComponent(String(appId))}/team-grants`;
+};
+
+/**
+ * Grant the app to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+ * @summary Grant an app to teams
+ */
+export const replaceAppTeamGrants = async (
+  organizationId: string,
+  appId: string,
+  appTeamGrantsInput: AppTeamGrantsInput,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppTeamGrants> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AppTeamGrants>(
+    getReplaceAppTeamGrantsUrl(organizationId, appId),
+    {
+      ...options,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(appTeamGrantsInput),
     },
   );
 };

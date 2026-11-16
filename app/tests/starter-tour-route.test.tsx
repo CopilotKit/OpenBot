@@ -75,6 +75,7 @@ const bot: AgentProfile = {
   title: "Clerk",
   visibility: "private",
   id: BOT,
+  packageBotId: BOT,
   runsOnOpenBotModel: true,
 };
 

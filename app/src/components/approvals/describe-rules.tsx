@@ -23,6 +23,7 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import type {
   ApprovalBacktest,
@@ -86,7 +87,8 @@ export function RuleRowsEditor({
   problems: RuleRowProblem[];
   onChange: (rules: ApprovalRuleInput[]) => void;
 }) {
-  const bots = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const bots = useQuery(agentListQueryOptions(false, useBotListScope()));
   const set = (index: number, change: Partial<ApprovalRuleInput>) =>
     onChange(
       rules.map((rule, at) => (at === index ? { ...rule, ...change } : rule)),

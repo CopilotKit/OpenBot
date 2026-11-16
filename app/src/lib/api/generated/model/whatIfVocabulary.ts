@@ -4,6 +4,7 @@
 import type { WhatIfVocabularyAppsItem } from "./whatIfVocabularyAppsItem";
 import type { WhatIfVocabularyBotsItem } from "./whatIfVocabularyBotsItem";
 import type { WhatIfVocabularyPeopleItem } from "./whatIfVocabularyPeopleItem";
+import type { WhatIfVocabularyTeamsItem } from "./whatIfVocabularyTeamsItem";
 
 /**
  * What an action can name in this organization.
@@ -13,5 +14,7 @@ export interface WhatIfVocabulary {
   people: WhatIfVocabularyPeopleItem[];
   /** The directory groups, by name. */
   groups: string[];
+  /** The organization's teams. An action names one in group, as team:<id>. */
+  teams?: WhatIfVocabularyTeamsItem[];
   apps: WhatIfVocabularyAppsItem[];
 }

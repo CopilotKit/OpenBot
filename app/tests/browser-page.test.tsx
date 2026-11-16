@@ -7,11 +7,6 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type {
-  LearningRunSummary,
-  PersonalReview,
-  RecordingSkills,
-} from "@openbot/shared/learning";
 import {
   type BrowserApiState,
   type BrowserOpenResponse,
@@ -41,6 +36,11 @@ import {
 import { Toaster, toast } from "@/components/ui/toast";
 import type { Recognition } from "@/lib/browser/narration";
 import { browserKeys } from "@/lib/browser/queries";
+import type {
+  LearningRunSummary,
+  PersonalReview,
+  RecordingSkill,
+} from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import {
   ME_PATH,
@@ -49,6 +49,13 @@ import {
   preferencesResponse,
 } from "./accounts-api";
 import { installChrome } from "./browser-narration.fixture";
+import {
+  learningContract,
+  personLearning,
+  runBody,
+  served,
+  testId,
+} from "./learning-api";
 import {
   type DesktopShellOptions,
   installDesktopShell,
@@ -113,7 +120,7 @@ function freshReview(): PersonalReview {
     canReview: true,
     autoApprove: true,
     approved: 0,
-    sources: [
+    spaces: [
       {
         containerId: RECORDINGS_SPACE,
         kind: "recordings",
@@ -125,8 +132,10 @@ function freshReview(): PersonalReview {
   };
 }
 let review: PersonalReview = freshReview();
+/** The person's own Learning in the API. */
+const ME_LEARNING = personLearning();
 /** The skills Learning proposed from the recording the page asks about, and what it asked. */
-let recordingSkills: RecordingSkills["skills"] = [];
+let recordingSkills: RecordingSkill[] = [];
 const skillsAsked: string[] = [];
 /** Learn now's refusal, in the server's sentence, while set. */
 let learnRefusal: string | null = null;
@@ -138,11 +147,11 @@ function learningRun(
 ): LearningRunSummary {
   const at = new Date(Date.now() + 60_000).toISOString();
   return {
-    id: "run-after",
+    id: testId("after"),
     status,
-    trigger: "manual",
-    proposals: null,
-    insights: null,
+    triggerSource: "manual",
+    proposalCount: null,
+    insightCount: null,
     failureCode: failure ? "BatchInsightAgentFailed" : null,
     failure,
     createdAt: at,
@@ -152,11 +161,11 @@ function learningRun(
 }
 
 /** A skill Learning proposed from "Find my meeting". */
-function meetingSkill(
-  status: "pending_review" | "approved",
-): RecordingSkills["skills"][number] {
+function meetingSkill(status: "pending_review" | "approved"): RecordingSkill {
   return {
     id: "4b9f2a8e-1c3d-4e5f-8a9b-0c1d2e3f4a5b",
+    runId: testId("after"),
+    publishedSkillId: null,
     title: "find-my-meeting",
     description: "Find a meeting on Google Calendar by name and open it.",
     reason: "You did this in a recording.",
@@ -295,15 +304,25 @@ async function server(path: string, init?: RequestInit): Promise<Response> {
       },
     });
   }
-  if (path === "/api/settings/learning/review") return Response.json(review);
-  if (path.startsWith("/api/settings/learning/recording-skills")) {
+  if (path === ME_LEARNING.review)
+    return served(learningContract.GetPersonLearningReviewResponse, review);
+  if (path.startsWith(`${ME_LEARNING.recordingSkills}?`)) {
     skillsAsked.push(path);
-    return Response.json({ skills: recordingSkills });
+    return served(learningContract.ListPersonLearningProposalsResponse, {
+      skills: recordingSkills.map(({ container, ...proposal }) => ({
+        containerId: container,
+        proposal,
+      })),
+      nextCursor: null,
+    });
   }
-  if (path.startsWith("/api/settings/learning/runs") && method === "POST") {
-    if (learnRefusal)
-      return Response.json({ error: learnRefusal }, { status: 409 });
-    return Response.json({ run: { id: "run-new", status: "queued" } });
+  if (path.startsWith(`${ME_LEARNING.runs}?`) && method === "POST") {
+    if (learnRefusal) return problem(409, learnRefusal);
+    return served(
+      learningContract.StartPersonLearningRunResponse,
+      runBody({ id: testId("new"), status: "queued" }),
+      202,
+    );
   }
   if (path === "/api/v2/organizations/default/people/me/recordings") {
     recordingsAsked += 1;
@@ -979,9 +998,9 @@ test("on OpenBot Desktop a saved recording says what happens next, Learn now sta
   await user.click(view.getByRole("button", { name: "Learn now" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: `/api/settings/learning/runs?container=${RECORDINGS_SPACE}`,
+      path: `${ME_LEARNING.runs}?containerId=${RECORDINGS_SPACE}`,
       method: "POST",
-      body: {},
+      body: undefined,
     }),
   );
   expect(await view.findByText("Learning from your recordings")).toBeTruthy();
@@ -995,8 +1014,8 @@ test("on OpenBot Desktop a saved recording says what happens next, Learn now sta
 
 test("on OpenBot Desktop a skill learned from the saved recording says so, with Try it opening a new conversation with the task", async () => {
   state = savedMeeting();
-  review.sources[0] = {
-    ...(review.sources[0] as PersonalReview["sources"][number]),
+  review.spaces[0] = {
+    ...(review.spaces[0] as PersonalReview["spaces"][number]),
     latestRun: learningRun("succeeded"),
   };
   // Waiting for the person's review first.
@@ -1011,7 +1030,7 @@ test("on OpenBot Desktop a skill learned from the saved recording says so, with 
   expect(linkNamed(view, "Review").getAttribute("href")).toBe("/skills");
   // Asked about this recording, by its name and when it stopped.
   expect(skillsAsked[0]).toMatch(
-    /^\/api\/settings\/learning\/recording-skills\?title=Find%20my%20meeting&since=\d+$/,
+    /^\/api\/v2\/organizations\/default\/people\/me\/learning-proposals\?recordingTitle=Find\+my\+meeting&since=\d+&limit=100$/,
   );
 
   // Approved: the page says the Bots learned it, and Try it starts a conversation with the task in the box.
@@ -1051,8 +1070,8 @@ test("on OpenBot Desktop a saved recording says why Learning can't run, didn't f
   const why =
     "Your model plan didn't answer Learning. Try Learn now again in a few minutes.";
   review = freshReview();
-  review.sources[0] = {
-    ...(review.sources[0] as PersonalReview["sources"][number]),
+  review.spaces[0] = {
+    ...(review.spaces[0] as PersonalReview["spaces"][number]),
     latestRun: learningRun("failed", why),
   };
   view = draw(<BrowserPage />);
@@ -1102,9 +1121,9 @@ test("with the browser in the page, a saved recording says what happens next und
   await user.click(view.getByRole("button", { name: "Learn now" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: `/api/settings/learning/runs?container=${RECORDINGS_SPACE}`,
+      path: `${ME_LEARNING.runs}?containerId=${RECORDINGS_SPACE}`,
       method: "POST",
-      body: {},
+      body: undefined,
     }),
   );
   expect(await view.findByText("Learning from your recordings")).toBeTruthy();

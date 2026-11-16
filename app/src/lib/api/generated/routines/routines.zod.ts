@@ -13,7 +13,7 @@ export const ListRoutinesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -152,7 +152,7 @@ export const CreateRoutineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -324,7 +324,7 @@ export const DeleteRoutineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   routineId: zod
     .string()
@@ -362,7 +362,7 @@ export const PauseRoutineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   routineId: zod
     .string()
@@ -402,7 +402,7 @@ export const ResumeRoutineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   routineId: zod
     .string()
@@ -442,7 +442,7 @@ export const RunRoutineParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   routineId: zod
     .string()
@@ -483,7 +483,7 @@ export const ListRoutineRunsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   routineId: zod
     .string()

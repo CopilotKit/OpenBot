@@ -17,7 +17,7 @@ export const ListConnectionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -153,7 +153,7 @@ export const GetConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -252,7 +252,7 @@ export const ConnectAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -414,7 +414,7 @@ export const ConfirmConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -469,7 +469,7 @@ export const RecheckConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -534,7 +534,7 @@ export const DisconnectAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -593,7 +593,7 @@ export const GetConnectionDisconnectPreviewParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -644,7 +644,7 @@ export const GetConnectionAuthorizationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -748,7 +748,7 @@ export const AuthorizeConnectionActionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -829,7 +829,7 @@ export const ListConnectedAccountsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -942,7 +942,7 @@ export const MakeConnectedAccountDefaultParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1004,7 +1004,7 @@ export const DisconnectConnectedAccountParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1062,7 +1062,7 @@ export const DisconnectConnectedAccountResponse = zod.object({
 });
 
 /**
- * Return the one account an app in Shared mode acts as for everybody: whether it is connected, who connected it, and the app's own name for the account. Anybody signed in may read it. Not found when the app is connected by each person instead, as getConnection reads.
+ * Return the one account an app in Shared mode acts as for everybody in the organization: whether it is connected, who connected it, and the app's own name for the account. Each organization connects its own, and one organization's shared account is never used in another. Any member of the organization may read it. Not found when the app is connected by each person instead, as getConnection reads.
  * @summary Read an app's shared account
  */
 
@@ -1075,7 +1075,7 @@ export const GetSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1152,7 +1152,7 @@ export const GetSharedConnectionResponse = zod
   );
 
 /**
- * Start connecting the one account an app in Shared mode acts as for everybody, and say what happens next, as connectApp does: consent answers the address of the app's sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app's page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator may connect it. The address and the values are never logged.
+ * Start connecting the one account an app in Shared mode acts as for everybody in the organization, and say what happens next, as connectApp does: consent answers the address of the app's sign-in page, form answers the boxes to fill in, connected means it is connected already. The person comes back to the app's page, where confirmSharedConnection checks the result. Where an app connects once, a shared account already connected is a conflict: disconnect it first. Only an administrator of the organization may connect it. The address and the values are never logged.
  * @summary Start connecting an app's shared account
  */
 
@@ -1165,7 +1165,7 @@ export const ConnectSharedAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1309,7 +1309,7 @@ export const ConfirmSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1353,7 +1353,7 @@ export const RecheckSharedConnectionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1407,7 +1407,7 @@ export const DisconnectSharedAppParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1455,7 +1455,7 @@ export const GetSharedConnectionAuthorizationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()
@@ -1548,7 +1548,7 @@ export const AuthorizeSharedConnectionActionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appId: zod
     .string()

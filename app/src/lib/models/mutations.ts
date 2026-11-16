@@ -1,6 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { replaceModelChoice } from "@/lib/api/generated/models/models";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ConversationModel, modelKeys } from "./queries";
 
 const FALLBACK = "Couldn't save the model. Try again.";
@@ -18,7 +18,7 @@ export async function saveConversationModel(
   pick: ConversationModel,
 ): Promise<ConversationModel> {
   return replaceModelChoice(
-    ORGANIZATION_ID,
+    organizationId(),
     "me",
     channelId,
     { model: pick.model, effort: pick.effort },

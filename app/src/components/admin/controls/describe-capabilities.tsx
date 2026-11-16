@@ -31,6 +31,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import type {
   CapabilityAnswer,
   CapabilityPreview,
@@ -41,23 +42,33 @@ import type {
   CapabilityChange,
   CapabilityChangeProblem,
 } from "@/lib/capability-changes/translate";
+import { MISSING_TEAM, teamName } from "@/lib/teams/names";
+import type { TeamSummary } from "@/lib/teams/queries";
 import { cn } from "@/lib/utils";
 
-/** Who a switch is for, as the Permissions page and its overrides name them. */
-function scopeWords(change: CapabilityChange): string {
+/** The organization's teams, by which a change's or an answer's team id is given its name. */
+type Teams = readonly Pick<TeamSummary, "id" | "name">[];
+
+/** Who a switch is for, as the Permissions page and its overrides name them. A team by its name. */
+function scopeWords(change: CapabilityChange, teams: Teams): string {
   if (change.scopeKind === "organization") return "Everybody";
   if (change.scopeKind === "role")
     return change.scopeId === "admin" ? "Admins" : "Members";
+  if (change.scopeKind === "team") {
+    const name = teamName(teams, change.scopeId);
+    return name === MISSING_TEAM ? name : `Team: ${name}`;
+  }
   return `Group: ${change.scopeId}`;
 }
 
 const SCOPE_ICONS = {
   organization: IconBuilding,
   role: IconUserShield,
+  team: IconUsersGroup,
   group: IconUsersGroup,
 };
 
-/** What a switch is set to, in the overrides dialog's words: a group grants, the rest turn on or off. */
+/** What a switch is set to, in the overrides dialog's words: a team grants, the rest turn on or off. */
 function settingWords(change: CapabilityChange): {
   text: string;
   className: string;
@@ -66,7 +77,10 @@ function settingWords(change: CapabilityChange): {
     return { text: "Inherit", className: "text-muted-foreground" };
   if (!change.allowed) return { text: "Off", className: "text-destructive" };
   return {
-    text: change.scopeKind === "group" ? "Grant" : "On",
+    text:
+      change.scopeKind === "team" || change.scopeKind === "group"
+        ? "Grant"
+        : "On",
     className: "text-emerald-600 dark:text-emerald-400",
   };
 }
@@ -78,12 +92,14 @@ function settingWords(change: CapabilityChange): {
 export function ChangeRows({
   changes,
   titles,
+  teams,
   problems,
   onRemove,
 }: {
   changes: CapabilityChange[];
   /** Each permission's title, from the Permissions page's own list. */
   titles: Partial<Record<string, string>>;
+  teams: Teams;
   problems: CapabilityChangeProblem[];
   onRemove: (index: number) => void;
 }) {
@@ -110,7 +126,7 @@ export function ChangeRows({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{title}</ItemTitle>
-                  <ItemDescription>{scopeWords(change)}</ItemDescription>
+                  <ItemDescription>{scopeWords(change, teams)}</ItemDescription>
                   {wrong.map((problem) => (
                     <p className="text-destructive text-sm" key={problem.field}>
                       {problem.message}
@@ -144,7 +160,7 @@ export function ChangeRows({
 }
 
 /** Why a person has a permission or not, after "Now" or "After this,". */
-function answerWords(answer: CapabilityAnswer): string {
+function answerWords(answer: CapabilityAnswer, teams: Teams): string {
   const state = answer.allowed ? "on" : "off";
   switch (answer.decidedBy) {
     case "default":
@@ -153,6 +169,10 @@ function answerWords(answer: CapabilityAnswer): string {
       return `${state} for everybody`;
     case "role":
       return `${state} for ${answer.scopeId === "admin" ? "admins" : "members"}`;
+    case "team": {
+      const name = teamName(teams, answer.scopeId);
+      return `on through ${name === MISSING_TEAM ? "a team" : name}`;
+    }
     case "group":
       return `on through ${answer.scopeId}`;
   }
@@ -237,8 +257,10 @@ function mediaOf(event: AuditEvent): ReplayRow["media"] {
  */
 export function PermissionsPreview({
   preview,
+  teams,
 }: {
   preview: UseQueryResult<CapabilityPreview>;
+  teams: Teams;
 }) {
   if (preview.isPending) return null;
   if (preview.error)
@@ -317,7 +339,7 @@ export function PermissionsPreview({
                     <ItemContent className="min-w-0">
                       <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription className="line-clamp-none">
-                        {person.role === "admin" ? "Admin" : "Member"}
+                        {isOrganizationAdmin(person.role) ? "Admin" : "Member"}
                         {person.groups.length > 0
                           ? ` in ${person.groups.join(", ")}`
                           : ", in no group"}
@@ -347,8 +369,9 @@ export function PermissionsPreview({
                                 <span className="font-medium">
                                   {capability.title}.
                                 </span>{" "}
-                                Now {answerWords(capability.before)}. After
-                                this, {answerWords(capability.after)}.
+                                Now {answerWords(capability.before, teams)}.
+                                After this,{" "}
+                                {answerWords(capability.after, teams)}.
                               </p>
                               {activity ? (
                                 <p className="text-muted-foreground text-xs">

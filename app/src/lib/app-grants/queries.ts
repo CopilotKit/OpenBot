@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { replayBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type GrantSetCheck, grantSetCheckOf } from "./translate";
 
 /** One action a change turns on or off, with what it does. */
@@ -62,7 +62,7 @@ export function appGrantsReplayQueryOptions(
     queryFn: async ({ signal }): Promise<AppGrantPreview> => {
       // An action that saves nothing: each ask is its own, so each gets its own key.
       const preview = await replayBotGrants(
-        ORGANIZATION_ID,
+        organizationId(),
         agentId,
         { appId: app, grants: [...grants] },
         { "Idempotency-Key": idempotencyKey() },

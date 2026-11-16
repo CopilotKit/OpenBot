@@ -4,7 +4,7 @@ import {
   listRoutineRuns,
   listRoutines,
 } from "@/lib/api/generated/routines/routines";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * One standing instruction, as the Routines page sees it: the API's `Routine`, generated from the
@@ -77,7 +77,7 @@ export function routineRunsQueryOptions(id: string) {
     queryKey: routineKeys.runs(id),
     queryFn: ({ signal }): Promise<RoutineRunRecord[]> =>
       everyPage(async (params) => {
-        const page = await listRoutineRuns(ORGANIZATION_ID, id, params, {
+        const page = await listRoutineRuns(organizationId(), id, params, {
           signal,
           fallback: "This routine's runs could not be loaded.",
         });
@@ -99,7 +99,7 @@ export function routinesQueryOptions() {
     queryKey: routineKeys.list(),
     queryFn: async ({ signal }): Promise<RoutinesPage> => ({
       routines: await everyPage(async (params) => {
-        const page = await listRoutines(ORGANIZATION_ID, params, {
+        const page = await listRoutines(organizationId(), params, {
           signal,
           fallback: "Your routines could not be loaded.",
         });

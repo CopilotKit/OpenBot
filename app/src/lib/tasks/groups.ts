@@ -30,6 +30,45 @@ export function waitsOnYou(status: TaskStatus): boolean {
   );
 }
 
+/**
+ * Whether a listed task is one thing waiting on the person, by the rule the Bots badge counts by
+ * (the server's task counts): something to read, answer or try again, less a delegated task that is
+ * done. Its result was already said in the conversation that asked for it, so it is not one more
+ * thing to review. Every count of what waits on the person counts tasks by this, so the numbers
+ * agree wherever they are shown.
+ */
+export function countsAsWaiting({ task, status }: ListedTask): boolean {
+  return (
+    waitsOnYou(status) &&
+    !(task.origin === "delegated" && status === "ready_for_review")
+  );
+}
+
+/** Where a question or an action waits: its conversation, its thread, or both. */
+export type WaitingWhere = {
+  channelId?: string | undefined;
+  threadId?: string | undefined;
+};
+
+/**
+ * Whether what waits somewhere waits inside one of these tasks' own conversations. It is then that
+ * task waiting on the person, listed and counted once, as the task, the way the Bots badge counts
+ * it. Every list that shows questions and actions beside tasks leaves these out by this one rule.
+ */
+export function heldByTaskOf(
+  listed: readonly ListedTask[],
+): (where: WaitingWhere) => boolean {
+  const channels = new Set<string>();
+  const threads = new Set<string>();
+  for (const { task } of listed) {
+    channels.add(task.channelId);
+    if (task.threadId) threads.add(task.threadId);
+  }
+  return ({ channelId, threadId }) =>
+    (channelId !== undefined && channels.has(channelId)) ||
+    (threadId !== undefined && threads.has(threadId));
+}
+
 const time = (iso: string | null) => {
   const at = iso ? Date.parse(iso) : Number.NaN;
   return Number.isFinite(at) ? at : 0;

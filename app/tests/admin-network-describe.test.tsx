@@ -247,7 +247,7 @@ test("a sentence becomes the list and its mode, read back independently, replaye
   expect(field.value.split("\n")).toEqual(
     TRANSLATION.rules.map((rule) => rule.value),
   );
-  expect(dialog.textContent).toContain("Team allowlist only");
+  expect(dialog.textContent).toContain("Organization allowlist only");
 
   // Replayed as it stands, for the organization, once, after it rests.
   await waitFor(

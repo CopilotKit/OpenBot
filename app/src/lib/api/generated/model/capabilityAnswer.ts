@@ -6,6 +6,6 @@ import type { CapabilityAnswerDecidedBy } from "./capabilityAnswerDecidedBy";
 export interface CapabilityAnswer {
   allowed: boolean;
   decidedBy: CapabilityAnswerDecidedBy;
-  /** The role or group that decided it. Empty otherwise. */
+  /** The role, the group's name or the team's id that decided it. Empty otherwise. */
   scopeId: string;
 }

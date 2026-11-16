@@ -119,6 +119,7 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 | `OPENBOT_TOOL_GUIDES` | unset                             | Path to a JSON file of `{ "<ACTION>": guide }` that replaces or adds to the guides OpenBot ships for Composio actions; `null` for an action puts the app's own words back. Read once. A file that cannot be read is logged and left out, and the shipped guides are used. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
+| `OPENBOT_ANYONE_CREATES_ORGANIZATIONS` | unset (admins only) | `true` or `1` lets anybody signed in create an organization. Unset, only an admin of the organization `default` can. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `OPENBOT_PRODUCT_TELEMETRY` | unset (off; on for OpenBot Desktop) | `1` or `true` sends OpenBot's product usage events; `0` turns them off. `DO_NOT_TRACK` or `COPILOTKIT_TELEMETRY_DISABLED` set to `1` or `true` turns them off whatever this says. See [TELEMETRY.md](TELEMETRY.md). |
 | `OPENBOT_ALLOW_LOOPBACK_MCP` | unset                      | `1` lets an MCP server on this machine's loopback address (`http://127.0.0.1:<port>` or `[::1]`) be added by its address, for developing an MCP server against OpenBot and for the end-to-end tests. Leave it unset everywhere people use OpenBot: every other private, local or plain-http address stays refused either way. |
@@ -197,7 +198,7 @@ To rotate the secret, do one of these:
   every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
   created later carries it.
 - **Turn the app off and on again.** Set the new values, restart, then on the app's page under Apps
-  turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
+  turn **Enable for this organization** off and back on. Turning it off deletes the config at Composio
   and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
   with the new client. Then make the app shared, connect the team account and grant it to Bots again.
 

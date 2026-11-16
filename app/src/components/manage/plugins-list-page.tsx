@@ -174,7 +174,7 @@ export function PluginsListPage({
       {plugins.isPending || catalogue.isPending ? null : plugins.error ||
         catalogue.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Reload the page.
+          Couldn't load apps. Try again in a moment.
         </p>
       ) : (
         <>

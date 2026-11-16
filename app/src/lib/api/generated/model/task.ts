@@ -65,11 +65,18 @@ export interface Task {
    * @nullable
    */
   stoppedAt?: string | null;
+  /** Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true. */
+  canTryAgain?: boolean;
   /**
    * When the work it is doing now began. Null or absent unless it is working.
    * @nullable
    */
   workingSince?: string | null;
+  /**
+   * When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
+   * @nullable
+   */
+  tryingAgainAt?: string | null;
   /** When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it. */
   lastActivityAt?: string;
   /**

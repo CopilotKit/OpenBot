@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the requests waiting for an administrator: all of them for an administrator, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's requests waiting for an administrator: all of them for an administrator of the organization, and only their own for anybody else. appId narrows them to one app. Newest first, and by id among requests made at the same moment. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List requests for apps
  */
 
@@ -13,7 +13,7 @@ export const ListAppAccessRequestsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -122,7 +122,7 @@ export const CreateAppAccessRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -211,7 +211,7 @@ export const DeleteAppAccessRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appAccessRequestId: zod
     .string()
@@ -251,7 +251,7 @@ export const ApproveAppAccessRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appAccessRequestId: zod
     .string()
@@ -352,7 +352,7 @@ export const DismissAppAccessRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   appAccessRequestId: zod
     .string()

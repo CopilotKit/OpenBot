@@ -19,7 +19,7 @@ import {
 import {
   type ApiRequestOptions,
   idempotencyKey,
-  ORGANIZATION_ID,
+  organizationId,
 } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { computerKeys } from "@/lib/computers/queries";
@@ -48,7 +48,7 @@ export function openBrowserMutationOptions(queryClient: QueryClient) {
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 function openBrowser(): Promise<BrowserOpenResponse | RealBrowserOpenResponse> {
-  return openPersonBrowser(ORGANIZATION_ID, "me", once(), {
+  return openPersonBrowser(organizationId(), "me", once(), {
     fallback: "Couldn't open your browser. Try again.",
   });
 }
@@ -64,7 +64,7 @@ function startBrowserRecording(
   variables: BrowserRecordingStart,
 ): Promise<BrowserApiState> {
   return recordInPersonBrowser(
-    ORGANIZATION_ID,
+    organizationId(),
     "me",
     {
       action: "start",
@@ -137,9 +137,15 @@ export function openAndStartBrowserRecordingMutationOptions(
 export function stopBrowserRecordingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<BrowserApiState> =>
-      recordInPersonBrowser(ORGANIZATION_ID, "me", { action: "stop" }, once(), {
-        fallback: "Couldn't stop recording. Try again.",
-      }),
+      recordInPersonBrowser(
+        organizationId(),
+        "me",
+        { action: "stop" },
+        once(),
+        {
+          fallback: "Couldn't stop recording. Try again.",
+        },
+      ),
     onSuccess: () => invalidateBrowser(queryClient),
   });
 }
@@ -148,7 +154,7 @@ export function stopBrowserRecordingMutationOptions(queryClient: QueryClient) {
 export function browserTabsMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (request: BrowserTabsRequest): Promise<BrowserApiState> =>
-      changePersonBrowserTabs(ORGANIZATION_ID, "me", request, once(), {
+      changePersonBrowserTabs(organizationId(), "me", request, once(), {
         fallback: "Couldn't change the tabs. Try again.",
       }),
     onSuccess: () => invalidateBrowser(queryClient),
@@ -159,7 +165,7 @@ export function browserTabsMutationOptions(queryClient: QueryClient) {
 export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (request: BrowserNavigateRequest): Promise<BrowserApiState> =>
-      navigatePersonBrowser(ORGANIZATION_ID, "me", request, once(), {
+      navigatePersonBrowser(organizationId(), "me", request, once(), {
         fallback: "Couldn't open that page. Try again.",
       }),
     onSuccess: () => invalidateBrowser(queryClient),
@@ -173,7 +179,7 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
 export function clearBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<BrowserApiState> =>
-      clearPersonBrowser(ORGANIZATION_ID, "me", once(), {
+      clearPersonBrowser(organizationId(), "me", once(), {
         fallback: "Couldn't clear your browser. Try again.",
       }),
     // Settings > Computer lists the browser too, with whether it runs.
@@ -205,7 +211,13 @@ export type NarrationPost = Unsent<BrowserNarrationRequest>;
 export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
   return sendNarrationWith(
     (narration, options) =>
-      narrateInPersonBrowser(ORGANIZATION_ID, "me", narration, once(), options),
+      narrateInPersonBrowser(
+        organizationId(),
+        "me",
+        narration,
+        once(),
+        options,
+      ),
     post,
   );
 }

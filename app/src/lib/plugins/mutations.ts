@@ -19,7 +19,7 @@ import type {
   ConnectionStart as ApiConnectionStart,
   ConnectAppRequest,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
 import { pluginKeys } from "./queries";
@@ -98,7 +98,7 @@ export function grantPlugin(variables: {
   approval?: SharedUseApproval;
 }): Promise<unknown> {
   return replaceBotGrant(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.agentId,
     grantIdOf(variables.kind, variables.ref),
     { "Idempotency-Key": idempotencyKey() },
@@ -118,7 +118,7 @@ export async function revokePlugin(variables: {
 }): Promise<void> {
   try {
     await deleteBotGrant(
-      ORGANIZATION_ID,
+      organizationId(),
       variables.agentId,
       grantIdOf(variables.kind, variables.ref),
       { "Idempotency-Key": idempotencyKey() },
@@ -271,7 +271,7 @@ function startConnect(
   const options = { fallback: press.fallback };
   if (press.shared)
     return connectSharedApp(
-      ORGANIZATION_ID,
+      organizationId(),
       serverId,
       {
         returnTo: desktopShell() ? "desktop" : "apps",
@@ -289,7 +289,7 @@ function startConnect(
     ...(press.another ? { anotherAccount: true } : {}),
     ...(press.values ? { values: press.values } : {}),
   };
-  return connectApp(ORGANIZATION_ID, "me", serverId, body, headers, options);
+  return connectApp(organizationId(), "me", serverId, body, headers, options);
 }
 
 /** A sign-in page to visit, an account already connected, or `null` for a key form. */
@@ -348,7 +348,7 @@ export function confirmBrokeredConnectionMutationOptions(
       const options = { fallback: "Couldn't confirm that connection." };
       const confirmShared = () =>
         confirmSharedConnection(
-          ORGANIZATION_ID,
+          organizationId(),
           serverId,
           { "Idempotency-Key": idempotencyKey() },
           options,
@@ -356,7 +356,7 @@ export function confirmBrokeredConnectionMutationOptions(
       if (shared) return confirmShared();
       try {
         return await confirmConnection(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           serverId,
           { "Idempotency-Key": idempotencyKey() },
@@ -438,8 +438,8 @@ export function disconnectBrokeredMutationOptions(
       const headers = { "Idempotency-Key": idempotencyKey() };
       const options = { fallback: "Couldn't disconnect that account." };
       await (shared
-        ? disconnectSharedApp(ORGANIZATION_ID, serverId, headers, options)
-        : disconnectApp(ORGANIZATION_ID, "me", serverId, headers, options));
+        ? disconnectSharedApp(organizationId(), serverId, headers, options)
+        : disconnectApp(organizationId(), "me", serverId, headers, options));
     },
     /*
      * In `onSettled`, which a screen's own `onSuccess` and `onError` cannot shadow. A person's own
@@ -463,7 +463,7 @@ export function setDefaultBrokeredAccountMutationOptions(
   return mutationOptions({
     mutationFn: async (variables: { serverId: string; accountId: string }) => {
       await makeConnectedAccountDefault(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         variables.serverId,
         variables.accountId,
@@ -486,7 +486,7 @@ export function disconnectBrokeredAccountMutationOptions(
     mutationKey: disconnectBrokeredAccountMutationKey,
     mutationFn: (variables: { serverId: string; accountId: string }) =>
       disconnectConnectedAccount(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         variables.serverId,
         variables.accountId,
@@ -683,13 +683,13 @@ export function recheckBrokeredConnectionMutationOptions(
       const options = { fallback: "Couldn't check that connection." };
       const check = shared
         ? await recheckSharedConnection(
-            ORGANIZATION_ID,
+            organizationId(),
             serverId,
             headers,
             options,
           )
         : await recheckConnection(
-            ORGANIZATION_ID,
+            organizationId(),
             "me",
             serverId,
             headers,

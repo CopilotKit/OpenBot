@@ -97,8 +97,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "app_access.approved": "Approve a request for an app",
   "app_access.dismissed": "Dismiss a request for an app",
   "app_access.refused": "Ask for an app",
-  "app_access.owner_granted": "Share an app",
-  "app_access.owner_revoked": "Stop sharing an app",
+  // A Bot's owner switching an app on or off for their own Bot: nothing is shared with anybody.
+  "app_access.owner_granted": "Give a Bot an app",
+  "app_access.owner_revoked": "Take an app from a Bot",
   "plugin.grants_translated": "Choose a Bot's actions from a description",
   "plugin.grants_changed": "Change a Bot's actions in an app",
   "computer.action_allowed": "Use the computer",
@@ -168,6 +169,15 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.provisioned": "Add a person",
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
+  // What happened to an organization itself, each on that organization's own trail, so the row
+  // needs no "in an organization" to say where. "Member" keeps them apart from the person.* rows.
+  "organization.created": "Create an organization",
+  "organization.renamed": "Rename an organization",
+  "organization.member_invited": "Invite a person",
+  "organization.invitation_canceled": "Cancel an invitation",
+  "organization.member_joined": "Join an organization",
+  "organization.member_removed": "Remove a member",
+  "organization.member_role_changed": "Change a member's role",
   "audit.exported": "Export events",
   "audit.asked": "Ask the audit trail",
   "what_if.asked": "Ask what would happen",

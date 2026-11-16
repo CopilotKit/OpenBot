@@ -3,7 +3,7 @@ import {
   createIdentityProvider,
   deleteIdentityProvider,
 } from "@/lib/api/generated/identity-providers/identity-providers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { identityProviderKeys } from "./queries";
 
 const FALLBACK = "Could not change that identity provider";
@@ -45,7 +45,7 @@ export function registerIdentityProviderMutationOptions(
     mutationFn: async (input: IdentityProviderInput): Promise<void> => {
       const { providerId, ...rest } = input;
       await createIdentityProvider(
-        ORGANIZATION_ID,
+        organizationId(),
         { id: providerId, ...rest },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -68,7 +68,7 @@ export function deleteIdentityProviderMutationOptions(
   return mutationOptions({
     mutationFn: async (providerId: string): Promise<void> => {
       await deleteIdentityProvider(
-        ORGANIZATION_ID,
+        organizationId(),
         providerId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },

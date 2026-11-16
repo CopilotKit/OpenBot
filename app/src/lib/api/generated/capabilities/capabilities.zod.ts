@@ -13,7 +13,7 @@ export const ListCapabilitiesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -85,7 +85,13 @@ export const ListCapabilitiesResponse = zod.object({
           groups: zod
             .record(zod.string(), zod.boolean())
             .describe(
-              "What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.",
+              "What each directory group is set to, by the group's name. A group absent sets nothing.",
+            ),
+          teams: zod
+            .record(zod.string(), zod.boolean())
+            .optional()
+            .describe(
+              "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
             ),
         })
         .describe(
@@ -113,7 +119,7 @@ export const UpdateCapabilityParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   capabilityId: zod
     .enum([
@@ -178,8 +184,20 @@ export const UpdateCapabilityBody = zod
           ),
       )
       .optional()
+      .describe("By directory group name, 1 to 200 characters."),
+    teams: zod
+      .record(
+        zod.string(),
+        zod
+          .boolean()
+          .nullable()
+          .describe(
+            "On, off, or null to clear it so the level beneath decides.",
+          ),
+      )
+      .optional()
       .describe(
-        "By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive.",
+        "By team id. A team that is not one of this organization's is not found.",
       ),
   })
   .describe("The levels to set or clear. At least one.");
@@ -218,7 +236,13 @@ export const UpdateCapabilityResponse = zod
     groups: zod
       .record(zod.string(), zod.boolean())
       .describe(
-        "What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.",
+        "What each directory group is set to, by the group's name. A group absent sets nothing.",
+      ),
+    teams: zod
+      .record(zod.string(), zod.boolean())
+      .optional()
+      .describe(
+        "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
       ),
   })
   .describe(
@@ -235,7 +259,7 @@ export const BatchUpdateCapabilitiesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -269,9 +293,9 @@ export const BatchUpdateCapabilitiesBody = zod.object({
     .array(
       zod.object({
         scopeKind: zod
-          .enum(["organization", "role", "group"])
+          .enum(["organization", "role", "group", "team"])
           .describe(
-            "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+            "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
           ),
         scopeId: zod
           .string()
@@ -279,7 +303,7 @@ export const BatchUpdateCapabilitiesBody = zod.object({
           .regex(batchUpdateCapabilitiesBodyChangesItemScopeIdRegExp)
           .optional()
           .describe(
-            "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+            "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
           ),
         capability: zod
           .enum([
@@ -332,9 +356,9 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
   saved: zod.array(
     zod.object({
       scopeKind: zod
-        .enum(["organization", "role", "group"])
+        .enum(["organization", "role", "group", "team"])
         .describe(
-          "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+          "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
         ),
       scopeId: zod
         .string()
@@ -342,7 +366,7 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
         .regex(batchUpdateCapabilitiesResponseSavedItemScopeIdRegExp)
         .optional()
         .describe(
-          "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+          "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
         ),
       capability: zod
         .enum([
@@ -378,7 +402,7 @@ export const TranslateCapabilityChangesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -417,14 +441,14 @@ export const TranslateCapabilityChangesResponse = zod.object({
       zod
         .object({
           scopeKind: zod
-            .enum(["organization", "role", "group"])
+            .enum(["organization", "role", "group", "team"])
             .describe(
-              "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+              "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
             ),
           scopeId: zod
             .string()
             .describe(
-              "Empty for the organization; admin or member for a role; a directory group's name for a group.",
+              "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
             ),
           capability: zod.string(),
           allowed: zod
@@ -465,7 +489,7 @@ export const PreviewCapabilityChangesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -497,9 +521,9 @@ export const PreviewCapabilityChangesBody = zod.object({
     .array(
       zod.object({
         scopeKind: zod
-          .enum(["organization", "role", "group"])
+          .enum(["organization", "role", "group", "team"])
           .describe(
-            "Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive.",
+            "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
           ),
         scopeId: zod
           .string()
@@ -507,7 +531,7 @@ export const PreviewCapabilityChangesBody = zod.object({
           .regex(previewCapabilityChangesBodyChangesItemScopeIdRegExp)
           .optional()
           .describe(
-            "Empty for the organization; admin or member for a role; a directory group's name for a group. Team scopes will be added when teams arrive.",
+            "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
           ),
         capability: zod
           .string()
@@ -549,7 +573,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       groups: zod.array(zod.string()),
       capabilities: zod.array(
@@ -573,17 +597,33 @@ export const PreviewCapabilityChangesResponse = zod.object({
           title: zod.string(),
           before: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum(["default", "organization", "role", "group"]),
+            decidedBy: zod.enum([
+              "default",
+              "organization",
+              "role",
+              "group",
+              "team",
+            ]),
             scopeId: zod
               .string()
-              .describe("The role or group that decided it. Empty otherwise."),
+              .describe(
+                "The role, the group's name or the team's id that decided it. Empty otherwise.",
+              ),
           }),
           after: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum(["default", "organization", "role", "group"]),
+            decidedBy: zod.enum([
+              "default",
+              "organization",
+              "role",
+              "group",
+              "team",
+            ]),
             scopeId: zod
               .string()
-              .describe("The role or group that decided it. Empty otherwise."),
+              .describe(
+                "The role, the group's name or the team's id that decided it. Empty otherwise.",
+              ),
           }),
           activity: zod
             .object({
@@ -681,7 +721,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
 });
 
 /**
- * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator reads anybody's. enforced is false where the deployment keeps no switches and every default applies.
+ * Return each permission switch as it applies to one person, so the apps hide what they may not use. The caller reads their own, as me; an administrator of the organization reads any member's. enforced is false where this OpenBot keeps no switches and every default applies.
  * @summary Read what a person may do
  */
 
@@ -694,7 +734,7 @@ export const GetPersonCapabilitiesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -718,7 +758,7 @@ export const GetPersonCapabilitiesResponse = zod.object({
 });
 
 /**
- * Stop every Bot computer running for one person now, and record it on the audit trail. Their Bots start a computer again when they next need one. Only an administrator may do this.
+ * Stop the computers of the organization's Bots that one person owns, now, and record it on the audit trail. Their Bots start a computer again when they next need one. A person's own computer is stopped only from the organization `default`. A person who is not a member of the organization is not found (PERSON_NOT_FOUND). Only an administrator of the organization may do this.
  * @summary Stop a person's computers
  */
 
@@ -731,7 +771,7 @@ export const StopPersonComputersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

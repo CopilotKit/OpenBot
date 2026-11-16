@@ -24,7 +24,7 @@ There is deliberately no endpoint for an administrator to connect an account on 
 
 ### 1. Enable the connector in OpenBot
 
-At `/admin/plugins/notion`, turn on **Enable for this deployment**. There is no client to register
+At `/admin/plugins/notion`, turn on **Enable for this organization**. There is no client to register
 and no secret to paste: this deployment introduces itself to Notion on first connect, over RFC 7591
 dynamic client registration. The prerequisite is a public URL the redirect URI can be derived from —
 `OPENBOT_PUBLIC_URL` if it is set, or the auth base URL it falls back to otherwise — nothing needs to

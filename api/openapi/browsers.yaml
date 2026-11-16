@@ -106,7 +106,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -175,7 +175,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -250,7 +250,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -327,7 +327,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -549,7 +549,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -617,7 +617,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -687,7 +687,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '429':
@@ -764,7 +764,7 @@ paths:
         '409':
           $ref: '#/components/responses/BrowserConflict'
         '413':
-          $ref: '#/components/responses/BrowserRequestTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/BrowserRequestNotJson'
         '500':
@@ -1371,25 +1371,6 @@ components:
                 detail: That Idempotency-Key was used for a different request. Use a new key for a new write.
                 code: IDEMPOTENCY_KEY_CONFLICT
                 category: conflict
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
-    BrowserRequestTooLarge:
-      description: >-
-        The body is larger than a browser request may be.
-      content:
-        application/problem+json:
-          schema:
-            $ref: './common.yaml#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: That request is too large.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example

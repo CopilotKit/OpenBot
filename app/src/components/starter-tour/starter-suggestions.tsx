@@ -12,7 +12,8 @@ import {
 } from "./suggestions";
 
 type Props = {
-  agentId: string | undefined;
+  /** The Bot the composer is for. The tour is for the Bots OpenBot starts with. */
+  bot: { packageBotId?: string | null } | undefined;
   channelId?: string;
   disabled?: boolean;
   onSelect: (message: string) => unknown | Promise<unknown>;
@@ -20,7 +21,7 @@ type Props = {
 
 /** Independent of the Bot's name, harness attribution and conversation introduction. */
 export function StarterSuggestions(props: Props) {
-  if (!props.agentId || !isStarterTourAgent(props.agentId)) return null;
+  if (!isStarterTourAgent(props.bot?.packageBotId)) return null;
   return <EligibleStarterSuggestions {...props} />;
 }
 

@@ -3,7 +3,7 @@
  */
 
 /**
- * Each person's own account, or one account OpenBot holds for everybody.
+ * Each person's own account, or one account OpenBot holds for everybody in the organization.
  */
 export type AppAccountMode =
   (typeof AppAccountMode)[keyof typeof AppAccountMode];

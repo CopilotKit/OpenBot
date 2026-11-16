@@ -13,7 +13,7 @@ export const ListTasksParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -111,11 +111,23 @@ export const ListTasksResponse = zod.object({
           .describe(
             "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
           ),
+        canTryAgain: zod
+          .boolean()
+          .optional()
+          .describe(
+            "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+          ),
         workingSince: zod.iso
           .datetime({ offset: true })
           .nullish()
           .describe(
             "When the work it is doing now began. Null or absent unless it is working.",
+          ),
+        tryingAgainAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
           ),
         lastActivityAt: zod.iso
           .datetime({ offset: true })
@@ -185,7 +197,7 @@ export const GetTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -259,11 +271,23 @@ export const GetTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
@@ -324,7 +348,7 @@ export const ResolveTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -410,11 +434,23 @@ export const ResolveTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
@@ -475,7 +511,7 @@ export const ReopenTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -561,11 +597,23 @@ export const ReopenTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })
@@ -626,7 +674,7 @@ export const RetryTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -712,11 +760,23 @@ export const RetryTaskResponse = zod.object({
         .describe(
           "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
         ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
       workingSince: zod.iso
         .datetime({ offset: true })
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
         ),
       lastActivityAt: zod.iso
         .datetime({ offset: true })

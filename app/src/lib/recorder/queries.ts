@@ -8,7 +8,7 @@ import {
   listRecorderConnections,
   listRecordings,
 } from "@/lib/api/generated/recorder/recorder";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import {
   askConnectWait,
   type ConnectWait,
@@ -56,7 +56,7 @@ export const recorderConnectionsQueryOptions = (options?: {
       let cursor: string | undefined;
       do {
         const page = await listRecorderConnections(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load your connected browsers." },
@@ -157,10 +157,10 @@ export const recordingsQueryOptions = (options?: { waiting?: boolean }) =>
     initialPageParam: "",
     queryFn: ({ pageParam }): Promise<RecordingsPage> =>
       listRecordings(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         pageParam ? { cursor: pageParam } : undefined,
-        { fallback: "Couldn't load your recordings. Reload the page." },
+        { fallback: "Couldn't load your recordings. Try again in a moment." },
       ),
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,

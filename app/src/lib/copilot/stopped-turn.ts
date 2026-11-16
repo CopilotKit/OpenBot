@@ -1,5 +1,6 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
+import { botNoLongerUsable } from "@/lib/agents/queries";
 
 /**
  * Why the last turn ended without an answer, for a surface that has to say so itself.
@@ -29,6 +30,8 @@ export function stoppedReason(reported: unknown): string {
       : typeof reported === "string"
         ? reported
         : "";
+  const refused = refusalForPerson(said);
+  if (refused) return refused;
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   return said.trim() || "The Bot stopped without saying why.";
@@ -42,7 +45,41 @@ export function stoppedReason(reported: unknown): string {
  * Container"}`). Nothing in it is the person's to act on, so they are told what happened in their
  * terms and the original goes to the console for whoever is debugging.
  */
-const REST_REQUEST_FAILED = /^REST (\w+) request failed\b/;
+const REST_REQUEST_FAILED = /^REST (\w+) request failed\b:?\s*/;
+
+/** Where OpenBot's own problems (RFC 9457) say what kind they are: `https://open.bot/errors/<code>`. */
+const OPENBOT_PROBLEM = "https://open.bot/errors/";
+
+/**
+ * The sentence OpenBot's server wrote for the person, when a REST failure is its refusal.
+ *
+ * The server refuses a run it may not start (an admin's model allowlist, a switch that is off) with
+ * a problem whose `type` is OpenBot's own and whose `detail` is written for the person. The client
+ * throws that body as it came, the status gone, so the body has to say itself that it is one: an
+ * OpenBot problem, about the request (4xx), with a `detail`. Anything else, a raw `{ error }`
+ * included, is not, and is still the backend failing.
+ */
+function refusalForPerson(said: string): string | null {
+  const match = REST_REQUEST_FAILED.exec(said.trim());
+  if (!match) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(said.trim().slice(match[0].length));
+  } catch {
+    return null;
+  }
+  if (!body || typeof body !== "object") return null;
+  const { type, status, detail } = body as Record<string, unknown>;
+  return typeof type === "string" &&
+    type.startsWith(OPENBOT_PROBLEM) &&
+    typeof status === "number" &&
+    status >= 400 &&
+    status < 500 &&
+    typeof detail === "string" &&
+    detail.trim()
+    ? detail.trim()
+    : null;
+}
 
 function backEndUnreachable(said: string): string | null {
   const match = REST_REQUEST_FAILED.exec(said.trim());
@@ -51,6 +88,74 @@ function backEndUnreachable(said: string): string | null {
   return match[1] === "run"
     ? "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot."
     : "OpenBot couldn't reach its backend. Try again, or quit and reopen OpenBot.";
+}
+
+/**
+ * The request the runtime refused or never made, when that is what was reported and the Bot having
+ * been taken away could be why. Null for everything else, a Bot's own failure included.
+ *
+ * The two ways a run travels report it differently. Through Intelligence, the client throws a plain
+ * `Error` reading `REST <mode> request failed: <the body>`, its `cause` another plain `Error` with
+ * the body as its message: the status and the response are gone by then, so any such failure may be
+ * a refusal. Over the plain event stream, AG-UI's HTTP agent throws an error that keeps the
+ * response's `status`, and only a 404 is the runtime saying the Bot is not one of this person's.
+ */
+function refusedRequest(reported: unknown): "run" | "connect" | null {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  // The server already said why, for the person: nothing to ask it again.
+  if (refusalForPerson(said)) return null;
+  const rest = REST_REQUEST_FAILED.exec(said.trim())?.[1];
+  if (rest) return rest === "run" ? "run" : "connect";
+  const status =
+    reported instanceof Error
+      ? (reported as Error & { status?: unknown }).status
+      : undefined;
+  return status === 404 ? "run" : null;
+}
+
+/** What a person reads when the Bot they were talking to is not one they can use any more. */
+export const BOT_NOT_SHARED_MESSAGE_NOT_SENT =
+  "This Bot isn't shared with you any more, so your message wasn't sent. Its owner or an admin can share it again.";
+export const BOT_NOT_SHARED =
+  "This Bot isn't shared with you any more. Its owner or an admin can share it again.";
+
+/**
+ * Why a run failed, when the failure may be the Bot having been taken away and not the back end.
+ *
+ * A person in a conversation with a Bot shared with their team is taken out of the team. Their next
+ * message is refused, rightly: the runtime answers the run request 404, because the Bot is not one of
+ * theirs. Through Intelligence the runtime client reports that exactly as it reports a back end
+ * that is down (see `refusedRequest`), so the person was told OpenBot couldn't reach its back end
+ * and to quit and reopen it, which was false and could not help.
+ *
+ * So the server is asked: the Bot is read again through the API, and only its own "not found" (404)
+ * says the Bot is not theirs any more. A read that fails any other way, or a Bot that is still
+ * there, leaves the sentence as it was, so a network failure and a server that broke are still
+ * called what they are.
+ *
+ * Never rejects: this is the sentence for a failure, and has to come back with one.
+ */
+export async function failedRunReason(
+  reported: unknown,
+  botId: string,
+  noLongerUsable: (botId: string) => Promise<boolean> = botNoLongerUsable,
+): Promise<string> {
+  const said = stoppedReason(reported);
+  const request = refusedRequest(reported);
+  if (!request) return said;
+  const gone = await noLongerUsable(botId).catch(() => false);
+  if (!gone) return said;
+  return request === "run" ? BOT_NOT_SHARED_MESSAGE_NOT_SENT : BOT_NOT_SHARED;
+}
+
+/** Whether a failure is one `failedRunReason` may have a truer sentence for. */
+export function requestNotMade(reported: unknown): boolean {
+  return refusedRequest(reported) !== null;
 }
 
 /**
@@ -131,13 +236,29 @@ export function useStoppedTurn(agentId: string): string | null {
   const [stopped, setStopped] = useState<string | null>(null);
 
   useEffect(() => {
+    // Which run a sentence is about, so one that arrives after the next run began is dropped.
+    let run = 0;
     const subscription = agent.subscribe?.({
-      onRunInitialized: () => setStopped(null),
+      onRunInitialized: () => {
+        run += 1;
+        setStopped(null);
+      },
       onRunErrorEvent: ({ event }) => setStopped(stoppedReason(event?.message)),
-      onRunFailed: ({ error }) => setStopped(stoppedReason(error)),
+      onRunFailed: ({ error }) => {
+        if (!requestNotMade(error)) return setStopped(stoppedReason(error));
+        // Said once the server has answered whether the Bot is still theirs, so the wrong sentence
+        // is never drawn first.
+        const failed = run;
+        void failedRunReason(error, agentId).then((reason) => {
+          if (failed === run) setStopped(reason);
+        });
+      },
     });
-    return () => subscription?.unsubscribe();
-  }, [agent]);
+    return () => {
+      run += 1;
+      subscription?.unsubscribe();
+    };
+  }, [agent, agentId]);
 
   return stopped;
 }

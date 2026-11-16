@@ -9,7 +9,7 @@ import {
   TerminalBlock,
 } from "@/components/computer/terminal-block";
 import { reportBotDecline } from "@/lib/api/generated/bots/bots";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
@@ -656,7 +656,7 @@ export function ComputerTools() {
     ) => {
       try {
         await reportBotDecline(
-          ORGANIZATION_ID,
+          organizationId(),
           botOf(agent),
           {
             reason: input.reason,

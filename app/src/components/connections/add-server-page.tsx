@@ -17,6 +17,7 @@ import {
   addServerByUrlMutationOptions,
 } from "@/lib/apps/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
@@ -49,7 +50,7 @@ export function AddServerPage({
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /* A key is used by every Bot that uses the server, so only an admin gives one. Personal: the one person. */
-  const mayGiveKey = personal || me?.role === "admin";
+  const mayGiveKey = personal || isOrganizationAdmin(me?.role);
   const add = useMutation(addServerByUrlMutationOptions(queryClient));
   const connect = useMutation(connectAccountMutationOptions("settings"));
   const approve = useMutation(setEnterpriseSettingMutationOptions(queryClient));

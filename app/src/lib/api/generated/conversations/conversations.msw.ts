@@ -160,12 +160,14 @@ export const getUploadConversationAttachmentResponseMock = (): Attachment => ({
 export const getCreateConversationThreadResponseMock =
   (): ConversationThread => ({
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
+    liveThreadId: "2b503bf7-514a-8c4e-b132-3ca9b729ffeb",
   });
 
 export const getGetConversationThreadResponseMock =
   (): ConversationThreadStatus => ({
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     known: true,
+    liveThreadId: "2b503bf7-514a-8c4e-b132-3ca9b729ffeb",
   });
 
 export const getCreateTranscriptionResponseMock = (): Transcription => ({

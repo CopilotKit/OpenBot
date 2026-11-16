@@ -36,6 +36,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   type ActivityEntry,
   groupActivity,
@@ -99,7 +100,7 @@ function linkFor(item: ActivityItem, agentId: string) {
   }
 }
 
-function ActivityRow({
+export function ActivityRow({
   agentId,
   item,
   live = false,
@@ -424,7 +425,7 @@ export function BotActivitySections({
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this Bot's activity. Reload the page.
+          Couldn't load this Bot's activity. Try again in a moment.
         </p>
       </PageSection>
     );
@@ -458,7 +459,7 @@ export function BotActivitySections({
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
       {taskList.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot's tasks. Reload the page.
+          Couldn't load this Bot's tasks. Try again in a moment.
         </p>
       ) : null}
       {groups.length === 0 && !taskList.error ? (
@@ -533,7 +534,9 @@ export function BotActivitySections({
 function BotActionsSection({ agentId }: { agentId: string }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
   if (!personal && !admin) return null;
   return (
     <PageSection title="Actions">
