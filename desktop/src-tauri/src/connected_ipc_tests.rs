@@ -565,6 +565,62 @@ mod connected_ipc {
         assert!(!written.contains("obr_") && !written.contains("oba_"), "{written}");
     }
 
+    /// Once the browser has been opened for a sign-in, the app comes forward however it ended: on
+    /// the Mac a sign-in whose save to the Keychain failed left the app behind the browser, and the
+    /// person saw only the browser's line. Before the browser opens (a bad or unreachable address)
+    /// the app is in front already, and nothing is asked of the window.
+    #[test]
+    fn every_outcome_after_the_browser_brings_the_app_forward() {
+        use openbot_desktop_lib::connected::Kind;
+        let shell = Connected::new();
+        let host = "openbot.example.com";
+        let outcomes: Vec<Result<(), Problem>> = vec![
+            Ok(()),
+            Err(Kind::AccessRefused.problem(host, "it answered 403")),
+            Err(Kind::SignInFailed.problem(host, "it answered 500")),
+            Err(Kind::CredentialStore.problem(host, "the keychain refused")),
+            Err(Kind::SignInCancelled.problem(host, "the person denied consent")),
+            Err(Kind::TooOld.problem(host, "the token exchange gave no refresh token")),
+        ];
+        let said: Vec<Option<String>> = outcomes
+            .iter()
+            .map(|outcome| desktop_connected::forward_after_sign_in(true, outcome))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "signed in",
+                "access-refused",
+                "sign-in-failed",
+                "credential-store",
+                "sign-in-cancelled",
+                "too-old",
+            ]
+            .map(|ended| Some(format!("the browser sign-in ended: {ended}")))
+        );
+        // The browser never opened: the window is left as it is.
+        assert_eq!(
+            desktop_connected::forward_after_sign_in(
+                false,
+                &Err(Kind::Unreachable.problem(host, "connection refused")),
+            ),
+            None
+        );
+        // Through the shell and its mock window, which keeps no record of being in front, so the
+        // decision above is what is checked; this only shows the call runs on the real app type.
+        for outcome in &outcomes {
+            desktop_connected::come_forward_after_sign_in(shell.handle(), true, outcome);
+        }
+        // The command does it for every outcome, before it answers the setup page.
+        let source = include_str!("desktop_connected.rs");
+        let command = &source[source.find("pub async fn connect_to_openbot").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("come_forward_after_sign_in(\n        &forward,\n        opened.load("),
+            "{command}"
+        );
+    }
+
     /// The sign-in ended while OpenBot was showing: the setup window is back, it is told so once
     /// in the agreed words, and the event went out for a page that was listening.
     #[test]
