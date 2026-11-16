@@ -20,7 +20,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { tryClient } from "@/lib/client";
 import { queryClient } from "@/query-client";
 
 const LINE =
@@ -54,12 +54,15 @@ function inDesktop(connection: { mode: string; address: string | null }) {
   };
 }
 
-/** A screen's own read, as any screen makes one. */
+/**
+ * A request of the page's own through the client, as a write makes one. Not a read: while the line
+ * shows, reads wait for OpenBot (`connection-lost-screens.test.tsx`).
+ */
 async function aScreenAsks() {
   await act(async () => {
-    await queryClient
-      .fetchQuery({ ...deploymentCapabilitiesQueryOptions(), retry: false })
-      .catch(() => undefined);
+    await tryClient("/api/v2/organizations/default/deployment").catch(
+      () => undefined,
+    );
   });
 }
 

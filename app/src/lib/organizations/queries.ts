@@ -72,7 +72,8 @@ const ONLY: OwnOrganizations = {
   currentId: ONLY_ORGANIZATION,
 };
 
-const LOAD_FALLBACK = "Couldn't load your organizations. Reload the page.";
+const LOAD_FALLBACK =
+  "Couldn't load your organizations. Try again in a moment.";
 export const SWITCH_FALLBACK = "Couldn't switch organizations. Try again.";
 /**
  * Whether a failed read is an OpenBot that has no such address, which is how one that keeps one
@@ -295,11 +296,13 @@ export function useOrganizationChoices(): OwnOrganizations | undefined {
     : undefined;
 }
 
-const MEMBERS_FALLBACK = "Couldn't load the members. Reload the page.";
+const MEMBERS_FALLBACK = "Couldn't load the members. Try again in a moment.";
 const SENT_INVITATIONS_FALLBACK =
-  "Couldn't load the invitations. Reload the page.";
-const INVITATIONS_FALLBACK = "Couldn't load your invitations. Reload the page.";
-const INVITATION_FALLBACK = "Couldn't load that invitation. Reload the page.";
+  "Couldn't load the invitations. Try again in a moment.";
+const INVITATIONS_FALLBACK =
+  "Couldn't load your invitations. Try again in a moment.";
+const INVITATION_FALLBACK =
+  "Couldn't load that invitation. Try again in a moment.";
 
 /** Every member of an organization, in the order they joined. Any member can read it. */
 export function organizationMembersQueryOptions(organizationId: string) {

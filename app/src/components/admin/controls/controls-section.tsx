@@ -82,7 +82,7 @@ export function ControlsSection({
     return (
       <PageSection title={title}>
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Reload the page.
+          Couldn't load these settings. Try again in a moment.
         </p>
       </PageSection>
     );

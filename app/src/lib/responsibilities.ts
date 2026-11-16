@@ -69,7 +69,7 @@ export function responsibilitiesQueryOptions() {
       const goals = await everyPage(async (params) => {
         const page = await listGoals(organizationId(), params, {
           signal,
-          fallback: "Couldn't load your goals. Reload the page.",
+          fallback: "Couldn't load your goals. Try again in a moment.",
         });
         return { items: page.goals, nextCursor: page.nextCursor };
       });
@@ -89,7 +89,7 @@ export function responsibilityRunsQueryOptions(id: string) {
       everyPage(async (params) => {
         const page = await listGoalRuns(organizationId(), id, params, {
           signal,
-          fallback: "Couldn't load this goal's runs. Reload the page.",
+          fallback: "Couldn't load this goal's runs. Try again in a moment.",
         });
         return { items: page.runs, nextCursor: page.nextCursor };
       }),

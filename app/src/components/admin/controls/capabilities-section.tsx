@@ -266,7 +266,7 @@ function OverridesDialog({
           </Select>
           {teams.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load teams. Reload the page.
+              Couldn't load teams. Try again in a moment.
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">

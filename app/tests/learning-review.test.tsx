@@ -322,7 +322,7 @@ test("says so when proposals couldn't be read", async () => {
   const view = draw();
   const alert = await view.findByRole("alert");
   expect(alert.textContent).toBe(
-    "Couldn't read your proposed skills. Reload the page.",
+    "Couldn't read your proposed skills. Try again in a moment.",
   );
 });
 
@@ -699,7 +699,7 @@ test("a source that failed to read still alerts next to one that is unavailable"
   ]);
   const view = draw();
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Couldn't read your proposed skills. Reload the page.",
+    "Couldn't read your proposed skills. Try again in a moment.",
   );
 });
 

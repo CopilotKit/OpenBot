@@ -318,7 +318,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
           >
             {query
               ? `No app matches "${query}".`
-              : "No apps to show yet. Reload the page to try again."}
+              : "No apps to show yet. Try again in a moment."}
           </PageEmpty>
         ) : (
           <>

@@ -24,7 +24,7 @@ async function failureMessage() {
 test("a messageless directory failure is the directory screen's sentence, and names no broker", async () => {
   const message = await failureMessage();
   expect(message).toBe(
-    "Couldn't load the apps you can connect. Reload the page.",
+    "Couldn't load the apps you can connect. Try again in a moment.",
   );
   expect(message).not.toMatch(/composio|arcade/i);
 });

@@ -180,7 +180,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
       ) : null}
       {giveable.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your apps. Reload the page.
+          Couldn't load your apps. Try again in a moment.
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty
@@ -280,7 +280,7 @@ function YourSkills({ agentId }: { agentId: string }) {
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your skills. Reload the page.
+          Couldn't load your skills. Try again in a moment.
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty
@@ -385,7 +385,7 @@ function Granted({
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load what this Bot can use. Reload the page.
+        Couldn't load what this Bot can use. Try again in a moment.
       </p>
     );
   }
@@ -416,7 +416,8 @@ function Granted({
     >
       {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't check whether each app is ready for you. Reload the page.
+          Couldn't check whether each app is ready for you. Try again in a
+          moment.
         </p>
       ) : null}
       {count === 0 && kind === "skills" ? (

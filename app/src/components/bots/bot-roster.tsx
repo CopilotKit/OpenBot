@@ -65,7 +65,7 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load your Bots. Reload the page.
+        Couldn't load your Bots. Try again in a moment.
       </p>
     );
   }

@@ -285,7 +285,7 @@ test("a goal's row claims no start when routines couldn't be read", async () => 
   const row = (await view.findByText("Reconcile receipts")).closest(
     "a, button",
   ) as HTMLElement;
-  await view.findByText("Couldn't load your routines. Reload the page.");
+  await view.findByText("Couldn't load your routines. Try again in a moment.");
   expect(row.textContent).not.toContain("When you ask");
 });
 
@@ -310,7 +310,7 @@ test("a routine that runs a goal, on a row of its own, says so and never shows t
     ],
   });
   const view = draw();
-  await view.findByText("Couldn't load your goals. Reload the page.");
+  await view.findByText("Couldn't load your goals. Try again in a moment.");
   // Named: the goal's title, as New routine names its routine, and what it does under it.
   const named = (await view.findByText("Reconcile receipts")).closest(
     '[data-slot="item"]',

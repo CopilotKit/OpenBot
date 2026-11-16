@@ -19,7 +19,8 @@ export const teamGrantKeys = {
   skill: (skillId: string) => ["team-grants", "skill", skillId] as const,
 };
 
-const FALLBACK = "Couldn't load the teams it's given to. Reload the page.";
+const FALLBACK =
+  "Couldn't load the teams it's given to. Try again in a moment.";
 
 /** The teams an app is granted to. `appId` is the app's id, as the list of apps answers it. */
 export function appTeamGrantsQueryOptions(appId: string) {

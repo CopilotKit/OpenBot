@@ -93,7 +93,7 @@ export function ProviderSection() {
     >
       {available.isPending ? null : available.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load the provider. Reload the page.
+          Couldn't load the provider. Try again in a moment.
         </p>
       ) : (
         <ProviderRow listing={available.data} />
@@ -165,7 +165,7 @@ export function ModelChoiceSection() {
     >
       {overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Reload the page.
+          Couldn't load these settings. Try again in a moment.
         </p>
       ) : (
         <PageRows>
@@ -507,7 +507,7 @@ export function ModelUsageSection({ team }: { team: boolean }) {
     >
       {usage.isPending ? null : usage.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load model usage. Reload the page.
+          Couldn't load model usage. Try again in a moment.
         </p>
       ) : usage.data.summary.length === 0 ? (
         <PageEmpty icon={IconChartBar} title="No recent runs">

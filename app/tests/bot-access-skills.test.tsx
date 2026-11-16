@@ -251,7 +251,7 @@ test("your skills failing to load says so, not that you have none", async () => 
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
   expect(
-    await view.findByText("Couldn't load your skills. Reload the page."),
+    await view.findByText("Couldn't load your skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText(/No skills yet/)).toBeNull();
 });
@@ -265,7 +265,7 @@ test("this Bot's own skills failing to load says so, rather than drawing every s
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
   expect(
-    await view.findByText("Couldn't load your skills. Reload the page."),
+    await view.findByText("Couldn't load your skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByRole("switch", { name: "mine-on" })).toBeNull();
 });

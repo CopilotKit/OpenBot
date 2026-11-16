@@ -428,7 +428,7 @@ export function brokeredAccountsQueryOptions(serverId: string) {
   return queryOptions({
     queryKey: pluginKeys.accounts(serverId),
     queryFn: async (): Promise<BrokeredAccounts> => {
-      const fallback = "Couldn't list your accounts. Reload the page.";
+      const fallback = "Couldn't list your accounts. Try again in a moment.";
       // Whether another account can be added is the connection's, read beside its accounts.
       const [accounts, connection] = await Promise.all([
         everyPage(async (cursor) => {

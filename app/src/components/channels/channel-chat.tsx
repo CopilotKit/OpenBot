@@ -70,6 +70,10 @@ import {
 } from "@/lib/channels/turns-finished-away";
 import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import { useConversationActivity } from "@/lib/computers/activity";
+import {
+  useConnectionLost,
+  useReconnected,
+} from "@/lib/desktop/connection-lost";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
   observeApprovalAgent,
@@ -671,7 +675,28 @@ export function ChannelChat({
     if (isReady) openReadyGate.current();
   }, [isReady]);
 
+  /**
+   * WHEN OPENBOT ANSWERS AGAIN, A CONVERSATION THAT HAD NO ANSWER FILLS IN BY ITSELF. Inside OpenBot
+   * Desktop connected to an OpenBot somewhere else, a conversation opened while that OpenBot did not
+   * answer has nothing to show: its join and the read of its history both came back from the relay.
+   * It used to stay that way until the person opened another conversation and came back. Now, when
+   * the connection line clears, a conversation whose join or read had no answer asks again: with an
+   * empty transcript it joins its thread again (`joins` reruns the join below), which also brings the
+   * runtime's connection back; with a transcript, it reads the stored history again and merges it,
+   * so a replay is never laid over messages already on screen.
+   */
+  const [joins, setJoins] = useState(0);
+  const unanswered = useRef(false);
+  const connection = useConnectionLost();
+  useReconnected(() => {
+    if (!unanswered.current) return;
+    unanswered.current = false;
+    if (agentRef.current.messages.length === 0) setJoins((count) => count + 1);
+    else pullHistoryRef.current?.();
+  });
+
   // Join the gateway socket, restore durable history, then release the first-message gate.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
     let current = true;
@@ -723,6 +748,7 @@ export function ChannelChat({
          * typed afterwards waits on that gate, so a throw here would silence the conversation
          * rather than degrade it. History is restored below either way.
          */
+        unanswered.current = true;
       } finally {
         lastRun.stop();
         if (current) setReplaying(false);
@@ -766,6 +792,7 @@ export function ChannelChat({
           setHistoryAvailability(stored.availability);
           // A gateway snapshot may be partial; neither it nor a later send proves this read succeeded.
           setHistoryReadFailed(stored.availability === "unavailable");
+          if (stored.availability === "unavailable") unanswered.current = true;
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -786,6 +813,7 @@ export function ChannelChat({
     channel.id,
     channel.threadId,
     runtimeAgentId,
+    joins,
   ]);
 
   /*
@@ -870,6 +898,7 @@ export function ChannelChat({
             if (delayMs === 1500 && !sawReady) {
               setHistoryAvailability("unavailable");
               setHistoryReadFailed(true);
+              unanswered.current = true;
             }
             continue;
           }
@@ -1006,14 +1035,17 @@ export function ChannelChat({
     voicePending: voiceArchive.pending,
     voiceWaitedOut,
   });
-  const historyNotice = channelHistoryNotice({
-    restoring: historyLoading,
-    messageCount: agent.messages.length,
-    lastMessageAt: channel.lastMessageAt,
-    historyAvailability,
-    historyReadFailed,
-    unreadable,
-  });
+  // While the connection line shows, it says why the history is missing; this does not repeat it.
+  const historyNotice = connection.lost
+    ? null
+    : channelHistoryNotice({
+        restoring: historyLoading,
+        messageCount: agent.messages.length,
+        lastMessageAt: channel.lastMessageAt,
+        historyAvailability,
+        historyReadFailed,
+        unreadable,
+      });
 
   const awaitingReply = useRef(false);
   /**
@@ -1891,7 +1923,7 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Reload the page.
+                    Couldn’t load voice chats. Try again in a moment.
                   </p>
                 )}
                 {voiceContextNotice && (

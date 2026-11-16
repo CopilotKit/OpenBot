@@ -121,7 +121,7 @@ function IdentityProvidersPage() {
         ) : null}
         {providers.isPending ? null : providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load identity providers. Reload the page.
+            Couldn't load identity providers. Try again in a moment.
           </p>
         ) : providers.data?.length === 0 ? (
           <PageEmpty

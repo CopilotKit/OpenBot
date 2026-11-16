@@ -1,12 +1,7 @@
 import { IconCloudOff } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
 import { askWhetherOpenBotAnswers } from "@/lib/deployment/queries";
-import { desktopConnectionQueryOptions } from "@/lib/desktop/queries";
-import {
-  openbotUnreachable,
-  subscribeReachability,
-} from "@/lib/desktop/reachability";
+import { useConnectionLost } from "@/lib/desktop/connection-lost";
 
 /** The first check after the line appears, then twice as long each time, up to a minute. */
 const FIRST_CHECK_MS = 5_000;
@@ -18,25 +13,18 @@ const LONGEST_CHECK_MS = 60_000;
  *
  * Only inside OpenBot Desktop connected to an OpenBot that runs somewhere else. There the page talks
  * to the desktop app on this computer, which says when that OpenBot did not answer
- * (`lib/desktop/reachability.ts`); without this line the person sees only each section's own failure
- * and nothing naming the cause. A browser has its own cues for a site that is down, and a local
- * Desktop has its own status, so neither draws it.
+ * (`lib/desktop/reachability.ts`). This line names the cause once; the screens under it wait for
+ * OpenBot and say nothing of their own failures (`lib/desktop/connection-lost.ts`). A browser has its
+ * own cues for a site that is down, and a local Desktop has its own status, so neither draws it.
  *
- * It clears on the next request that gets an answer. While it shows it asks OpenBot itself now and
- * then, backing off, so it also clears on a screen that has nothing more to ask.
+ * It clears on the next request that gets an answer. While it shows the screens' reads wait, so it
+ * asks OpenBot itself now and then, backing off, and clears when it answers; the screens fill in
+ * then, by themselves.
  *
  * The same bar as the update banner, so it reads as OpenBot's own.
  */
 export function ConnectionBanner() {
-  const connection = useQuery(desktopConnectionQueryOptions());
-  const unreachable = useSyncExternalStore(
-    subscribeReachability,
-    openbotUnreachable,
-    () => false,
-  );
-  const address =
-    connection.data?.mode === "connected" ? connection.data.address : null;
-  const showing = address !== null && unreachable;
+  const { lost: showing, address } = useConnectionLost();
 
   useEffect(() => {
     if (!showing) return;
@@ -58,7 +46,7 @@ export function ConnectionBanner() {
     };
   }, [showing]);
 
-  if (!showing) return null;
+  if (!showing || address === null) return null;
   const said = `Can't reach ${hostOf(address)}. OpenBot will reconnect when it answers.`;
   return (
     <aside
