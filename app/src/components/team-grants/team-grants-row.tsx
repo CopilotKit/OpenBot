@@ -256,9 +256,9 @@ function TeamGrantsDialog({
         <DialogHeader>
           <DialogTitle>Teams that can use {title}</DialogTitle>
           <DialogDescription>
-            People in the teams you tick can put {title} on their Bots and use
-            it without asking an admin. Nobody else's Bot in the organization
-            can.
+            People in the teams you tick can put {title} on their Bots without
+            asking an admin, starting with its actions that only read. Nobody
+            else's Bot in the organization can use it.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
