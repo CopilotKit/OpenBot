@@ -137,8 +137,60 @@ test("a hand-off that shares with another person draws its card in the conversat
     "What is the pipeline code word?",
   );
   expect(card.queryByText(/9f2c/)).toBeNull();
+  expect(
+    card.getByText(
+      "Pipeline Bot belongs to someone else, so they can read the text below.",
+    ),
+  ).toBeTruthy();
   for (const name of ["Allow once", "Deny"])
     expect(card.getByRole("radio", { name })).toBeTruthy();
+});
+
+test("a hand-off that both asks first and shares is ONE card that says both", async () => {
+  inbox = [
+    {
+      id: "approval-both",
+      status: "pending",
+      createdAt: "2026-11-15T10:00:00.000Z",
+      action: {
+        botId: "handbook",
+        toolRef: "openbot/share_private_information",
+        effect: "share_private",
+        scope: "handoff:dana",
+        threadId: "thread-1",
+        toolCallId: CALL,
+        covers: "4be1",
+        args: {
+          audience: "Pipeline Bot",
+          recipients: 1,
+          contentDigest: "9f2c",
+          preview: "What is the pipeline code word?",
+          handOff: "Pipeline Bot",
+        },
+        target: { kind: "handoff", id: "dana" },
+      },
+    },
+  ];
+  const view = draw();
+  const cards = await view.findAllByRole("region", {
+    name: "Waiting for your approval",
+  });
+  expect(cards).toHaveLength(1);
+  const [only] = cards;
+  if (!only) throw new Error("No card.");
+  const card = within(only);
+  // It is handed over, and it shares this text with someone else: both, on the one card.
+  expect(card.getByText("Hand this to Pipeline Bot")).toBeTruthy();
+  expect(
+    card.getByText(
+      "Pipeline Bot belongs to someone else, so this also shares the text below with them.",
+    ),
+  ).toBeTruthy();
+  expect(card.getByLabelText("What it would send").textContent).toBe(
+    "What is the pipeline code word?",
+  );
+  expect(card.getByRole("radio", { name: "Allow once" })).toBeTruthy();
+  expect(card.getByRole("radio", { name: "Deny" })).toBeTruthy();
 });
 
 test("a hand-off the person asks before draws its card in the conversation", async () => {
