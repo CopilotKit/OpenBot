@@ -55,6 +55,7 @@ import {
 } from "@/lib/approvals";
 import { readFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import type { WaitingWhere } from "@/lib/tasks/groups";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -292,10 +293,7 @@ function RequestRow({
  */
 export function useWaitingByBot(
   agentId: string | undefined,
-  heldByTask: (where: {
-    channelId?: string | undefined;
-    threadId?: string | undefined;
-  }) => boolean = () => false,
+  heldByTask: (where: WaitingWhere) => boolean = () => false,
 ) {
   const waiting = useWaiting(agentId);
   const byBot = new Map<string, { rows: ReactNode[]; times: string[] }>();
@@ -603,27 +601,43 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
   );
 }
 
-/** The waiting questions and actions as rows, questions first, for a card that may hold more. */
-export function useWaitingRows(agentId: string | undefined) {
+/**
+ * The waiting questions and actions as rows, questions first, for a card that may hold more. One
+ * held by a task (`heldByTask`) is left to that task's own row.
+ */
+export function useWaitingRows(
+  agentId: string | undefined,
+  heldByTask: (where: WaitingWhere) => boolean = () => false,
+) {
   const waiting = useWaiting(agentId);
   const botName = useBotNames();
   return {
     error: waiting.error,
     rows: [
-      ...waiting.questions.map((question) => (
-        <QuestionRow
-          botName={botName(question.botId)}
-          key={`question-${question.id}`}
-          question={question}
-        />
-      )),
-      ...waiting.pending.map((request) => (
-        <RequestRow
-          botName={botName(request.action.botId)}
-          key={`request-${request.id}`}
-          request={request}
-        />
-      )),
+      ...waiting.questions
+        .filter(
+          (question) =>
+            !heldByTask({
+              channelId: question.channelId,
+              threadId: question.threadId,
+            }),
+        )
+        .map((question) => (
+          <QuestionRow
+            botName={botName(question.botId)}
+            key={`question-${question.id}`}
+            question={question}
+          />
+        )),
+      ...waiting.pending
+        .filter((request) => !heldByTask({ threadId: request.action.threadId }))
+        .map((request) => (
+          <RequestRow
+            botName={botName(request.action.botId)}
+            key={`request-${request.id}`}
+            request={request}
+          />
+        )),
     ],
   };
 }
@@ -634,8 +648,15 @@ export function useWaitingRows(agentId: string | undefined) {
  * same requests the conversation draws inline, so a decision made in either place is the one
  * decision.
  */
-export function WaitingForYou({ agentId }: { agentId?: string }) {
-  const { error, rows } = useWaitingRows(agentId);
+export function WaitingForYou({
+  agentId,
+  heldByTask,
+}: {
+  agentId?: string;
+  /** Leaves out what waits inside a task, for a list that shows the task itself. */
+  heldByTask?: (where: WaitingWhere) => boolean;
+}) {
+  const { error, rows } = useWaitingRows(agentId, heldByTask);
   return (
     <>
       {error ? (

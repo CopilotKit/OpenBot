@@ -47,6 +47,24 @@ export function waitingOnYou(bot: BotAttention): number {
   return asksOf(bot) + bot.tasks.ready + bot.tasks.failed;
 }
 
+/**
+ * How many things wait on the person across all their Bots: the one number every badge, bell and tab
+ * shows, in OpenBot's sidebar and in every skin. Counted once, by the server's rule (`waitingOnYou`
+ * per Bot), so a skin never counts its own way: one that counted the approval inbox said 1 while
+ * the Bots badge said 2, because a failed task or a task waiting on a question is in one and not the
+ * other.
+ */
+export function waitingAcross(
+  bots: readonly BotAttention[] | undefined,
+): number {
+  return (bots ?? []).reduce((total, bot) => total + waitingOnYou(bot), 0);
+}
+
+/** {@link waitingAcross}, read live, for whatever draws the number. */
+export function useWaitingCount(): number {
+  return waitingAcross(useQuery(botAttentionQueryOptions()).data);
+}
+
 const count = (total: number, one: string, many: string) =>
   `${total} ${total === 1 ? one : many}`;
 
@@ -266,7 +284,7 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
   useAttentionNotifications(attention.data);
   usePingNotifications(lastPing.data, attention.data);
   const bots = attention.data ?? [];
-  const waiting = bots.reduce((total, bot) => total + waitingOnYou(bot), 0);
+  const waiting = waitingAcross(bots);
   if (waiting > 0) {
     return (
       <span

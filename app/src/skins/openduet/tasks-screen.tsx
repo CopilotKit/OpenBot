@@ -8,7 +8,7 @@ import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
 import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
-import { TASK_ORDER } from "@/lib/tasks/groups";
+import { heldByTaskOf, TASK_ORDER } from "@/lib/tasks/groups";
 import { TASK_STATUS_LABEL } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { FOCUS } from "./kit";
@@ -156,9 +156,10 @@ function ActiveView() {
           checkIns: checkIns.data,
         }).length
       : undefined;
-  const waiting = useWaitingRows(undefined);
   const { tasks, done } = useNeedsYou();
   const listed = [...tasks, ...done];
+  // A question or an action inside a task is that task waiting, listed once, as the task.
+  const waiting = useWaitingRows(undefined, heldByTaskOf(listed));
 
   return (
     <div className="flex flex-col gap-9">
