@@ -1,9 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { desktopShell } from "@/lib/desktop/shell";
-import { confirmBrokeredConnectionMutationOptions } from "@/lib/plugins/mutations";
 
 /**
  * The link that brings OpenBot Desktop's window forward, on the page it is already showing.
@@ -18,9 +16,11 @@ export const DESKTOP_LINK = "openbot://open";
  * (`/desktop-return`).
  *
  * The Desktop window opens every site outside OpenBot in the browser, so the vendor's redirect lands
- * there as well (`desktopReturnUrlFor` on the server). This page does what the account's page does on
- * arrival, asking the server to confirm the account so it is recorded, and then hands the person back
- * to the window through `openbot://`. The window refreshes its apps when it has the focus again.
+ * there as well (`desktopReturnUrlFor` on the server). That browser is not the window, and the
+ * personal edition only admits requests carrying its install's token, which only the window has. So
+ * this page is not behind sign-in and asks the API nothing: it hands the person back to the window
+ * through `openbot://`, and the window confirms the account itself when it has the focus again
+ * (`confirmOnReturn` in brokered-account-row.tsx).
  *
  * Loaded in the Desktop window itself, it goes to the account's page instead, which confirms on its
  * own.
@@ -35,9 +35,6 @@ export function DesktopReturn({
   openDesktop?: (link: string) => void;
 }) {
   const navigate = useNavigate();
-  const { mutate: confirm } = useMutation(
-    confirmBrokeredConnectionMutationOptions(useQueryClient()),
-  );
   const started = useRef(false);
 
   useEffect(() => {
@@ -51,14 +48,8 @@ export function DesktopReturn({
       );
       return;
     }
-    // Handed back once the account is recorded, or once that failed: the window shows either.
-    const handBack = () => openDesktop(DESKTOP_LINK);
-    if (!app) {
-      handBack();
-      return;
-    }
-    confirm(app, { onSettled: handBack });
-  }, [app, confirm, navigate, openDesktop]);
+    openDesktop(DESKTOP_LINK);
+  }, [app, navigate, openDesktop]);
 
   return (
     <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">

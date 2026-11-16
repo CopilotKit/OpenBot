@@ -364,8 +364,8 @@ export function confirmBrokeredConnectionMutationOptions(
         );
       } catch (error) {
         /*
-         * The page a consent lands back on (`/desktop-return`) knows the app and not whose account
-         * it was: a person's own connection refuses an app with one shared account as a conflict,
+         * A caller may know the app and not whose account it was: a person's own connection refuses
+         * an app with one shared account as a conflict,
          * and that account is then the one to confirm. A caller that knows says so.
          */
         if (
