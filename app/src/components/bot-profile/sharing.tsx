@@ -192,7 +192,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
       </PageSection>
       {agent.mine && (published || publishable) ? (
         <PageSection
-          description="Publishing doesn't change its visibility. You can unpublish at any time."
+          description="Only the people and teams you publish it to can use it. You can unpublish at any time."
           title={published ? "Who it is published to" : "Publish"}
         >
           {/* More than one value (an audience, then people and teams), so a summary row and a
@@ -330,8 +330,8 @@ function PublishDialog({
             {current ? "Who it is published to" : "Publish"}
           </DialogTitle>
           <DialogDescription>
-            Publishing doesn't change its visibility. You can unpublish at any
-            time.
+            Only the people and teams you publish it to can use it. You can
+            unpublish at any time.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
