@@ -257,13 +257,22 @@ describe.skipIf(!asked)("maths a Bot writes", () => {
               await page
                 .waitForSelector(".katex-display", { timeout: 10_000 })
                 .catch(() => {});
-              // The reply fades in as it arrives; read and shoot it once it has landed.
+              // The reply fades in as it arrives; read and shoot it once it has landed. Only the
+              // animations that end are waited for: a running step's pulse never does.
               await page.evaluate(() =>
-                Promise.all(
-                  document
-                    .getAnimations()
-                    .map((animation) => animation.finished),
-                ),
+                Promise.race([
+                  Promise.all(
+                    document
+                      .getAnimations()
+                      .filter(
+                        (animation) =>
+                          animation.effect?.getComputedTiming().endTime !==
+                          Number.POSITIVE_INFINITY,
+                      )
+                      .map((animation) => animation.finished.catch(() => {})),
+                  ),
+                  new Promise((done) => setTimeout(done, 3000)),
+                ]),
               );
               const seen = await read(page);
               if (shots) {
