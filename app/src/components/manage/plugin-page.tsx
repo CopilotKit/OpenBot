@@ -254,8 +254,8 @@ function ConnectionStateUnreadable() {
       <ItemContent>
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
-          Couldn't load whether you've connected an account here. Reload the
-          page, or check {paths.deploymentName}'s logs if it keeps happening.
+          Couldn't load whether you've connected an account here. Try again in a
+          moment, or check {paths.deploymentName}'s logs if it keeps happening.
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -645,8 +645,8 @@ export function PluginPage({
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
           {personal
-            ? "Couldn't load your apps. Reload the page."
-            : "Couldn't load apps. Reload the page."}
+            ? "Couldn't load your apps. Try again in a moment."
+            : "Couldn't load apps. Try again in a moment."}
         </p>
       </PageShell>
     );

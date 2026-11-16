@@ -221,7 +221,7 @@ export function SkillsSettingsPage({
         ) : null}
         {loaded && !writtenKnown ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the skills you wrote. Reload the page.
+            Couldn't load the skills you wrote. Try again in a moment.
           </p>
         ) : null}
 

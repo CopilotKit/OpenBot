@@ -398,8 +398,8 @@ export function LearningReview() {
           {sources
             .filter((source) => !source.unavailable)
             .every((source) => source.proposals === null)
-            ? "Couldn't read your proposed skills. Reload the page."
-            : "Couldn't read some of your proposed skills. Reload the page."}
+            ? "Couldn't read your proposed skills. Try again in a moment."
+            : "Couldn't read some of your proposed skills. Try again in a moment."}
         </p>
       )}
       {open && (

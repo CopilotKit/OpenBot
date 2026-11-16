@@ -710,7 +710,7 @@ test("when the connections cannot be loaded This browser says it cannot tell, an
   connectionsFail = true;
   const view = draw();
   await view.findByText(
-    "Couldn't check whether this browser is connected. Reload the page.",
+    "Couldn't check whether this browser is connected. Try again in a moment.",
     {},
     { timeout: 4000 },
   );

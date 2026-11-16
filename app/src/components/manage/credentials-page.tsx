@@ -68,7 +68,7 @@ export function CredentialsList() {
   if (credentials.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load {noun}s. Reload the page.
+        Couldn't load {noun}s. Try again in a moment.
       </p>
     );
   if (credentials.data.length === 0)

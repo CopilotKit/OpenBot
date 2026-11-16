@@ -484,7 +484,7 @@ export function useBrokeredAccount(input: {
        */
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }
@@ -650,7 +650,7 @@ export function useBrokeredAccount(input: {
       }
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }

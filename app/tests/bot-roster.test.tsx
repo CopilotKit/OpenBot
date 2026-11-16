@@ -227,7 +227,7 @@ test("a failed refetch keeps the roster it already had, not the error", async ()
   );
   expect(view.getByText("Mine")).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load your Bots. Reload the page."),
+    view.queryByText("Couldn't load your Bots. Try again in a moment."),
   ).toBeNull();
 });
 

@@ -1891,7 +1891,7 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Reload the page.
+                    Couldn’t load voice chats. Try again in a moment.
                   </p>
                 )}
                 {voiceContextNotice && (

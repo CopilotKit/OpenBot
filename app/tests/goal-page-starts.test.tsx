@@ -420,7 +420,7 @@ test("a goal whose routines couldn't be read says its schedules couldn't be load
   const view = open(undefined);
   await triggersLoaded();
   await view.findByText(
-    "Couldn't load this goal's schedules. Reload the page.",
+    "Couldn't load this goal's schedules. Try again in a moment.",
   );
   await view.findByText("Its schedules, events and triggers start it.");
 });

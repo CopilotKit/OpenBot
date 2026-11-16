@@ -200,7 +200,7 @@ export function MenuSheet({
                   className="openduet-type-sub px-3 py-2 text-openduet-problem"
                   role="alert"
                 >
-                  Couldn't load your conversations. Reload the page.
+                  Couldn't load your conversations. Try again in a moment.
                 </p>
               ) : conversations.length > 0 ? (
                 /*

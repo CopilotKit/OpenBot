@@ -174,7 +174,9 @@ function RouteComponent() {
         agentId = fallback?.id;
       }
       if (!agentId)
-        throw new Error("There's no Bot to send this to. Reload the page.");
+        throw new Error(
+          "There's no Bot to send this to. Try again in a moment.",
+        );
       await start(agentId, draft.text, undefined, pendingId, draft.attachments);
     } catch (caught) {
       stashFailedStart({
@@ -288,8 +290,8 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              Couldn't load your Bots, so there's no one to send this to. Reload
-              the page.
+              Couldn't load your Bots, so there's no one to send this to. Try
+              again in a moment.
             </p>
           ) : null}
         </div>

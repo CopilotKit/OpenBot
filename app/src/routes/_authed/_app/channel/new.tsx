@@ -169,7 +169,7 @@ function NewConversation({ composition }: { composition: string }) {
   const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
-      ? "Couldn't load your Bots. Reload the page."
+      ? "Couldn't load your Bots. Try again in a moment."
       : urlAgentDetailFailed
         ? /*
            * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
@@ -178,7 +178,7 @@ function NewConversation({ composition }: { composition: string }) {
            */
           detailFailure?.message === AGENT_NOT_FOUND
           ? "This Bot isn't available to you. It may be unpublished or not shared with you."
-          : "Couldn't load that Bot. Reload the page."
+          : "Couldn't load that Bot. Try again in a moment."
         : null;
   /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
   const [picked, setPicked] = useState<AgentProfile[] | null>(null);

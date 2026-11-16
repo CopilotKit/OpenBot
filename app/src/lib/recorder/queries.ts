@@ -160,7 +160,7 @@ export const recordingsQueryOptions = (options?: { waiting?: boolean }) =>
         organizationId(),
         "me",
         pageParam ? { cursor: pageParam } : undefined,
-        { fallback: "Couldn't load your recordings. Reload the page." },
+        { fallback: "Couldn't load your recordings. Try again in a moment." },
       ),
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,

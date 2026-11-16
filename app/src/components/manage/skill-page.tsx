@@ -90,7 +90,7 @@ export function SkillPage({ slug }: { slug: string }) {
     return (
       <PageShell backButton={back} title="Skill">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Reload the page.
+          Couldn't load this skill. Try again in a moment.
         </p>
       </PageShell>
     );

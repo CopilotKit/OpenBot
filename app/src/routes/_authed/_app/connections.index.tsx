@@ -593,8 +593,8 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Reload the
-            page.
+            Couldn't load GitHub and Slack, so they aren't listed. Try again in
+            a moment.
           </p>
         ) : null}
       </PageSection>

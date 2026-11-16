@@ -52,7 +52,7 @@ export const teamKeys = {
   people: () => ["teams", "people"] as const,
 };
 
-const FALLBACK = "Couldn't load teams. Reload the page.";
+const FALLBACK = "Couldn't load teams. Try again in a moment.";
 
 /** The value a Bot's assignment carries for a team: `team:<id>`, beside a directory group's name. */
 const TEAM_VALUE = "team:";

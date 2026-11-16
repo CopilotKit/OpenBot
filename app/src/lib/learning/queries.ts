@@ -110,7 +110,8 @@ export function personalLearningQueryOptions() {
     queryFn: ({ signal }): Promise<PersonalLearningSharing> =>
       getPersonLearningSettings(organizationId(), ME, {
         signal,
-        fallback: "Couldn't load your Learning settings. Reload the page.",
+        fallback:
+          "Couldn't load your Learning settings. Try again in a moment.",
       }),
   });
 }
@@ -379,7 +380,7 @@ export function personalReviewQueryOptions() {
     queryFn: ({ signal }): Promise<PersonalReview> =>
       getPersonLearningReview(organizationId(), ME, {
         signal,
-        fallback: "Couldn't load your skills to review. Reload the page.",
+        fallback: "Couldn't load your skills to review. Try again in a moment.",
       }),
     // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload, and
     // after a read that failed it is read again until one answers. Every person's reads go through the one project key,

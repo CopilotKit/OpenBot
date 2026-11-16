@@ -105,7 +105,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Reload the page.
+          Couldn't load your Bots. Try again in a moment.
         </p>
       </div>
     );
@@ -114,7 +114,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Reload the page.
+          Couldn't load this Bot. Try again in a moment.
         </p>
       </div>
     );
