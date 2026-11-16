@@ -139,6 +139,19 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
   });
 
+  test("a brief keeps a time window counted back from now, never a calendar date", () => {
+    // Live, on the Claude Agent SDK: asked for customer mail "in the last day", the brief said
+    // "since 2026-11-15" in half the replays; the task searched by that date, which takes whole
+    // calendar days, and filed a 30-hour-old email as one of the last day's.
+    const paragraph = DELEGATING_GUIDANCE.split("\n").find((line) =>
+      line.includes("with a brief that stands on its own"),
+    );
+    expect(paragraph).toContain(
+      'Give a time window as the person did, counted back from now: "the last day" is the last 24 hours',
+    );
+    expect(paragraph).toContain('never "since" yesterday\'s date');
+  });
+
   test("hands off only work the person asked for: a question about whether it can gets an answer", () => {
     // Live, 2 runs of 3: "are you able to build a sequence in Smartlead?" was answered yes, and a
     // task then read the person's campaigns.
