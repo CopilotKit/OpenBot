@@ -5,7 +5,12 @@ import {
   listBots,
   testBotConnection,
 } from "@/lib/api/generated/bots/bots";
-import type { Bot, BotHandoff, BotVisibility } from "@/lib/api/generated/model";
+import type {
+  Bot,
+  BotHandoff,
+  BotVisibility,
+  ListBotsScope,
+} from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
@@ -32,7 +37,11 @@ export function isSharedWithYou(agent: AgentProfile): boolean {
 
 export const agentKeys = {
   all: ["agents"] as const,
-  list: (hidden = false) => ["agents", "list", { hidden }] as const,
+  /** A person's own list keeps the key it always had; Admin's list of every Bot has its own. */
+  list: (hidden = false, scope: ListBotsScope = "caller") =>
+    scope === "caller"
+      ? (["agents", "list", { hidden }] as const)
+      : (["agents", "list", { hidden, scope }] as const),
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
   botRouteDetail: (agentId: string) =>
     ["agents", "bot-route-detail", agentId] as const,
@@ -58,7 +67,10 @@ export type HandoffGrants = BotHandoff;
  * roster, so this reads to the end. A server that hands back the cursor it was given is a server
  * that would never end the list, so a repeated cursor ends it too.
  */
-async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
+async function everyBot(
+  hidden: boolean,
+  scope: ListBotsScope,
+): Promise<AgentProfile[]> {
   const bots: AgentProfile[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
@@ -67,6 +79,7 @@ async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
       organizationId(),
       {
         ...(hidden ? { hidden } : {}),
+        ...(scope === "caller" ? {} : { scope }),
         limit: 100,
         ...(cursor ? { cursor } : {}),
       },
@@ -79,10 +92,17 @@ async function everyBot(hidden: boolean): Promise<AgentProfile[]> {
   return bots;
 }
 
-export function agentListQueryOptions(hidden = false) {
+/**
+ * The Bots a screen lists. `scope` is `caller` everywhere a person sees, picks or talks to a Bot,
+ * and `organization` on Admin's screens only (`useBotListScope`, lib/agents/list-scope.tsx).
+ */
+export function agentListQueryOptions(
+  hidden = false,
+  scope: ListBotsScope = "caller",
+) {
   return queryOptions({
-    queryKey: agentKeys.list(hidden),
-    queryFn: (): Promise<AgentProfile[]> => everyBot(hidden),
+    queryKey: agentKeys.list(hidden, scope),
+    queryFn: (): Promise<AgentProfile[]> => everyBot(hidden, scope),
   });
 }
 

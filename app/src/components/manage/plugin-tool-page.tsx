@@ -17,6 +17,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { grantRoster } from "@/lib/agents/grant-roster";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
@@ -48,9 +49,11 @@ export function PluginToolPage({
   const queryClient = useQueryClient();
   const plugins = useQuery(appsQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
    * Whether a call from this Bot could be authenticated at all.
    *

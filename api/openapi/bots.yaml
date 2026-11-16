@@ -14,9 +14,13 @@ paths:
         Return one page of the Bots the caller can see: theirs, the ones shared
         with them, the ones assigned to them and the ones that come with
         OpenBot, oldest first, and by id among Bots made at the same moment.
-        hidden=true lists only the Bots the caller hid from their own list
-        instead. A missing cursor starts at the first page and nextCursor null
-        ends the list.
+        Somebody else's private Bot is never among them, an admin's list
+        included. hidden=true lists only the Bots the caller hid from their own
+        list instead. scope=organization lists every Bot in the organization,
+        people's private Bots included, for an admin's screens that decide what
+        Bots may hold; it is refused to anybody who is not an admin of the
+        organization. A missing cursor starts at the first page and nextCursor
+        null ends the list.
       security:
         - webSession: []
         - appOAuth: [bots:read]
@@ -28,6 +32,15 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: scope
+          in: query
+          description: >-
+            Whose Bots: caller, the Bots the caller can see; organization, every
+            Bot in the organization, for an admin of it only.
+          schema:
+            type: string
+            enum: [caller, organization]
+            default: caller
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:

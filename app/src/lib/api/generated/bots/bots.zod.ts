@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. hidden=true lists only the Bots the caller hid from their own list instead. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 
@@ -18,6 +18,7 @@ export const ListBotsParams = zod.object({
 });
 
 export const listBotsQueryHiddenDefault = false;
+export const listBotsQueryScopeDefault = `caller`;
 export const listBotsQueryLimitDefault = 50;
 export const listBotsQueryLimitMax = 100;
 
@@ -30,6 +31,12 @@ export const ListBotsQueryParams = zod.object({
     .boolean()
     .default(listBotsQueryHiddenDefault)
     .describe("List the Bots the caller hid instead of the ones they did not."),
+  scope: zod
+    .enum(["caller", "organization"])
+    .default(listBotsQueryScopeDefault)
+    .describe(
+      "Whose Bots: caller, the Bots the caller can see; organization, every Bot in the organization, for an admin of it only.",
+    ),
   limit: zod
     .int()
     .min(1)

@@ -46,6 +46,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   saveComponentDraftMutationOptions,
@@ -80,7 +81,7 @@ export const Route = createFileRoute("/_authed/admin/components/$name")({
 function RouteComponent() {
   const { name } = Route.useParams();
   const components = useQuery(componentListQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const dataFunctions = useQuery(componentFunctionsQueryOptions(name));
 
   const setGrant = useMutation(setComponentGrantMutationOptions(queryClient));
