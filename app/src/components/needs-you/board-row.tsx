@@ -190,6 +190,12 @@ export function BoardRow({
   );
 }
 
+/**
+ * A row's menu is as wide as its longest item, on one line, and never wider than the window has room
+ * for. Left at the trigger's width it was 128px, and "Allow for this conversation" broke in two.
+ */
+export const ROW_MENU_WIDTH = "w-max max-w-(--available-width)";
+
 /** A row's menu, behind a "…" button named for what it holds. */
 export function RowMenu({
   label,
@@ -205,7 +211,9 @@ export function RowMenu({
       >
         <IconDots />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">{children}</DropdownMenuContent>
+      <DropdownMenuContent align="end" className={ROW_MENU_WIDTH}>
+        {children}
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }

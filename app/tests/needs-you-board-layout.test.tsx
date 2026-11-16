@@ -349,6 +349,8 @@ type RowLook = {
   missing: string[];
   /** Mark done is not a button on the row: it is in the row's last menu. */
   inMenu: boolean;
+  /** What the row waits on, its detail line, is cut: a line hidden, or an ellipsis. */
+  detailCut: boolean;
 };
 
 /** How each row of the board is drawn, as a person would judge it. */
@@ -400,11 +402,14 @@ async function rows(page: Page): Promise<RowLook[]> {
       const menu = buttons.some(
         (button) => button.getAttribute("aria-haspopup") === "menu",
       );
+      // A task that waits on the person can be stopped from its row, as from its card.
       const wanted = name.startsWith("Should I")
         ? ["Answer"]
         : name.startsWith("Compare")
           ? ["Try again", "Mark done", "Open"]
-          : ["Mark done", "Open"];
+          : ["Stop", "Mark done", "Open"];
+      // The line under the title: what the row waits on.
+      const detail = title.nextElementSibling;
       looks.push({
         title: name,
         titleCut:
@@ -435,12 +440,46 @@ async function rows(page: Page): Promise<RowLook[]> {
         missing: wanted.filter(
           (label) =>
             !names.includes(label) &&
-            !(menu && (label === "Mark done" || label === "Open")),
+            !(
+              menu &&
+              (label === "Stop" || label === "Mark done" || label === "Open")
+            ),
         ),
         inMenu: wanted.includes("Mark done") && !names.includes("Mark done"),
+        detailCut: detail
+          ? detail.scrollHeight > detail.clientHeight + 1 ||
+            detail.scrollWidth > detail.clientWidth + 1
+          : false,
       });
     }
     return looks;
+  });
+}
+
+/** The open menu: whether every item reads on one line, and the menu is inside the window. */
+async function menuLook(page: Page) {
+  return page.evaluate(async () => {
+    // Measured once it has opened: it grows in from its corner.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const menu = document.querySelector("[role=menu]");
+    if (!menu) throw new Error("no menu open");
+    // How many lines an item's words run to: its height inside its padding, in lines of its text.
+    const lines = [...menu.querySelectorAll("[role=menuitem]")].map((item) => {
+      const css = getComputedStyle(item);
+      const inner =
+        item.getBoundingClientRect().height -
+        Number.parseFloat(css.paddingTop) -
+        Number.parseFloat(css.paddingBottom);
+      const line =
+        Number.parseFloat(css.lineHeight) ||
+        Number.parseFloat(css.fontSize) * 1.43;
+      return Math.round(inner / line);
+    });
+    const box = menu.getBoundingClientRect();
+    return {
+      oneLine: lines.every((count) => count <= 1),
+      inside: box.left >= -0.5 && box.right <= innerWidth + 0.5,
+    };
   });
 }
 
@@ -473,6 +512,8 @@ describe.skipIf(!asked)("a row of the Needs you board", () => {
                   buttonLines: 1,
                   missing: [],
                   inMenu: look.inMenu,
+                  // A task waiting on the person says what it waits on in full, at every width.
+                  detailCut: false,
                 });
               // What a row folded into its menu is there: Mark done and Open.
               for (const look of looks.filter((one) => one.inMenu)) {
@@ -486,9 +527,57 @@ describe.skipIf(!asked)("a row of the Needs you board", () => {
                   .getByRole("menuitem", { name: "Mark done" })
                   .waitFor();
                 await page.getByRole("menuitem", { name: "Open" }).waitFor();
+                if (look.title !== CATERERS)
+                  await page.getByRole("menuitem", { name: "Stop" }).waitFor();
+                // The menu's own classes, which were not on the page until it opened.
+                await style(page);
+                // Each item on one line, the menu inside the window.
+                expect(await menuLook(page)).toEqual({
+                  oneLine: true,
+                  inside: true,
+                });
                 await page.keyboard.press("Escape");
                 await page.getByRole("menu").waitFor({ state: "detached" });
               }
+            } finally {
+              await page.close();
+            }
+          }
+        }, 120_000);
+});
+
+/*
+ * The approval's own menu, with its standing answers: "Allow for this conversation" reads on one
+ * line, and the menu stays inside the window. At the trigger's 128px it broke in two at every width.
+ */
+describe.skipIf(!asked)("a row's menu on the Needs you board", () => {
+  for (const { name, path } of PAGES)
+    for (const engine of engines)
+      for (const width of WIDTHS)
+        test(`reads each item on one line on the ${name} in ${engine} at ${width}px`, async () => {
+          for (const theme of shots ? THEMES : (["light"] as const)) {
+            const page = await open(path, engine, theme, width);
+            try {
+              await page
+                .locator("[data-needs-you-bot] [data-slot=item]")
+                .filter({ hasText: SEEDS })
+                .locator("[aria-haspopup=menu]")
+                .last()
+                .click();
+              await page
+                .getByRole("menuitem", { name: "Allow for this conversation" })
+                .waitFor();
+              // The menu's own classes, which were not on the page until it opened.
+              await style(page);
+              const look = await menuLook(page);
+              if (shots)
+                await page.screenshot({
+                  path: join(
+                    shots,
+                    `${name}-${engine}-${theme}-${width}-menu.png`,
+                  ),
+                });
+              expect(look).toEqual({ oneLine: true, inside: true });
             } finally {
               await page.close();
             }

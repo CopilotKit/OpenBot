@@ -195,6 +195,12 @@ export function TaskDetails({ task }: { task: BotTask }) {
     taskTurnsQueryOptions(task.id, task.status === "working"),
   );
   const model = turns?.findLast((turn) => turn.model)?.model ?? null;
+  /*
+   * While the task works or waits on the person, what it has not made or read it may still: "yet".
+   * Once it has ended (done, couldn't finish or stopped), nothing is coming.
+   */
+  const ongoing = task.status === "working" || task.status === "needs_input";
+  const yet = ongoing ? " yet" : "";
   return (
     <div className="flex w-full flex-col gap-6 p-8" data-slot="task-details">
       <Section title="Ran by">
@@ -222,14 +228,14 @@ export function TaskDetails({ task }: { task: BotTask }) {
       </Section>
       <Section title="Outputs">
         <ShortList
-          empty="Nothing made or changed yet."
+          empty={`Nothing made or changed${yet}.`}
           items={work.outputs}
           row={OutputRow}
         />
       </Section>
       <Section title="Sources">
         <ShortList
-          empty="Nothing read yet."
+          empty={`Nothing read${yet}.`}
           items={work.sources}
           row={SourceRow}
         />

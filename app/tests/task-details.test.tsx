@@ -244,3 +244,45 @@ test("the Details pane names the agent a task was handed to, and none for a task
       .querySelector("[data-slot=task-agent]"),
   ).toBeNull();
 });
+
+/*
+ * FOUND LIVE: a finished task's Details said "Nothing made or changed yet." and "Nothing read yet.",
+ * as if more were coming. "Yet" belongs to a task still under way; once it has ended, it is gone.
+ */
+test("the Details pane says nothing is coming yet only while the task is under way", async () => {
+  publishThreadWork("thread_empty", {
+    sources: [],
+    outputs: [],
+    usedComputer: false,
+  });
+  const draw = (status: BotTask["status"]) =>
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TaskDetails task={{ ...task, threadId: "thread_empty", status }} />
+      </QueryClientProvider>,
+    );
+  const said = (view: ReturnType<typeof draw>) =>
+    ["Outputs", "Sources"].map(
+      (name) => view.getByRole("region", { name }).textContent,
+    );
+  for (const status of ["working", "needs_input"] as const) {
+    const view = draw(status);
+    expect(said(view)).toEqual([
+      "OutputsNothing made or changed yet.",
+      "SourcesNothing read yet.",
+    ]);
+    view.unmount();
+  }
+  for (const status of ["ready_for_review", "resolved", "failed"] as const) {
+    const view = draw(status);
+    expect(said(view)).toEqual([
+      "OutputsNothing made or changed.",
+      "SourcesNothing read.",
+    ]);
+    view.unmount();
+  }
+});
