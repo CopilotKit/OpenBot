@@ -1926,6 +1926,15 @@ export function ChannelChat({
                     Couldn’t load voice chats. Try again in a moment.
                   </p>
                 )}
+                {/* The picked model stopped being offered: what this conversation uses now. */}
+                {runModel.notice && channel.active ? (
+                  <p
+                    className="pb-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    {runModel.notice}
+                  </p>
+                ) : null}
                 {voiceContextNotice && (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
