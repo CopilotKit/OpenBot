@@ -3,8 +3,12 @@ import {
   queryOptions,
   useQuery,
 } from "@tanstack/react-query";
+import type { Deployment } from "@/lib/api/generated/model";
 import { getDeployment } from "@/lib/api/generated/organization-settings/organization-settings";
+import { listOrganizations } from "@/lib/api/generated/organizations/organizations";
 import { DEPLOYMENT_ORGANIZATION } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
+import { currentOrganizationId } from "@/lib/organizations/current";
 
 /**
  * What this deployment can do, as the server is willing to say it.
@@ -62,6 +66,37 @@ export type DeploymentCapabilities = {
   botComputers?: boolean;
 };
 
+/**
+ * The API's `deployment`, asked where the server answers it.
+ *
+ * Signed in, it is answered in an organization the person is a member of and not found in any
+ * other, `default` included, as every address under an organization is. Nobody signed in reads it
+ * at `default`, which the sign-in screen asks before there is anybody to ask as. So it is asked in
+ * the organization the person works in once that is known, and at `default` before. A person who
+ * is signed in and not a member of `default` is told "not found" there, and is asked in one of
+ * their own instead: the facts are the deployment's, the same in each.
+ */
+export async function readDeployment(options: {
+  signal?: AbortSignal;
+  fallback: string;
+}): Promise<Deployment> {
+  const known = currentOrganizationId();
+  try {
+    return await getDeployment(known ?? DEPLOYMENT_ORGANIZATION, options);
+  } catch (error) {
+    if (
+      known !== undefined ||
+      !(error instanceof ClientError) ||
+      error.status !== 404
+    )
+      throw error;
+    const own = (await listOrganizations({ limit: 1 }, options))
+      .organizations[0];
+    if (!own) throw error;
+    return getDeployment(own.id, options);
+  }
+}
+
 export const deploymentKeys = {
   all: ["deployment"] as const,
   capabilities: () => ["deployment", "capabilities"] as const,
@@ -84,7 +119,7 @@ export function deploymentCapabilitiesQueryOptions() {
     // Configuration, not data. It cannot change without the process restarting.
     staleTime: Number.POSITIVE_INFINITY,
     queryFn: async ({ signal }): Promise<DeploymentCapabilities> => {
-      const body = await getDeployment(DEPLOYMENT_ORGANIZATION, {
+      const body = await readDeployment({
         signal,
         fallback: "Couldn't load what OpenBot can do.",
       });

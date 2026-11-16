@@ -95,7 +95,11 @@ function serve(server: Server) {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = requestOf(input, init);
-      if (request.path === `${ORGANIZATION}/deployment`)
+      // What OpenBot offers, in the organization the person works in, as the server answers it.
+      if (
+        request.path === `${ORGANIZATION}/deployment` ||
+        request.path === `${address}/deployment`
+      )
         return Response.json({
           generativeUi: true,
           selfHostBanner: false,

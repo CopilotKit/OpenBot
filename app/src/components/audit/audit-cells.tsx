@@ -43,6 +43,12 @@ export type AuditEvent = {
    * ("Write a skill" for `skill-creator`). Not part of the stored row, so older rows read it too.
    */
   subjectTitle?: string;
+  /**
+   * The address of the person the page found for the row's `actorUserId`, where the row records
+   * none of its own: a Bot's action, run on its person's authority. Not part of the stored row
+   * (components/manage/audit-page.tsx, `withPeopleNamed`).
+   */
+  startedBy?: string;
 };
 
 type NameFor = (botId: string) => string;
@@ -460,21 +466,22 @@ function initiatorKindOf(event: AuditEvent): string | undefined {
 }
 
 /**
- * The person a row says started it, by the email the server records in `payload.by`. The row
- * carries no name, and the page loads people only when a filter menu opens, so the email is what
- * every row can name. Undefined when the row names nobody.
+ * The person a row says started it, by the email the server records in `payload.by`, else the
+ * address the page found for the person whose authority it ran on (`startedBy`). The row carries no
+ * name, so the email is what every row can name. Undefined when the row names nobody.
  */
 function personOf(event: AuditEvent): string | undefined {
   const by = event.payload?.by;
-  return typeof by === "string" && by.trim() ? by.trim() : undefined;
+  if (typeof by === "string" && by.trim()) return by.trim();
+  return event.startedBy?.trim() || undefined;
 }
 
 /**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
  * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
  * "OpenBot" in the personal edition's Activity, which is anybody's page. A person is named where
- * the row says who ({@link personOf}), "You" where that is `viewer` (the signed-in person's
- * email), and is "A person" where the row names nobody.
+ * the row or the page says who ({@link personOf}), "You" where that is `viewer` (the signed-in
+ * person's email), and is "A person" where nobody can.
  */
 export function startedByText(
   event: AuditEvent,
