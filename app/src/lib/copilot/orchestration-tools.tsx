@@ -85,7 +85,6 @@ function TaskActionCard({
   return (
     <ToolLine
       label={answer !== undefined ? refused : running}
-      notYet={answer !== undefined}
       running={status !== "complete" && result === undefined}
     />
   );
@@ -157,7 +156,7 @@ export function OrchestrationTools() {
     parameters: followUpParameters,
     render: ({ result, status }) => (
       <TaskActionCard
-        refused="Couldn't pass that on"
+        refused="Nothing passed on"
         result={result}
         running="Telling the task"
         status={status}
@@ -171,7 +170,7 @@ export function OrchestrationTools() {
     parameters: stopParameters,
     render: ({ result, status }) => (
       <TaskActionCard
-        refused="Couldn't stop a task"
+        refused="Nothing stopped"
         result={result}
         running="Stopping the task"
         status={status}
