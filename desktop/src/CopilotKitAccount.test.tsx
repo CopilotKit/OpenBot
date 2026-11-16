@@ -395,6 +395,68 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
 });
 
 /*
+ * Seen on two Windows computers: after "Sign-in didn't finish", the first Try again showed the code
+ * that had just timed out, and approving it said it had expired. Try again starts a new sign-in
+ * that shows its own code, never the timed-out one, even when the old sign-in's answer lands late.
+ */
+test("after a sign-in times out, Try again shows a new code and never the old one", async () => {
+  const OLD = {
+    url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=OLDC-0001&source=cli&mode=openbot",
+    userCode: "OLDC-0001",
+  };
+  const attempts: string[] = [];
+  const first: {
+    timeOut?: (reason: unknown) => void;
+    lateAnswer?: (found: unknown) => void;
+  } = {};
+  let asksForOld = 0;
+  invokeHandler = async ({ command, args }) => {
+    const attempt = args?.attempt as string;
+    if (command === "local_eval_terms") return { status: "signed-out" };
+    if (command === "sign_in_to_copilotkit") {
+      attempts.push(attempt);
+      return new Promise((_, reject) => {
+        if (attempts.length === 1) first.timeOut = reject;
+      });
+    }
+    if (command === "copilotkit_sign_in_page") {
+      if (attempt === attempts[0]) {
+        asksForOld += 1;
+        if (asksForOld === 1) return OLD;
+        // Still on its way when the sign-in times out.
+        return new Promise((resolve) => {
+          first.lateAnswer = resolve;
+        });
+      }
+      return attempt === attempts[1] ? PAGE : null;
+    }
+    if (command === "cancel_local_eval") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = await startSigningIn();
+  await screen.findByText(OLD.userCode);
+  await waitFor(() => expect(first.lateAnswer).toBeDefined());
+
+  // OpenBot stopped the CLI's sign-in: it waited too long.
+  first.timeOut?.("timeout");
+  await screen.findByText("Sign-in didn’t finish. Try again.");
+  expect(screen.queryByText(OLD.userCode)).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // The late answer for the timed-out sign-in lands after Try again.
+  first.lateAnswer?.(OLD);
+  expect((await screen.findByText(PAGE.userCode)).tagName).toBe("STRONG");
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1]).not.toBe(attempts[0]);
+  expect(screen.queryByText(OLD.userCode)).toBeNull();
+  expect(
+    screen
+      .getByRole("link", { name: "Open the sign-in page" })
+      .getAttribute("href"),
+  ).toBe(PAGE.url);
+});
+
+/*
  * The step is OpenBot's, so it leads with OpenBot by CopilotKit, not CopilotKit's logotype, while
  * the sign-in waits and once it is stopped, and says what the free local license key is for.
  */
