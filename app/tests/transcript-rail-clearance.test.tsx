@@ -102,13 +102,16 @@ async function stylesheet(classes: string[]): Promise<string> {
 let browser: Browser;
 let script: string;
 
+// Bundling the transcript with React and CopilotKit, then starting Chromium, takes longer than a
+// hook's default 5 s on a cold runner when this is the first file `bun test` opens. It has the
+// whole minute the sweep below has, as transcript-room.test.tsx's setup does.
 beforeAll(async () => {
   if (!asked) return;
   script = await bundle();
   const { chromium } = await import("playwright-core");
   // The CI job installs full Chromium without the headless shell.
   browser = await chromium.launch({ channel: "chromium" });
-});
+}, 60_000);
 
 afterAll(async () => {
   await browser?.close();
