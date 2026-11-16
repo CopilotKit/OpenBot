@@ -84,7 +84,7 @@ OpenBot is built on [CopilotKit](https://www.copilotkit.ai), which is [used in p
 
 ## Architecture
 
-OpenBot has three parts. On your laptop, setup runs the backend and Intelligence for you. For a team, the Helm chart deploys both on Kubernetes in your own infrastructure.
+OpenBot has three parts. On your laptop, setup runs the backend and Intelligence for you. For a team, the Helm charts deploy both on Kubernetes in your own infrastructure: `openbot-bundle` installs the two together, and `openbot` installs OpenBot beside an Intelligence that already runs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
@@ -94,7 +94,7 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 | Part | What it does |
 | --- | --- |
 | **OpenBot frontends** | Mac, Windows, web, iOS, Android, Slack, and Teams connect people to the same workspace. Conversations, interactive results, computer view, and approvals adapt to each surface. [Choose a frontend](#getting-started). |
-| **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Published as signed images and a Helm chart, and reached through [one API](#api). Deploys on Kubernetes with PostgreSQL and persistent storage. |
+| **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Published as signed images and Helm charts, and reached through [one API](#api). Deploys on Kubernetes with PostgreSQL and persistent storage. |
 | **CopilotKit Intelligence** | Durable conversations, memory, Automatic Learning, and enterprise governance services. Separately licensed; runs on Kubernetes alongside OpenBot. |
 
 OpenBot enforces sign-in, tool permissions, action policies, and audit at its API, alongside Intelligence's platform services. Built-in Bots run in the OpenBot server; your own agents can run alongside OpenBot or on any agent execution platform. Both use AG-UI and can share the same workspace.
@@ -119,32 +119,38 @@ Computer execution is pluggable: use the default Kubernetes setup or connect a c
 
 ## Deploy on Kubernetes
 
-Deploy OpenBot and CopilotKit Intelligence together on **AWS EKS, Azure AKS, Google GKE, or your own Kubernetes cluster**. The chart installs Intelligence by default; no separate hosted project is required.
+Deploy OpenBot on **AWS EKS, Azure AKS, Google GKE, or your own Kubernetes cluster**. Each release publishes two Helm charts:
 
-For a first evaluation, you need a cluster with **amd64 nodes**, a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The commands below use an OpenAI key. For Anthropic, a model router, cluster sizing, or an existing Intelligence deployment, use the full Helm guide that comes with the chart (`helm show readme` on the chart below).
+| Chart | What it installs |
+| --- | --- |
+| **`openbot-bundle`** (`openbot-bundle-0.1.0.tgz` in v1.1.0) | OpenBot and CopilotKit Intelligence together, on one PostgreSQL server. Nobody signs in to Intelligence: the chart makes OpenBot's organization, project and key in it. The quickest way to try OpenBot on a cluster, and the evaluation below. |
+| **`openbot`** (`openbot-0.3.0.tgz` in v1.1.0) | OpenBot alone, pointed at an Intelligence that already runs, managed or self-hosted: its two addresses in `config.intelligence.apiUrl` and `config.intelligence.gatewayWsUrl`, and a project key. |
+
+For a first evaluation, you need a cluster with a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The install requests about 3.15 vCPU while it runs, plus about 0.4 vCPU while its install Jobs run; on EKS that is three t3.large nodes, not two. The commands below use an OpenAI key. For Anthropic, a model router, your own database, or OpenBot against an Intelligence you already run, use the Helm guide that comes with each chart (`helm show readme` on the chart).
 
 > **Setting up with an AI assistant?** Give it this README and the Helm guide (`helm show readme` on the chart below). The guide covers cloud-specific values, storage, secrets, sign-in, networking, upgrades, and troubleshooting. Use the evaluation below only through a local port-forward; configure sign-in and TLS before sharing a deployment.
 
 1. **Create `openbot-values.yaml` locally.** Replace the placeholders with your license and model key. Keep this file out of source control.
 
    ```yaml
-   config:
-     singleUser: true
-   postgresql:
-     enabled: true
-   secrets:
-     licenseToken: "<your CopilotKit trial or production license>"
-     modelApiKey: "<your OpenAI API key>"
+   openbot:
+     config:
+       singleUser: true
+     secrets:
+       licenseToken: "<your CopilotKit trial or production license>"
+       modelApiKey: "<your OpenAI API key>"
    ```
 
-2. **Install** the chart published with the release.
+2. **Install** the `openbot-bundle` chart published with the release.
 
    ```sh
-   helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.0.2/openbot-0.2.0.tgz \
+   helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz \
      --namespace openbot --create-namespace \
      --values openbot-values.yaml \
      --timeout 15m
    ```
+
+   On arm64 nodes, add `--set intelligence.embeddings.enabled=false`. The OpenBot image runs on amd64 and arm64, but the embeddings server Intelligence runs for Memory is amd64 only. Without it, Memory recalls by keyword.
 
 3. **Open your evaluation.**
 
@@ -155,7 +161,9 @@ For a first evaluation, you need a cluster with **amd64 nodes**, a **default Sto
 
    Open <http://127.0.0.1:3001>. This configuration is single-user: anyone who can reach it is an administrator. Keep the port-forward local.
 
-The chart creates the runtime credentials, installs the databases, bootstraps Intelligence, and sets up the Learning container and scheduled jobs. Automatic Learning uses your model key too.
+The chart generates every password, key and token both products need, creates both databases, and sets up Intelligence's organization, OpenBot's project and the Learning container. OpenBot's server migrates its own database as it starts and does the scheduled work itself, so there is no migration Job and no CronJob. Automatic Learning uses your model key too.
+
+For OpenBot against managed Intelligence, or an Intelligence you already run, install the `openbot` chart instead (`https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-0.3.0.tgz`) with `config.intelligence.apiUrl`, `config.intelligence.gatewayWsUrl` and `secrets.intelligenceApiKey`; its guide has the commands. A release of the 0.2 chart that still runs the Intelligence it installed is refused at upgrade to 0.3: keep it on 0.2, or install `openbot-bundle` as a new release in a namespace of its own.
 
 For a team deployment, follow the Helm guide (`helm show readme` on the chart) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
 
@@ -528,14 +536,14 @@ More detail: [docs/architecture.md](docs/architecture.md).
 
 Every OpenBot client uses one API, and its spec is in this repository under [`api/`](api/README.md):
 
-- **REST**, in OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml), bundled from one file per area in `api/openapi/`. Every resource is under `/api/v2/organizations/{organizationId}/`, and an installation's one organization is addressed as `default`, so the Bots are at `/api/v2/organizations/default/bots`.
+- **REST**, in OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml), bundled from one file per area in `api/openapi/`. Every resource is under `/api/v2/organizations/{organizationId}/`, where `organizationId` is an organization's id or its slug. `default` is the first organization, the one that holds everything from before organizations, so its Bots are at `/api/v2/organizations/default/bots`. An OpenBot holds more than one when `OPENBOT_MULTIPLE_ORGANIZATIONS=true`, and a caller who isn't a member of the organization an address names gets the same not found as one that doesn't exist.
 - **Live channels**, on WebSockets, in AsyncAPI 3.1: [`api/asyncapi.yaml`](api/asyncapi.yaml). A Bot's run as it streams, what changed in your conversations, a Bot's screen and its terminal.
 
 The conventions are the same everywhere. An error is a problem detail (`application/problem+json`, RFC 9457). A list pages with `cursor` and `limit`. Every write takes an `Idempotency-Key` header, and repeating a request with the same key within 24 hours does it once. The web app signs in with its session cookie; anything else sends `Authorization: Bearer` with an API key, which acts as the person who made it, or with an access token from OAuth 2.1 with PKCE. Both work on `/api/v2` only.
 
 A client is given one address, OpenBot's. An Intelligence that runs beside OpenBot is reached there too: on a laptop OpenBot's server carries the Intelligence gateway's socket on its own port, and on a cluster the Ingress or HTTPRoute sends that socket's path straight to Intelligence and everything else to OpenBot. Run from a source checkout, the app keeps the gateway's own port unless `OPENBOT_PUBLIC_URL` is set. [Configuration](docs/configuration.md#required-api-server-variables) has the settings.
 
-The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. The app's screens are moving onto it area by area, and the earlier `/api/...` addresses are retired as each area moves, so a script should call only `/api/v2`.
+The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. Every client is on the API now. The earlier `/api/...` addresses are retired, except those that stay outside it for a named reason, such as sign-in, the CopilotKit runtime, machine callbacks, webhooks and health checks, which [`api/client-boundary.allow.ts`](api/client-boundary.allow.ts) lists in `STAYS`. A script should call only `/api/v2`.
 
 ## Sign in
 
@@ -658,7 +666,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/routines.md](docs/routines.md)
 - [docs/automatic-learning.md](docs/automatic-learning.md)
 - [docs/deployment.md](docs/deployment.md)
-- The Helm chart, published with each release: `helm show readme` on it is the Helm guide
+- The Helm charts, `openbot` and `openbot-bundle`, published with each release: `helm show readme` on either is its Helm guide
 - [docs/releasing.md](docs/releasing.md)
 - [docs/web-research.md](docs/web-research.md): public-web search and extraction through Parallel, Exa or Firecrawl
 
