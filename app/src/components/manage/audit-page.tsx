@@ -364,7 +364,7 @@ export function AuditPage({
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load these events. Reload the page.
+              Couldn't load these events. Try again in a moment.
             </p>
           ) : (
             <AuditTable

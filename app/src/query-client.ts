@@ -1,9 +1,16 @@
 import {
+  type DefaultError,
+  type DefaultedQueryObserverOptions,
   focusManager,
   hashKey,
   QueryClient,
   type QueryKey,
+  type QueryObserverOptions,
 } from "@tanstack/react-query";
+import {
+  holdReadsWhileConnectionLost,
+  retryWhileConnectionLost,
+} from "@/lib/desktop/connection-lost";
 import {
   currentOrganizationId,
   onOrganizationChange,
@@ -62,7 +69,65 @@ focusManager.setEventListener((handleFocus) => {
   };
 });
 
-export const queryClient = new QueryClient({
+/**
+ * The app's client. Every query's retry rule is its own, wrapped once here so that a read failing
+ * while OpenBot Desktop can't reach the OpenBot it is connected to waits for it instead of failing
+ * (`lib/desktop/connection-lost.ts`). Wrapped where options are resolved, so a query that turns its
+ * retries off is held the same way.
+ */
+class OpenBotQueryClient extends QueryClient {
+  override defaultQueryOptions<
+    TQueryFnData = unknown,
+    TError = DefaultError,
+    TData = TQueryFnData,
+    TQueryData = TQueryFnData,
+    TQueryKey extends QueryKey = QueryKey,
+    TPageParam = never,
+  >(
+    options:
+      | QueryObserverOptions<
+          TQueryFnData,
+          TError,
+          TData,
+          TQueryData,
+          TQueryKey,
+          TPageParam
+        >
+      | DefaultedQueryObserverOptions<
+          TQueryFnData,
+          TError,
+          TData,
+          TQueryData,
+          TQueryKey
+        >,
+  ): DefaultedQueryObserverOptions<
+    TQueryFnData,
+    TError,
+    TData,
+    TQueryData,
+    TQueryKey
+  > {
+    if (options._defaulted)
+      return options as DefaultedQueryObserverOptions<
+        TQueryFnData,
+        TError,
+        TData,
+        TQueryData,
+        TQueryKey
+      >;
+    const resolved = super.defaultQueryOptions(options);
+    return {
+      ...resolved,
+      ...retryWhileConnectionLost<TError>(
+        this,
+        resolved.retry ?? false,
+        resolved.retryDelay,
+      ),
+    };
+  }
+}
+
+export const queryClient = new OpenBotQueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
@@ -71,6 +136,8 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+holdReadsWhileConnectionLost(queryClient);
 
 /**
  * Moving from one organization to another drops everything the app held for the one left, in

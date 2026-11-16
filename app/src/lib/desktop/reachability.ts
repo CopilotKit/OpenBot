@@ -9,8 +9,8 @@
  * means the OpenBot's address answered.
  *
  * `lib/client.ts` reports every answer here, so the line clears on the next request that gets one.
- * Only the connection line reads it, and only in connected mode: in a browser and in a local Desktop
- * nothing shows it.
+ * Only connected mode acts on it (`connection-lost.ts`): the line shows, and the screens wait for
+ * OpenBot. In a browser and in a local Desktop nothing does.
  *
  * No imports, so the transport can report to it without a cycle.
  */
@@ -27,13 +27,16 @@ function set(next: boolean): void {
   for (const listener of listeners) listener();
 }
 
-/** A request was answered. A 502 is read to tell the relay's own answer from one passed on. */
-export function noteAnswer(response: Response): void {
+/**
+ * A request was answered. A 502 is read to tell the relay's own answer from one passed on; the
+ * promise settles once it has been, so the caller can let its request fail knowing which it was.
+ */
+export function noteAnswer(response: Response): Promise<void> {
   if (response.status !== 502) {
     set(false);
-    return;
+    return Promise.resolve();
   }
-  response
+  return response
     .clone()
     .text()
     .then(

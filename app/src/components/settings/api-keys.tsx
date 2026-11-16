@@ -97,7 +97,7 @@ export function ApiKeysPage() {
       <PageSection>
         {list.isPending ? null : list.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Couldn't load your API keys. Reload the page.
+            Couldn't load your API keys. Try again in a moment.
           </p>
         ) : list.data.state === "unavailable" ? (
           <PageEmpty

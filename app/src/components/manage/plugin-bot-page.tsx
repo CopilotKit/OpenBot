@@ -237,7 +237,7 @@ export function PluginBotPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Reload the page.
+          Couldn't load apps. Try again in a moment.
         </p>
       </PageShell>
     );

@@ -147,7 +147,7 @@ function TeamGrantsRow({
           <ItemTitle>Teams</ItemTitle>
           <ItemDescription role="alert">
             {failed?.message ??
-              "Couldn't load the teams it's given to. Reload the page."}
+              "Couldn't load the teams it's given to. Try again in a moment."}
           </ItemDescription>
         </ItemContent>
       </Item>

@@ -177,7 +177,7 @@ export function ComputersPage({
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Reload the page."
+    ? "Couldn't load the computers. Try again in a moment."
     : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message

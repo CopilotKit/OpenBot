@@ -304,7 +304,7 @@ test("when the states cannot be read, the apps are still listed and the failure 
   });
   const view = draw();
   expect((await view.findByRole("alert")).textContent).toContain(
-    "Couldn't check whether each app is ready for you. Reload the page.",
+    "Couldn't check whether each app is ready for you. Try again in a moment.",
   );
   expect(await view.findByText("Google Drive")).toBeTruthy();
 });

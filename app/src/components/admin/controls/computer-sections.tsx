@@ -260,7 +260,7 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
       </PageRows>
       {teams.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load teams. Reload the page.
+          Couldn't load teams. Try again in a moment.
         </p>
       ) : null}
       {known.some(

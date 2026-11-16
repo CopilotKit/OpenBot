@@ -387,7 +387,7 @@ test("a read that fails says so, and a save that fails says why", async () => {
   failRead = true;
   const failed = draw();
   await failed.findByText(
-    "Couldn't load your Learning settings. Reload the page.",
+    "Couldn't load your Learning settings. Try again in a moment.",
   );
   cleanup();
   queryClient.clear();

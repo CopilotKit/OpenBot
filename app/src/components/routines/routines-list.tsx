@@ -279,7 +279,7 @@ export function RoutinesList({
       {/* One read failing leaves the other two listed, and says which part is missing. */}
       {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your {failed.join(" and ")}. Reload the page.
+          Couldn't load your {failed.join(" and ")}. Try again in a moment.
         </p>
       ) : null}
 

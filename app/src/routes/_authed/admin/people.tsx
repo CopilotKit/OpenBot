@@ -149,7 +149,7 @@ function PeoplePage() {
 
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load people. Reload the page.
+            Couldn't load people. Try again in a moment.
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty

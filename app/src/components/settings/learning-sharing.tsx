@@ -89,7 +89,7 @@ function emptySentence(
 ): string {
   if (personal) {
     return data.skills === null
-      ? "Couldn't read your Skills from the backend just now. Reload the page to try again."
+      ? "Couldn't read your Skills from the backend just now. Try again in a moment."
       : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")

@@ -27,7 +27,7 @@ test("a load that failed for any other reason still says to reload", () => {
     new TypeError("Failed to fetch"),
   ]) {
     expect(conversationLoadFailure(error, "Acme")).toBe(
-      "Couldn't load this conversation. Reload the page.",
+      "Couldn't load this conversation. Try again in a moment.",
     );
   }
 });

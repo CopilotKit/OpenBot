@@ -141,7 +141,7 @@ export function CheckInsPage() {
         </PageSection>
       ) : overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in settings. Reload the page.
+          Couldn't load check-in settings. Try again in a moment.
         </p>
       ) : (
         <CheckInSettings data={overview.data} />
@@ -291,7 +291,7 @@ function Activity({
     >
       {metrics.isPending ? null : metrics.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in activity. Reload the page.
+          Couldn't load check-in activity. Try again in a moment.
         </p>
       ) : (
         <>

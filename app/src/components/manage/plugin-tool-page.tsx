@@ -95,7 +95,7 @@ export function PluginToolPage({
     return (
       <PageShell backButton={back} title={toolName}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Reload the page.
+          Couldn't load plugins. Try again in a moment.
         </p>
       </PageShell>
     );

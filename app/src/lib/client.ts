@@ -38,6 +38,9 @@ export type ClientOptions = {
 /**
  * The one `fetch`. Each outcome is reported to `lib/desktop/reachability.ts`, which is how the app
  * knows the OpenBot it is connected to stopped answering, and answers again.
+ *
+ * A 502 is read before it is handed back, so a read failing on the relay's own answer fails with
+ * the connection already known to be lost, and waits for OpenBot (`connection-lost.ts`).
  */
 async function request(path: string, init: RequestInit): Promise<Response> {
   let response: Response;
@@ -47,7 +50,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     noteNoAnswer(error);
     throw error;
   }
-  noteAnswer(response);
+  const noted = noteAnswer(response);
+  if (response.status === 502) await noted;
   return response;
 }
 

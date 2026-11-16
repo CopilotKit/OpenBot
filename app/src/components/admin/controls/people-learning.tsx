@@ -71,7 +71,7 @@ const CHOICES: {
 function SettingsError({ message }: { message?: string }) {
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {message ?? "Couldn't load Learning settings. Reload the page."}
+      {message ?? "Couldn't load Learning settings. Try again in a moment."}
     </p>
   );
 }
@@ -249,7 +249,7 @@ export function PeopleProposalsSection() {
               key={person.personId}
               role="alert"
             >
-              {`Couldn't read ${person.name}'s skills. Reload the page to try again.`}
+              {`Couldn't read ${person.name}'s skills. Try again in a moment.`}
             </p>
           ))}
           {rows.length === 0 ? (
