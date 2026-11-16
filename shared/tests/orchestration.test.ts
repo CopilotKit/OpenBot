@@ -190,6 +190,10 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
     expect(DELEGATING_GUIDANCE).toContain("never start a new task for it");
     expect(DELEGATING_GUIDANCE).toContain("call stop for it");
+    // Live, told to stop work it had done itself, a Bot stopped the conversation's other task.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "stop nothing, never a different task in its place",
+    );
   });
 
   test("a finished task is said to be done, not waiting for review", () => {
