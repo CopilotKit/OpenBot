@@ -38,6 +38,7 @@ import type {
   ListInvitationsParams,
   ListOrganizationInvitationsParams,
   ListOrganizationMembersParams,
+  ListOrganizationsHeaders,
   ListOrganizationsParams,
   OrganizationConflictResponse,
   OrganizationInvitationConflictResponse,
@@ -105,16 +106,39 @@ export const getListOrganizationsUrl = (params?: ListOrganizationsParams) => {
 };
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizations = async (
   params?: ListOrganizationsParams,
+  headers?: ListOrganizationsHeaders,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<OrganizationPage> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return apiRequest<OrganizationPage>(getListOrganizationsUrl(params), {
     ...options,
     method: "GET",
+    headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
 
@@ -133,10 +157,12 @@ export const getListOrganizationsQueryOptions = <
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | ForbiddenResponse
+    | OrganizationNotFoundResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
 >(
   params?: ListOrganizationsParams,
+  headers?: ListOrganizationsHeaders,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -155,7 +181,8 @@ export const getListOrganizationsQueryOptions = <
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof listOrganizations>>
-  > = ({ signal }) => listOrganizations(params, { signal, ...requestOptions });
+  > = ({ signal }) =>
+    listOrganizations(params, headers, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listOrganizations>>,
@@ -171,6 +198,7 @@ export type ListOrganizationsQueryError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | ForbiddenResponse
+  | OrganizationNotFoundResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 
@@ -180,10 +208,12 @@ export function useListOrganizations<
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | ForbiddenResponse
+    | OrganizationNotFoundResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
 >(
   params: undefined | ListOrganizationsParams,
+  headers: undefined | ListOrganizationsHeaders,
   options: {
     query: Partial<
       UseQueryOptions<
@@ -212,10 +242,12 @@ export function useListOrganizations<
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | ForbiddenResponse
+    | OrganizationNotFoundResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
 >(
   params?: ListOrganizationsParams,
+  headers?: ListOrganizationsHeaders,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -244,10 +276,12 @@ export function useListOrganizations<
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | ForbiddenResponse
+    | OrganizationNotFoundResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
 >(
   params?: ListOrganizationsParams,
+  headers?: ListOrganizationsHeaders,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -272,10 +306,12 @@ export function useListOrganizations<
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | ForbiddenResponse
+    | OrganizationNotFoundResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
 >(
   params?: ListOrganizationsParams,
+  headers?: ListOrganizationsHeaders,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -290,7 +326,11 @@ export function useListOrganizations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getListOrganizationsQueryOptions(params, options);
+  const queryOptions = getListOrganizationsQueryOptions(
+    params,
+    headers,
+    options,
+  );
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

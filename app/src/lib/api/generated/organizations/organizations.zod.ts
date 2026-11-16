@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizationsQueryLimitDefault = 50;
@@ -31,6 +31,19 @@ export const ListOrganizationsQueryParams = zod.object({
     .optional()
     .describe(
       "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listOrganizationsHeaderOpenBotOrganizationMax = 200;
+
+export const ListOrganizationsHeader = zod.object({
+  "OpenBot-Organization": zod
+    .string()
+    .min(1)
+    .max(listOrganizationsHeaderOpenBotOrganizationMax)
+    .optional()
+    .describe(
+      "For a request signed in with an app's token: the organization it works in, by id or slug, which the list marks active. Without it the caller's own is active. One the caller is not a member of answers not found, and one that is not a single id or slug 400. Ignored for a session and an API key.",
     ),
 });
 

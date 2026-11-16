@@ -119,8 +119,11 @@ async function everyOrganization(
   let canCreate = false;
   let cursor: string | undefined;
   do {
+    // No OpenBot-Organization header: the page's own sign-in says which one is active, and where
+    // an app's token signs it in, the app adds the header on its way to OpenBot.
     const page = await listOrganizations(
       { limit: 100, ...(cursor ? { cursor } : {}) },
+      undefined,
       { signal, fallback: LOAD_FALLBACK },
     );
     organizations.push(...page.organizations);
