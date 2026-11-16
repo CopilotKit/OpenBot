@@ -72,8 +72,16 @@ let recorded = new Map<string, unknown[]>();
 /** The thread's stored messages: what was said, and nothing about how a run ended. */
 let stored = new Map<string, Message[]>();
 let stopRequests: string[] = [];
-/** How the API answers a read of the Bot: it is this person's, it is not (404), or the server broke. */
+/**
+ * How the API answers a read of the Bot once a run has been asked for: it is this person's, it is not
+ * (404), or the server broke. Before that it is found, as it was for a person already talking to the
+ * Bot: what each test is about is the read after the run went wrong. A read that fails before the
+ * run is asked for is waited out with the screen's own retry, a second later (`factsFor` in
+ * lib/copilot/bot-offer.ts), and that second is not what these tests are about.
+ */
 let botRead: "found" | "not-found" | "breaks" = "found";
+/** Whether a run has been asked for since the test began, from when `botRead` applies. */
+let runAsked = false;
 let botReads = 0;
 /**
  * How runs travel, as the runtime's `/info` says. Through Intelligence, a run is a request for join
@@ -230,7 +238,11 @@ beforeAll(() => {
       if (url.pathname === botGrantsPath("failed-run-bot"))
         return botGrantsResponse();
       if (url.pathname === botPath("failed-run-bot")) botReads += 1;
-      if (url.pathname === botPath("failed-run-bot") && botRead !== "found")
+      if (
+        url.pathname === botPath("failed-run-bot") &&
+        runAsked &&
+        botRead !== "found"
+      )
         return botRead === "not-found"
           ? NativeResponse.json(
               {
@@ -279,8 +291,10 @@ beforeAll(() => {
         const body = (await request().json()) as { threadId?: string };
         return sse(recorded.get(body.threadId ?? "") ?? []);
       }
-      if (url.pathname.endsWith("/run"))
+      if (url.pathname.endsWith("/run")) {
+        runAsked = true;
         return run(RunAgentInputSchema.parse(await request().json()));
+      }
       /*
        * A stop, as the runtime carries it out: the runner closes what the run left open and ends it
        * with RUN_FINISHED, outcome cancelled, never a RUN_ERROR (`finalizeRunEvents` in
@@ -338,6 +352,7 @@ afterEach(() => {
   stalled = null;
   stepsRun = 0;
   botRead = "found";
+  runAsked = false;
   botReads = 0;
   transport = "sse";
 });
