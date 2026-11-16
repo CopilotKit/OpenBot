@@ -1,6 +1,11 @@
 import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
+import {
+  Link,
+  type LinkOptions,
+  useParams,
+  useRouterState,
+} from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -9,10 +14,8 @@ import { openNewOrganization } from "@/components/organizations/new-organization
 import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import {
-  DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   InputGroup,
@@ -67,7 +70,7 @@ import {
 import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { AccountLabel } from "./account-label";
+import { AccountMenu } from "./account-label";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
@@ -331,6 +334,40 @@ function SearchResults({
   );
 }
 
+/**
+ * Whether the pointer has stayed where it was since the page last changed.
+ *
+ * The account menu opens upwards, over the rows above it, and Invitations sits right over Bots. Chosen
+ * from there, the menu goes and leaves the pointer resting on Bots, which took its hover fill: the
+ * same fill the open page's row has, so on /invitations Bots read as the page that was open. Until
+ * the pointer moves, a row it happens to be over is not filled. A browser can tell the page what is
+ * under a pointer that did not move, with no distance moved; only a real move counts.
+ */
+function usePointerRestingSinceNavigation(): boolean {
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const [movedOn, setMovedOn] = useState<string | null>(null);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const moved = (event: PointerEvent) => {
+      // By the distance the event reports, or, where a browser reports none, by where it lands.
+      const before = last.current;
+      last.current = { x: event.clientX, y: event.clientY };
+      if (
+        event.movementX !== 0 ||
+        event.movementY !== 0 ||
+        (before !== null &&
+          (before.x !== event.clientX || before.y !== event.clientY))
+      )
+        setMovedOn(pathname);
+    };
+    window.addEventListener("pointermove", moved);
+    return () => window.removeEventListener("pointermove", moved);
+  }, [pathname]);
+  return movedOn !== pathname;
+}
+
 /** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
 function PrimaryNavItem({
   item,
@@ -344,7 +381,9 @@ function PrimaryNavItem({
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        className="hover:bg-foreground/5 h-10"
+        // No hover fill under a pointer that has not moved since the page changed (see
+        // usePointerRestingSinceNavigation); the open page's row keeps its own.
+        className="hover:bg-foreground/5 h-10 group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5"
         render={(props) => (
           <Link
             {...props}
@@ -388,6 +427,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const organizationChoices = useOrganizationChoices();
   const invitationsWaiting = useWaitingInvitationCount();
   const switchOrganization = useSwitchOrganization();
+  const pointerResting = usePointerRestingSinceNavigation();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -543,7 +583,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
-        <SidebarMenu className="gap-px">
+        <SidebarMenu
+          className="group/footer-menu gap-px"
+          data-pointer-resting={pointerResting || undefined}
+        >
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
@@ -559,14 +602,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               ),
             )}
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
-                }
-              >
-                <AccountLabel />
-              </DropdownMenuTrigger>
+            <AccountMenu>
               <DropdownMenuContent
                 align="start"
                 className="p-1.5"
@@ -618,7 +654,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </AccountMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

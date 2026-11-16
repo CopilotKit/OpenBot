@@ -464,10 +464,12 @@ mod connected_ipc {
     }
 
     /// The organisation picked in the app is kept beside the address, told back to the page, and
-    /// gone at sign-out. Sign-out forgets the saved sign-in and keeps the address; back on this
-    /// computer the choice is local, with the address still remembered for another time.
+    /// kept through a sign-out, so the next sign-in at that address works where the person left
+    /// off: a token remembers nothing, so the app is what remembers. Sign-out forgets the saved
+    /// sign-in and keeps the address; back on this computer the choice is local, with the address
+    /// still remembered for another time and the organisation gone.
     #[test]
-    fn the_organisation_is_kept_then_cleared_at_sign_out_and_the_address_stays() {
+    fn the_organisation_is_kept_through_sign_out_and_cleared_back_on_this_computer() {
         let _ports = crate::test_support::hold_ports();
         let shell = Connected::new();
         let address = nobody_home();
@@ -513,9 +515,31 @@ mod connected_ipc {
             serde_json::json!({
                 "mode": "connected",
                 "address": address,
-                "organizationId": null,
+                "organizationId": "org_A1-b",
                 "signedIn": false
             })
+        );
+        // Signing in again at the same address carries it into the new sign-in, which the relay
+        // then names; at another address it is gone.
+        let kept = choice::read(&shell.config);
+        assert_eq!(
+            choice::signed_in_at(&kept, &address)
+                .organization_id
+                .as_deref(),
+            Some("org_A1-b")
+        );
+        assert_eq!(
+            choice::signed_in_at(&kept, "https://another.example.com").organization_id,
+            None
+        );
+
+        // Settings' Change signs out the same way, and keeps it too.
+        shell.store.set(&address, &saved).unwrap();
+        desktop_connected::change_connection_now(shell.handle()).unwrap();
+        assert_eq!(shell.store.get(&address).unwrap(), None);
+        assert_eq!(
+            choice::read(&shell.config).organization_id.as_deref(),
+            Some("org_A1-b")
         );
 
         // Back to OpenBot on this computer, from the setup window.
@@ -539,6 +563,62 @@ mod connected_ipc {
         assert_eq!(shell.config_files(), ["connection.json"]);
         let written = std::fs::read_to_string(shell.config.join("connection.json")).unwrap();
         assert!(!written.contains("obr_") && !written.contains("oba_"), "{written}");
+    }
+
+    /// Once the browser has been opened for a sign-in, the app comes forward however it ended: on
+    /// the Mac a sign-in whose save to the Keychain failed left the app behind the browser, and the
+    /// person saw only the browser's line. Before the browser opens (a bad or unreachable address)
+    /// the app is in front already, and nothing is asked of the window.
+    #[test]
+    fn every_outcome_after_the_browser_brings_the_app_forward() {
+        use openbot_desktop_lib::connected::Kind;
+        let shell = Connected::new();
+        let host = "openbot.example.com";
+        let outcomes: Vec<Result<(), Problem>> = vec![
+            Ok(()),
+            Err(Kind::AccessRefused.problem(host, "it answered 403")),
+            Err(Kind::SignInFailed.problem(host, "it answered 500")),
+            Err(Kind::CredentialStore.problem(host, "the keychain refused")),
+            Err(Kind::SignInCancelled.problem(host, "the person denied consent")),
+            Err(Kind::TooOld.problem(host, "the token exchange gave no refresh token")),
+        ];
+        let said: Vec<Option<String>> = outcomes
+            .iter()
+            .map(|outcome| desktop_connected::forward_after_sign_in(true, outcome))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "signed in",
+                "access-refused",
+                "sign-in-failed",
+                "credential-store",
+                "sign-in-cancelled",
+                "too-old",
+            ]
+            .map(|ended| Some(format!("the browser sign-in ended: {ended}")))
+        );
+        // The browser never opened: the window is left as it is.
+        assert_eq!(
+            desktop_connected::forward_after_sign_in(
+                false,
+                &Err(Kind::Unreachable.problem(host, "connection refused")),
+            ),
+            None
+        );
+        // Through the shell and its mock window, which keeps no record of being in front, so the
+        // decision above is what is checked; this only shows the call runs on the real app type.
+        for outcome in &outcomes {
+            desktop_connected::come_forward_after_sign_in(shell.handle(), true, outcome);
+        }
+        // The command does it for every outcome, before it answers the setup page.
+        let source = include_str!("desktop_connected.rs");
+        let command = &source[source.find("pub async fn connect_to_openbot").unwrap()..];
+        let command = &command[..command.find("\n}\n").unwrap()];
+        assert!(
+            command.contains("come_forward_after_sign_in(\n        &forward,\n        opened.load("),
+            "{command}"
+        );
     }
 
     /// The sign-in ended while OpenBot was showing: the setup window is back, it is told so once
@@ -591,7 +671,8 @@ mod connected_ipc {
         assert_eq!(shell.window.url().unwrap().as_str(), SETUP);
         let kept = choice::read(&shell.config);
         assert_eq!(kept.connected_to(), Some(address.as_str()));
-        assert_eq!(kept.organization_id, None);
+        // Kept for signing in again at the same address; another address or this computer clears it.
+        assert_eq!(kept.organization_id.as_deref(), Some("org_1"));
         assert_eq!(
             shell.ask(SETUP, "take_connection_notice"),
             Ok(serde_json::json!({ "kind": "choose", "message": null }))

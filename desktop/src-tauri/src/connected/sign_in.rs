@@ -461,16 +461,22 @@ impl Session {
             let live = self.live.lock().unwrap();
             (live.access.clone(), live.refresh.clone())
         };
+        let mut answered = true;
         for (token, hint) in [(access, "access_token"), (refresh, "refresh_token")] {
             if token.is_empty() {
                 continue;
             }
             if let Err(error) = revoke_token(endpoint, &token, hint) {
+                answered = false;
                 log::warn!(
                     "[connect] could not revoke the {hint} at {}: {error}",
                     self.host
                 );
             }
+        }
+        // The host only: never a token.
+        if answered {
+            log::info!("[connect] revoked the sign-in at {}", self.host);
         }
     }
 }
@@ -486,11 +492,12 @@ pub fn sign_out_saved(
         metadata.and_then(|metadata| metadata.revocation_endpoint.as_deref()),
         store.get(address),
     ) {
-        if let Err(error) = revoke_token(endpoint, &refresh, "refresh_token") {
-            log::warn!(
+        match revoke_token(endpoint, &refresh, "refresh_token") {
+            Ok(()) => log::info!("[connect] revoked the sign-in at {}", host_of(address)),
+            Err(error) => log::warn!(
                 "[connect] could not revoke the saved sign-in at {}: {error}",
                 host_of(address)
-            );
+            ),
         }
     }
     store.forget(address)
@@ -1324,9 +1331,17 @@ mod tests {
         tokens.push(store.get(&address).unwrap().unwrap());
         openbot.end_sessions();
         session.after_refused(&tokens[4]).expect_err("ended");
+        // And a saved sign-in revoked with no session around it, as sign-out at launch does.
+        let saved = openbot.sign_in(store.clone());
+        tokens.push(saved.access().unwrap());
+        tokens.push(store.get(&address).unwrap().unwrap());
+        sign_out_saved(&address, Some(&openbot.metadata()), &store).unwrap();
 
         let lines = captured.0.lock().unwrap().join("\n");
         assert!(lines.contains("[connect] signed in to"), "{lines}");
+        // Each revocation the OpenBot answered says so, once: the sign-out and the saved one.
+        let revoked = format!("[connect] revoked the sign-in at {}", host_of(&address));
+        assert_eq!(lines.matches(revoked.as_str()).count(), 2, "{lines}");
         for token in &tokens {
             assert!(!lines.contains(token.as_str()), "a token was logged");
         }
