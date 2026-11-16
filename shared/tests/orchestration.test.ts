@@ -184,6 +184,14 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
   });
 
+  test("more for a task already started goes to that task, and a stop to it, never a new task", () => {
+    expect(DELEGATING_GUIDANCE).toContain(
+      "pass it on with follow_up, naming that task by the taskId its delegate answer gave",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("never start a new task for it");
+    expect(DELEGATING_GUIDANCE).toContain("call stop for it");
+  });
+
   test("a finished task is said to be done, not waiting for review", () => {
     // Told `ready_for_review`, a Bot said a finished order "may be waiting on you".
     expect(taskStands("ready_for_review")).toStartWith("done");
