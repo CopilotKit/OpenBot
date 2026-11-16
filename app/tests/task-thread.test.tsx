@@ -492,7 +492,7 @@ test("a card that had stopped reading its task reads it again when the conversat
   };
   await view.findByText("Couldn't finish", {}, { timeout: 6_000 });
   expect(stateOf(view)).toBe("failed");
-  expect(view.getByText("a service didn't answer")).toBeTruthy();
+  expect(view.getByText("A service didn't answer.")).toBeTruthy();
 }, 20_000);
 
 test("last activity moves when the task does something, and keeps ageing when it does not", async () => {
@@ -697,4 +697,68 @@ test("a stopped task's line in the conversation reads Stopped, and its link row 
   expect(
     view.container.querySelector("li[data-state]")?.getAttribute("data-state"),
   ).toBe("stopped");
+});
+
+test("a task that couldn't finish says why on its card as a sentence of its own", async () => {
+  // The server words the reason to follow "Couldn't finish:", so it starts in lower case.
+  for (const [failure, said] of [
+    [
+      "this Bot isn't shared with you any more",
+      "This Bot isn't shared with you any more.",
+    ],
+    [
+      "Pipeline Bot isn't shared with you",
+      "Pipeline Bot isn't shared with you.",
+    ],
+  ] as const) {
+    task = {
+      ...task,
+      status: "failed",
+      next: null,
+      failure,
+      failedAt: ago(5),
+      stoppedAt: null,
+      workingSince: null,
+    };
+    const view = draw(
+      <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+    );
+    await view.findByText("Couldn't finish");
+    expect(view.getByText(said)).toBeTruthy();
+    expect(view.queryByText(failure)).toBeNull();
+    cleanup();
+  }
+});
+
+test("a result whose task now needs the person doesn't read as done above its card", async () => {
+  task = {
+    ...task,
+    status: "needs_input",
+    next: "This needs you: Slack isn't ready for this Bot yet",
+    failure: null,
+    stoppedAt: null,
+  };
+  const view = draw(
+    <TaskReport kind="result" taskId="task-1">
+      <p>
+        “refunds batch done” was not posted because I haven't been granted Slack
+        access.
+      </p>
+    </TaskReport>,
+  );
+  const link = await view.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(link.getAttribute("data-state")).toBe("needs"));
+  task = { ...task, status: "ready_for_review", next: null };
+  cleanup();
+  const done = draw(
+    <TaskReport kind="result" taskId="task-1">
+      <p>Posted.</p>
+    </TaskReport>,
+  );
+  const doneLink = await done.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(doneLink.getAttribute("data-state")).toBe("done"));
 });
