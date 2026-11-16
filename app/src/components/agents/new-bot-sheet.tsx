@@ -127,14 +127,14 @@ type Step = (typeof STEPS)[number];
  * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
  * so the server never hears which was picked.
  */
-type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+export type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
 
 /**
  * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
  * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
  * fails if the two drift apart.
  */
-function declaredFramework(id: string): CreateBotRequestHarness | undefined {
+export function declaredFramework(id: string): CreateBotRequestHarness | undefined {
   const known: readonly string[] = Object.values(CreateBotRequestHarness);
   return id !== "" && known.includes(id)
     ? (id as CreateBotRequestHarness)
@@ -938,7 +938,7 @@ function IsolatedOption({
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
-const OPTION_CLASSES =
+export const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
@@ -947,7 +947,7 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
+export function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -996,7 +996,7 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * from there, which is the one thing the browser cannot tell. Why it could not be reached arrives as
  * this field's error.
  */
-function EndpointStep({
+export function EndpointStep({
   harness,
   endpoint,
   secret,
