@@ -1,9 +1,13 @@
-import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
+import { IconArrowDown, IconArrowUp, IconSitemap } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { OPTION_CLASSES } from "@/components/agents/new-bot-sheet";
 import { AgentMark } from "@/components/bot-agents/agent-mark";
-import { PageCard, PageSection } from "@/components/layout/page-shell";
+import {
+  PageCard,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { MetaTag } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +19,14 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -90,7 +102,8 @@ function DelegationForm({
   const save = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const editable = saved.canManage;
 
-  const [orchestrate, setOrchestrate] = useState(saved.mode === "orchestrate");
+  const orchestrate = saved.mode === "orchestrate";
+  const toggle = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const [runsOn, setRunsOn] = useState(saved.agents[0]?.id ?? "");
   const [chosen, setChosen] = useState<string[]>(
     saved.mode === "orchestrate" ? saved.agents.map((each) => each.id) : [],
@@ -154,211 +167,243 @@ function DelegationForm({
     setDone(true);
   };
 
-  return (
-    <PageSection>
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit().catch(() => undefined);
-        }}
-      >
-        <PageCard
-          footer={
-            editable ? (
-              <Button disabled={save.isPending} size="sm" type="submit">
-                {save.isPending ? "Saving…" : "Save"}
-              </Button>
-            ) : undefined
-          }
-        >
-          <FieldGroup>
-            <Field orientation="horizontal">
-              <div className="grid min-w-0 flex-1 gap-1">
-                <FieldLabel htmlFor="hand-work-to-agents">
-                  Hand work to agents
-                </FieldLabel>
-                <FieldDescription>
-                  {orchestrate
-                    ? "This Bot answers quickly and hands the work to these agents. They act with this Bot's apps, as the person who asked."
-                    : "This Bot does the work itself, with its apps."}
-                </FieldDescription>
-              </div>
-              <Switch
-                checked={orchestrate}
-                disabled={!editable}
-                id="hand-work-to-agents"
-                onCheckedChange={(next) => {
-                  setOrchestrate(next);
-                  // Turning it on starts from the agent it runs on today, so nothing is lost.
-                  if (next && chosen.length === 0 && runsOn)
-                    setChosen([runsOn]);
-                  if (!next && chosen[0]) setRunsOn(chosen[0]);
-                }}
-              />
-            </Field>
+  /*
+   * The switch saves on its own, as a switch does. Turning it on keeps the agent the Bot runs on as
+   * its first and default; turning it off runs the Bot on its default agent again. What was saved
+   * for the other mode (the model, the instructions) is kept for when it is turned back on.
+   */
+  const flip = (next: boolean) => {
+    const own = saved.agents.filter((each) => each.available);
+    const first = own[0] ?? saved.agents[0];
+    if (!first) return;
+    toggle.mutate({
+      botId,
+      input: {
+        mode: next ? "orchestrate" : "self",
+        model: saved.model,
+        effort: saved.effort,
+        instructions: saved.instructions,
+        agentIds: next ? own.map((each) => each.id) : [first.id],
+      },
+    });
+  };
 
-            {orchestrate ? (
-              <>
-                <Field>
-                  <FieldLabel>Model</FieldLabel>
-                  <Select
-                    disabled={!editable}
-                    onValueChange={(value) => setModel(String(value))}
-                    value={model}
-                  >
-                    <SelectTrigger aria-label="Model">
-                      <SelectValue>
-                        {model === DEFAULT_MODEL
-                          ? "Organization default"
-                          : (catalogue.data?.models.find(
-                              (option) => option.id === model,
-                            )?.label ?? model)}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value={DEFAULT_MODEL}>
-                          Organization default
-                        </SelectItem>
-                        {(catalogue.data?.models ?? []).map((option) => (
-                          <SelectItem key={option.id} value={option.id}>
-                            {option.label}
+  return (
+    <>
+      <PageSection>
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconSitemap />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle id={`hand-work-${botId}`}>
+                Hand work to agents
+              </ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                {orchestrate
+                  ? "This Bot answers quickly and hands the work to the agents below. They act with this Bot's apps, as the person who asked."
+                  : "This Bot does the work itself, with its apps."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-labelledby={`hand-work-${botId}`}
+                checked={toggle.isPending ? !orchestrate : orchestrate}
+                disabled={!editable || toggle.isPending}
+                onCheckedChange={flip}
+              />
+            </ItemActions>
+          </Item>
+        </PageRows>
+        {toggle.error ? (
+          <p className="mt-3 text-destructive text-sm" role="alert">
+            {toggle.error.message}
+          </p>
+        ) : null}
+      </PageSection>
+      <PageSection title={orchestrate ? "Handing out work" : "Runs on"}>
+        <form
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit().catch(() => undefined);
+          }}
+        >
+          <PageCard
+            footer={
+              editable ? (
+                <Button disabled={save.isPending} size="sm" type="submit">
+                  {save.isPending ? "Saving…" : "Save"}
+                </Button>
+              ) : undefined
+            }
+          >
+            <FieldGroup>
+              {orchestrate ? (
+                <>
+                  <Field>
+                    <FieldLabel>Model</FieldLabel>
+                    <Select
+                      disabled={!editable}
+                      onValueChange={(value) => setModel(String(value))}
+                      value={model}
+                    >
+                      <SelectTrigger aria-label="Model">
+                        <SelectValue>
+                          {model === DEFAULT_MODEL
+                            ? "Organization default"
+                            : (catalogue.data?.models.find(
+                                (option) => option.id === model,
+                              )?.label ?? model)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value={DEFAULT_MODEL}>
+                            Organization default
                           </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    What this Bot answers and decides on. Each agent keeps its
-                    own.
-                  </FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="delegation-instructions">
-                    How it hands out work
-                    <span className="font-normal text-muted-foreground">
-                      Optional
-                    </span>
-                  </FieldLabel>
-                  <Textarea
-                    disabled={!editable}
-                    id="delegation-instructions"
-                    maxLength={4000}
-                    onChange={(event) => setInstructions(event.target.value)}
-                    placeholder="Send research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself."
-                    rows={4}
-                    value={instructions}
-                  />
-                </Field>
-                <FieldSet>
-                  <FieldLegend variant="label">Agents it may use</FieldLegend>
-                  <FieldDescription>
-                    It reads what each one is good at to decide. The first is
-                    its default, and it gets the work nobody waits on, such as
-                    routines.
-                  </FieldDescription>
-                  <ul aria-label="Agents it may use" className="grid gap-2">
-                    {chosen.map((id, index) => {
-                      const each = byId.get(id);
-                      if (!each) return null;
-                      return (
-                        <AgentChoice
-                          checked
-                          choice={each}
-                          default={index === 0}
-                          disabled={!editable}
-                          key={id}
-                          onCheck={() =>
-                            setChosen((current) =>
-                              current.filter((other) => other !== id),
-                            )
-                          }
-                        >
-                          {editable ? (
-                            <div className="flex shrink-0 gap-1">
-                              <Button
-                                aria-label={`Move ${each.name} up`}
-                                disabled={index === 0}
-                                onClick={() => move(id, -1)}
-                                size="icon-sm"
-                                type="button"
-                                variant="ghost"
-                              >
-                                <IconArrowUp />
-                              </Button>
-                              <Button
-                                aria-label={`Move ${each.name} down`}
-                                disabled={index === chosen.length - 1}
-                                onClick={() => move(id, 1)}
-                                size="icon-sm"
-                                type="button"
-                                variant="ghost"
-                              >
-                                <IconArrowDown />
-                              </Button>
-                            </div>
-                          ) : null}
-                        </AgentChoice>
-                      );
-                    })}
-                    {editable
-                      ? others.map((each) => (
+                          {(catalogue.data?.models ?? []).map((option) => (
+                            <SelectItem key={option.id} value={option.id}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      What this Bot answers and decides on. Each agent keeps its
+                      own.
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="delegation-instructions">
+                      How it hands out work
+                      <span className="font-normal text-muted-foreground">
+                        Optional
+                      </span>
+                    </FieldLabel>
+                    <Textarea
+                      disabled={!editable}
+                      id="delegation-instructions"
+                      maxLength={4000}
+                      onChange={(event) => setInstructions(event.target.value)}
+                      placeholder="Send research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself."
+                      rows={4}
+                      value={instructions}
+                    />
+                  </Field>
+                  <FieldSet>
+                    <FieldLegend variant="label">Agents it may use</FieldLegend>
+                    <FieldDescription>
+                      It reads what each one is good at to decide. The first is
+                      its default, and it gets the work nobody waits on, such as
+                      routines.
+                    </FieldDescription>
+                    <ul aria-label="Agents it may use" className="grid gap-2">
+                      {chosen.map((id, index) => {
+                        const each = byId.get(id);
+                        if (!each) return null;
+                        return (
                           <AgentChoice
-                            checked={false}
+                            checked
                             choice={each}
-                            disabled={chosen.length >= MAX_AGENTS}
-                            key={each.id}
+                            default={index === 0}
+                            disabled={!editable}
+                            key={id}
                             onCheck={() =>
-                              setChosen((current) => [...current, each.id])
+                              setChosen((current) =>
+                                current.filter((other) => other !== id),
+                              )
                             }
-                          />
-                        ))
-                      : null}
-                  </ul>
+                          >
+                            {editable ? (
+                              <div className="flex shrink-0 gap-1">
+                                <Button
+                                  aria-label={`Move ${each.name} up`}
+                                  disabled={index === 0}
+                                  onClick={() => move(id, -1)}
+                                  size="icon-sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <IconArrowUp />
+                                </Button>
+                                <Button
+                                  aria-label={`Move ${each.name} down`}
+                                  disabled={index === chosen.length - 1}
+                                  onClick={() => move(id, 1)}
+                                  size="icon-sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <IconArrowDown />
+                                </Button>
+                              </div>
+                            ) : null}
+                          </AgentChoice>
+                        );
+                      })}
+                      {editable
+                        ? others.map((each) => (
+                            <AgentChoice
+                              checked={false}
+                              choice={each}
+                              disabled={chosen.length >= MAX_AGENTS}
+                              key={each.id}
+                              onCheck={() =>
+                                setChosen((current) => [...current, each.id])
+                              }
+                            />
+                          ))
+                        : null}
+                    </ul>
+                  </FieldSet>
+                </>
+              ) : (
+                <FieldSet>
+                  <FieldLegend className="sr-only" variant="label">
+                    Runs on
+                  </FieldLegend>
+                  <div className="grid gap-2">
+                    {all
+                      .filter((each) => each.available || each.id === runsOn)
+                      .map((each) => (
+                        <button
+                          aria-pressed={runsOn === each.id}
+                          className={OPTION_CLASSES}
+                          disabled={!editable}
+                          key={each.id}
+                          onClick={() => setRunsOn(each.id)}
+                          type="button"
+                        >
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+                            <AgentMark agent={each} bare />
+                          </span>
+                          <AgentWords choice={each} />
+                        </button>
+                      ))}
+                  </div>
                 </FieldSet>
-              </>
-            ) : (
-              <FieldSet>
-                <FieldLegend variant="label">Runs on</FieldLegend>
-                <div className="grid gap-2">
-                  {all
-                    .filter((each) => each.available || each.id === runsOn)
-                    .map((each) => (
-                      <button
-                        aria-pressed={runsOn === each.id}
-                        className={OPTION_CLASSES}
-                        disabled={!editable}
-                        key={each.id}
-                        onClick={() => setRunsOn(each.id)}
-                        type="button"
-                      >
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
-                          <AgentMark agent={each} bare />
-                        </span>
-                        <AgentWords choice={each} />
-                      </button>
-                    ))}
-                </div>
-              </FieldSet>
-            )}
-          </FieldGroup>
-          {problem ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              {problem}
-            </p>
-          ) : save.error ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              {save.error.message}
-            </p>
-          ) : done ? (
-            <p className="mt-4 text-muted-foreground text-sm" role="status">
-              Saved.
-            </p>
-          ) : null}
-        </PageCard>
-      </form>
-    </PageSection>
+              )}
+            </FieldGroup>
+            {problem ? (
+              <p className="mt-4 text-destructive text-sm" role="alert">
+                {problem}
+              </p>
+            ) : save.error ? (
+              <p className="mt-4 text-destructive text-sm" role="alert">
+                {save.error.message}
+              </p>
+            ) : done ? (
+              <p className="mt-4 text-muted-foreground text-sm" role="status">
+                Saved.
+              </p>
+            ) : null}
+          </PageCard>
+        </form>
+      </PageSection>
+    </>
   );
 }
 

@@ -199,7 +199,7 @@ test("the list says where each agent runs and how many Bots use it, and a refuse
 
 const BOT = { id: "agent_sales" } as AgentProfile;
 
-test("turning on Hand work to agents saves the Bot's own agent first, then the ones ticked", async () => {
+test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
   delegation = {
     botId: BOT.id,
     mode: "self",
@@ -211,6 +211,7 @@ test("turning on Hand work to agents saves the Bot's own agent first, then the o
   };
   const user = userEvent.setup({ document });
   const view = draw(<BotDelegation agent={BOT} />);
+  const puts = () => seen.filter((each) => each.line.startsWith("PUT"));
 
   const toggle = await view.findByRole("switch", {
     name: "Hand work to agents",
@@ -219,20 +220,25 @@ test("turning on Hand work to agents saves the Bot's own agent first, then the o
     view.getByText("This Bot does the work itself, with its apps."),
   ).toBeTruthy();
   await user.click(toggle);
+  // Saved at once, with no Save pressed: the agent it ran on, now its default.
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(puts()[0]?.line).toBe(`PUT ${ORG}/bots/agent_sales/delegation`);
+  expect(puts()[0]?.body).toEqual({
+    mode: "orchestrate",
+    model: null,
+    effort: null,
+    instructions: "",
+    agentIds: ["bag_openbot"],
+  });
+
   const list = await view.findByRole("list", { name: "Agents it may use" });
-  // The agent it ran on stays, as its default.
   expect(within(list).getByText("Default")).toBeTruthy();
   await user.click(
     within(list).getByRole("checkbox", { name: /Pipeline analyst/ }),
   );
   await user.click(view.getByRole("button", { name: "Save" }));
-
-  await waitFor(() =>
-    expect(seen.some((each) => each.line.startsWith("PUT"))).toBe(true),
-  );
-  const put = seen.find((each) => each.line.startsWith("PUT"));
-  expect(put?.line).toBe(`PUT ${ORG}/bots/agent_sales/delegation`);
-  expect(put?.body).toEqual({
+  await waitFor(() => expect(puts()).toHaveLength(2));
+  expect(puts()[1]?.body).toEqual({
     mode: "orchestrate",
     model: null,
     effort: null,

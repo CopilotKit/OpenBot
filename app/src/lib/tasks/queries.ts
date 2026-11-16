@@ -72,6 +72,12 @@ export type BotTask = {
   /** When it last did something: a step of its work, or a line said in its conversation. */
   lastActivityAt?: string;
   resolvedAt: string | null;
+  /**
+   * The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a
+   * task the Bot does itself; absent from a server that does not name it. An agent private to
+   * somebody else is named "Private agent".
+   */
+  agent?: { id: string; name: string } | null;
   /** The latest thing the person told it directly in its conversation, unasked. See `TaskSteer`. */
   steer?: { text: string; at: string } | null;
   createdAt: string;

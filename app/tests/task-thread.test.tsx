@@ -62,6 +62,7 @@ let task = {
   sourceApp: null,
   sourceLink: null,
   originConversationId: "channel_main",
+  agent: null as { id: string; name: string } | null,
   status: "needs_input",
   failure: null as string | null,
   failedAt: null as string | null,
@@ -923,4 +924,51 @@ test("a task that needs the person can be stopped from its card too, and a finis
   );
   await done.findByText("Done");
   expect(done.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
+test("a task handed to an agent names it on its card and in its thread, and a task the Bot does itself names none", async () => {
+  // Handed to an agent: who is on it while it works, then who did it.
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    agent: { id: "bag_analyst", name: "Pipeline analyst" },
+  };
+  const working = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Forecast" />,
+  );
+  expect(
+    (await working.findByText("Pipeline analyst is on it")).getAttribute(
+      "data-slot",
+    ),
+  ).toBe("task-agent");
+  cleanup();
+
+  task = { ...task, status: "ready_for_review" };
+  const done = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Forecast" />,
+  );
+  await done.findByText("Done by Pipeline analyst");
+  cleanup();
+
+  // The thread's brief says who sent it and to which agent.
+  const brief = draw(
+    <SentFromBot brief="Forecast Q4." threadId="thread_task" />,
+  );
+  await brief.findByText("to Pipeline analyst");
+  cleanup();
+
+  // The Bot did it itself: the card names no agent, and the brief says only who sent it.
+  task = { ...task, status: "working", agent: null };
+  const itself = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Forecast" />,
+  );
+  await itself.findByText("Working");
+  expect(itself.container.querySelector("[data-slot=task-agent]")).toBeNull();
+  cleanup();
+  const plain = draw(
+    <SentFromBot brief="Forecast Q4." threadId="thread_task" />,
+  );
+  await plain.findByText(/Sent from/);
+  expect(plain.container.querySelector("[data-slot=task-agent]")).toBeNull();
 });
