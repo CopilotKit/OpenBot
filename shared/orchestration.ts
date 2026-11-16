@@ -14,6 +14,10 @@ export const DELEGATE_TOOL = "delegate";
 export const REACT_TOOL = "react";
 /** Find a task thread this conversation started, to give the person its link. */
 export const LINK_TOOL = "link_to_thread";
+/** Tell a task this conversation started something more, as the person's message in its thread. */
+export const FOLLOW_UP_TOOL = "follow_up";
+/** Stop a task this conversation started, as Stop on its card does. */
+export const STOP_TOOL = "stop";
 
 /** The reactions a Bot may leave. A short list, so a reaction always reads as an acknowledgement. */
 export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂"] as const;
@@ -91,6 +95,33 @@ export type LinkedThread = {
 
 /** What `link_to_thread` answers. */
 export type LinkResult = { threads: LinkedThread[] };
+
+/**
+ * What `follow_up` and `stop` answer when they reached the task, and what the conversation draws the
+ * task's card from: the task, and for the model what happens next.
+ */
+export type TaskActionResult = {
+  taskId: string;
+  channelId: string;
+  title: string;
+  /** For `follow_up`: the message the task was sent, as its thread shows it. */
+  message?: string;
+  /** For the model: what happens next, so it neither waits nor does the work itself. */
+  next: string;
+};
+
+/** The task, read back from a `follow_up` or `stop` result, or null for a refusal or anything else. */
+export function readTaskActionResult(text: unknown): TaskActionResult | null {
+  const result = parsedObject(text);
+  if (
+    !result ||
+    typeof result.taskId !== "string" ||
+    typeof result.channelId !== "string" ||
+    typeof result.title !== "string"
+  )
+    return null;
+  return result as TaskActionResult;
+}
 
 function parsedObject(text: unknown): Record<string, unknown> | null {
   if (typeof text !== "string") return null;

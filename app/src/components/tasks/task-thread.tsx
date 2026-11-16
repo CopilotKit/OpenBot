@@ -10,13 +10,18 @@ import {
   IconPlayerStop,
   IconProgress,
 } from "@tabler/icons-react";
-import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import {
+  QueryClientContext,
+  useMutation,
+  useQuery,
+} from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useContext } from "react";
+import { type ReactNode, useContext, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
+import { stopTaskMutationOptions } from "@/lib/tasks/mutations";
 import {
   type BotTask,
   failureSentence,
@@ -32,6 +37,7 @@ import {
   taskQueryOptions,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
+import { queryClient } from "@/query-client";
 
 /*
  * A Bot's task threads, as the conversation that asked for them draws them: the card a task starts
@@ -218,6 +224,36 @@ function OpenThread({
   );
 }
 
+/**
+ * Stop, on a task that is working or waiting on the person: the same stop as Stop in its thread.
+ * The card reads Stopped as soon as the answer comes back, and the line saying how far it got
+ * follows in the conversation.
+ */
+function StopTask({
+  taskId,
+  onError,
+}: {
+  taskId: string;
+  onError: (message: string | null) => void;
+}) {
+  const stop = useMutation({
+    ...stopTaskMutationOptions(queryClient),
+    onMutate: () => onError(null),
+    onError: (error) => onError(error.message),
+  });
+  return (
+    <Button
+      disabled={stop.isPending}
+      onClick={() => stop.mutate(taskId)}
+      size="sm"
+      variant="ghost"
+    >
+      <IconPlayerStop data-icon="inline-start" />
+      {stop.isPending ? "Stopping…" : "Stop"}
+    </Button>
+  );
+}
+
 /** A task's icon, with the dot that says it is moving, waiting or done. */
 function StateIcon({ state }: { state: CardState }) {
   const { icon: Icon, dot } = STATE[state];
@@ -263,6 +299,7 @@ export function TaskCard({
     enabled: Boolean(taskId),
   });
   const state = cardState(taskId ? task.data : undefined);
+  const [stopError, setStopError] = useState<string | null>(null);
   // The card's clock, once there is a task to time: every second while it works, and every half
   // minute otherwise.
   const now = useNow(
@@ -300,9 +337,14 @@ export function TaskCard({
       }
       action={
         channelId ? (
-          <OpenThread channelId={channelId} primary={state === "needs"}>
-            {state === "needs" ? "Go to thread" : "Open thread"}
-          </OpenThread>
+          <>
+            {taskId && (state === "working" || state === "needs") ? (
+              <StopTask onError={setStopError} taskId={taskId} />
+            ) : null}
+            <OpenThread channelId={channelId} primary={state === "needs"}>
+              {state === "needs" ? "Go to thread" : "Open thread"}
+            </OpenThread>
+          </>
         ) : null
       }
       state={state}
@@ -320,6 +362,11 @@ export function TaskCard({
       ) : null}
       {brief && state === "working" ? (
         <p className="line-clamp-2 text-muted-foreground text-xs">{brief}</p>
+      ) : null}
+      {stopError ? (
+        <p className="text-destructive text-xs" role="alert">
+          {stopError}
+        </p>
       ) : null}
     </TaskFrame>
   );
@@ -373,7 +420,9 @@ function TaskFrame({
             {children}
           </div>
         </div>
-        {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
+        {action ? (
+          <div className="mt-3 flex flex-wrap justify-end gap-2">{action}</div>
+        ) : null}
       </section>
       {below}
     </div>

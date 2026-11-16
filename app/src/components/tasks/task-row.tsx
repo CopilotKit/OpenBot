@@ -25,6 +25,7 @@ import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
+  stopTaskMutationOptions,
   tryTaskAgainMutationOptions,
 } from "@/lib/tasks/mutations";
 import {
@@ -179,11 +180,14 @@ export function TaskRow({
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const stop = useMutation(stopTaskMutationOptions(queryClient));
   const { state, Icon, dot: stateDot } = look(listed);
   const dot = settled ? undefined : stateDot;
   const next = nextLine(listed);
-  const busy = resolve.isPending || again.isPending;
-  const error = resolve.error ?? again.error;
+  const busy = resolve.isPending || again.isPending || stop.isPending;
+  const error = resolve.error ?? again.error ?? stop.error;
+  // Stop, as on its card: while it works or waits on the person.
+  const canStop = status === "working" || status === "needs_input";
   const openFirst =
     !settled && (status === "ready_for_review" || status === "needs_input");
   return (
@@ -252,6 +256,17 @@ export function TaskRow({
           >
             Open
           </Button>
+          {canStop ? (
+            <Button
+              disabled={busy}
+              onClick={() => stop.mutate(task.id)}
+              size="sm"
+              variant="ghost"
+            >
+              <IconPlayerStop data-icon="inline-start" />
+              {stop.isPending ? "Stopping…" : "Stop"}
+            </Button>
+          ) : null}
           {status === "resolved" ? (
             <Button
               disabled={busy}
