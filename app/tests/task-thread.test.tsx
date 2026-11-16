@@ -764,6 +764,41 @@ test("a task that couldn't finish says why once, on the line it reports, not on 
   }
 });
 
+/*
+ * An admin dismissing the Request access a task waited on ends it as couldn't finish, after its
+ * result was already said: no failed line is reported under it. The card says only that it couldn't
+ * finish, so the result above the app's card says why, once, and does not read as done.
+ */
+test("a result whose task then couldn't finish says why, once, and doesn't read as done", async () => {
+  task = {
+    ...task,
+    status: "failed",
+    next: null,
+    failure: "an admin didn't give this Bot Slack",
+    failedAt: ago(1),
+    stoppedAt: null,
+    workingSince: null,
+  };
+  const view = draw(
+    <>
+      <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />
+      <TaskReport kind="result" taskId="task-1">
+        <p>
+          “refunds batch done” was not posted because I haven't been granted
+          Slack access.
+        </p>
+      </TaskReport>
+    </>,
+  );
+  const link = await view.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(link.getAttribute("data-state")).toBe("failed"));
+  expect(
+    view.container.textContent?.match(/an admin didn't give this Bot Slack/gi),
+  ).toHaveLength(1);
+});
+
 test("a result whose task now needs the person doesn't read as done above its card", async () => {
   task = {
     ...task,

@@ -19,6 +19,7 @@ import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
 import {
   type BotTask,
+  failureSentence,
   type Reaction,
   reactionsQueryOptions,
   stoppedByYou,
@@ -406,7 +407,21 @@ export function TaskReport({
      * it) is not finished: its link reads as needing them, as the task's card does, not as done.
      */
     const waiting = live === "needs";
-    const ResultIcon = waiting ? IconHandStop : IconCircleCheck;
+    /*
+     * A result whose task then couldn't finish (an admin dismissed the Request access it waited on)
+     * has no failed line under it, and the card says only that it couldn't finish: why is said here,
+     * once, and the link doesn't read as done.
+     */
+    const failedSince = live === "failed";
+    const reason =
+      failedSince && task.data?.failure
+        ? failureSentence(task.data.failure)
+        : null;
+    const ResultIcon = waiting
+      ? IconHandStop
+      : failedSince
+        ? IconAlertTriangle
+        : IconCircleCheck;
     return (
       <div
         className="w-full space-y-2"
@@ -420,7 +435,7 @@ export function TaskReport({
         {channelId ? (
           <Link
             className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
-            data-state={waiting ? "needs" : "done"}
+            data-state={waiting ? "needs" : failedSince ? "failed" : "done"}
             params={{ channelId }}
             to="/channel/$channelId"
           >
@@ -429,12 +444,22 @@ export function TaskReport({
                 "size-3.5 shrink-0",
                 waiting
                   ? STATE.needs.text
-                  : "text-emerald-600 dark:text-emerald-400",
+                  : failedSince
+                    ? STATE.failed.text
+                    : "text-emerald-600 dark:text-emerald-400",
               )}
             />
             <span className="truncate">{title ?? "Task"}</span>
             <IconArrowUpRight className="size-3.5 shrink-0" />
           </Link>
+        ) : null}
+        {reason ? (
+          <p className="text-sm">
+            <span className={cn("font-medium text-xs", STATE.failed.text)}>
+              {TASK_FAILED_LABEL}
+            </span>{" "}
+            <span className="text-muted-foreground">{reason}</span>
+          </p>
         ) : null}
         {children}
       </div>
