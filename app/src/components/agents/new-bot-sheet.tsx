@@ -1085,8 +1085,8 @@ export function EndpointStep({
             />
           ) : mastra ? (
             <FieldDescription>
-              Give the address of your Mastra server. It needs to run one
-              agent, and OpenBot's server has to be able to reach it.
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
             </FieldDescription>
           ) : (
             <FieldDescription>
