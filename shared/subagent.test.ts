@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { readSubagentResult, subagentThreadId } from "./subagent";
+import {
+  ANSWERED_DIRECTLY,
+  readSubagentResult,
+  subagentThreadId,
+} from "./subagent";
 
 /*
  * The server and the browser find a subagent's thread the same way, from the conversation and the
@@ -30,4 +34,24 @@ test("a result is read back from the tool message as the store holds it", () => 
     steps: 2,
   });
   expect(readSubagentResult("Refused. No subagent was started.")).toBeNull();
+});
+
+test("a result that answered without calling a tool carries no count, and is read all the same", () => {
+  const stored = JSON.stringify(
+    JSON.stringify({
+      answer: "PONG",
+      threadId: "t",
+      worked: ANSWERED_DIRECTLY,
+    }),
+  );
+  expect(readSubagentResult(stored)).toEqual({
+    answer: "PONG",
+    threadId: "t",
+    worked: "Answered directly",
+  });
+  expect(
+    readSubagentResult(
+      JSON.stringify({ answer: "x", threadId: "t", steps: "2" }),
+    ),
+  ).toBeNull();
 });
