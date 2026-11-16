@@ -107,6 +107,7 @@ type Task = {
   failure: string | null;
   failedAt: string | null;
   stoppedAt?: string | null;
+  canTryAgain?: boolean;
   next: string | null;
   resolvedAt: string | null;
   createdAt: string;
@@ -469,9 +470,7 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
     "Draft the board update",
   ]);
   expect(bots.getByText("I drafted a reply. Want me to send it?")).toBeTruthy();
-  expect(
-    bots.getByText("Couldn't finish: Gmail stopped answering."),
-  ).toBeTruthy();
+  expect(bots.getByText("Gmail stopped answering.")).toBeTruthy();
 
   fireEvent.click(bots.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
@@ -481,9 +480,7 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
     }),
   );
   await waitFor(() =>
-    expect(
-      bots.queryByText("Couldn't finish: Gmail stopped answering."),
-    ).toBeNull(),
+    expect(bots.queryByText("Gmail stopped answering.")).toBeNull(),
   );
 
   const ready = bots
@@ -567,18 +564,55 @@ test("a task the person stopped reads Stopped on the board, in its card's words,
       row("File the expense report").querySelector(".bg-amber-50"),
     ).not.toBeNull();
 
-    // One that couldn't finish on its own still says so.
+    // One that couldn't finish on its own still says so, in its card's words, and why.
     const failed = within(
       surface
         .getByText("File the expense report")
         .closest("[data-slot=item]") as HTMLElement,
     );
-    expect(failed.getByText("Failed")).toBeTruthy();
-    expect(
-      failed.getByText("Couldn't finish: Gmail stopped answering."),
-    ).toBeTruthy();
+    expect(failed.getByText("Couldn't finish")).toBeTruthy();
+    expect(failed.getByText("Gmail stopped answering.")).toBeTruthy();
     expect(failed.queryByText("Stopped")).toBeNull();
     expect(failed.getByRole("button", { name: "Try again" })).toBeTruthy();
+  }
+});
+
+test("a task refused for good reads Couldn't finish, as its card does, and is offered no Try again", async () => {
+  tasks = [
+    task({
+      id: "h",
+      title: "Deals closing this week",
+      origin: "delegated",
+      status: "failed",
+      failure: "Pipeline Bot isn't shared with you",
+      failedAt: now,
+      // Asking again gets the same answer, and the server says so.
+      canTryAgain: false,
+    }),
+  ];
+  waitingBots = [
+    attentionOf("inbox", "Inbox Bot", {
+      tasks: { needsInput: 0, ready: 0, failed: 1 },
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const row = within(
+      (await region(name).findByText("Deals closing this week")).closest(
+        "[data-slot=item]",
+      ) as HTMLElement,
+    );
+    // Its state in the card's words, and why once, as a sentence.
+    expect(row.getByText("Couldn't finish")).toBeTruthy();
+    expect(row.getByText("Pipeline Bot isn't shared with you.")).toBeTruthy();
+    expect(row.queryByText("Failed")).toBeNull();
+    // What can still be done with it: read it, or put it away.
+    expect(row.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(row.getByRole("button", { name: "Mark done" })).toBeTruthy();
+    expect(row.getByRole("button", { name: "Open" }).getAttribute("href")).toBe(
+      "/channel/c-h",
+    );
   }
 });
 

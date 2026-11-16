@@ -498,7 +498,7 @@ test("a card that had stopped reading its task reads it again when the conversat
   await view.findByText("Working", {}, { timeout: 2_000 });
   expect(stateOf(view)).toBe("working");
 
-  // It runs out of tries: Couldn't finish, with why, and not Stopped.
+  // It runs out of tries: Couldn't finish, and not Stopped. Why is said on the line it reports.
   task = {
     ...task,
     status: "failed",
@@ -509,7 +509,6 @@ test("a card that had stopped reading its task reads it again when the conversat
   };
   await view.findByText("Couldn't finish", {}, { timeout: 6_000 });
   expect(stateOf(view)).toBe("failed");
-  expect(view.getByText("A service didn't answer.")).toBeTruthy();
 }, 20_000);
 
 test("last activity moves when the task does something, and keeps ageing when it does not", async () => {
@@ -716,16 +715,18 @@ test("a stopped task's line in the conversation reads Stopped, and its link row 
   ).toBe("stopped");
 });
 
-test("a task that couldn't finish says why on its card as a sentence of its own", async () => {
-  // The server words the reason to follow "Couldn't finish:", so it starts in lower case.
-  for (const [failure, said] of [
+test("a task that couldn't finish says why once, on the line it reports, not on its card as well", async () => {
+  // What the server says on each, and the line it reports under the card with the next step.
+  for (const [failure, reported, reason] of [
     [
       "this Bot isn't shared with you any more",
-      "This Bot isn't shared with you any more.",
+      "This Bot isn't shared with you any more, so it stopped this task. Its owner or an admin can share it again.",
+      /isn't shared with you any more/,
     ],
     [
       "Pipeline Bot isn't shared with you",
-      "Pipeline Bot isn't shared with you.",
+      "I couldn't ask Pipeline Bot because it isn't shared with you. Its owner or an admin can share it with you.",
+      /isn't shared with you/,
     ],
   ] as const) {
     task = {
@@ -737,12 +738,28 @@ test("a task that couldn't finish says why on its card as a sentence of its own"
       stoppedAt: null,
       workingSince: null,
     };
+    // As the conversation that asked draws them: the card, and the line under it.
     const view = draw(
-      <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+      <>
+        <TaskCard
+          channelId="channel_task"
+          taskId="task-1"
+          title="Order seeds"
+        />
+        <TaskReport kind="failed" taskId="task-1">
+          <p>{reported}</p>
+        </TaskReport>
+      </>,
     );
-    await view.findByText("Couldn't finish");
-    expect(view.getByText(said)).toBeTruthy();
-    expect(view.queryByText(failure)).toBeNull();
+    const card = await view.findByRole("region", { name: /^Task: / });
+    await waitFor(() => expect(card.textContent).toContain("Couldn't finish"));
+    // The card says that it couldn't finish; why, and what to do, is said once, on the line.
+    expect(card.textContent).not.toMatch(reason);
+    const line = view.getByRole("region", { name: "A task couldn't finish" });
+    expect(line.textContent).toContain(reported);
+    expect(
+      view.getAllByText(reason, { exact: false, selector: "p" }),
+    ).toHaveLength(1);
     cleanup();
   }
 });

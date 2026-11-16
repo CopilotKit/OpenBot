@@ -19,11 +19,11 @@ import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
 import {
   type BotTask,
-  failureSentence,
   type Reaction,
   reactionsQueryOptions,
   stoppedByYou,
   TASK_DONE_LABEL,
+  TASK_FAILED_LABEL,
   TASK_STOPPED,
   TASK_STOPPED_LABEL,
   type TaskStatus,
@@ -85,7 +85,7 @@ const STATE: Record<
     text: "text-emerald-700 dark:text-emerald-400",
   },
   failed: {
-    label: "Couldn't finish",
+    label: TASK_FAILED_LABEL,
     icon: IconAlertTriangle,
     dot: "bg-destructive",
     text: "text-destructive",
@@ -276,18 +276,16 @@ export function TaskCard({
     );
   /*
    * What it waits for is said once, on the needs-you line the task posts, not here as well: the
-   * card says only that it needs the person, and leads into the thread.
+   * card says only that it needs the person, and leads into the thread. Why it couldn't finish is
+   * said once too, on the line it reports under the card, which also says what to do about it: the
+   * card said the same reason a second time just above it.
    */
   const next =
-    state === "failed"
-      ? task.data?.failure
-        ? failureSentence(task.data.failure)
-        : null
-      : state === "stopped"
-        ? TASK_STOPPED
-        : state === "working" && !taskId
-          ? "Starting…"
-          : null;
+    state === "stopped"
+      ? TASK_STOPPED
+      : state === "working" && !taskId
+        ? "Starting…"
+        : null;
   return (
     <TaskFrame
       below={children}
