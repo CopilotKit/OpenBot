@@ -110,8 +110,11 @@ let given: string[] = [];
 /** Every app that is turned on, as listApps lists them, and every path the sheet asked for. */
 let servers: TodayServer[] = [];
 let requested: string[] = [];
+/** A create the server refuses with this sentence, as it refuses an address it couldn't reach. */
+let createRefusal: string | undefined;
 
 beforeEach(() => {
+  createRefusal = undefined;
   builtInAvailable = true;
   isolationAvailable = true;
   mayIsolate = true;
@@ -149,6 +152,21 @@ beforeEach(() => {
           : connectionTestResponse(verdict);
       }
       if (path === BOTS_PATH && init?.method === "POST") {
+        if (createRefusal) {
+          return Response.json(
+            {
+              type: "about:blank",
+              title: "Bad Request",
+              status: 400,
+              code: "VALIDATION_ERROR",
+              detail: createRefusal,
+            },
+            {
+              status: 400,
+              headers: { "content-type": "application/problem+json" },
+            },
+          );
+        }
         creates.push(body);
         return Response.json({ bot: { id: "agent_new" } }, { status: 201 });
       }
@@ -641,6 +659,51 @@ test("team: the sheet offers only the apps the person can give, ticked", async (
     view.getByText("It always uses the account of whoever is asking."),
   ).toBeTruthy();
   expect(requested.filter((path) => path.startsWith(APPS_PATH))).toEqual([]);
+});
+
+/**
+ * Mastra is offered beside the others, with its mark, and picking it connects a Mastra server.
+ *
+ * A Mastra server has no AG-UI route, so the AG-UI test can only fail against one. The create carries
+ * the framework instead, and the server proves the address against Mastra's own API before it saves
+ * anything. What it refused with is shown under the address, as a failed test is.
+ */
+test("Mastra is offered with its mark, and picking it connects a Mastra server", async () => {
+  const { view, user } = await customFlow();
+  const mastra = view.getByRole("button", { name: /^Mastra/ });
+  const mark = mastra.querySelector("img[data-mark='Mastra']");
+  expect(mark?.getAttribute("src")).toBe("data:image/svg+xml,mastra");
+
+  await user.click(mastra);
+  expect(view.getByText("Mastra")).toBeTruthy();
+  await user.type(
+    await view.findByLabelText("Agent address"),
+    "https://mastra.example.com",
+  );
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  await view.findByText("Expense Review is ready");
+  expect(tests).toEqual([]);
+  expect(creates[0]).toMatchObject({
+    endpoint: "https://mastra.example.com",
+    title: "Powered by Mastra",
+    harness: "mastra",
+  });
+});
+
+test("an address the server could not reach as a Mastra server says why, under the address", async () => {
+  const refusal =
+    "Couldn't reach a Mastra server at that address. It runs no agents.";
+  const { view, user } = await customFlow();
+  await user.click(view.getByRole("button", { name: /^Mastra/ }));
+  await user.type(
+    await view.findByLabelText("Agent address"),
+    "https://mastra.example.com",
+  );
+  createRefusal = refusal;
+  await user.click(view.getByRole("button", { name: "Create Bot" }));
+  expect(await view.findByText(refusal)).toBeTruthy();
+  expect(view.getAllByText(refusal)).toHaveLength(1);
+  expect(view.queryByText("Expense Review is ready")).toBeNull();
 });
 
 test("the LangGraph harness is offered as LangChain, the name people know it by", async () => {

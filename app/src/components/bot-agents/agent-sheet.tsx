@@ -1,4 +1,8 @@
-import { WEB_HARNESSES } from "@openbot/shared/harnesses";
+import {
+  HARNESSES,
+  reachedThroughMastra,
+  WEB_HARNESSES,
+} from "@openbot/shared/harnesses";
 import { IconLock, IconPlus, IconUsers, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -188,6 +192,19 @@ function AgentFlow({
       description: skill.description.trim(),
     }));
 
+  /**
+   * Whether this agent is a Mastra server: the framework picked, or for one being changed, the one it
+   * was added with. A Mastra server has no AG-UI route, so the server proves its address against
+   * Mastra's own API when it is saved, and the AG-UI test is not run.
+   */
+  const mastra = editing
+    ? HARNESSES.some(
+        (harness) =>
+          reachedThroughMastra(harness.id) &&
+          harness.name === editing.framework,
+      )
+    : runtime?.kind === "managed" && reachedThroughMastra(runtime.harness);
+
   /** Dial the address from the server before it is saved, as New Bot does. */
   const reachable = async (): Promise<boolean> => {
     if (endpointIssue) {
@@ -196,6 +213,7 @@ function AgentFlow({
       return false;
     }
     setUnreachable(undefined);
+    if (mastra) return true;
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -354,7 +372,7 @@ function AgentFlow({
               <EndpointStep
                 endpoint={endpoint}
                 endpointError={tried ? endpointIssue : unreachable}
-                harness={null}
+                harness={mastra ? "mastra" : null}
                 onEndpoint={(value) => {
                   setEndpoint(value);
                   setTried(false);
