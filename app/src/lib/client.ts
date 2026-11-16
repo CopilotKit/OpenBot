@@ -12,6 +12,8 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+
 export type ClientOptions = {
   /** Absent means GET. */
   method?: string;
@@ -28,11 +30,26 @@ export type ClientOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * The one `fetch`. Each outcome is reported to `lib/desktop/reachability.ts`, which is how the app
+ * knows the OpenBot it is connected to stopped answering, and answers again.
+ */
+async function request(path: string, init: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, credentials: "include" });
+  } catch (error) {
+    noteNoAnswer(error);
+    throw error;
+  }
+  noteAnswer(response);
+  return response;
+}
+
 /** Every request in this app is authenticated, and every one of them is JSON or nothing. */
 async function send(path: string, options: ClientOptions): Promise<Response> {
-  return fetch(path, {
+  return request(path, {
     method: options.method,
-    credentials: "include",
     headers:
       options.body === undefined
         ? undefined
@@ -129,7 +146,7 @@ export async function clientRequest(
   init: RequestInit,
   fallback?: string,
 ): Promise<Response> {
-  const response = await fetch(path, { ...init, credentials: "include" });
+  const response = await request(path, init);
   if (!response.ok) throw await refusal(response, fallback);
   return response;
 }

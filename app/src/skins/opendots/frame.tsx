@@ -20,6 +20,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
@@ -511,6 +512,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           onToggleNav={() => setNavCollapsed((collapsed) => !collapsed)}
           place={place}
         />
+        <ConnectionBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">

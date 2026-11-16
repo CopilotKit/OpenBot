@@ -14,6 +14,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -137,6 +138,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
         className="openfuse-frame flex h-svh flex-col overflow-hidden bg-background text-foreground"
         data-openfuse-tab={tab ?? "none"}
       >
+        <ConnectionBanner />
         <UpdateBanner />
         <SelfHostBanner />
         {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}

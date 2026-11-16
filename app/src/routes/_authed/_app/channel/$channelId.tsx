@@ -170,7 +170,8 @@ function RouteComponent() {
                 ease: EASE_OUT,
               }}
             >
-              {channel.data?.name ?? "Channel"}
+              {/* Nothing while it loads; one that could not load is still a conversation. */}
+              {channel.data?.name ?? (channel.error ? "Conversation" : null)}
             </motion.span>
           </div>
           <div className="flex flex-row gap-1.5">
