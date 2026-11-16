@@ -610,14 +610,15 @@ export function TaskReport({
 /**
  * What a needs-you line says once the person has answered, by where the task is now. Never where
  * they answered: the thread, the Bots page's Needs you board and the inbox all answer it, and the
- * line can't tell which.
+ * line can't tell which. A task they stopped is the one exception: Stop withdraws what it waited
+ * for, answered or not, so that line says only the stop.
  */
 const ANSWERED: Record<CardState, string> = {
   working: "You answered this. It's carrying on.",
   needs: "You answered this. It needs you again in its thread.",
   done: "You answered this, and it's done.",
   failed: "You answered this, but it couldn't finish.",
-  stopped: "You answered this, and stopped it after.",
+  stopped: "You stopped this task, so it no longer needs this.",
 };
 
 /**

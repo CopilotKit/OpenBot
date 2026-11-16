@@ -313,6 +313,31 @@ test("an answered needs-you line never claims the answer was given in the thread
   expect(view.queryByText(/in its thread/)).toBeNull();
 });
 
+/*
+ * Found live: Stop pressed on a task that was waiting on the person's answer, and the needs-you line
+ * in the conversation that asked then read "You answered this, and stopped it after." They had
+ * answered nothing. The line can't know whether they answered first, so it says only the stop.
+ */
+test("a needs-you line for a task the person stopped never says they answered it", async () => {
+  task = {
+    ...task,
+    status: "failed",
+    stoppedAt: "2026-11-16T14:00:00.000Z",
+    failure: "you stopped it",
+    next: null as never,
+  };
+  const view = draw(
+    <TaskReport kind="needs" taskId="task-1" words={WAITING}>
+      <p>{WAITING}</p>
+    </TaskReport>,
+  );
+  await view.findByText("Needed you");
+  expect(
+    view.getByText("You stopped this task, so it no longer needs this."),
+  ).toBeTruthy();
+  expect(view.queryByText(/You answered/)).toBeNull();
+});
+
 test("a Bot's link to a task thread opens in the app, not in a new tab", async () => {
   expect(inAppPath("/channel/channel_task", "http://openbot.invalid")).toBe(
     "/channel/channel_task",
