@@ -457,8 +457,8 @@ export function TaskReport({
           <p className="text-sm">
             <span className={cn("font-medium text-xs", STATE.failed.text)}>
               {TASK_FAILED_LABEL}
-            </span>{" "}
-            <span className="text-muted-foreground">{reason}</span>
+            </span>
+            <span className="text-muted-foreground"> · {reason}</span>
           </p>
         ) : null}
         {children}
