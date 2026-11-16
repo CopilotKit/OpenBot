@@ -21,7 +21,7 @@ export interface BotDelegation {
    * @nullable
    */
   effort: string | null;
-  /** How it hands work out and answers when it orchestrates. May be empty. */
+  /** How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner. */
   instructions: string;
   /** @minItems 1 */
   agents: BotDelegationAgent[];

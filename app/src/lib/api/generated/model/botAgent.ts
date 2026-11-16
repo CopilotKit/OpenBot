@@ -41,7 +41,7 @@ export interface BotAgent {
   /** Whether the caller added it. */
   mine: boolean;
   /**
-   * How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.
+   * How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.
    * @minimum 0
    */
   botCount: number;

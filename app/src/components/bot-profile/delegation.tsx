@@ -73,6 +73,11 @@ type Choice = Pick<
  */
 export function BotDelegation({ agent }: { agent: AgentProfile }) {
   const delegation = useQuery(botDelegationQueryOptions(agent.id));
+  /*
+   * Kept out here: the save's own refetch remounts the form below (it is keyed by what was saved), and
+   * "Saved." has to outlive that.
+   */
+  const [saved, setSaved] = useState(false);
   if (delegation.isPending) return null;
   if (delegation.error)
     return (
@@ -84,7 +89,9 @@ export function BotDelegation({ agent }: { agent: AgentProfile }) {
   return (
     <DelegationForm
       botId={agent.id}
+      done={saved}
       key={JSON.stringify(delegation.data)}
+      onDone={setSaved}
       saved={delegation.data}
     />
   );
@@ -93,9 +100,14 @@ export function BotDelegation({ agent }: { agent: AgentProfile }) {
 function DelegationForm({
   botId,
   saved,
+  done,
+  onDone: setDone,
 }: {
   botId: string;
   saved: Delegation;
+  /** Whether the last save went through. */
+  done: boolean;
+  onDone: (done: boolean) => void;
 }) {
   const visible = useQuery(botAgentListQueryOptions());
   const catalogue = useQuery(modelCatalogueQueryOptions());
@@ -111,7 +123,6 @@ function DelegationForm({
   const [model, setModel] = useState(saved.model ?? DEFAULT_MODEL);
   const [instructions, setInstructions] = useState(saved.instructions);
   const [problem, setProblem] = useState<string>();
-  const [done, setDone] = useState(false);
 
   // Every agent this page can name: the Bot's own first, as the server described them, then the rest.
   const byId = new Map<string, Choice>();
@@ -173,6 +184,7 @@ function DelegationForm({
    * for the other mode (the model, the instructions) is kept for when it is turned back on.
    */
   const flip = (next: boolean) => {
+    setDone(false);
     const own = saved.agents.filter((each) => each.available);
     const first = own[0] ?? saved.agents[0];
     if (!first) return;
@@ -276,23 +288,27 @@ function DelegationForm({
                       own.
                     </FieldDescription>
                   </Field>
-                  <Field>
-                    <FieldLabel htmlFor="delegation-instructions">
-                      How it hands out work
-                      <span className="font-normal text-muted-foreground">
-                        Optional
-                      </span>
-                    </FieldLabel>
-                    <Textarea
-                      disabled={!editable}
-                      id="delegation-instructions"
-                      maxLength={4000}
-                      onChange={(event) => setInstructions(event.target.value)}
-                      placeholder="For example: send anything about numbers to the agent that works with figures, and answer greetings yourself."
-                      rows={4}
-                      value={instructions}
-                    />
-                  </Field>
+                  {/* Only for whoever may change the Bot: its owner's words can name a private agent. */}
+                  {editable ? (
+                    <Field>
+                      <FieldLabel htmlFor="delegation-instructions">
+                        How it hands out work
+                        <span className="font-normal text-muted-foreground">
+                          Optional
+                        </span>
+                      </FieldLabel>
+                      <Textarea
+                        id="delegation-instructions"
+                        maxLength={4000}
+                        onChange={(event) =>
+                          setInstructions(event.target.value)
+                        }
+                        placeholder="For example: send anything about numbers to the agent that works with figures, and answer greetings yourself."
+                        rows={4}
+                        value={instructions}
+                      />
+                    </Field>
+                  ) : null}
                   <FieldSet>
                     <FieldLegend variant="label">Agents it may use</FieldLegend>
                     <FieldDescription>

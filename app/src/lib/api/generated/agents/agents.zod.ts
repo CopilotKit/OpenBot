@@ -171,7 +171,7 @@ export const ListBotAgentsResponse = zod.object({
           .int()
           .min(listBotAgentsResponseAgentsItemBotCountMin)
           .describe(
-            "How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.",
+            "How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.",
           ),
         createdAt: zod.iso
           .datetime({ offset: true })
@@ -490,7 +490,7 @@ export const CreateBotAgentResponse = zod.object({
         .int()
         .min(createBotAgentResponseAgentBotCountMin)
         .describe(
-          "How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.",
+          "How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -637,7 +637,7 @@ export const GetBotAgentResponse = zod.object({
         .int()
         .min(getBotAgentResponseAgentBotCountMin)
         .describe(
-          "How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.",
+          "How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -931,7 +931,7 @@ export const UpdateBotAgentResponse = zod.object({
         .int()
         .min(updateBotAgentResponseAgentBotCountMin)
         .describe(
-          "How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.",
+          "How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -946,7 +946,7 @@ export const UpdateBotAgentResponse = zod.object({
 });
 
 /**
- * Delete an agent and retire its key and callback token. It is taken off every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is the only agent of any Bot, deleted Bots aside: give that Bot another agent first. Only whoever may manage the agent may delete it. Task threads it worked in stay readable. An agent that is already deleted is not found.
+ * Delete an agent and retire its key and callback token. It is taken off every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is the only agent of any Bot, deleted Bots aside: give that Bot another agent first. The refusal names those Bots the caller can see and only counts the rest. Only whoever may manage the agent may delete it. Task threads it worked in stay readable. An agent that is already deleted is not found.
  * @summary Delete an agent
  */
 
@@ -1186,7 +1186,7 @@ export const RevokeBotAgentCallbackTokenResponse = zod.object({
         .int()
         .min(revokeBotAgentCallbackTokenResponseAgentBotCountMin)
         .describe(
-          "How many Bots in the organization may use it, deleted Bots aside. A count only: which Bots is not said.",
+          "How many of the Bots the caller can see may use it, deleted Bots aside. A count only: which Bots is not said. With scope=organization, every Bot in the organization.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -1244,7 +1244,7 @@ export const GetBotDelegationResponse = zod
     instructions: zod
       .string()
       .describe(
-        "How it hands work out and answers when it orchestrates. May be empty.",
+        "How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner.",
       ),
     agents: zod
       .array(
@@ -1401,7 +1401,7 @@ export const ReplaceBotDelegationResponse = zod
     instructions: zod
       .string()
       .describe(
-        "How it hands work out and answers when it orchestrates. May be empty.",
+        "How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner.",
       ),
     agents: zod
       .array(

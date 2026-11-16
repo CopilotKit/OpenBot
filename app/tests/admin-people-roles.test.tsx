@@ -145,3 +145,18 @@ test("an owner's admin switch reads on and can't be changed, and nothing is sent
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(sent).toEqual([]);
 });
+
+/*
+ * FOUND IN THE BIG TEST: an owner's row had its Admin switch and Remove turned off with nothing to
+ * say why. It says so under the row.
+ */
+test("an owner's row says why its switch and Remove can't be used", async () => {
+  roles.sam = "owner";
+  const view = await draw();
+  expect(
+    await view.findByText(
+      "Owners are always admins. Change who owns this organization in Organization settings.",
+    ),
+  ).toBeTruthy();
+  expect(view.getAllByText(/Owners are always admins/)).toHaveLength(1);
+});

@@ -284,3 +284,72 @@ test("an agent private to somebody else reads as such, and the Bot's manager can
     "bag_openbot",
   ]);
 });
+
+/*
+ * FOUND IN THE BIG TEST: Save on a Bot's Agents page said nothing. The form is drawn again from what
+ * was saved once the page reads the Bot again, and that took "Saved." with it.
+ */
+test("Save says Saved., and still says it once the page has read the Bot again", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "self",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [{ ...OPENBOT, available: true }],
+    canManage: true,
+  };
+  const user = userEvent.setup({ document });
+  const view = draw(<BotDelegation agent={BOT} />);
+  const reads = () =>
+    seen.filter(
+      (each) => each.line === `GET ${ORG}/bots/agent_sales/delegation`,
+    ).length;
+
+  await user.click(
+    await view.findByRole("button", { name: /Pipeline analyst/ }),
+  );
+  await user.click(view.getByRole("button", { name: "Save" }));
+  // The save, then the page reading the Bot again with the agent it now runs on.
+  await waitFor(() => expect(reads()).toBe(2));
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("button", { name: /Pipeline analyst/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true"),
+  );
+  expect((await view.findByRole("status")).textContent).toBe("Saved.");
+});
+
+/*
+ * Chosen while David was away (2026-11-16): how a Bot hands out work is its owner's own words, which
+ * can name an agent private to them. Somebody the Bot is shared with sees the agents, by the names
+ * they may see, and not the words.
+ */
+test("somebody who can't change the Bot doesn't see how it hands out work", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "orchestrate",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [
+      { ...OPENBOT, available: true },
+      {
+        id: "bag_hidden",
+        name: "Private agent",
+        description: "",
+        kind: "openbot",
+        available: true,
+      },
+    ],
+    canManage: false,
+  };
+  const view = draw(<BotDelegation agent={BOT} />);
+  const list = await view.findByRole("list", { name: "Agents it may use" });
+  expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
+  expect(view.queryAllByText(/How it hands out work/)).toHaveLength(0);
+  expect(view.queryByRole("textbox")).toBeNull();
+  expect(view.queryByRole("button", { name: "Save" })).toBeNull();
+});

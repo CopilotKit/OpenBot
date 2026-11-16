@@ -813,7 +813,7 @@ export const getDeleteBotAgentUrl = (
 };
 
 /**
- * Delete an agent and retire its key and callback token. It is taken off every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is the only agent of any Bot, deleted Bots aside: give that Bot another agent first. Only whoever may manage the agent may delete it. Task threads it worked in stay readable. An agent that is already deleted is not found.
+ * Delete an agent and retire its key and callback token. It is taken off every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is the only agent of any Bot, deleted Bots aside: give that Bot another agent first. The refusal names those Bots the caller can see and only counts the rest. Only whoever may manage the agent may delete it. Task threads it worked in stay readable. An agent that is already deleted is not found.
  * @summary Delete an agent
  */
 export const deleteBotAgent = async (

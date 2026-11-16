@@ -78,8 +78,14 @@ function describe(person: Person, organization: string | undefined): string {
   if (person.configuredAdmin) {
     return `Admin by configuration · ${when}`;
   }
+  if (person.role === "owner")
+    return `Owner · ${providers || "no provider"} · ${when}`;
   return `${providers || "no provider"} · ${when}`;
 }
+
+/** Under an owner's row, where neither their Admin switch nor Remove can be used. */
+const OWNER_HINT =
+  "Owners are always admins. Change who owns this organization in Organization settings.";
 
 /** What a person is called: their name, or their address when they have not given one. */
 function nameOf(person: Person): string {
@@ -217,6 +223,10 @@ function PeoplePage() {
                         {person.name ? `${person.email} · ` : ""}
                         {describe(person, organization)}
                       </ItemDescription>
+                      {/* Why the owner's switch and Remove can't be used here. */}
+                      {owner && !person.configuredAdmin ? (
+                        <ItemDescription>{OWNER_HINT}</ItemDescription>
+                      ) : null}
                     </ItemContent>
                     <ItemActions>
                       {/*
