@@ -11,7 +11,8 @@ loopback port that answers the addresses the app uses as the real one does.
   that rotate, where one used a second time answers `invalid_grant` and ends the family;
 - revocation (RFC 7009);
 - `/api/copilotkit/info` and a few `/api/v2` addresses that honour a Bearer access token and nothing else, one
-  of them a stream and one a WebSocket.
+  of them a stream and one a WebSocket;
+- on request, a proxy's idle close of a kept-open connection at the moment it is used.
 
 And a stand-in for the person's browser (`Browser`), which follows the authorization address the
 app opens and the redirect back to the app's listener.
@@ -100,6 +101,10 @@ struct State {
     /// For each revocation request, whether it ended a token that still worked.
     revoke_ended: Vec<bool>,
     token_delay: Duration,
+    /// A proxy in front that closes a kept-open connection: see `close_kept_open_connections`.
+    close_kept_open: bool,
+    /// Requests that arrived on a kept-open connection and were closed on, unanswered.
+    closed_unanswered: usize,
 }
 
 pub struct FakeOpenBot {
@@ -169,13 +174,36 @@ impl FakeOpenBot {
                     shape.clone(),
                 );
                 tokio::spawn(async move {
+                    let answered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let closing = Arc::new(tokio::sync::Notify::new());
+                    let close = closing.clone();
                     let service = hyper::service::service_fn(move |request| {
-                        answer(request, state.clone(), address.clone(), shape.clone())
+                        let (state, address, shape) =
+                            (state.clone(), address.clone(), shape.clone());
+                        let (answered, closing) = (answered.clone(), closing.clone());
+                        async move {
+                            let kept_open =
+                                answered.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0;
+                            let closes = kept_open && {
+                                let mut state = state.lock().unwrap();
+                                state.closed_unanswered += usize::from(state.close_kept_open);
+                                state.close_kept_open
+                            };
+                            if closes {
+                                // Gone, with no answer and no `Connection: close` beforehand.
+                                closing.notify_one();
+                                std::future::pending::<()>().await;
+                            }
+                            answer(request, state, address, shape).await
+                        }
                     });
-                    let _ = hyper::server::conn::http1::Builder::new()
+                    let connection = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(stream), service)
-                        .with_upgrades()
-                        .await;
+                        .with_upgrades();
+                    tokio::select! {
+                        _ = connection => {}
+                        _ = close.notified() => {}
+                    }
                 });
             }
         });
@@ -282,6 +310,19 @@ impl FakeOpenBot {
         for current in state.refresh.values_mut() {
             *current = false;
         }
+    }
+
+    /// From now on it behaves as a load balancer or an ingress in front of OpenBot does when it
+    /// closes a kept-open connection for being idle at the very moment the app sends on it: a
+    /// connection that has already answered a request is closed when its next request arrives,
+    /// unanswered, and that request never reaches OpenBot. A new connection is answered as usual.
+    pub fn close_kept_open_connections(&self) {
+        self.state.lock().unwrap().close_kept_open = true;
+    }
+
+    /// How many requests arrived on a kept-open connection and were closed on, unanswered.
+    pub fn closed_unanswered(&self) -> usize {
+        self.state.lock().unwrap().closed_unanswered
     }
 
     pub fn slow_token_endpoint(&self, delay: Duration) {

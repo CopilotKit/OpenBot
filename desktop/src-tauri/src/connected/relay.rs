@@ -28,6 +28,11 @@ What keeps it to that:
 Bodies are passed on as they arrive, both ways, so a chat answer streams. A WebSocket upgrade is
 passed on and the two connections are joined.
 
+Connections to OpenBot are kept open between requests for `KEPT_OPEN_FOR`, less than the idle
+timeout of a load balancer or an ingress in front of it. When one still closes just as a request
+goes out on it, a request that is safe to send twice is sent once more on a new connection, and
+the page sees only the answer (`Forward::send`).
+
 The access token is replaced shortly before it ends, and when that OpenBot answers 401 to a request
 with no body the request is sent once more with a new one. When the refresh itself is refused the
 sign-in is over: the relay says so once (`Ended::SessionEnded`) and stops answering.
@@ -77,6 +82,19 @@ pub enum Ended {
 /// How often `Ended::Unreachable` is said while the OpenBot stays unreachable.
 const UNREACHABLE_SAID_EVERY: Duration = Duration::from_secs(30);
 
+/// How long a connection to OpenBot is kept open, idle, for the next request. A load balancer or
+/// an ingress in front of OpenBot closes an idle connection on a timer of its own (AWS's load
+/// balancer after 60 s, nginx after 75 s), and a request sent at the moment it does so is lost.
+/// Shorter than those, the relay lets the connection go first. Left alone, reqwest keeps one 90 s.
+const KEPT_OPEN_FOR: Duration = Duration::from_secs(30);
+
+/// The largest body the relay holds whole, so that the request can be sent again. A larger one,
+/// or one of no stated length, is passed on as it arrives and is sent once at most.
+const WHOLE_BODY_AT_MOST: usize = 1024 * 1024;
+
+/// The header the API's writes carry so that OpenBot does a write sent twice only once.
+const IDEMPOTENCY_KEY: &str = "idempotency-key";
+
 type Body = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 type OnEnded = dyn Fn(Ended) + Send + Sync;
 
@@ -89,6 +107,9 @@ struct Shared {
     upstream: reqwest::Url,
     secret: String,
     client: reqwest::Client,
+    /// Keeps no connection open: a request sent again goes on a new connection, never on another
+    /// kept-open one the same proxy may have closed at the same moment.
+    fresh: reqwest::Client,
     organization: Arc<Mutex<Option<HeaderValue>>>,
     on_ended: Box<OnEnded>,
     session_ended: AtomicBool,
@@ -120,13 +141,20 @@ impl Relay {
             .map_err(|error| format!("could not listen on 127.0.0.1: {error}"))?;
         let address = listener.local_addr().map_err(|error| error.to_string())?;
         // No whole-request timeout: a chat answer and a socket stay open for as long as they do.
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::none())
-            .http1_only()
-            .user_agent("OpenBot/desktop")
-            .build()
-            .map_err(|error| error.to_string())?;
+        let client = |keeps_open: bool| {
+            let builder = reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(15))
+                .redirect(reqwest::redirect::Policy::none())
+                .http1_only()
+                .user_agent("OpenBot/desktop");
+            let builder = if keeps_open {
+                builder.pool_idle_timeout(KEPT_OPEN_FOR)
+            } else {
+                builder.pool_max_idle_per_host(0)
+            };
+            builder.build().map_err(|error| error.to_string())
+        };
+        let (client, fresh) = (client(true)?, client(false)?);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("openbot-relay")
@@ -142,6 +170,7 @@ impl Relay {
             upstream,
             secret: secret.clone(),
             client,
+            fresh,
             organization: organization.clone(),
             on_ended: Box::new(on_ended),
             session_ended: AtomicBool::new(false),
@@ -434,24 +463,37 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
     let method = request.method().clone();
     let on_upgrade = upgrading.then(|| hyper::upgrade::on(&mut request));
     let no_body = hyper::body::Body::is_end_stream(request.body());
+    let idempotent = request.headers().contains_key(IDEMPOTENCY_KEY);
+    let length = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|length| length.to_str().ok())
+        .and_then(|length| length.parse::<usize>().ok());
     let incoming = request.into_body();
-    let body = (!no_body)
-        .then(|| reqwest::Body::wrap_stream(http_body_util::BodyDataStream::new(incoming)));
-
-    let send = |access: Option<&str>, body: Option<reqwest::Body>| {
-        let mut outgoing = shared
-            .client
-            .request(method.clone(), destination.clone())
-            .headers(headers.clone());
-        if let Some(access) = access {
-            outgoing = outgoing.bearer_auth(access);
+    let body = if no_body {
+        Outgoing::Empty
+    } else if idempotent && length.is_some_and(|length| length <= WHOLE_BODY_AT_MOST) {
+        match http_body_util::Limited::new(incoming, WHOLE_BODY_AT_MOST)
+            .collect()
+            .await
+        {
+            Ok(whole) => Outgoing::Whole(whole.to_bytes()),
+            Err(_) => return plain(StatusCode::BAD_REQUEST, "The request did not arrive whole."),
         }
-        if let Some(body) = body {
-            outgoing = outgoing.body(body);
-        }
-        outgoing.send()
+    } else {
+        Outgoing::Streamed(reqwest::Body::wrap_stream(
+            http_body_util::BodyDataStream::new(incoming),
+        ))
     };
-    let mut answered = match send(access.as_deref(), body).await {
+
+    let forward = Forward {
+        method,
+        destination,
+        headers,
+        upgrading,
+        idempotent,
+    };
+    let mut answered = match forward.send(&shared, access.as_deref(), body).await {
         Ok(answered) => answered,
         Err(error) => return unreachable(&shared, error),
     };
@@ -461,7 +503,7 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
         // send again; a request with a body is answered as it was, and the next one is signed in.
         match token(&shared, Some(access.clone())).await {
             Ok(newer) if no_body && newer != access => {
-                answered = match send(Some(&newer), None).await {
+                answered = match forward.send(&shared, Some(&newer), Outgoing::Empty).await {
                     Ok(answered) => answered,
                     Err(error) => return unreachable(&shared, error),
                 };
@@ -524,6 +566,109 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
                 "OpenBot's answer could not be passed on.",
             )
         })
+}
+
+/// The body of the page's request, as it is passed on.
+enum Outgoing {
+    Empty,
+    /// Held whole, so it can be sent again: only for a write that carries an Idempotency-Key.
+    Whole(Bytes),
+    /// Passed on as it arrives, so part of it may be gone already: sent once at most.
+    Streamed(reqwest::Body),
+}
+
+/// The page's request as it goes to OpenBot.
+struct Forward {
+    method: Method,
+    destination: reqwest::Url,
+    headers: HeaderMap,
+    upgrading: bool,
+    idempotent: bool,
+}
+
+impl Forward {
+    fn request(
+        &self,
+        client: &reqwest::Client,
+        access: Option<&str>,
+        body: Option<reqwest::Body>,
+    ) -> reqwest::RequestBuilder {
+        let mut outgoing = client
+            .request(self.method.clone(), self.destination.clone())
+            .headers(self.headers.clone());
+        if let Some(access) = access {
+            outgoing = outgoing.bearer_auth(access);
+        }
+        if let Some(body) = body {
+            outgoing = outgoing.body(body);
+        }
+        outgoing
+    }
+
+    /// Sent, and sent once more on a new connection when the one it went on closed before
+    /// OpenBot's answer began and the request is safe to send twice: a read (GET, HEAD, OPTIONS)
+    /// with no body, or a write with an Idempotency-Key whose body is empty or held whole. A body
+    /// that streams, a write without the key and a socket upgrade are never sent again
+    /// (RFC 9110 §9.2.2).
+    async fn send(
+        &self,
+        shared: &Shared,
+        access: Option<&str>,
+        body: Outgoing,
+    ) -> reqwest::Result<reqwest::Response> {
+        let read = matches!(self.method, Method::GET | Method::HEAD | Method::OPTIONS);
+        let (first, again) = match body {
+            Outgoing::Empty => (None, (read || self.idempotent).then_some(None)),
+            Outgoing::Whole(whole) => (Some(whole.clone().into()), Some(Some(whole))),
+            Outgoing::Streamed(streamed) => (Some(streamed), None),
+        };
+        let error = match self.request(&shared.client, access, first).send().await {
+            Err(error) if closed_unanswered(&error) => error,
+            answered => return answered,
+        };
+        let (Some(again), false) = (again, self.upgrading) else {
+            return Err(error);
+        };
+        log::info!(
+            "[relay] the connection to OpenBot closed before it answered {} {}; sending it once more",
+            self.method,
+            self.destination.path()
+        );
+        self.request(&shared.fresh, access, again.map(reqwest::Body::from))
+            .send()
+            .await
+    }
+}
+
+/// Whether the connection a request went on closed before any answer: what a load balancer or an
+/// ingress does to a kept-open connection it closes for being idle just as the request is sent
+/// ("connection closed before message completed", or a reset). Not a refused connection or a
+/// timeout, which say OpenBot itself is not there.
+fn closed_unanswered(error: &reqwest::Error) -> bool {
+    if error.is_connect() || error.is_timeout() {
+        return false;
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        if inner
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_incomplete_message)
+        {
+            return true;
+        }
+        if inner.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+            )
+        }) {
+            return true;
+        }
+        source = inner.source();
+    }
+    false
 }
 
 /// An access token, off the async threads: a refresh is a blocking request. On a sign-in that has
@@ -1285,6 +1430,103 @@ mod tests {
             Some("org_kept".into())
         );
         let _ = std::fs::remove_dir_all(config);
+    }
+
+    /// One request through the relay, so it keeps a connection to OpenBot open, and a moment for
+    /// that connection to go back to be used again.
+    fn keep_a_connection_open(window: &Window) {
+        window.echo(window.get(ECHO));
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    /// A load balancer or an ingress in front of OpenBot closes a kept-open connection once it has
+    /// been idle for a while, and the relay may send on it at that very moment: the request is
+    /// written and the connection closes with no answer ("connection closed before message
+    /// completed"). Nothing was wrong with OpenBot, so the page must not see a failure: a request
+    /// that is safe to send twice goes once more, on a new connection.
+    #[test]
+    fn a_kept_open_connection_closed_as_it_is_used_is_not_a_failure_for_the_page() {
+        let rig = rig();
+        let window = rig.window();
+        rig.openbot.close_kept_open_connections();
+
+        keep_a_connection_open(&window);
+        let sent = window.echo(window.get(&format!("{ECHO}?page=2")));
+        assert_eq!(rig.openbot.closed_unanswered(), 1, "sent on the kept one");
+        assert_eq!(sent["method"], "GET");
+        assert_eq!(sent["query"], "page=2");
+
+        // A write the API marks with an Idempotency-Key, its body whole: sent again, body and all.
+        keep_a_connection_open(&window);
+        let sent = window.echo(
+            window
+                .request(reqwest::Method::POST, ECHO)
+                .header("idempotency-key", "key-1")
+                .header("content-type", "application/json")
+                .body(r#"{"name":"Ada"}"#),
+        );
+        assert_eq!(rig.openbot.closed_unanswered(), 2, "sent on the kept one");
+        assert_eq!(sent["method"], "POST");
+        assert_eq!(sent["body"], r#"{"name":"Ada"}"#);
+        assert_eq!(sent["headers"]["idempotency-key"], "key-1");
+
+        // Each reached OpenBot once: the two that kept the connection open, and the two again.
+        assert_eq!(rig.echoes(), 4);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            rig.ended.lock().unwrap().is_empty(),
+            "the person was told OpenBot was unreachable"
+        );
+    }
+
+    /// The same close, on a request that may not be sent twice: a write with no Idempotency-Key,
+    /// a body that streams (so part of it may already be gone), or a socket. The page gets the
+    /// relay's answer as before, and OpenBot is not sent it again.
+    #[test]
+    fn a_request_that_is_not_safe_to_send_twice_is_not_sent_again() {
+        let rig = rig();
+        let window = rig.window();
+        rig.openbot.close_kept_open_connections();
+
+        let streamed =
+            || reqwest::blocking::Body::new(std::io::Cursor::new(br#"{"name":"Ada"}"#.to_vec()));
+        let writes = [
+            window
+                .request(reqwest::Method::POST, ECHO)
+                .header("content-type", "application/json")
+                .body(r#"{"name":"Ada"}"#),
+            window
+                .request(reqwest::Method::POST, ECHO)
+                .header("idempotency-key", "key-2")
+                .body(streamed()),
+        ];
+        for (sent, write) in writes.into_iter().enumerate() {
+            keep_a_connection_open(&window);
+            let answered = write.send().unwrap();
+            assert_eq!(answered.status(), 502, "write {sent}");
+            assert_eq!(answered.text().unwrap(), "OpenBot could not be reached.");
+            assert_eq!(rig.openbot.closed_unanswered(), sent + 1, "sent once");
+        }
+        assert_eq!(
+            rig.echoes(),
+            2,
+            "only the two that kept the connection open"
+        );
+
+        keep_a_connection_open(&window);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let stream = tokio::net::TcpStream::connect(&window.host).await.unwrap();
+            let mut request = socket_request(&window, "/api/v2/socket");
+            request
+                .headers_mut()
+                .insert("cookie", window.cookie.parse().unwrap());
+            assert!(tokio_tungstenite::client_async(request, stream)
+                .await
+                .is_err());
+        });
+        assert_eq!(rig.openbot.closed_unanswered(), 3, "the upgrade, sent once");
+        assert_eq!(rig.openbot.seen_at("/api/v2/socket").len(), 0);
     }
 
     /// The entry address holds the run's secret, and the log's redaction covers it.
