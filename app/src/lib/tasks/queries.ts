@@ -1,7 +1,11 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { Reaction, Task } from "@/lib/api/generated/model";
+import type { Reaction, Task, TaskTurn } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
-import { getTask, listTasks } from "@/lib/api/generated/tasks/tasks";
+import {
+  getTask,
+  listTasks,
+  listTaskTurns,
+} from "@/lib/api/generated/tasks/tasks";
 import { organizationId } from "@/lib/api/request";
 
 /*
@@ -81,6 +85,7 @@ export const taskKeys = {
   ones: ["tasks", "one"] as const,
   one: (id: string) => ["tasks", "one", id] as const,
   reactions: (threadId: string) => ["tasks", "reactions", threadId] as const,
+  turns: (id: string) => ["tasks", "turns", id] as const,
 };
 
 /** A Bot's reaction to one of the person's messages, in place of a line of its own. */
@@ -157,6 +162,38 @@ export const taskQueryOptions = (id: string) =>
       ),
     refetchInterval: (query) =>
       query.state.data && moving(query.state.data.status) ? LIVE_MS : false,
+  });
+
+/** One finished turn of a task: what it answered, how long it worked, and which model answered. */
+export type { TaskTurn };
+
+/**
+ * How long a task worked on each thing it was asked, oldest first. A turn is listed once it ends,
+ * so while one is under way, or has just ended and is not listed yet, it is read again soon
+ * (`live`); otherwise only when something asks.
+ */
+export const taskTurnsQueryOptions = (id: string, live = false) =>
+  queryOptions({
+    queryKey: taskKeys.turns(id),
+    queryFn: async (): Promise<TaskTurn[]> => {
+      const turns: TaskTurn[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      // Read to the end; a cursor handed back twice ends the list too.
+      do {
+        const page = await listTaskTurns(
+          organizationId(),
+          id,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load how long this task worked." },
+        );
+        turns.push(...page.turns);
+        if (cursor) seen.add(cursor);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && !seen.has(cursor));
+      return turns;
+    },
+    refetchInterval: live ? LIVE_MS : false,
   });
 
 /**

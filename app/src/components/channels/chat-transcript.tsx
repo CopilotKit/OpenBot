@@ -28,10 +28,11 @@ import {
   IconFile,
   IconX,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {
   createContext,
+  Fragment,
   memo,
   useCallback,
   useContext,
@@ -53,6 +54,8 @@ import {
   SentFromBot,
   TaskReport,
 } from "@/components/tasks/task-thread";
+import { foldTurnWork, NO_TURN_WORK } from "@/components/tasks/turn-work";
+import { isTaskThread, WorkedFor } from "@/components/tasks/worked-for";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   Dialog,
@@ -2151,6 +2154,18 @@ export function ChatTranscript({
   );
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
   /*
+   * In a task's thread, each turn's steps and the lines said on the way fold into one "Worked for"
+   * row (`foldTurnWork`). Worked out on every render, as `items` is.
+   */
+  const queryClient = useContext(QueryClientContext);
+  const folds = isTaskThread(threadId, items, queryClient)
+    ? foldTurnWork(items, busy)
+    : NO_TURN_WORK;
+  const taskWork = {
+    folds,
+    lastAskId: [...folds.at.values()].at(-1)?.askId,
+  };
+  /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
    * and every finished tool row under it drew again while a reply streamed.
@@ -2498,65 +2513,88 @@ export function ChatTranscript({
    * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
    * drawn, so "the last row" and "latest" mean the same with or without older pages above.
    */
-  const renderRow = (item: TranscriptItem, index: number) =>
+  /*
+   * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
+   * turn's "Worked for" row when it folds there (`foldTurnWork`).
+   */
+  const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <ToolRow
-          active={busy && index === items.length - 1}
-          id={item.id}
-          inFlight={busy && index >= turnStart}
-          latest={index >= latestIndex}
-          spokeAfter={lastBotWords > index}
-          steps={item.kind === "tools" ? item.steps : [item]}
-        />
-      </MessageScrollerItem>
+      <ToolRow
+        active={busy && index === items.length - 1}
+        id={item.id}
+        inFlight={busy && index >= turnStart}
+        latest={index >= latestIndex}
+        spokeAfter={lastBotWords > index}
+        steps={item.kind === "tools" ? item.steps : [item]}
+      />
     ) : item.kind === "activity" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <TranscriptActivity message={item.message} />
-      </MessageScrollerItem>
+      <TranscriptActivity message={item.message} />
     ) : item.kind === "text" ? (
-      <MessageScrollerItem
-        key={item.id}
+      <TranscriptMessage
+        threadId={threadId}
         messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptMessage
-          threadId={threadId}
-          messageId={item.id}
-          settled={!busy || index < turnStart}
-          commandLabels={commandLabels}
-          role={item.role}
-          slackNames={slackNames}
-          streaming={
-            busy && item.role === "assistant" && index === items.length - 1
-          }
-          text={item.text}
-        />
-      </MessageScrollerItem>
+        settled={!busy || index < turnStart}
+        commandLabels={commandLabels}
+        role={item.role}
+        slackNames={slackNames}
+        streaming={
+          busy && item.role === "assistant" && index === items.length - 1
+        }
+        text={item.text}
+      />
     ) : item.kind === "attachments" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptAttachments attachments={item.attachments} />
-      </MessageScrollerItem>
+      <TranscriptAttachments attachments={item.attachments} />
     ) : (
       // Every member of the union is handled above. `assertNever` types `item` as
       // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
       // this call instead of silently falling into this branch and rendering nothing.
       assertNever(item)
     );
+
+  /*
+   * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
+   * drawn, so "the last row" and "latest" mean the same with or without older pages above. In a
+   * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
+   * inside that row.
+   */
+  const renderRow = (item: TranscriptItem, index: number) => {
+    const work = taskWork.folds.at.get(item.id);
+    if (work)
+      return (
+        <MessageScrollerItem
+          key={work.id}
+          messageId={work.id}
+          {...openingProps(item.id)}
+        >
+          <WorkedFor
+            last={work.askId === taskWork.lastAskId}
+            threadId={threadId}
+            work={work}
+          >
+            {work.rows.map((row) => (
+              <Fragment key={row.item.id}>
+                {rowContent(row.item, row.index)}
+              </Fragment>
+            ))}
+          </WorkedFor>
+        </MessageScrollerItem>
+      );
+    if (taskWork.folds.inside.has(item.id)) return null;
+    return (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        scrollAnchor={
+          item.kind === "text" || item.kind === "attachments"
+            ? anchorRows.has(item.id)
+            : undefined
+        }
+        {...openingProps(item.id)}
+      >
+        {rowContent(item, index)}
+      </MessageScrollerItem>
+    );
+  };
 
   return (
     <ArrivalsLive>
