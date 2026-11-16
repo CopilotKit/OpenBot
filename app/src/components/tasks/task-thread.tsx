@@ -19,6 +19,7 @@ import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
 import {
   type BotTask,
+  failureSentence,
   type Reaction,
   reactionsQueryOptions,
   stoppedByYou,
@@ -279,7 +280,9 @@ export function TaskCard({
    */
   const next =
     state === "failed"
-      ? (task.data?.failure ?? null)
+      ? task.data?.failure
+        ? failureSentence(task.data.failure)
+        : null
       : state === "stopped"
         ? TASK_STOPPED
         : state === "working" && !taskId
@@ -398,7 +401,14 @@ export function TaskReport({
   const task = useQuery(taskQueryOptions(taskId));
   const title = task.data?.title;
   const channelId = task.data?.channelId;
-  if (kind === "result")
+  const live = cardState(task.data);
+  if (kind === "result") {
+    /*
+     * A result that left the task waiting on the person (an app's Request access card drawn under
+     * it) is not finished: its link reads as needing them, as the task's card does, not as done.
+     */
+    const waiting = live === "needs";
+    const ResultIcon = waiting ? IconHandStop : IconCircleCheck;
     return (
       <div
         className="w-full space-y-2"
@@ -412,10 +422,18 @@ export function TaskReport({
         {channelId ? (
           <Link
             className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
+            data-state={waiting ? "needs" : "done"}
             params={{ channelId }}
             to="/channel/$channelId"
           >
-            <IconCircleCheck className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <ResultIcon
+              className={cn(
+                "size-3.5 shrink-0",
+                waiting
+                  ? STATE.needs.text
+                  : "text-emerald-600 dark:text-emerald-400",
+              )}
+            />
             <span className="truncate">{title ?? "Task"}</span>
             <IconArrowUpRight className="size-3.5 shrink-0" />
           </Link>
@@ -423,7 +441,7 @@ export function TaskReport({
         {children}
       </div>
     );
-  const live = cardState(task.data);
+  }
   // A task the person stopped says so here too: it did not fail, and its line is not an alarm.
   const stopped = kind === "failed" && live === "stopped";
   const state: CardState =
