@@ -426,6 +426,10 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
 - In the personal edition, a Bot's Apps page with no app connected says "Connect one on
   Connections." and links there. It said to turn one on under Your apps or ask an admin, and the
   personal edition has neither.
+- A Mastra Bot on a Gemini model through an OpenAI-compatible endpoint no longer fails when the
+  model makes a tool call. Gemini streams the call without the index the chat stream expects,
+  and the run failed before the call landed; the missing index is now filled in from the call's
+  place in the list.
 
 ## 1.0.3
 

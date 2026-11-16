@@ -26,6 +26,128 @@ import {
 const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
 
 /**
+ * A streamed chat-completion chunk with any tool-call delta that omits `index` given one.
+ *
+ * Some OpenAI-compatible endpoints (Gemini's, notably) leave `index` off
+ * `choices[].delta.tool_calls[]`, and the AI SDK's chat-chunk schema requires it, so the run
+ * fails with "Type validation failed" before the first tool call lands. The index a call sits
+ * at in its array is the index the schema wants, so that is what a missing one becomes. A chunk
+ * that needs nothing is returned untouched, and so is anything that is not a chunk at all.
+ */
+export function normalizeChatCompletionChunk(chunk: unknown): unknown {
+  if (typeof chunk !== "object" || chunk === null || !("choices" in chunk)) {
+    return chunk;
+  }
+  const choices = (chunk as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) return chunk;
+  let changed = false;
+  const normalizedChoices = choices.map((choice) => {
+    if (typeof choice !== "object" || choice === null || !("delta" in choice)) {
+      return choice;
+    }
+    const delta = (choice as { delta?: unknown }).delta;
+    if (
+      typeof delta !== "object" ||
+      delta === null ||
+      !("tool_calls" in delta)
+    ) {
+      return choice;
+    }
+    const toolCalls = (delta as { tool_calls?: unknown }).tool_calls;
+    if (!Array.isArray(toolCalls)) return choice;
+    let callsChanged = false;
+    const normalizedCalls = toolCalls.map((call, index) => {
+      if (
+        typeof call !== "object" ||
+        call === null ||
+        ("index" in call && (call as { index?: unknown }).index !== undefined)
+      ) {
+        return call;
+      }
+      callsChanged = true;
+      return { ...call, index };
+    });
+    if (!callsChanged) return choice;
+    changed = true;
+    return { ...choice, delta: { ...delta, tool_calls: normalizedCalls } };
+  });
+  if (!changed) return chunk;
+  return { ...(chunk as Record<string, unknown>), choices: normalizedChoices };
+}
+
+/** One SSE line with any tool-call delta that omits `index` given one, otherwise untouched. */
+function normalizeChatCompletionSseLine(line: string): string {
+  const ending = line.endsWith("\r\n")
+    ? "\r\n"
+    : line.endsWith("\n")
+      ? "\n"
+      : "";
+  const content = ending ? line.slice(0, -ending.length) : line;
+  if (!content.startsWith("data:")) return line;
+  const payload = content.slice("data:".length).trimStart();
+  if (payload === "" || payload === "[DONE]") return line;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return line;
+  }
+  const normalized = normalizeChatCompletionChunk(parsed);
+  if (normalized === parsed) return line;
+  return `data: ${JSON.stringify(normalized)}${ending}`;
+}
+
+/**
+ * A fetch that repairs streamed chat-completion chunks before the AI SDK validates them.
+ *
+ * The SDK parses each chunk inside its own stream, so there is no later seam to fix one up at:
+ * the response body is the place. Only server-sent-event streams are touched, and only lines
+ * that carry a chunk with a missing tool-call index are rewritten; every other line — and every
+ * non-streamed response — passes through byte for byte. A line split across writes is buffered
+ * until its newline arrives, so a chunk cut mid-line is still repaired.
+ */
+export function withDefaultToolCallIndexes(
+  fetchImpl: typeof fetch,
+): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const response = await fetchImpl(input, init);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/event-stream") || !response.body) {
+      return response;
+    }
+    let buffer = "";
+    const stream = response.body
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(
+        new TransformStream<string, string>({
+          transform(chunk, controller) {
+            buffer += chunk;
+            let newline = buffer.indexOf("\n");
+            while (newline !== -1) {
+              controller.enqueue(
+                normalizeChatCompletionSseLine(buffer.slice(0, newline + 1)),
+              );
+              buffer = buffer.slice(newline + 1);
+              newline = buffer.indexOf("\n");
+            }
+          },
+          flush(controller) {
+            if (buffer.length > 0) {
+              controller.enqueue(normalizeChatCompletionSseLine(buffer));
+            }
+          },
+        }),
+      )
+      .pipeThrough(new TextEncoderStream());
+    return new Response(stream, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }) as typeof fetch;
+}
+
+/**
  * The model this Bot answers with, read from the spec file rather than remembered in this file.
  *
  * `shared/model-providers.json` holds this Bot's `bots.agent-mastra` row and the provider facts
@@ -72,6 +194,12 @@ async function buildModel() {
     baseURL: baseURL || "https://api.openai.com/v1",
     apiKey: compatible
       ? apiKeyOrPlaceholder(process.env[spec.keyVariable])
+      : undefined,
+    // A compatible endpoint's streamed tool-call deltas can omit `index`, which the SDK's
+    // chat-chunk schema requires: repair the stream before it is validated. OpenAI's own
+    // Responses path never sees a chat chunk, so it keeps the default fetch.
+    fetch: compatible
+      ? withDefaultToolCallIndexes(globalThis.fetch)
       : undefined,
   });
   // Compatible endpoints commonly expose Chat Completions; OpenAI keeps its Responses default.

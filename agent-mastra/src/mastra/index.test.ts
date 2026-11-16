@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildOpenBotInstructions, openbotBaseInstructions } from "./index";
+import {
+  buildOpenBotInstructions,
+  normalizeChatCompletionChunk,
+  openbotBaseInstructions,
+} from "./index";
 
 type ModelCase = {
   name: string;
@@ -567,4 +571,204 @@ describe("OpenBot Mastra provider requests", () => {
       }
     }, 15_000);
   }
+});
+
+describe("OpenBot Mastra compatible-endpoint tool-call chunks", () => {
+  test("defaults a missing tool-call index to its position in the array", () => {
+    const chunk = {
+      id: "chatcmpl-gemini",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                id: "call_one",
+                function: { name: "host_list_folders", arguments: "{}" },
+              },
+              {
+                id: "call_two",
+                index: 4,
+                function: { name: "host_list_folders", arguments: "{}" },
+              },
+              {
+                id: "call_three",
+                function: { name: "host_list_folders", arguments: "{}" },
+              },
+            ],
+            extra_content: { google: { thought_signature: "thought" } },
+          },
+        },
+      ],
+    };
+    const normalized = normalizeChatCompletionChunk(chunk) as typeof chunk;
+    expect(normalized.choices[0].delta.tool_calls[0]).toMatchObject({
+      id: "call_one",
+      index: 0,
+    });
+    // An index the endpoint did send is kept, even when it is not the position.
+    expect(normalized.choices[0].delta.tool_calls[1]).toMatchObject({
+      id: "call_two",
+      index: 4,
+    });
+    expect(normalized.choices[0].delta.tool_calls[2]).toMatchObject({
+      id: "call_three",
+      index: 2,
+    });
+    // Everything else on the chunk survives, including what the schema ignores.
+    expect(normalized.choices[0].delta.extra_content).toEqual({
+      google: { thought_signature: "thought" },
+    });
+  });
+
+  test("leaves a chunk with no missing index untouched", () => {
+    const chunk = {
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              { index: 0, function: { name: "a", arguments: "{}" } },
+            ],
+          },
+        },
+      ],
+    };
+    expect(normalizeChatCompletionChunk(chunk)).toBe(chunk);
+  });
+
+  test("leaves values that are not chat chunks untouched", () => {
+    expect(normalizeChatCompletionChunk(null)).toBe(null);
+    expect(normalizeChatCompletionChunk("data: [DONE]")).toBe("data: [DONE]");
+    const usage = { choices: [], usage: { total_tokens: 3 } };
+    expect(normalizeChatCompletionChunk(usage)).toBe(usage);
+  });
+
+  test("streams a tool call whose delta omits the tool-call index", async () => {
+    // Gemini's OpenAI-compatible endpoint streams tool-call deltas without `index`, and the
+    // AI SDK's chat-chunk schema requires it, so the run failed with "Type validation failed"
+    // (#1716). The chunks below are that shape: no index on the tool call, plus the
+    // extra_content Gemini adds beside it.
+    const chunks = [
+      {
+        id: "chatcmpl-gemini",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "gemini-2.0-flash",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              tool_calls: [
+                {
+                  id: "call_host_list_folders",
+                  type: "function",
+                  function: { name: "host_list_folders", arguments: "{}" },
+                },
+              ],
+              extra_content: { google: { thought_signature: "thought" } },
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        id: "chatcmpl-gemini",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "gemini-2.0-flash",
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      },
+    ];
+    const sse = `${chunks
+      .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+      .join("")}data: [DONE]\n\n`;
+    const provider = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        if (path !== "/v1/chat/completions") {
+          return new Response("unexpected provider route", { status: 404 });
+        }
+        // Dribble the stream out a few bytes at a time, the way a live endpoint does: a
+        // normaliser that only copes with whole lines would miss a chunk split mid-line.
+        const bytes = new TextEncoder().encode(sse);
+        let offset = 0;
+        const body = new ReadableStream({
+          pull(controller) {
+            if (offset >= bytes.length) {
+              controller.close();
+              return;
+            }
+            const end = Math.min(offset + 11, bytes.length);
+            controller.enqueue(bytes.slice(offset, end));
+            offset = end;
+          },
+        });
+        return new Response(body, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const { stdout, stderr, exitCode } = await runProbe(
+        [
+          Bun.argv[0],
+          "--no-env-file",
+          "-e",
+          [
+            // Only HTTP is replaced: the real Mastra Agent and provider SDK build the request.
+            "const networkFetch = globalThis.fetch;",
+            "globalThis.fetch = (input, init) => {",
+            "  const request = new Request(input, init);",
+            "  const url = new URL(request.url);",
+            `  return networkFetch(new Request(${JSON.stringify(provider.url.toString())} + url.pathname.slice(1) + url.search, request));`,
+            "};",
+            'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+            'const model = mastra.getAgent("openbot").model;',
+            "const { stream } = await model.doStream({",
+            '  prompt: [{ role: "user", content: [{ type: "text", text: "List the folders" }] }],',
+            '  tools: [{ type: "function", name: "host_list_folders", description: "List the folders", inputSchema: { type: "object", properties: {} } }],',
+            "});",
+            "const parts = [];",
+            "for await (const part of stream) parts.push(part);",
+            "console.log(JSON.stringify({ parts }));",
+          ].join("\n"),
+        ],
+        {
+          PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+          MASTRA_TELEMETRY_DISABLED: "true",
+          DO_NOT_TRACK: "1",
+          NODE_ENV: "test",
+          BOT_PROVIDER: "openai",
+          BOT_MODEL: "gemini-2.0-flash",
+          OPENAI_BASE_URL: "http://compatible.test/v1",
+          OPENAI_API_KEY: "test-key",
+        },
+        10_000,
+      );
+      if (exitCode !== 0)
+        throw new Error(
+          `provider probe exited ${exitCode}\n${stdout}\n${stderr}`,
+        );
+      const line = stdout
+        .trim()
+        .split("\n")
+        .reverse()
+        .find((line: string) => line.startsWith("{"));
+      if (!line) throw new Error(`provider probe produced no JSON:\n${stdout}`);
+      const parts = (JSON.parse(line).parts ?? []) as Record<string, unknown>[];
+      expect(parts).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolName: "host_list_folders",
+          input: "{}",
+        }),
+      );
+    } finally {
+      await provider.stop(true);
+    }
+  }, 15_000);
 });
