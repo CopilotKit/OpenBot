@@ -34,8 +34,11 @@ export function OrganizationMenuItems({
   switching,
 }: {
   choices: OwnOrganizations;
-  /** How many invitations wait for the person's answer. The entry is drawn only when some do. */
-  invitationsWaiting: number;
+  /**
+   * How many invitations wait for the person's answer. The entry is drawn when some do, and without
+   * a count when they could not be read (null), so the page that says why is still one click away.
+   */
+  invitationsWaiting: number | null;
   itemClassName: string;
   /** Open the New organization dialog, which lives outside the menu so it outlasts it. */
   onNew: () => void;
@@ -80,7 +83,7 @@ export function OrganizationMenuItems({
             Organization settings
           </DropdownMenuItem>
         ) : null}
-        {invitationsWaiting > 0 ? (
+        {invitationsWaiting === null || invitationsWaiting > 0 ? (
           <DropdownMenuItem
             className={itemClassName}
             nativeButton={false}
@@ -88,13 +91,15 @@ export function OrganizationMenuItems({
           >
             <IconMail />
             Invitations
-            <span
-              className="ml-auto pl-3 text-muted-foreground text-xs tabular-nums"
-              data-slot="invitations-waiting"
-            >
-              <span aria-hidden="true">{invitationsWaiting}</span>
-              <span className="sr-only">, {invitationsWaiting} waiting</span>
-            </span>
+            {invitationsWaiting === null ? null : (
+              <span
+                className="ml-auto pl-3 text-muted-foreground text-xs tabular-nums"
+                data-slot="invitations-waiting"
+              >
+                <span aria-hidden="true">{invitationsWaiting}</span>
+                <span className="sr-only">, {invitationsWaiting} waiting</span>
+              </span>
+            )}
           </DropdownMenuItem>
         ) : null}
         {choices.canCreate ? (

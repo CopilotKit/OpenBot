@@ -1,4 +1,9 @@
-import { hashKey, QueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  focusManager,
+  hashKey,
+  QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   currentOrganizationId,
   onOrganizationChange,
@@ -35,6 +40,27 @@ export function organizationScopedHash(queryKey: QueryKey): string {
     ? hashKey(queryKey)
     : hashKey([{ organization }, ...queryKey]);
 }
+
+/**
+ * A query that refetches when the person comes back to OpenBot does so when the page is shown again
+ * AND when its window is focused again.
+ *
+ * TanStack Query 5 listens only for the page being shown (`visibilitychange`). OpenBot Desktop's
+ * window stays shown while the person works in their browser beside it, so coming back to it never
+ * hid or showed anything: a membership or an invitation made on the web stayed unseen in Desktop
+ * until a reload. Its window being focused again is the moment that says it. A browser window
+ * beside another is the same.
+ */
+focusManager.setEventListener((handleFocus) => {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const refocused = () => handleFocus();
+  window.addEventListener("visibilitychange", refocused, false);
+  window.addEventListener("focus", refocused, false);
+  return () => {
+    window.removeEventListener("visibilitychange", refocused);
+    window.removeEventListener("focus", refocused);
+  };
+});
 
 export const queryClient = new QueryClient({
   defaultOptions: {

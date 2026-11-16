@@ -74,6 +74,22 @@ const ONLY: OwnOrganizations = {
 
 const LOAD_FALLBACK = "Couldn't load your organizations. Reload the page.";
 export const SWITCH_FALLBACK = "Couldn't switch organizations. Try again.";
+/**
+ * Whether a failed read is an OpenBot that has no such address, which is how one that keeps one
+ * organization answers the person's organizations and invitations: the address is not served, so it
+ * is the API's plain not found (`NOT_FOUND`), or a 404 that names no code at all. Every other 404 is
+ * a refusal and is said as one: `ORGANIZATION_NOT_FOUND` is the organization the request named not
+ * being one of the person's, which an app's sign-in meets when it names an organization they are
+ * not in. A 401 or 403 is never this.
+ */
+function noSuchAddress(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    error.status === 404 &&
+    (error.code === undefined || error.code === "NOT_FOUND")
+  );
+}
+
 /** What the server says on every other request to somebody in no organization, said here too. */
 const IN_NONE =
   "You aren't a member of an organization here. Ask an admin to add you.";
@@ -126,8 +142,8 @@ async function ownOrganizations(
   } catch (error) {
     // Not signed in is an answer, as it is for the current user.
     if (error instanceof ClientError && error.status === 401) return null;
-    // An OpenBot that keeps one organization has no list of them.
-    if (error instanceof ClientError && error.status === 404) return ONLY;
+    // An OpenBot that keeps one organization has no list of them. A refusal is not that.
+    if (noSuchAddress(error)) return ONLY;
     throw error;
   }
   const { organizations } = listed;
@@ -322,7 +338,9 @@ export function sentInvitationsQueryOptions(organizationId: string) {
 
 /**
  * Every invitation sent to the person's address that they have not answered, the newest first. One
- * that ran out of time is listed as expired.
+ * that ran out of time is listed as expired. A refusal (a sign-in not allowed to see them, an
+ * expired one, an organization the request named that is not the person's) fails in the server's
+ * sentence: it is never "no invitations".
  */
 export function receivedInvitationsQueryOptions() {
   return queryOptions({
@@ -338,13 +356,16 @@ export function receivedInvitationsQueryOptions() {
         });
       } catch (error) {
         // An OpenBot that keeps one organization has no invitations to list, as it has no list of them.
-        if (error instanceof ClientError && error.status === 404) return [];
+        if (noSuchAddress(error)) return [];
         throw error;
       }
     },
     staleTime: 60_000,
-    // Somebody invited while OpenBot was open sees it when they come back to the window.
-    refetchOnWindowFocus: true,
+    /*
+     * Somebody invited, or who answered on the web, while OpenBot was open sees it when they come
+     * back to the window: always, however lately it was read, so the count agrees with the web.
+     */
+    refetchOnWindowFocus: "always",
   });
 }
 
@@ -364,8 +385,17 @@ export function receivedInvitationQueryOptions(invitationId: string) {
           })
         ).invitation;
       } catch (error) {
-        // Not found is an answer, which the page says in words.
-        if (error instanceof ClientError && error.status === 404) return null;
+        /*
+         * Not found is an answer, which the page says in words: the invitation's own
+         * (`INVITATION_NOT_FOUND`, api/openapi/organizations.yaml), or an OpenBot with no
+         * invitations at all. Any other refusal is said as one.
+         */
+        if (
+          (error instanceof ClientError &&
+            error.code === "INVITATION_NOT_FOUND") ||
+          noSuchAddress(error)
+        )
+          return null;
         throw error;
       }
     },
@@ -374,15 +404,17 @@ export function receivedInvitationQueryOptions(invitationId: string) {
 
 /**
  * How many invitations are waiting for the person's answer, for the account menu. Zero where
- * OpenBot lists no organizations, which never asks.
+ * OpenBot lists no organizations, which never asks. Null when they could not be read: how many is
+ * not known, which is not none, and the invitations page says why.
  */
-export function useWaitingInvitationCount(): number {
+export function useWaitingInvitationCount(): number | null {
   const offered = useOrganizationChoices() !== undefined;
   const invitations = useQuery({
     ...receivedInvitationsQueryOptions(),
     enabled: offered,
   });
   if (!offered) return 0;
+  if (invitations.isError) return null;
   return (
     invitations.data?.filter((invitation) => invitation.status === "pending")
       .length ?? 0
