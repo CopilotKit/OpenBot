@@ -40,6 +40,7 @@ import {
   askDesktopForHandoff,
   desktopAddress,
   desktopAvailable,
+  desktopEntry,
 } from "./native-host";
 
 /** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
@@ -61,6 +62,9 @@ type ConnectionDeps = {
   desktopAvailable: () => Promise<boolean>;
   /** OpenBot Desktop's own OpenBot address, as its native host confirms it (native-host.ts `desktopAddress`). */
   desktopAddress: () => Promise<string | null>;
+  /** Where to open a path of OpenBot Desktop's own OpenBot in this browser, as its native host answers it (native-host.ts
+   * `desktopEntry`). */
+  desktopEntry: (path: string) => Promise<string | null>;
   readPolicy: () => Promise<RecorderPolicy>;
   openTab: (url: string) => Promise<number | undefined>; // the new tab's id, kept in pendingConnect.tabId
   /** Stops what the lost connection still has running: the live recording and whatever the document sends with its
@@ -111,6 +115,7 @@ const defaultDeps: ConnectionDeps = {
   askDesktop: askDesktopForHandoff,
   desktopAvailable,
   desktopAddress,
+  desktopEntry,
   readPolicy,
   openTab: async (url) => (await chrome.tabs.create({ url })).id,
   connectionLost: async (loss) => {
@@ -281,8 +286,54 @@ export async function handleConnectionMessage(
       return { ok: true, available: await resolved.desktopAvailable() };
     case "page.connect.desktop":
       return { ok: true, ...(await connectThroughDesktop(resolved)) };
+    case "page.openbot.open":
+      return openOpenBotPage(message.url, resolved);
     default:
       return undefined;
+  }
+}
+
+const NOT_AN_OPENBOT_PAGE = "The Recorder cannot open that address.";
+
+/** Opens a page of an OpenBot in a new tab, at the address `openBotPageAddress` gives it. Only an http or https address. */
+async function openOpenBotPage(
+  raw: string,
+  deps: ConnectionDeps,
+): Promise<PageResponse> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: NOT_AN_OPENBOT_PAGE };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return { ok: false, error: NOT_AN_OPENBOT_PAGE };
+  await deps.openTab(await openBotPageAddress(url, deps));
+  return { ok: true };
+}
+
+/**
+ * Where a page of an OpenBot opens in this browser. The personal edition only admits requests carrying its install's
+ * token, and this browser has none, so a page of OpenBot Desktop's own OpenBot opens through the entry address its
+ * native host answers, which carries it. Every other OpenBot, and OpenBot Desktop's when the host is not there or
+ * answers nothing, opens at `url` itself, as it always did. The host answers for its own OpenBot whatever was asked, so
+ * its answer is used only when it is on `url`'s own origin; and OpenBot Desktop serves only plain http on this computer,
+ * so an https OpenBot is never asked about.
+ */
+async function openBotPageAddress(
+  url: URL,
+  deps: Pick<ConnectionDeps, "desktopEntry">,
+): Promise<string> {
+  const plain = url.toString();
+  if (url.protocol !== "http:") return plain;
+  const entry = await deps.desktopEntry(
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+  if (entry === null) return plain;
+  try {
+    return new URL(entry).origin === url.origin ? entry : plain;
+  } catch {
+    return plain;
   }
 }
 

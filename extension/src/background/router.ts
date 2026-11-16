@@ -50,6 +50,7 @@ const CONNECTION_TYPES = new Set<string>([
   "page.disconnect",
   "page.desktop.available",
   "page.connect.desktop",
+  "page.openbot.open",
 ]);
 const RECORDING_TYPES = new Set<string>([
   "page.state",
