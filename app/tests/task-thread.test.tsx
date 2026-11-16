@@ -235,7 +235,7 @@ test("a needs-you line asks while the task waits, and changes in place once it i
   expect(waiting.getByRole("button", { name: /Go to thread/ })).toBeTruthy();
   cleanup();
 
-  // Answered in the thread: the task carries on, and the line no longer says it is waiting.
+  // Answered: the task carries on, and the line no longer says it is waiting.
   task = { ...task, status: "working", next: null };
   const answered = draw(
     <TaskReport kind="needs" taskId="task-1" words={WAITING}>
@@ -244,7 +244,7 @@ test("a needs-you line asks while the task waits, and changes in place once it i
   );
   await answered.findByText("Needed you");
   expect(
-    answered.getByText("You answered this in its thread. It's carrying on."),
+    answered.getByText("You answered this. It's carrying on."),
   ).toBeTruthy();
   expect(answered.queryByText(WAITING)).toBeNull();
   expect(answered.getByRole("button", { name: /Open thread/ })).toBeTruthy();
@@ -264,6 +264,23 @@ test("a needs-you line asks while the task waits, and changes in place once it i
   );
   await askedAgain.findByText("Needed you");
   expect(askedAgain.queryByText(WAITING)).toBeNull();
+});
+
+/*
+ * Found on the re-test: a person pressed Allow on the Bots page's Needs you board, and the line in
+ * the conversation that asked read "You answered this in its thread, and it's done." The card can't
+ * know where the answer was given (the thread, the board, the inbox), so it never says.
+ */
+test("an answered needs-you line never claims the answer was given in the thread", async () => {
+  task = { ...task, status: "ready_for_review", next: null as never };
+  const view = draw(
+    <TaskReport kind="needs" taskId="task-1" words={WAITING}>
+      <p>{WAITING}</p>
+    </TaskReport>,
+  );
+  await view.findByText("Needed you");
+  expect(view.getByText("You answered this, and it's done.")).toBeTruthy();
+  expect(view.queryByText(/in its thread/)).toBeNull();
 });
 
 test("a Bot's link to a task thread opens in the app, not in a new tab", async () => {

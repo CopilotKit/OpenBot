@@ -515,13 +515,17 @@ export function TaskReport({
   );
 }
 
-/** What a needs-you line says once the person has answered, by where the task is now. */
+/**
+ * What a needs-you line says once the person has answered, by where the task is now. Never where
+ * they answered: the thread, the Bots page's Needs you board and the inbox all answer it, and the
+ * line can't tell which.
+ */
 const ANSWERED: Record<CardState, string> = {
-  working: "You answered this in its thread. It's carrying on.",
-  needs: "You answered this in its thread. It needs you again there.",
-  done: "You answered this in its thread, and it's done.",
-  failed: "You answered this in its thread, but it couldn't finish.",
-  stopped: "You answered this in its thread, and stopped it after.",
+  working: "You answered this. It's carrying on.",
+  needs: "You answered this. It needs you again in its thread.",
+  done: "You answered this, and it's done.",
+  failed: "You answered this, but it couldn't finish.",
+  stopped: "You answered this, and stopped it after.",
 };
 
 /**
