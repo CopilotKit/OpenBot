@@ -41157,11 +41157,11 @@ components:
                 traceId: trace_example
             unknownAgent:
               value:
-                type: https://open.bot/errors/bot-agent-not-found
-                title: Agent not found.
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
                 status: 400
                 detail: Couldn't find one of those agents. Choose from the agents you can see.
-                code: BOT_AGENT_NOT_FOUND
+                code: VALIDATION_ERROR
                 category: validation
                 retryable: false
                 requestId: req_example
