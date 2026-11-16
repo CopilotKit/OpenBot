@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
@@ -35,6 +36,7 @@ function RouteComponent() {
     <SidebarShell className="h-svh overflow-hidden">
       <AdminSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+        <ConnectionBanner />
         <Outlet />
       </SidebarInset>
     </SidebarShell>
