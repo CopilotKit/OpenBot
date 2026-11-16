@@ -67,11 +67,17 @@ const removed = new Set<string>();
 const writes: string[] = [];
 /** The sentence the server refuses a removal with, when a test sets one. */
 let refusal: string | null = null;
+/**
+ * Whether this OpenBot has several organizations, everybody with one of their own. Off, it keeps one
+ * and has no list of them to answer (the address is not served), as before organizations.
+ */
+let severalOrganizations = false;
 
 beforeEach(() => {
   removed.clear();
   writes.length = 0;
   refusal = null;
+  severalOrganizations = false;
   queryClient.clear();
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
@@ -84,6 +90,29 @@ beforeEach(() => {
     const method = init?.method ?? "GET";
     if (method !== "GET") writes.push(`${method} ${path}`);
     if (path === ME_PATH) return meResponse({ user: dana });
+    if (path === "/api/v2/people/me/organizations" && severalOrganizations)
+      return Response.json({
+        organizations: [
+          {
+            id: "default",
+            slug: "acme",
+            name: "Acme Freight",
+            role: "admin",
+            personal: false,
+            active: true,
+          },
+          {
+            id: "org_dana",
+            slug: "dana",
+            name: "Dana's organization",
+            role: "owner",
+            personal: true,
+            active: false,
+          },
+        ],
+        canCreate: true,
+        nextCursor: null,
+      });
     if (path === PEOPLE_PATH && method === "GET")
       return Response.json({
         people: everybody.map((one) => ({
@@ -186,6 +215,43 @@ test("somebody with no name is asked about by their address", async () => {
     }),
   ).toBeTruthy();
   expect(writes).toEqual([]);
+});
+
+/*
+ * Where everybody has an organization of their own, removing somebody ends their membership of this
+ * organization and nothing else: they stay signed in, their own organization and any other stay
+ * theirs, and their API keys go on working there. The dialog said they were signed out everywhere
+ * and their keys stopped working, every clause of which was false.
+ */
+test("with several organizations, Remove says it takes them out of this one alone", async () => {
+  severalOrganizations = true;
+  const view = await draw();
+  fireEvent.click(
+    await view.findByRole("button", { name: "Remove Sam Ortiz" }),
+  );
+  const dialog = await view.findByRole("dialog", {
+    name: "Remove Sam Ortiz from Acme Freight?",
+  });
+  expect(writes).toEqual([]);
+  const said = dialog.textContent ?? "";
+  expect(said).toContain("Acme Freight");
+  expect(said).toContain("their own organization");
+  expect(said).not.toContain("signed out");
+  expect(said).not.toContain("can't sign in");
+  expect(said).not.toContain("API keys");
+  expect(said).not.toContain("OpenBot");
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+  await waitFor(() =>
+    expect(writes).toEqual([`POST ${PEOPLE_PATH}/sam/revoke-access`]),
+  );
+  // The row says where they were removed from, and Restore is still offered.
+  expect(
+    await view.findByRole("button", { name: "Restore Sam Ortiz" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText(/sam@acme\.test · Removed from Acme Freight/),
+  ).toBeTruthy();
 });
 
 test("a removal the server refuses is said in the dialog, and the person stays", async () => {

@@ -1320,22 +1320,20 @@ describe("invitations, for the person invited", () => {
     );
   });
 
-  test("an invitation that ran out while the page was open is refused in the server's sentence", async () => {
+  test("an invitation that ran out while the page was open says so once", async () => {
     server.received = [received("inv_1", "pending")];
     const app = await open("/invitations/inv_1");
-    const page = within(await app.view.findByRole("main"));
+    const main = await app.view.findByRole("main");
+    const page = within(main);
     const accept = await page.findByRole("button", {
       name: "Accept invitation to Acme Research",
     });
     (server.received[0] as ReceivedInvitation).status = "expired";
     await app.person.click(accept);
-    expect((await page.findByRole("alert")).textContent).toBe(
-      "This invitation has expired. Ask whoever invited you to send a new one.",
-    );
     /*
-     * Found in the Northwind story: beside the refusal the row still said "Expires in 7 days" and
-     * offered Accept until a reload. The refusal means the invitation changed, so the row is read
-     * again and says what it is now, with nothing left to press.
+     * Found in testing: beside the refusal the row still said "Expires in 7 days" and offered
+     * Accept until a reload. The refusal means the invitation changed, so the row is read again and
+     * says what it is now, with nothing left to press.
      */
     expect(
       await page.findByText(
@@ -1348,6 +1346,41 @@ describe("invitations, for the person invited", () => {
         name: "Accept invitation to Acme Research",
       }),
     ).toBeNull();
+    /*
+     * And it is said once. The refusal underneath said the same thing again in other words ("Ask
+     * whoever invited you to send a new one."), which the row, read again, already says.
+     */
+    await settleReactWork();
+    expect(page.queryByRole("alert")).toBeNull();
+    expect(main.textContent?.match(/expired/g)).toHaveLength(1);
+  });
+
+  test("a refusal that leaves the invitation waiting is said under its row", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/invitations/inv_1");
+    const page = within(await app.view.findByRole("main"));
+    const accept = await page.findByRole("button", {
+      name: "Accept invitation to Acme Research",
+    });
+    const answering = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        String(input).endsWith("/accept")
+          ? problem(
+              409,
+              "CONFLICT",
+              "Couldn't accept the invitation. Try again.",
+            )
+          : answering(input, init),
+      { preconnect: originalFetch.preconnect },
+    );
+    await app.person.click(accept);
+    expect((await page.findByRole("alert")).textContent).toBe(
+      "Couldn't accept the invitation. Try again.",
+    );
+    expect(
+      page.getByRole("button", { name: "Accept invitation to Acme Research" }),
+    ).toBeTruthy();
   });
 
   test("on the list, an invitation refused as expired is read again: no Expires in, no Accept", async () => {

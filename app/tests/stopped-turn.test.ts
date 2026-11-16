@@ -88,6 +88,48 @@ describe("the reason a turn ended", () => {
     ).toBe("invalid x-api-key");
   });
 
+  test("a run the server refused for the person says the server's sentence, not that the backend is unreachable", async () => {
+    // An admin's model allowlist refused the run. The server answers a problem (RFC 9457) whose type
+    // is OpenBot's own, and CopilotKit's Intelligence agent throws exactly this: its own prefix and
+    // the body as it came, the 403 gone.
+    const sentence =
+      "This Bot uses openai/gpt-6.1-terra, which isn't an allowed model. Ask an admin to allow it.";
+    const refused = new Error(
+      `REST run request failed: {"type":"https://open.bot/errors/model-not-allowed","title":"That model isn't allowed.","status":403,"detail":"${sentence}","code":"MODEL_NOT_ALLOWED","category":"permission","retryable":false,"requestId":"req_6f1c2a9e-0b7d-4e57-9a43-1d2f3c4b5a69","traceId":"4bf92f3577b34da6a3ce929d0e0e4736","error":"${sentence}"}`,
+    );
+    expect(stoppedReason(refused)).toBe(sentence);
+    // The Bot is still theirs, and the server is not asked again: it already said why.
+    let asked = false;
+    expect(
+      await failedRunReason(refused, "general-assistant", async () => {
+        asked = true;
+        return false;
+      }),
+    ).toBe(sentence);
+    expect(asked).toBe(false);
+
+    // "Use Bots" turned off for the person: the same gate's other refusal, read the same way.
+    const capability =
+      "Your admin hasn't turned on Use Bots for you. Ask an admin to turn it on.";
+    expect(
+      stoppedReason(
+        `REST run request failed: {"type":"https://open.bot/errors/capability-required","title":"An admin hasn't turned this on for you.","status":403,"detail":"${capability}","code":"CAPABILITY_REQUIRED","category":"permission","retryable":false,"requestId":"req_1","traceId":"t1","capability":"useBots","error":"${capability}"}`,
+      ),
+    ).toBe(capability);
+
+    // Anything else in a REST failure is still the backend failing, said in the person's terms: a
+    // raw body, a problem that is not OpenBot's own, and a problem about a server fault.
+    for (const body of [
+      '{"error":"Failed to resolve Learning Container"}',
+      '{"type":"about:blank","title":"Forbidden","status":403,"detail":"Failed to resolve Learning Container"}',
+      '{"type":"https://open.bot/errors/internal-server-error","title":"Unexpected server error.","status":500,"detail":"Unexpected server error.","code":"INTERNAL_SERVER_ERROR"}',
+      "not json at all",
+    ])
+      expect(stoppedReason(`REST run request failed: ${body}`)).toBe(
+        "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot.",
+      );
+  });
+
   test("says so plainly when nothing was reported, rather than inventing a cause", () => {
     // This is the one moment a person has no other way to find out what went wrong, so a guess here
     // would be worse than an admission.
