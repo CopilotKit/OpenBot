@@ -13,7 +13,7 @@ export const ListComponentsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -215,7 +215,7 @@ export const AnnounceComponentsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -296,7 +296,7 @@ export const GetComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -447,7 +447,7 @@ export const DeleteComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -484,7 +484,7 @@ export const ReplaceComponentDraftParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -687,7 +687,7 @@ export const PublishComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -850,7 +850,7 @@ export const UnpublishComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -1013,7 +1013,7 @@ export const ListComponentFunctionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -1102,7 +1102,7 @@ export const GrantComponentFunctionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -1157,7 +1157,7 @@ export const RevokeComponentFunctionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   componentId: zod
     .string()
@@ -1199,7 +1199,7 @@ export const ListBotComponentsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1279,7 +1279,7 @@ export const AllowBotComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1323,7 +1323,7 @@ export const WithholdBotComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1367,7 +1367,7 @@ export const CheckBotComponentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -1430,7 +1430,7 @@ export const CallComponentFunctionParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()

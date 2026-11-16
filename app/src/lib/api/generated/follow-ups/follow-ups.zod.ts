@@ -18,7 +18,7 @@ export const CancelFollowUpParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()

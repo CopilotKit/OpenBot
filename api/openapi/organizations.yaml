@@ -57,9 +57,9 @@ paths:
       operationId: createOrganization
       summary: Create an organization
       description: >-
-        Create an organization with the caller as its owner. It starts with the
-        starter Bots and skills a fresh install has, and no conversations.
-        Everybody already has an organization of
+        Create an organization with the caller as its owner. It starts with
+        what a fresh install starts with, its starter Bots included, and no
+        conversations. Everybody already has an organization of
         their own, made when they first signed in; this is for making another,
         which anybody signed in may do where OpenBot keeps more than one.
         Without a slug, one is made from the name. The caller's session keeps

@@ -13,7 +13,7 @@ export const ListTeamsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -137,7 +137,7 @@ export const CreateTeamParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -263,7 +263,7 @@ export const GetTeamParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()
@@ -351,7 +351,7 @@ export const UpdateTeamParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()
@@ -486,7 +486,7 @@ export const DeleteTeamParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()
@@ -524,7 +524,7 @@ export const ListTeamMembersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()
@@ -622,7 +622,7 @@ export const PutTeamMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()
@@ -703,7 +703,7 @@ export const RemoveTeamMemberParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   teamId: zod
     .string()

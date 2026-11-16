@@ -17,7 +17,7 @@ export const ListDestinationsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -117,7 +117,7 @@ export const LinkChatDestinationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -197,7 +197,7 @@ export const VerifyPhoneDestinationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -277,7 +277,7 @@ export const ConfirmPhoneDestinationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -359,7 +359,7 @@ export const DeleteDestinationParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

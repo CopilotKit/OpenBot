@@ -74,7 +74,11 @@ paths:
         once and for about half a minute, so ask for a new one for every
         connection, and again to reconnect. Only a person in the conversation
         may have one, and it opens the thread they see there and no other. A
-        conversation no Bot has run in yet has nothing to join.
+        conversation no Bot has run in yet has nothing to join (409). Where
+        realtime.clientUrl is on this server, open it with the same
+        credential that made the token: the session, an app's access token,
+        or an API key, as Authorization: Bearer or x-api-key. So a script
+        that holds only an API key can watch a conversation live.
       security:
         - webSession: []
         - appOAuth: [conversations:read]
@@ -1687,11 +1691,18 @@ components:
               minLength: 1
               description: >-
                 The socket's address, without the /websocket it ends in or its
-                query. A ws or wss address, or a path on this server.
+                query. A ws or wss address, or a path on this server, which is
+                resolved against the address the API was called at. Where it
+                is on this server, the socket is opened with the credential
+                that made the token (see createConversationJoinToken).
             topic:
               type: string
               pattern: ^thread:.+$
-              description: The topic to join on the socket, thread:{threadId}.
+              description: >-
+                The topic to join on the socket, as the realtime gateway knows
+                the thread. Use it as given: outside the organization default
+                it does not name threadId, so a topic made from threadId joins
+                nothing.
     Conversation:
       type: object
       description: A conversation between the caller and one or more Bots.
@@ -2240,7 +2251,9 @@ components:
       properties:
         id:
           type: string
-          description: The caller's own id for the message, so a retry is the same message.
+          description: The caller's own id for the message, any string, so a retry in the
+            same conversation is the same message. The conversation's messages
+            list it under this id.
           minLength: 1
           maxLength: 160
         text:

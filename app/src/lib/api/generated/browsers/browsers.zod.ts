@@ -15,7 +15,7 @@ export const GetBotBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -162,7 +162,7 @@ export const ChangeBotBrowserTabsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -350,7 +350,7 @@ export const NavigateBotBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -529,7 +529,7 @@ export const RecordInBotBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -721,7 +721,7 @@ export const NarrateInBotBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -836,7 +836,7 @@ export const ClearBotBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   botId: zod
     .string()
@@ -997,7 +997,7 @@ export const GetPersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1203,7 +1203,7 @@ export const OpenPersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1282,7 +1282,7 @@ export const ChangePersonBrowserTabsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1529,7 +1529,7 @@ export const NavigatePersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1767,7 +1767,7 @@ export const RecordInPersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2018,7 +2018,7 @@ export const NarrateInPersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -2138,7 +2138,7 @@ export const ClearPersonBrowserParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

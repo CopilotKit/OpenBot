@@ -61,8 +61,18 @@ servers:
       join token carries the address to dial with it (realtime.clientUrl).
       Where Intelligence runs beside an OpenBot, that address is OpenBot's
       own, so a client dials one host: either /api/intelligence/client, which
-      OpenBot relays and which also asks for the person's session, or
-      /client, which the deployment's edge sends straight to the gateway.
+      OpenBot relays, or /client, which the deployment's edge sends straight
+      to the gateway. The relayed address also asks who is connecting, with
+      the same credential that made the join token: the web app's session, an
+      app's access token (conversations:read) or an API key, the last two as
+      Authorization: Bearer on the request that opens the socket, or a key in
+      an x-api-key header. So a script that holds only an API key mints a
+      join token with it and opens the socket with it. A credential that is
+      not valid is answered 401 before the socket opens. A join token the
+      gateway refuses, because it was used already or has expired, closes the
+      relayed socket with code 1008 and the reason "This join token has been
+      used or has expired. Ask for a new one."; 1011 means the gateway could
+      not be reached at all.
     security:
       - $ref: "#/components/securitySchemes/joinToken"
   voiceService:
@@ -187,8 +197,11 @@ channels:
       A Bot's runs in one conversation thread, as AG-UI events, on the
       gateway's socket for clients. The socket speaks the Phoenix Channels
       protocol, version 2: every frame is a JSON array of five items, [join
-      reference, reference, topic, event, payload]. The topic is
-      thread:{threadId}, and a join token opens exactly one thread.
+      reference, reference, topic, event, payload]. The topic is the one the
+      REST answer gave as realtime.topic, and a join token opens exactly one
+      thread. The topic names the thread as the gateway knows it, which in an
+      organization other than default is not the threadId a client has, so a
+      client uses the topic as given and never makes one from threadId.
 
 
       A client joins the topic, and the gateway answers with connected, then
@@ -540,7 +553,8 @@ components:
     organizationId:
       description: >-
         The organization, by its id or its slug, which the caller must be a
-        member of. Every install has one addressed as default.
+        member of. One the caller is not in answers as one that does not
+        exist, default included.
     botId:
       description: The Bot whose computer it is.
   messages:
@@ -1142,7 +1156,9 @@ components:
     ThreadTopic:
       type: string
       pattern: ^thread:.+$
-      description: The thread, as thread:{threadId}.
+      description: >-
+        The thread, as thread: and the gateway's name for it: the topic the
+        REST answer gave (realtime.topic), used as given.
     ThreadJoinFrame:
       type: array
       description: "[join reference, reference, topic, \"phx_join\", payload]"

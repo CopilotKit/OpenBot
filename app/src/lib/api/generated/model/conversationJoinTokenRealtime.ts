@@ -7,12 +7,12 @@
  */
 export type ConversationJoinTokenRealtime = {
   /**
-   * The socket's address, without the /websocket it ends in or its query. A ws or wss address, or a path on this server.
+   * The socket's address, without the /websocket it ends in or its query. A ws or wss address, or a path on this server, which is resolved against the address the API was called at. Where it is on this server, the socket is opened with the credential that made the token (see createConversationJoinToken).
    * @minLength 1
    */
   clientUrl: string;
   /**
-   * The topic to join on the socket, thread:{threadId}.
+   * The topic to join on the socket, as the realtime gateway knows the thread. Use it as given: outside the organization default it does not name threadId, so a topic made from threadId joins nothing.
    * @pattern ^thread:.+$
    */
   topic: string;

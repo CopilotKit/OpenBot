@@ -17,7 +17,7 @@ export const ListApiKeysParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -95,7 +95,7 @@ export const ListApiKeysResponse = zod.object({
 });
 
 /**
- * Make an API key that acts as the person, inside this organization, on the API only. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
+ * Make an API key that acts as the person, in every organization they are a member of, on the API. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
  * @summary Make an API key
  */
 
@@ -108,7 +108,7 @@ export const CreateApiKeyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -196,7 +196,7 @@ export const DeleteApiKeyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization, by its id or its slug. Every install has one addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
