@@ -77,6 +77,48 @@ describe("a delegated task's brief", () => {
     expect(framed).toContain("never by an app's id or its markup for one");
   });
 
+  test("a report of work done is shaped after the brief: a few sentences, no list, one for what to check", () => {
+    // Claude Sonnet 5.5 reported a three-app job in 166 to 252 words, where GPT-5.6 Terra took 45 to
+    // 84, answering its brief's "report back with ... anything you could not confirm" item by item.
+    // Said after the brief, where Claude reads it last, the report came to 81 to 114 words.
+    const brief =
+      "Put the last day's customer emails in a new sheet and post a short summary in #sales. Report back with the sheet link and anything you could not confirm.";
+    const framed = frameBrief(brief);
+    const after = framed.slice(framed.indexOf(brief) + brief.length);
+    expect(after).toContain(
+      "your report is one paragraph of at most four sentences, with no list and no headings, whatever the task asks it to include",
+    );
+    expect(after).toContain(
+      "then at most one sentence on what the person should check",
+    );
+    expect(after).toContain(
+      "That sentence is where what you could not confirm goes, and nothing follows it.",
+    );
+    expect(after).toContain(
+      "Leave out the items again, the checks you ran, what you read back and what you left out.",
+    );
+    // Only for work done: a question's answer is shaped by the frame before the brief, as it was.
+    expect(after).toContain(
+      "When the task above is to make, change or send something",
+    );
+    // The example keeps the claims rule (an inference is said to be one), on apps no test uses.
+    expect(after).toContain(
+      "a whole report is: 'I saved this week's 4 invoices to [Invoices, week 46](link) and posted the list in #finance. Two vendor names come from their email addresses, so check those.'",
+    );
+    for (const app of ["Gmail", "Sheets", "Slack", "Smartlead"])
+      expect(after).not.toContain(app);
+    // Read back, the brief is the brief alone.
+    expect(readBrief(framed)).toBe(brief);
+  });
+
+  test("a thread opened before a report of work done was shaped after the brief still reads as the Bot's brief", () => {
+    const before = `${frameBrief("Post the summary in #sales.").split("Post the summary in #sales.")[0]}Post the summary in #sales.`;
+    expect(before.endsWith("The task:\n\nPost the summary in #sales.")).toBe(
+      true,
+    );
+    expect(readBrief(before)).toBe("Post the summary in #sales.");
+  });
+
   test("a thread opened before the report was asked to be the result alone still reads as the Bot's brief", () => {
     const before =
       "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are, your words first; what you say while you work stays in this thread. Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'.\nThe task:\n\nFind Dana's latest email.";
@@ -118,6 +160,17 @@ describe("how a Bot answers a short ask itself", () => {
  * order itself, and wrote 👍 as a reply beside its 👍 reaction.
  */
 describe("how a Bot that holds delegate is told to work", () => {
+  test("a brief says what to do and check, and ends there, leaving how to report to the task", () => {
+    // A Claude Bot's briefs ended "Report back with the sheet link, how many emails were included,
+    // and anything you could not confirm", and the task answered that list item by item.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Say in it what to do and what to check, and end it there: no line on what to report back, mention or confirm in the result, since the task is told how to report already.",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "every figure, name, link and constraint from this conversation the work needs",
+    );
+  });
+
   test("names the work that goes to a task, so it is handed off without being asked", () => {
     expect(DELEGATING_GUIDANCE).toContain("without waiting to be asked");
     // On Claude Sonnet 5.5 a chart of four figures and a sheet with a total were done in the

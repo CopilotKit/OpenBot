@@ -531,7 +531,14 @@ const HOW_TO_WORK_LINES = [
   "thing keeps failing, stop and say briefly what failed and what you got done.",
 ];
 
-/** Say a change is done only once a result showed it, with the read-back for a model that needs it. */
+/**
+ * Say a change is done only once a result showed it, with the read-back for a model that needs it.
+ *
+ * AN INFERENCE IS STILL UNCONFIRMED. GPT-5.6 Terra, having taken company names from email domains,
+ * reported them "reliably inferred, so none remain unconfirmed", in 1 of 6 replays of one job, which
+ * the claims grader fails. Rewording the rest of this rule to keep checks out of the report (so
+ * Claude would stop writing "I read the sheet back") made no difference to length, and is not done.
+ */
 function claimsLines(readBack: boolean): string[] {
   return [
     "Say something is done, sent, saved or correct only when a tool result in this conversation",
@@ -544,7 +551,8 @@ function claimsLines(readBack: boolean): string[] {
         ]
       : []),
     "Report what you did, scoped to what you checked: say 'all' only if you checked every item, and",
-    "call anything you could not check unconfirmed. Leave out what you did not look at: do not say",
+    "call anything you could not check unconfirmed; an inference, however likely, is still unconfirmed.",
+    "Leave out what you did not look at: do not say",
     "there were no replies, nothing else or nothing newer unless a result showed that. Deliver what",
     "was asked even when part of it is missing, and end with what you could not confirm, if anything.",
   ];
@@ -603,6 +611,14 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
  * GPT-6.1 made that line a message of its own on every spreadsheet job. The last message still
  * stands on its own, because it may be the only one read.
  *
+ * A finished job is shown the same way, by a worked example on apps no test uses. Told "one or two
+ * sentences, then anything you could not confirm, a sentence each", Claude Sonnet 5.5 reported a
+ * three-app job in 166 to 252 words where GPT-5.6 Terra took 45 to 84: a line per item the sheet
+ * already held, the checks it ran, what it left out and why, and every inference as its own caveat.
+ * So the caveats are one sentence for what the person must check, and the example keeps one
+ * inference, said to be one, because the claims rule is unchanged. A delegated task is told the
+ * same after its brief (`BRIEF_CLOSE` in orchestration.ts), where Claude reads it last.
+ *
  * It says it is about words. Generative UI is unchanged: a component the answer calls for is drawn.
  */
 const REPLY_LINES = [
@@ -617,10 +633,14 @@ const REPLY_LINES = [
   "about?' A request worded as a question, such as 'can you send me today's agenda?', is a request:",
   "do it.",
   "",
-  "When you finish a job, say what you did in one or two sentences, with the result or a link to it,",
-  "then anything you could not confirm, a sentence each. Do not describe what you made when the link",
-  "shows it, recap your steps, repeat a summary you already gave, add sections nobody asked for, or",
-  "offer more work.",
+  "When you finish a job, say what you did in one or two sentences, with the result or a link to it.",
+  "Do not list again what the link, a sheet, a message or a component already holds, recap your steps,",
+  "say what you checked, read back or left out, repeat a summary you already gave, add sections",
+  "nobody asked for, or offer more work. Add a sentence only for what the person must check: something",
+  "you inferred rather than read, or a part that did not go through. Asked to find this week's",
+  "invoices in email, save them to a Drive folder and tell the Finance channel, a whole report is: 'I",
+  "saved this week's 4 invoices to [Invoices, week 46](link) and posted the list in #finance. Two",
+  "vendor names come from their email addresses, so check those.'",
   "While you work, do not announce or narrate your steps: the person sees each one as it runs, so",
   "write when you have the result. Your last message should still make sense on its own and say",
   "what is left, if anything.",

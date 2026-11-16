@@ -76,6 +76,12 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * search itself instead of handing it off, and told "stop the Figma one" it stopped the only task
  * the conversation had, the venue's, in 2 of 3 runs. Stopping work the person still wants is worse
  * than stopping nothing, so a stop that names no task of this conversation stops nothing.
+ *
+ * THE BRIEF SAYS WHAT TO DO AND CHECK, NOT HOW TO REPORT. The task is told how to report by its own
+ * frame (`frameBrief`). A Claude Bot's briefs ended "Report back with the sheet link, how many emails
+ * were included, and anything you could not confirm", and the task answered that list item by item
+ * beside its frame's. Told only "never how to report back", Claude still wrote such a line in 4 of 4
+ * replayed briefs; told to end the brief at what to check, in 2 of 4. What the work must check stays.
  */
 export const DELEGATING_GUIDANCE = [
   `When you hold ${DELEGATE_TOOL}, you are the person's point of contact and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:`,
@@ -299,6 +305,15 @@ export function readTaskReport(
  *
  * NAMES, NOT IDS. A task that posted in Slack quoted its message back with the mention as Slack
  * stores it, `<@U0E2EALEX0>`.
+ *
+ * A REPORT OF WORK DONE IS SHAPED AFTER THE BRIEF (`BRIEF_CLOSE`). Claude Sonnet 5.5 reported a
+ * three-app job (read the inbox, build a sheet, post in #sales) in 166 to 252 words, on OpenBot's own
+ * runner and on the Claude Agent SDK alike, where GPT-5.6 Terra took 45 to 84: the sheet's rows
+ * again, "I read the sheet back", what it left out and why, and each inference as a bullet. Claude
+ * follows the brief, which comes last and often asks for "anything you could not confirm", over a
+ * rule before it. Replayed on the real model: rules reworded here, 145 to 190 words; "under 60
+ * words", 104 to 168; one paragraph of at most four sentences, no list, said after the brief, 81 to
+ * 114 on the Claude Agent SDK. A question's answer is left as it was.
  */
 const BRIEF_FRAME = [
   "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.",
@@ -351,15 +366,31 @@ const BRIEF_PREFIXES = [
   ],
 ].map((frame) => [...frame, "", ""].join("\n"));
 
+/**
+ * What follows the brief: the shape of a report of work done, whatever the brief asked it to hold.
+ * See `BRIEF_FRAME` on why it comes last. The example is on apps no test uses, and keeps one
+ * inference, said to be one, because the claims rule is unchanged.
+ */
+export const BRIEF_CLOSE =
+  "\n\nWhen the task above is to make, change or send something, your report is one paragraph of at most four sentences, with no list and no headings, whatever the task asks it to include: what you did, with its link, then at most one sentence on what the person should check, such as something you inferred rather than read. That sentence is where what you could not confirm goes, and nothing follows it. Leave out the items again, the checks you ran, what you read back and what you left out. Asked to find this week's invoices in email, save them to a Drive folder and tell the Finance channel, a whole report is: 'I saved this week's 4 invoices to [Invoices, week 46](link) and posted the list in #finance. Two vendor names come from their email addresses, so check those.'";
+
 /** The brief, wrapped in the words that tell the turn it is a delegated task. */
 export function frameBrief(brief: string): string {
-  return `${BRIEF_PREFIXES[0]}${brief}`;
+  return `${BRIEF_PREFIXES[0]}${brief}${BRIEF_CLOSE}`;
 }
 
-/** The brief back out of a framed message, or null if this was not one. See `readFiring`. */
+/**
+ * The brief back out of a framed message, or null if this was not one. See `readFiring`. A thread
+ * opened before `BRIEF_CLOSE` was said has none to take off.
+ */
 export function readBrief(text: string): string | null {
   for (const prefix of BRIEF_PREFIXES)
-    if (text.startsWith(prefix)) return text.slice(prefix.length);
+    if (text.startsWith(prefix)) {
+      const brief = text.slice(prefix.length);
+      return brief.endsWith(BRIEF_CLOSE)
+        ? brief.slice(0, -BRIEF_CLOSE.length)
+        : brief;
+    }
   return null;
 }
 
