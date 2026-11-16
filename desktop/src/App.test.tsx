@@ -723,6 +723,12 @@ const CONNECT_PROBLEMS: Array<{
     said: "OpenBot couldn't sign you in at openbot.example.com. Try again, or ask whoever runs your OpenBot.",
   },
   {
+    kind: "access-refused",
+    at: "connect",
+    offer: "Sign in again",
+    said: "You signed in, but the OpenBot at openbot.example.com didn't let this app in. Ask whoever runs it to give you access, then sign in again.",
+  },
+  {
     kind: "session-ended",
     at: "connect",
     offer: "Sign in again",
