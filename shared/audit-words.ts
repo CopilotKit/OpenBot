@@ -97,8 +97,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "app_access.approved": "Approve a request for an app",
   "app_access.dismissed": "Dismiss a request for an app",
   "app_access.refused": "Ask for an app",
-  "app_access.owner_granted": "Share an app",
-  "app_access.owner_revoked": "Stop sharing an app",
+  // A Bot's owner switching an app on or off for their own Bot: nothing is shared with anybody.
+  "app_access.owner_granted": "Give a Bot an app",
+  "app_access.owner_revoked": "Take an app from a Bot",
   "plugin.grants_translated": "Choose a Bot's actions from a description",
   "plugin.grants_changed": "Change a Bot's actions in an app",
   "computer.action_allowed": "Use the computer",
