@@ -38,7 +38,13 @@ const invitation = {
   expiresAt: new Date(Date.now() + 6 * day).toISOString(),
 };
 
-globalThis.fetch = async (input, init) => {
+const realFetch = globalThis.fetch;
+globalThis.fetch = Object.assign(answer, { preconnect: realFetch.preconnect });
+
+async function answer(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
   const url = new URL(
     input instanceof Request ? input.url : String(input),
     location.origin,
@@ -88,7 +94,7 @@ globalThis.fetch = async (input, init) => {
     return Response.json({ conversations: [], nextCursor: null });
   unanswered.push(`${method} ${path}`);
   return problem(404, "NOT_FOUND");
-};
+}
 
 /** No socket: nothing here answers one. */
 class OfflineWebSocket extends EventTarget {
