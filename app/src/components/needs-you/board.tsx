@@ -67,7 +67,8 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     group.rows.push(
       <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
     );
-    group.times.push(listed.task.updatedAt);
+    // Only what waits on the person says how long it has waited.
+    if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);
     blocked.set(listed.task.agentId, group);
   }
   const found = new Map<string, typeof list.items>();
@@ -125,17 +126,21 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
           </div>
         ) : null}
         {blocked.size ? (
-          <Half title="Waiting on you">
+          <Half title={waitingCount ? "Waiting on you" : "Your tasks"}>
             {[...blocked].map(([botId, group]) => (
               <BotGroup
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
-                note={`waiting since ${relativeTime(
-                  group.times.reduce((first, at) =>
-                    Date.parse(at) < Date.parse(first) ? at : first,
-                  ),
-                )}`}
+                note={
+                  group.times.length
+                    ? `waiting since ${relativeTime(
+                        group.times.reduce((first, at) =>
+                          Date.parse(at) < Date.parse(first) ? at : first,
+                        ),
+                      )}`
+                    : "nothing waiting on you"
+                }
               >
                 {group.rows}
               </BotGroup>

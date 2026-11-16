@@ -680,6 +680,29 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
   expect(within(botRow).getByText("1")).toBeTruthy();
 });
 
+test("a board with nothing waiting on the person never says it is waiting", async () => {
+  tasks = [
+    task({ id: "w", title: "Draft the board update", status: "working" }),
+    task({
+      id: "d",
+      title: "Check the venue's doors time",
+      origin: "delegated",
+      next: "Doors open at 7:00 p.m.",
+    }),
+  ];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    await surface.findByText("Check the venue's doors time");
+    expect(surface.getByText("Your tasks")).toBeTruthy();
+    expect(surface.queryByText("Waiting on you")).toBeNull();
+    expect(surface.queryByText(/\d+ waiting/)).toBeNull();
+    expect(surface.getByText(/nothing waiting on you/)).toBeTruthy();
+    expect(surface.queryByText(/waiting since/)).toBeNull();
+  }
+});
+
 test("a task whose conversation is running a turn reads Working, whatever the server last said", async () => {
   tasks = [task({ id: "r", title: "Reply to the landlord" })];
   busy = ["c-r"];
