@@ -488,6 +488,9 @@ function installDeployment(deployment: Deployment): Server {
       if (!state.composioConfigured) {
         return connectionsProblem(503, "Composio is not set up");
       }
+      // The route records what the app answered: an account the app says is connected is kept,
+      // so the connections read lists it from then on.
+      if (state.confirms) state.recorded = true;
       return confirmationResponse(state.confirms);
     }
     /*

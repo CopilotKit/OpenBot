@@ -19,8 +19,8 @@ export const DESKTOP_LINK = "openbot://open";
  * there as well (`desktopReturnUrlFor` on the server). That browser is not the window, and the
  * personal edition only admits requests carrying its install's token, which only the window has. So
  * this page is not behind sign-in and asks the API nothing: it hands the person back to the window
- * through `openbot://`, and the window confirms the account itself when it has the focus again
- * (`confirmOnReturn` in brokered-account-row.tsx).
+ * through `openbot://`, and the window confirms the account itself when it has the focus again,
+ * whatever screen it is on (`confirmOnReturn` in lib/plugins/confirm-on-return.ts).
  *
  * Loaded in the Desktop window itself, it goes to the account's page instead, which confirms on its
  * own.
