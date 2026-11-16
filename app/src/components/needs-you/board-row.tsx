@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  *
  * An icon in a small square (tinted where a Bot is stopped on the person), the title and one line
  * of detail, each cut to a line until the row is opened with a click, a quiet line of where and
- * when, and the row's actions on the right. `more` is what opens under the row; `onSelect` opens
+ * when, and the row's actions on the right, or under the words where the row is too narrow for both. `more` is what opens under the row; `onSelect` opens
  * something else instead (a question's answer dialog).
  */
 export function BoardRow({
@@ -65,44 +65,53 @@ export function BoardRow({
         >
           {icon}
         </span>
-        <div className="min-w-0 flex-1">
-          {opens ? (
-            <button
-              aria-expanded={open}
-              className="block w-full min-w-0 cursor-pointer text-left"
-              onClick={() => (onSelect ? onSelect() : setOpened(!opened))}
-              type="button"
-            >
+        {/*
+         * The words and the buttons share a line while the words keep room to be read (20rem), and
+         * the buttons go under the words, lined up with them, where they don't. On a phone or in a
+         * narrow window, three buttons beside the words squeezed them to a word or two per line.
+         */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-x-3 gap-y-2">
+          <div className="min-w-0 grow basis-80">
+            {opens ? (
+              <button
+                aria-expanded={open}
+                className="block w-full min-w-0 cursor-pointer text-left"
+                onClick={() => (onSelect ? onSelect() : setOpened(!opened))}
+                type="button"
+              >
+                <RowText
+                  detail={detail}
+                  open={open || wholeDetail}
+                  title={title}
+                  whole={wholeDetail}
+                />
+              </button>
+            ) : (
               <RowText
                 detail={detail}
                 open={open || wholeDetail}
                 title={title}
                 whole={wholeDetail}
               />
-            </button>
-          ) : (
-            <RowText
-              detail={detail}
-              open={open || wholeDetail}
-              title={title}
-              whole={wholeDetail}
-            />
-          )}
-          {shownMeta.length ? (
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-muted-foreground text-xs">
-              {shownMeta.map((piece, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: the pieces are fixed per row.
-                <Fragment key={index}>
-                  {index > 0 ? <span aria-hidden>·</span> : null}
-                  {piece}
-                </Fragment>
-              ))}
+            )}
+            {shownMeta.length ? (
+              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-muted-foreground text-xs">
+                {shownMeta.map((piece, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: the pieces are fixed per row.
+                  <Fragment key={index}>
+                    {index > 0 ? <span aria-hidden>·</span> : null}
+                    {piece}
+                  </Fragment>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {actions ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {actions}
             </div>
           ) : null}
         </div>
-        {actions ? (
-          <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
-        ) : null}
       </div>
       {open && more ? <div className="pl-10">{more}</div> : null}
     </div>

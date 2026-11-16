@@ -167,7 +167,14 @@ function HiddenSection({
   return (
     <PageSection
       action={
-        <Button onClick={() => setOpen(!open)} size="sm" variant="ghost">
+        // Short on screen; to a screen reader it says which list it opens, beside Done's own Show.
+        <Button
+          aria-expanded={open}
+          aria-label={open ? "Hide hidden Bots" : "Show hidden Bots"}
+          onClick={() => setOpen(!open)}
+          size="sm"
+          variant="ghost"
+        >
           {open ? "Hide" : "Show"}
         </Button>
       }

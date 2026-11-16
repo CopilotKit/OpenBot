@@ -27,7 +27,7 @@ import {
   attentionOf,
   BOT_ATTENTION_PATH,
 } from "./bots-api";
-import { CONVERSATIONS_PATH, TASKS_PATH } from "./conversations-api";
+import { CONVERSATIONS_PATH, TASKS_PATH, taskOf } from "./conversations-api";
 import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -78,6 +78,12 @@ function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
 /** Every request the roster sent, as `METHOD path`. */
 const requests: string[] = [];
 
+/** The person's tasks, as the task list answers them. None unless a test sets some. */
+let tasks: unknown[] = [];
+afterEach(() => {
+  tasks = [];
+});
+
 /**
  * Serves the visible roster, the hidden roster, and an attention list (empty unless given,
  * `pageSize` Bots to a page), with nothing found by check-ins and no tasks.
@@ -100,7 +106,7 @@ function serving(
     if (pathOf(url) === CHECK_IN_ITEMS_PATH)
       return Response.json({ checkInItems: [], nextCursor: null });
     if (url.split("?")[0] === TASKS_PATH)
-      return Response.json({ tasks: [], nextCursor: null });
+      return Response.json({ tasks, nextCursor: null });
     if (url.split("?")[0] === CONVERSATIONS_PATH)
       return Response.json({ conversations: [], nextCursor: null });
     return (
@@ -186,9 +192,60 @@ test("a hidden Bot is under Hidden, folded until asked for, and its row opens it
   const view = draw();
   expect(await view.findByText("Hidden")).toBeTruthy();
   expect(view.queryByText("Tucked")).toBeNull();
-  fireEvent.click(view.getByRole("button", { name: "Show" }));
+  fireEvent.click(view.getByRole("button", { name: "Show hidden Bots" }));
   const row = view.getByText("Tucked").closest("a");
   expect(row?.getAttribute("href")).toBe("/bots/tucked");
+});
+
+test("Done and Hidden each fold behind a Show a screen reader can tell apart", async () => {
+  const now = new Date().toISOString();
+  tasks = [
+    taskOf({
+      id: "marked",
+      agentId: "mine",
+      channelId: "channel_marked",
+      threadId: "thread_marked",
+      title: "Book the venue",
+      why: null,
+      origin: "delegated",
+      suggestionId: null,
+      sourceApp: null,
+      sourceLink: null,
+      originChannelId: null,
+      status: "resolved",
+      failure: null,
+      failedAt: null,
+      next: null,
+      resolvedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  ];
+  serving(
+    [bot({ id: "mine", name: "Mine" })],
+    [bot({ id: "tucked", name: "Tucked", hidden: true })],
+  );
+  const view = draw();
+  expect(await view.findByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(await view.findByRole("heading", { name: "Hidden" })).toBeTruthy();
+  // Each button says which section it opens, and still reads Show on screen.
+  const done = view.getByRole("button", { name: "Show done tasks" });
+  const hidden = view.getByRole("button", { name: "Show hidden Bots" });
+  expect(done.textContent).toBe("Show");
+  expect(hidden.textContent).toBe("Show");
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+  expect(view.queryByRole("button", { name: "Show" })).toBeNull();
+
+  fireEvent.click(done);
+  expect(await view.findByText("Book the venue")).toBeTruthy();
+  const hideDone = view.getByRole("button", { name: "Hide done tasks" });
+  expect(hideDone.textContent).toBe("Hide");
+  expect(hideDone.getAttribute("aria-expanded")).toBe("true");
+  expect(view.queryByText("Tucked")).toBeNull();
+
+  fireEvent.click(hidden);
+  expect(view.getByText("Tucked")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Hide hidden Bots" })).toBeTruthy();
 });
 
 test("with nothing hidden there is no Hidden section", async () => {

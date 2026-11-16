@@ -479,7 +479,7 @@ test("tasks list what to read, answer and retry first, and each acts from its ro
   const done = await bots.findByRole("heading", { name: "Done" });
   const section = within(done.closest("section") as HTMLElement);
   expect(section.getByText("1 task you marked done this week.")).toBeTruthy();
-  fireEvent.click(section.getByRole("button", { name: "Show" }));
+  fireEvent.click(section.getByRole("button", { name: "Show done tasks" }));
   fireEvent.click(section.getByRole("button", { name: "Reopen" }));
   await waitFor(() =>
     expect(sent).toContainEqual({

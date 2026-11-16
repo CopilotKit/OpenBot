@@ -346,9 +346,49 @@ test("a row under Done reads Done, as the task's card does, and never Ready for 
   expect(done.getAllByText(/^Done · /)).toHaveLength(2);
   expect(done.queryByText(/Ready for review/)).toBeNull();
   expect(done.queryByText(/Resolved/)).toBeNull();
-  // What each can still do is unchanged.
-  expect(done.getByRole("button", { name: "Mark done" })).toBeTruthy();
-  expect(done.getByRole("button", { name: "Reopen" })).toBeTruthy();
+  // A row that already reads Done is not offered Mark done: there is nothing left to mark. One the
+  // person marked keeps Reopen.
+  expect(done.queryByRole("button", { name: "Mark done" })).toBeNull();
+  expect(done.getAllByRole("button", { name: "Reopen" })).toHaveLength(1);
+  expect(done.getAllByText("Open")).toHaveLength(2);
+});
+
+test("a stopped task has a Stopped group of its own, after Done and before Failed", async () => {
+  const view = draw(
+    {
+      completed: [
+        item({
+          id: "routine-run:3",
+          title: "Weekly report run",
+          status: "failed",
+        }),
+      ],
+    },
+    [
+      task("ready", "ready_for_review"),
+      task("stopped", "failed", { failure: "you stopped it", stoppedAt: NOW }),
+      task("failed", "failed"),
+    ],
+  );
+  await view.findByRole("heading", { name: "Stopped" });
+  const drawn = sections(view.container);
+  expect(drawn.map((section) => section.heading)).toEqual([
+    "Done",
+    "Stopped",
+    "Failed",
+  ]);
+  const rows = Object.fromEntries(
+    drawn.map((section) => [section.heading, section.rows.sort()]),
+  );
+  expect(rows.Stopped).toEqual(["Task stopped"]);
+  expect(rows.Failed).toEqual(["Task failed", "Weekly report run"]);
+  // Under its own heading it still reads Stopped, and can still be tried again or marked done.
+  const stopped = within(
+    view.getByText("Task stopped").closest("[data-slot=item]") as HTMLElement,
+  );
+  expect(stopped.getByText(/^Stopped · /)).toBeTruthy();
+  expect(stopped.getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(stopped.getByRole("button", { name: "Mark done" })).toBeTruthy();
 });
 
 test("a task's line is plain text that says something, or it is left out", async () => {
@@ -362,6 +402,10 @@ test("a task's line is plain text that says something, or it is left out", async
     task("plain", "ready_for_review", {
       next: "The stadium opened in 1976 and was replaced by Lumen Field.",
     }),
+    // The Bot's last words were the list of what it read: links, nothing about the task.
+    task("sources", "ready_for_review", {
+      next: "[The Seattle Times](https://www.seattletimes.com/seattle-news/smith-tower-history/); [SAH Archipedia](https://sah-archipedia.org/buildings/WA-01-033-0083); [KING 5](https://www.king5.com/article/news/history/smith-tower-…",
+    }),
   ]);
   const row = async (title: string) =>
     (await view.findByText(title)).closest("[data-slot=item]") as HTMLElement;
@@ -374,6 +418,11 @@ test("a task's line is plain text that says something, or it is left out", async
   expect((await row("Task table")).textContent).not.toContain("*");
   // A note of where the answer came from, cut short, says nothing: the title and status stand.
   expect((await row("Task source")).textContent).not.toContain("Source:");
+  // Nor does a bare list of sources: the row says its title and status, and no list of names.
+  expect((await row("Task sources")).textContent).not.toContain(
+    "Seattle Times",
+  );
+  expect((await row("Task sources")).textContent).not.toContain("KING 5");
   expect(
     within(await row("Task plain")).getByText(
       "The stadium opened in 1976 and was replaced by Lumen Field.",
@@ -395,8 +444,9 @@ test("a working task's row opens its thread and does not offer Mark done", async
   const running = await row("Task running");
   expect(running.getByText("Open")).toBeTruthy();
   expect(running.queryByRole("button", { name: "Mark done" })).toBeNull();
-  // Where there is something to be done with, it stays.
-  for (const title of ["Task asking", "Task ready", "Task failed"])
+  // Where there is something to be done with, it stays. A ready task is listed under Done, where
+  // it already reads Done, so it is not offered there.
+  for (const title of ["Task asking", "Task failed"])
     expect(
       (await row(title)).getByRole("button", { name: "Mark done" }),
     ).toBeTruthy();
