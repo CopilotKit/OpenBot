@@ -215,6 +215,12 @@ export const ALLOWED: Allowed[] = [
     rule: "sign-in-protocol",
     why: "where sign-in sends a person back to finish verifying an app account",
   },
+  {
+    file: "app/src/lib/plugins/finish-on-return.ts",
+    what: "fetch()",
+    rule: "sign-in-protocol",
+    why: "OpenBot Desktop's window finishes an app account's verification in the background, at the verifier resume.ts names",
+  },
   // The runtime and the sockets.
   {
     file: "app/src/lib/copilot/provider.tsx",

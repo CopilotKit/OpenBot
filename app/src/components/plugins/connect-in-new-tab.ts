@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { finishInBackground } from "@/lib/plugins/finish-on-return";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
 
@@ -59,10 +60,17 @@ export function useConnectInNewTab() {
   const onReturn = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!waiting) return;
+    /*
+     * In OpenBot Desktop's window the consent ran in the person's browser, and where the verifier
+     * finishes it the window does that first, in the background ({@link finishInBackground}), so the
+     * connections read below sees it.
+     */
     const finish = () => {
       onReturn.current = null;
       setWaiting(false);
-      void queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+      void finishInBackground().then(() =>
+        queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
+      );
     };
     const timer = setInterval(() => {
       if (!handle.current?.closed || onReturn.current) return;
