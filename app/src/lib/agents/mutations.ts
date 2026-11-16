@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { botAgentKeys } from "@/lib/bot-agents/queries";
 import { channelKeys } from "@/lib/channels/queries";
 import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
 import { type AgentProfile, agentKeys } from "./queries";
@@ -136,6 +137,11 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
       // A read of it already on its way is dropped too, not left to land in the cache.
       await queryClient.cancelQueries(ofThisBot);
       queryClient.removeQueries(ofThisBot);
+      // How it worked goes with it, and the agents it used now count one Bot fewer.
+      const itsDelegation = { queryKey: botAgentKeys.delegation(agentId) };
+      await queryClient.cancelQueries(itsDelegation);
+      queryClient.removeQueries(itsDelegation);
+      void queryClient.invalidateQueries({ queryKey: botAgentKeys.list() });
       return queryClient.invalidateQueries({
         queryKey: agentKeys.all,
         predicate: (query) => query.queryKey[2] !== agentId,

@@ -139,6 +139,24 @@ function answerExpenses(path: string): Response {
     return handoffResponse();
   if (path === `${botPath(EXPENSES.id)}/grants`)
     return Response.json({ grants: [], nextCursor: null });
+  if (path === `${botPath(EXPENSES.id)}/delegation`)
+    return Response.json({
+      botId: EXPENSES.id,
+      mode: "self",
+      model: null,
+      effort: null,
+      instructions: "",
+      agents: [
+        {
+          id: "bag_openbot",
+          name: "OpenBot",
+          description: "OpenBot's own agent.",
+          kind: "openbot",
+          available: true,
+        },
+      ],
+      canManage: true,
+    });
   return Response.json({});
 }
 

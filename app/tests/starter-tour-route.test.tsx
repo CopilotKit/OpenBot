@@ -36,6 +36,7 @@ import {
 } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import {
   CONVERSATIONS_PATH,
   conversationOf,
@@ -48,7 +49,6 @@ import {
   problemResponse,
 } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
-import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /** Real home/new routes hand the selected starter prompt to real ChannelChat and its HTTP run. */
 const NativeResponse = globalThis.Response;
@@ -220,6 +220,25 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [bot] });
       if (bots) return bots;
+      // How the Bot works: on its own agent, so a model is picked per conversation.
+      if (url.pathname === `${botPath(BOT)}/delegation`)
+        return NativeResponse.json({
+          botId: BOT,
+          mode: "self",
+          model: null,
+          effort: null,
+          instructions: "",
+          agents: [
+            {
+              id: "bag_openbot",
+              name: "OpenBot",
+              description: "OpenBot's own agent.",
+              kind: "openbot",
+              available: true,
+            },
+          ],
+          canManage: true,
+        });
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
       if (url.pathname === botGrantsPath(BOT))
