@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -12,14 +12,14 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { desktopShell } from "@/lib/desktop/shell";
 import {
   type AddServerByUrlOutcome,
   addServerByUrlMutationOptions,
 } from "@/lib/apps/mutations";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import {
@@ -40,12 +40,12 @@ type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
  * one that needs nothing opens on its tools. A refusal it can offer a step for (a key, an admin's
  * approval) is drawn under the form with that step beside it.
  */
-export function AddServerPage() {
+export function AddServerPage({
+  back = { label: "Connections", linkProps: { to: "/connections" } },
+}: {
+  back?: { label: string; linkProps: LinkOptions };
+} = {}) {
   const navigate = useNavigate();
-  const back = {
-    label: "Connections",
-    linkProps: { to: "/connections" as const },
-  };
   const me = useQuery(currentUserQueryOptions()).data;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
@@ -148,7 +148,7 @@ export function AddServerPage() {
           footer={
             <>
               <Button
-                render={(props) => <Link {...props} to="/connections" />}
+                render={(props) => <Link {...props} {...back.linkProps} />}
                 variant="outline"
               >
                 Cancel

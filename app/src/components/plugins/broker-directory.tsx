@@ -262,6 +262,16 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
       <PageSection
         description={directoryDescriptions(paths.edition).search}
         title="Apps"
+        action={
+          <Button
+            variant="outline"
+            render={
+              <Link to={personal ? "/connections/new" : "/admin/plugins/new"} />
+            }
+          >
+            Add MCP server
+          </Button>
+        }
       >
         {enableError || tabError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
