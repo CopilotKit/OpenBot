@@ -54,6 +54,23 @@ function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
   return claudeCodeCall(name, args);
 }
 
+/**
+ * Whether a run of tool lines still waits on the person: a step with no answer in a turn that is
+ * over is held for them (an approval, whose card the run draws under its line), and a step whose
+ * answer asks them to connect or consent is a question. Either stays out of the fold, card and all.
+ * FOUND BY THE APPROVALS JOURNEYS: a payment's approval card folded into "Worked for 5s", so the
+ * thread showed nothing to answer.
+ */
+function waitsOnThePerson(
+  item: Extract<TranscriptItem, { kind: "tools" }>,
+  inFlight: boolean,
+): boolean {
+  return item.steps.some(
+    (step) =>
+      (step.result === undefined && !inFlight) || asksThePerson(step.result),
+  );
+}
+
 function isPersons(item: TranscriptItem): boolean {
   return (
     (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
@@ -103,7 +120,7 @@ export function foldTurnWork(
       const item = items[index];
       if (!item || index === answer) continue;
       if (
-        item.kind === "tools" ||
+        (item.kind === "tools" && !waitsOnThePerson(item, inFlight)) ||
         (item.kind === "tool" && isWorkStep(item)) ||
         (item.kind === "text" && item.role === "assistant")
       )

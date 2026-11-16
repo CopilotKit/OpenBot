@@ -243,3 +243,55 @@ test("a step the app draws as its own card folds too, and what is drawn for the 
   expect([...folds.inside]).toEqual(["bash"]);
   expect(folds.at.get("bash")?.askId).toBe("brief");
 });
+
+test("a run of steps holding one still waiting on the person stays out of the fold, so its approval card is there to answer", () => {
+  const step = (id: string, name: string, result?: string) => ({
+    kind: "tool" as const,
+    id,
+    toolCall: {
+      id,
+      type: "function" as const,
+      function: { name, arguments: "{}" },
+    },
+    ...(result === undefined ? {} : { result }),
+  });
+  // A browser checkout as the approvals journeys draw it: two steps done, the third (Place order)
+  // held for the person's approval, its card drawn under the run's line.
+  const run = (id: string, last?: string): TranscriptItem => ({
+    kind: "tools",
+    id: `group:${id}`,
+    steps: [
+      step(`${id}-open`, "computer_navigate", "Opened the shop."),
+      step(`${id}-add`, "computer_click", "Added to the cart."),
+      step(`${id}-pay`, "computer_click", last),
+    ],
+  });
+  const items: TranscriptItem[] = [
+    {
+      kind: "text",
+      id: "brief",
+      role: "user",
+      text: "Order the tomato seeds.",
+    },
+    { kind: "text", id: "on-it", role: "assistant", text: "Opening the shop." },
+    run("checkout"),
+  ];
+  // The turn is over (the task waits on the person): the run and its card stay where they are, and
+  // what the Bot said last reads as the turn's words, so nothing is left to fold.
+  expect([...foldTurnWork(items, false).inside]).toEqual([]);
+  // While the turn still runs, the step is only working, and folds with the rest.
+  expect([...foldTurnWork(items, true).inside]).toEqual([
+    "on-it",
+    "group:checkout",
+  ]);
+  // Once answered, the run is work like any other.
+  const answered: TranscriptItem[] = [
+    ...items.slice(0, 2),
+    run("checkout", "Placed the order."),
+    { kind: "text", id: "answer", role: "assistant", text: "Ordered." },
+  ];
+  expect([...foldTurnWork(answered, false).inside]).toEqual([
+    "on-it",
+    "group:checkout",
+  ]);
+});
