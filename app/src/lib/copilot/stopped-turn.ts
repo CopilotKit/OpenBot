@@ -30,6 +30,8 @@ export function stoppedReason(reported: unknown): string {
       : typeof reported === "string"
         ? reported
         : "";
+  const refused = refusalForPerson(said);
+  if (refused) return refused;
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   return said.trim() || "The Bot stopped without saying why.";
@@ -43,7 +45,41 @@ export function stoppedReason(reported: unknown): string {
  * Container"}`). Nothing in it is the person's to act on, so they are told what happened in their
  * terms and the original goes to the console for whoever is debugging.
  */
-const REST_REQUEST_FAILED = /^REST (\w+) request failed\b/;
+const REST_REQUEST_FAILED = /^REST (\w+) request failed\b:?\s*/;
+
+/** Where OpenBot's own problems (RFC 9457) say what kind they are: `https://open.bot/errors/<code>`. */
+const OPENBOT_PROBLEM = "https://open.bot/errors/";
+
+/**
+ * The sentence OpenBot's server wrote for the person, when a REST failure is its refusal.
+ *
+ * The server refuses a run it may not start (an admin's model allowlist, a switch that is off) with
+ * a problem whose `type` is OpenBot's own and whose `detail` is written for the person. The client
+ * throws that body as it came, the status gone, so the body has to say itself that it is one: an
+ * OpenBot problem, about the request (4xx), with a `detail`. Anything else, a raw `{ error }`
+ * included, is not, and is still the backend failing.
+ */
+function refusalForPerson(said: string): string | null {
+  const match = REST_REQUEST_FAILED.exec(said.trim());
+  if (!match) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(said.trim().slice(match[0].length));
+  } catch {
+    return null;
+  }
+  if (!body || typeof body !== "object") return null;
+  const { type, status, detail } = body as Record<string, unknown>;
+  return typeof type === "string" &&
+    type.startsWith(OPENBOT_PROBLEM) &&
+    typeof status === "number" &&
+    status >= 400 &&
+    status < 500 &&
+    typeof detail === "string" &&
+    detail.trim()
+    ? detail.trim()
+    : null;
+}
 
 function backEndUnreachable(said: string): string | null {
   const match = REST_REQUEST_FAILED.exec(said.trim());
@@ -71,6 +107,8 @@ function refusedRequest(reported: unknown): "run" | "connect" | null {
       : typeof reported === "string"
         ? reported
         : "";
+  // The server already said why, for the person: nothing to ask it again.
+  if (refusalForPerson(said)) return null;
   const rest = REST_REQUEST_FAILED.exec(said.trim())?.[1];
   if (rest) return rest === "run" ? "run" : "connect";
   const status =
