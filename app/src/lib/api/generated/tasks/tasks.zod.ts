@@ -335,6 +335,111 @@ export const GetTaskResponse = zod.object({
 });
 
 /**
+ * Return one page of the turns a task has finished, oldest first: each time its Bot worked on something it was asked in the task's conversation, the Bot's brief or a line the person said there. Each says how long the Bot worked on it, counting only the time its runs took, never the time it waited on the person, and which model answered. A turn still running is not listed until it ends. Another person's task is not found. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a task's turns
+ */
+
+export const listTaskTurnsPathTaskIdMax = 256;
+
+export const listTaskTurnsPathTaskIdRegExp = new RegExp("\\S");
+
+export const ListTaskTurnsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  taskId: zod
+    .string()
+    .min(1)
+    .max(listTaskTurnsPathTaskIdMax)
+    .regex(listTaskTurnsPathTaskIdRegExp)
+    .describe("The task's id."),
+});
+
+export const listTaskTurnsQueryLimitDefault = 50;
+export const listTaskTurnsQueryLimitMax = 100;
+
+export const listTaskTurnsQueryCursorMax = 4096;
+
+export const listTaskTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const ListTaskTurnsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listTaskTurnsQueryLimitMax)
+    .default(listTaskTurnsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listTaskTurnsQueryCursorMax)
+    .regex(listTaskTurnsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listTaskTurnsResponseTurnsItemWorkedSecondsMin = 0;
+
+export const listTaskTurnsResponseNextCursorMax = 4096;
+
+export const listTaskTurnsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListTaskTurnsResponse = zod.object({
+  turns: zod.array(
+    zod
+      .object({
+        askId: zod
+          .string()
+          .describe(
+            "The id of the message the turn answered, as the conversation's history names it.",
+          ),
+        startedAt: zod.iso
+          .datetime({ offset: true })
+          .describe("When its first run began."),
+        endedAt: zod.iso
+          .datetime({ offset: true })
+          .describe("When its last run ended."),
+        workedSeconds: zod
+          .int()
+          .min(listTaskTurnsResponseTurnsItemWorkedSecondsMin)
+          .describe(
+            "How long its runs took, added up. A wait on the person between two runs (an approval, a question) is not counted.",
+          ),
+        runs: zod
+          .int()
+          .min(1)
+          .describe(
+            "How many runs it took. More than one when it stopped for the person and carried on after.",
+          ),
+        model: zod
+          .string()
+          .nullable()
+          .describe(
+            "The model its last run used. Null when the Bot chooses its own model and did not name it.",
+          ),
+      })
+      .describe(
+        "One finished turn of a task's work, answering one thing it was asked in its conversation.",
+      ),
+  ),
+  nextCursor: zod
+    .string()
+    .max(listTaskTurnsResponseNextCursorMax)
+    .regex(listTaskTurnsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});
+
+/**
  * Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
  * @summary Mark a task done
  */

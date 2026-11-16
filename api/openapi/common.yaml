@@ -175,6 +175,7 @@ paths:
   /api/v2/organizations/{organizationId}/conversation-threads/{threadId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversation-threads~1{threadId}' }
   /api/v2/organizations/{organizationId}/tasks: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}' }
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/turns: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1turns' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1resolve' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}/reopen: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1reopen' }
   /api/v2/organizations/{organizationId}/tasks/{taskId}/retry: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1tasks~1{taskId}~1retry' }

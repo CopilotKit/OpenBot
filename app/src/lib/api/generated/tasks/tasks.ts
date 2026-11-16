@@ -20,6 +20,7 @@ import type {
 import type {
   ForbiddenResponse,
   InvalidRequestResponse,
+  ListTaskTurnsParams,
   ListTasksParams,
   OrganizationNotFoundResponse,
   ReopenTaskHeaders,
@@ -32,6 +33,7 @@ import type {
   TaskNotFoundResponse,
   TaskPage,
   TaskResponse,
+  TaskTurnPage,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
 } from "../model";
@@ -474,6 +476,250 @@ export function useGetTask<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getGetTaskQueryOptions(organizationId, taskId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListTaskTurnsUrl = (
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/tasks/${encodeURIComponent(String(taskId))}/turns?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/tasks/${encodeURIComponent(String(taskId))}/turns`;
+};
+
+/**
+ * Return one page of the turns a task has finished, oldest first: each time its Bot worked on something it was asked in the task's conversation, the Bot's brief or a line the person said there. Each says how long the Bot worked on it, counting only the time its runs took, never the time it waited on the person, and which model answered. A turn still running is not listed until it ends. Another person's task is not found. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a task's turns
+ */
+export const listTaskTurns = async (
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<TaskTurnPage> => {
+  return apiRequest<TaskTurnPage>(
+    getListTaskTurnsUrl(organizationId, taskId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListTaskTurnsQueryKey = (
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/tasks/${taskId}/turns`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListTaskTurnsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTaskTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTaskTurns>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListTaskTurnsQueryKey(organizationId, taskId, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listTaskTurns>>> = ({
+    signal,
+  }) =>
+    listTaskTurns(organizationId, taskId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      taskId !== null &&
+      taskId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTaskTurns>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListTaskTurnsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTaskTurns>>
+>;
+export type ListTaskTurnsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | TaskNotFoundResponse
+  | ServerErrorResponse
+  | ServiceUnavailableResponse
+  | UnexpectedErrorResponse;
+
+export function useListTaskTurns<
+  TData = Awaited<ReturnType<typeof listTaskTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  taskId: string,
+  params: undefined | ListTaskTurnsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTaskTurns>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTaskTurns>>,
+          TError,
+          Awaited<ReturnType<typeof listTaskTurns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTaskTurns<
+  TData = Awaited<ReturnType<typeof listTaskTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTaskTurns>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTaskTurns>>,
+          TError,
+          Awaited<ReturnType<typeof listTaskTurns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTaskTurns<
+  TData = Awaited<ReturnType<typeof listTaskTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTaskTurns>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List a task's turns
+ */
+
+export function useListTaskTurns<
+  TData = Awaited<ReturnType<typeof listTaskTurns>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | TaskNotFoundResponse
+    | ServerErrorResponse
+    | ServiceUnavailableResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  taskId: string,
+  params?: ListTaskTurnsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTaskTurns>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListTaskTurnsQueryOptions(
+    organizationId,
+    taskId,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

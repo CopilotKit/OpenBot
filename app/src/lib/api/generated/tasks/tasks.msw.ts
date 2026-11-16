@@ -4,7 +4,7 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { TaskPage, TaskResponse } from "../model";
+import type { TaskPage, TaskResponse, TaskTurnPage } from "../model";
 
 export const getListTasksResponseMock = (): TaskPage => ({
   tasks: [
@@ -59,6 +59,20 @@ export const getGetTaskResponseMock = (): TaskResponse => ({
     createdAt: "2026-11-14T09:00:00.000Z",
     updatedAt: "2026-11-14T09:05:00.000Z",
   },
+});
+
+export const getListTaskTurnsResponseMock = (): TaskTurnPage => ({
+  turns: [
+    {
+      askId: "3a1c9e2b-5d40-4f7a-8b61-0e9d2c4f7a13",
+      startedAt: "2026-11-14T09:00:02.000Z",
+      endedAt: "2026-11-14T09:00:54.000Z",
+      workedSeconds: 52,
+      runs: 1,
+      model: "gpt-5.1",
+    },
+  ],
+  nextCursor: null,
 });
 
 export const getResolveTaskResponseMock = (): TaskResponse => ({
@@ -221,6 +235,36 @@ export const getGetTaskMockHandler = (
   );
 };
 
+export const getListTaskTurnsMockHandler = (
+  overrideResponse?:
+    | TaskTurnPage
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; taskId: string }>
+        >[0],
+      ) => Promise<TaskTurnPage> | TaskTurnPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; taskId: string }>(
+    "*/api/v2/organizations/:organizationId/tasks/:taskId/turns",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; taskId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListTaskTurnsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getResolveTaskMockHandler = (
   overrideResponse?:
     | TaskResponse
@@ -343,6 +387,7 @@ export const getStopTaskMockHandler = (
 export const getTasksMock = () => [
   getListTasksMockHandler(),
   getGetTaskMockHandler(),
+  getListTaskTurnsMockHandler(),
   getResolveTaskMockHandler(),
   getReopenTaskMockHandler(),
   getRetryTaskMockHandler(),

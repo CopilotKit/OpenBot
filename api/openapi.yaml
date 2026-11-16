@@ -3753,6 +3753,51 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/turns:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags:
+        - Tasks
+      operationId: listTaskTurns
+      summary: List a task's turns
+      description: 'Return one page of the turns a task has finished, oldest first: each time its Bot worked on something it was asked in the task''s conversation, the Bot''s brief or a line the person said there. Each says how long the Bot worked on it, counting only the time its runs took, never the time it waited on the person, and which model answered. A turn still running is not listed until it ends. Another person''s task is not found. A missing cursor starts at the first page and nextCursor null ends the list.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the task's turns.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskTurnPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskTurnPageExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -24063,6 +24108,58 @@ components:
       properties:
         task:
           $ref: '#/components/schemas/Task'
+    TaskTurn:
+      type: object
+      description: One finished turn of a task's work, answering one thing it was asked in its conversation.
+      required:
+        - askId
+        - startedAt
+        - endedAt
+        - workedSeconds
+        - runs
+        - model
+      properties:
+        askId:
+          type: string
+          description: The id of the message the turn answered, as the conversation's history names it.
+        startedAt:
+          type: string
+          format: date-time
+          description: When its first run began.
+        endedAt:
+          type: string
+          format: date-time
+          description: When its last run ended.
+        workedSeconds:
+          type: integer
+          minimum: 0
+          description: How long its runs took, added up. A wait on the person between two runs (an approval, a question) is not counted.
+        runs:
+          type: integer
+          minimum: 1
+          description: How many runs it took. More than one when it stopped for the person and carried on after.
+        model:
+          type:
+            - string
+            - 'null'
+          description: The model its last run used. Null when the Bot chooses its own model and did not name it.
+    TaskTurnPage:
+      type: object
+      required:
+        - turns
+        - nextCursor
+      properties:
+        turns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTurn'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.
     TranscriptionUpload:
       type: object
       required:
@@ -41059,6 +41156,17 @@ components:
           resolvedAt: null
           createdAt: '2026-11-14T09:00:00.000Z'
           updatedAt: '2026-11-14T09:05:00.000Z'
+    TaskTurnPageExample:
+      summary: 'One turn: the Bot''s brief, worked on for 52 seconds.'
+      value:
+        turns:
+          - askId: 3a1c9e2b-5d40-4f7a-8b61-0e9d2c4f7a13
+            startedAt: '2026-11-14T09:00:02.000Z'
+            endedAt: '2026-11-14T09:00:54.000Z'
+            workedSeconds: 52
+            runs: 1
+            model: gpt-5.1
+        nextCursor: null
     TranscriptionExample:
       summary: What was said.
       value:
