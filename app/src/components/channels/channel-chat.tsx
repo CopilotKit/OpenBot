@@ -28,6 +28,7 @@ import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
@@ -46,6 +47,7 @@ import {
   carryingOnAfterApproval,
   leftAnswers,
 } from "@/lib/approvals";
+import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -70,10 +72,6 @@ import {
 } from "@/lib/channels/turns-finished-away";
 import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import { useConversationActivity } from "@/lib/computers/activity";
-import {
-  useConnectionLost,
-  useReconnected,
-} from "@/lib/desktop/connection-lost";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
   observeApprovalAgent,
@@ -105,6 +103,10 @@ import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
+import {
+  useConnectionLost,
+  useReconnected,
+} from "@/lib/desktop/connection-lost";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -835,6 +837,16 @@ export function ChannelChat({
    */
   /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
   const pullHistoryRef = useRef<(() => void) | null>(null);
+  /*
+   * NOT WHILE THIS TAB'S OWN TURN IS GOING. A Bot's line said here from elsewhere can land while a
+   * turn of this tab's is still reaching it: a task the Bot handed off finishes and its result is
+   * said the moment the turn lets go of the conversation, before the turn's last events are here.
+   * Merged in then, the line was gone again when the turn ended, because a run ends by handing back
+   * the thread as it saw it (ag-ui-langgraph sends that snapshot on every run), and the conversation
+   * showed the task's card as Done with no result under it until it was opened again. So that read
+   * waits for the turn to be over, and the turn's end asks for it (`say`).
+   */
+  const readAfterTurn = useRef(false);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
@@ -881,6 +893,13 @@ export function ChannelChat({
         // Nor while a run of a turn going on in a chat that closed is joined: see `rejoining`.
         await rejoining.current;
         if (!isCurrent()) return;
+        // Nor while this tab's own turn is going: read when it ends. See `readAfterTurn`.
+        const ownTurnGoing = () => {
+          if (turnsRef.current === 0) return false;
+          readAfterTurn.current = true;
+          return true;
+        };
+        if (ownTurnGoing()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
@@ -892,6 +911,8 @@ export function ChannelChat({
             runtimeAgentId,
           );
           if (!isCurrent()) return;
+          // A turn of this tab's began while the read was out: it is read again once that ends.
+          if (ownTurnGoing()) return;
           if (stored.availability === "unavailable") {
             // Only an exhausted refresh with no successful read is a failure to announce. Keep the
             // last known ready notice when the store already answered this refresh cycle.
@@ -1011,13 +1032,18 @@ export function ChannelChat({
    * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
    */
+  /*
+   * Not a Bot that hands work to agents either: its own model is set on its Agents page, and each
+   * agent keeps its own.
+   */
+  const picksModel = useBotTakesModelChoice(botProfile);
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: botProfile?.runsOnOpenBotModel === true,
+    enabled: picksModel,
   });
   const runModel = useConversationModel(
     channel.id,
-    botProfile?.runsOnOpenBotModel ? models.data : undefined,
+    picksModel ? models.data : undefined,
   );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
@@ -1518,9 +1544,8 @@ export function ChannelChat({
       agentRef.current.isRunning ||
       turnsGoingAway(channel.id) > 0
     ) {
-      throw new Error(
-        "This Bot is still working on something. Wait for it, or stop it first.",
-      );
+      // Its own kind, so a drained queue tries again once the Bot is free (`StillWorkingError`).
+      throw new StillWorkingError();
     }
 
     const turn = {};
@@ -1554,6 +1579,11 @@ export function ChannelChat({
       // does not, and the last turn out is what takes the roster's working indicator down.
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
+        // A Bot's line said here while the turn went on is read now that it is over.
+        if (readAfterTurn.current) {
+          readAfterTurn.current = false;
+          pullHistoryRef.current?.();
+        }
       }
       turnTokens.current.delete(turn);
       // And the conversation open now, if the person came back, reads what this turn stored.
@@ -1871,9 +1901,7 @@ export function ChannelChat({
             commands={skillCommands}
             modelPicker={
               <ModelPicker
-                catalogue={
-                  botProfile?.runsOnOpenBotModel ? models.data : undefined
-                }
+                catalogue={picksModel ? models.data : undefined}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}

@@ -36,6 +36,7 @@ import {
   agentListQueryOptions,
   agentQueryOptions,
 } from "@/lib/agents/queries";
+import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
@@ -193,8 +194,11 @@ function NewConversation({ composition }: { composition: string }) {
    * A model can be picked before the first message when the conversation is with one Bot that runs
    * on OpenBot's own model. The pick is saved with the conversation, before the message runs.
    */
-  const pickable =
-    !group && selected.length === 1 && selected[0]?.runsOnOpenBotModel === true;
+  const takesModel = useBotTakesModelChoice(
+    !group && selected.length === 1 ? selected[0] : undefined,
+  );
+  // Not a Bot that hands work to agents: its model is set on its Agents page.
+  const pickable = !group && selected.length === 1 && takesModel;
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
     enabled: pickable,

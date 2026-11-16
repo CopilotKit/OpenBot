@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDeletedHere } from "@/components/routines/routine-detail-missing";
 import { deleteAgentMutationKey } from "@/lib/agents/mutations";
 import { agentQueryOptions } from "@/lib/agents/queries";
+import { botDelegationQueryOptions } from "@/lib/bot-agents/queries";
 import { botActivityQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 
@@ -32,6 +33,15 @@ export function useBotPlugins(agentId: string) {
   const deleted = useBotDeletedHere(agentId);
   return useQuery({
     ...agentPluginsQueryOptions(agentId),
+    enabled: agentId.length > 0 && !deleted,
+  });
+}
+
+/** How the Bot works and the agents it may use, read until the Bot is deleted from this browser. */
+export function useBotDelegation(agentId: string) {
+  const deleted = useBotDeletedHere(agentId);
+  return useQuery({
+    ...botDelegationQueryOptions(agentId),
     enabled: agentId.length > 0 && !deleted,
   });
 }

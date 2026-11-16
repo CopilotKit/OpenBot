@@ -1,5 +1,5 @@
 import type { ProactiveSetting } from "@/lib/proactive";
-import type { ListedTask } from "@/lib/tasks/groups";
+import { type ListedTask, onTheBoard } from "@/lib/tasks/groups";
 import { stoppedByYou } from "@/lib/tasks/queries";
 import type { ActivityItem, BotActivity } from "./queries";
 
@@ -113,6 +113,7 @@ export function groupActivity({
   /**
    * The Needs you board is drawn above these groups and already lists the Bot's tasks and what it
    * asked the person, so neither is listed a second time and there is no second Needs you group.
+   * A task the board leaves out (`onTheBoard`), one finished or marked done, is listed here.
    */
   boardAbove?: boolean;
 }): ActivityGroup[] {
@@ -127,7 +128,9 @@ export function groupActivity({
   };
   const taskConversations = new Set(tasks.map(({ task }) => task.channelId));
 
-  for (const listed of boardAbove ? [] : tasks)
+  for (const listed of boardAbove
+    ? tasks.filter((entry) => !onTheBoard(entry))
+    : tasks)
     groups[taskGroup(listed)].push({
       kind: "task",
       key: `task:${listed.task.id}`,

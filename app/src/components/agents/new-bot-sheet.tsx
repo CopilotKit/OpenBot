@@ -1,5 +1,6 @@
 import {
   OPENBOT_HARNESS_NAME,
+  reachedThroughMastra,
   summaryFor,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
@@ -65,11 +66,11 @@ import {
   type GiveableApp,
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import { appsQueryOptions } from "@/lib/apps/queries";
 import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -124,17 +125,22 @@ type Step = (typeof STEPS)[number];
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
- * so the server never hears which was picked.
+ * The framework is kept for its connection instructions and default role description, and sent with
+ * the create. Every framework but Mastra is reached the same way, at an AG-UI address. A Mastra
+ * server is reached through Mastra's own API, which the server picks from the framework sent.
  */
-type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+export type Runtime =
+  | { kind: "builtin" }
+  | { kind: "managed"; harness: string };
 
 /**
  * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
  * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
  * fails if the two drift apart.
  */
-function declaredFramework(id: string): CreateBotRequestHarness | undefined {
+export function declaredFramework(
+  id: string,
+): CreateBotRequestHarness | undefined {
   const known: readonly string[] = Object.values(CreateBotRequestHarness);
   return id !== "" && known.includes(id)
     ? (id as CreateBotRequestHarness)
@@ -364,6 +370,25 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setUnreachable(undefined);
+    /*
+     * A Mastra server has no AG-UI route, so the AG-UI test could only fail against it. The create
+     * names the framework and the server proves the address against Mastra's own API before it saves
+     * anything. What it refused with is shown under the address, as a failed test is.
+     */
+    if (runtime?.kind === "managed" && reachedThroughMastra(runtime.harness)) {
+      try {
+        await create(runtime);
+      } catch (error) {
+        createAgent.reset();
+        setUnreachable(
+          error instanceof Error && error.message
+            ? error.message
+            : MASTRA_UNREACHABLE,
+        );
+        focusAddress();
+      }
+      return;
+    }
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -560,6 +585,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     </form>
   );
 }
+
+/** Said when a Mastra create failed without a sentence of the server's own. */
+export const MASTRA_UNREACHABLE =
+  "Couldn't reach a Mastra server at that address.";
 
 /** How long the created view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
@@ -938,7 +967,7 @@ function IsolatedOption({
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
-const OPTION_CLASSES =
+export const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
@@ -947,7 +976,11 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
+export function RuntimeStep({
+  onChoose,
+}: {
+  onChoose: (runtime: Runtime) => void;
+}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -985,8 +1018,8 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
  * The framework picked on the step before is named at the top so the person can see what they are
- * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
- * stored the same way.
+ * connecting. Nothing below differs by framework but Mastra's: every other one is an AG-UI address,
+ * and a Mastra one is the address of the Mastra server itself, so its example and its hint say so.
  *
  * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
@@ -996,7 +1029,7 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * from there, which is the one thing the browser cannot tell. Why it could not be reached arrives as
  * this field's error.
  */
-function EndpointStep({
+export function EndpointStep({
   harness,
   endpoint,
   secret,
@@ -1012,6 +1045,7 @@ function EndpointStep({
   onKey: (value: string) => void;
 }) {
   const chosen = WEB_HARNESSES.find((entry) => entry.id === harness);
+  const mastra = reachedThroughMastra(harness);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1037,7 +1071,11 @@ function EndpointStep({
             id="new-bot-endpoint"
             inputMode="url"
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://your-agent.example.com/ag-ui"
+            placeholder={
+              mastra
+                ? "https://your-mastra-server.example.com"
+                : "https://your-agent.example.com/ag-ui"
+            }
             value={endpoint}
           />
           {endpointError ? (
@@ -1045,6 +1083,11 @@ function EndpointStep({
               className="text-pretty"
               errors={[{ message: endpointError }]}
             />
+          ) : mastra ? (
+            <FieldDescription>
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
+            </FieldDescription>
           ) : (
             <FieldDescription>
               Any agent that speaks AG-UI works. OpenBot connects to it, so it

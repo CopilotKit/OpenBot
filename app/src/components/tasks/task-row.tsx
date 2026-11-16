@@ -11,6 +11,7 @@ import { Link } from "@tanstack/react-router";
 import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   Item,
   ItemContent,
@@ -20,10 +21,11 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import { countsAsWaiting, type ListedTask } from "@/lib/tasks/groups";
+import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
+  stopTaskMutationOptions,
   tryTaskAgainMutationOptions,
 } from "@/lib/tasks/mutations";
 import {
@@ -178,11 +180,14 @@ export function TaskRow({
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const stop = useMutation(stopTaskMutationOptions(queryClient));
   const { state, Icon, dot: stateDot } = look(listed);
   const dot = settled ? undefined : stateDot;
   const next = nextLine(listed);
-  const busy = resolve.isPending || again.isPending;
-  const error = resolve.error ?? again.error;
+  const busy = resolve.isPending || again.isPending || stop.isPending;
+  const error = resolve.error ?? again.error ?? stop.error;
+  // Stop, as on its card: while it works or waits on the person.
+  const canStop = status === "working" || status === "needs_input";
   const openFirst =
     !settled && (status === "ready_for_review" || status === "needs_input");
   return (
@@ -251,6 +256,17 @@ export function TaskRow({
           >
             Open
           </Button>
+          {canStop ? (
+            <Button
+              disabled={busy}
+              onClick={() => stop.mutate(task.id)}
+              size="sm"
+              variant="ghost"
+            >
+              <IconPlayerStop data-icon="inline-start" />
+              {stop.isPending ? "Stopping…" : "Stop"}
+            </Button>
+          ) : null}
           {status === "resolved" ? (
             <Button
               disabled={busy}
@@ -300,54 +316,108 @@ export function TaskBoardRow({
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const stop = useMutation(stopTaskMutationOptions(queryClient));
   const { state, Icon } = look(listed);
-  const busy = resolve.isPending || again.isPending;
-  const error = resolve.error ?? again.error;
+  const busy = resolve.isPending || again.isPending || stop.isPending;
+  const error = resolve.error ?? again.error ?? stop.error;
+  const openFirst = status === "ready_for_review" || status === "needs_input";
+  const said = boardStatus(listed);
+  const markDone = () => resolve.mutate({ id: task.id, done: true });
+  const markDoneWords = resolve.isPending ? "Saving…" : "Mark done";
+  // Stop, as on its card and its Activity row: while it works or waits on the person.
+  const canStop = status === "working" || status === "needs_input";
+  const stopWords = stop.isPending ? "Stopping…" : "Stop";
+  const openLink = (
+    <Link params={{ channelId: task.channelId }} to="/channel/$channelId" />
+  );
   /*
-   * A delegated task that is done waits on nobody: its result was said in the conversation that
-   * asked. It reads Done, as its card does, untinted and uncounted, with Open no longer leading.
+   * Stop, Mark done and Open come after the row's answers, and fold into its menu where the row's
+   * line has no room for them (`BoardRow`).
    */
-  const settled = !countsAsWaiting(listed) && status === "ready_for_review";
-  const openFirst =
-    !settled && (status === "ready_for_review" || status === "needs_input");
-  const said = boardStatus(listed, settled);
+  const secondary = (openVariant: "default" | "outline" | "ghost") => [
+    ...(canStop
+      ? [
+          {
+            key: "stop",
+            button: (
+              <Button
+                disabled={busy}
+                onClick={() => stop.mutate(task.id)}
+                size="sm"
+                variant="ghost"
+              >
+                <IconPlayerStop data-icon="inline-start" />
+                {stopWords}
+              </Button>
+            ),
+            menuItem: (
+              <DropdownMenuItem
+                disabled={busy}
+                onClick={() => stop.mutate(task.id)}
+              >
+                {stopWords}
+              </DropdownMenuItem>
+            ),
+          },
+        ]
+      : []),
+    ...(held || canMarkDone(listed)
+      ? [
+          {
+            key: "mark-done",
+            button: (
+              <Button
+                disabled={busy}
+                onClick={markDone}
+                size="sm"
+                variant="ghost"
+              >
+                {markDoneWords}
+              </Button>
+            ),
+            menuItem: (
+              <DropdownMenuItem disabled={busy} onClick={markDone}>
+                {markDoneWords}
+              </DropdownMenuItem>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: "open",
+      button: (
+        <Button render={openLink} size="sm" variant={openVariant}>
+          Open
+        </Button>
+      ),
+      menuItem: (
+        <DropdownMenuItem nativeButton={false} render={openLink}>
+          Open
+        </DropdownMenuItem>
+      ),
+    },
+  ];
   if (held)
     return (
       <BoardRow
-        actions={
-          <>
-            {held.actions}
-            <Button
-              disabled={busy}
-              onClick={() => resolve.mutate({ id: task.id, done: true })}
-              size="sm"
-              variant="ghost"
-            >
-              {resolve.isPending ? "Saving…" : "Mark done"}
-            </Button>
-            <Button
-              render={
-                <Link
-                  params={{ channelId: task.channelId }}
-                  to="/channel/$channelId"
-                />
-              }
-              size="sm"
-              variant="ghost"
-            >
-              Open
-            </Button>
-          </>
-        }
+        actions={held.actions}
         detail={said.line}
         icon={<Icon />}
         meta={[
           <span key="status">{boardStatus(listed).label}</span>,
           <span key="when">{relativeTime(task.updatedAt)}</span>,
           ...held.meta,
+          error ? (
+            <span className="text-destructive" key="error" role="alert">
+              {error.message}
+            </span>
+          ) : null,
         ]}
         more={held.more}
         open={held.more !== undefined}
+        // What it waits on is what the person answers: read in full, at a phone's width too.
+        readDetail
+        secondary={secondary("ghost")}
         state={state}
         title={task.title}
         waiting
@@ -356,43 +426,24 @@ export function TaskBoardRow({
   return (
     <BoardRow
       actions={
-        <>
-          {canTryAgain({ ...task, status }) ? (
-            <Button
-              disabled={busy}
-              onClick={() => again.mutate(task.id)}
-              size="sm"
-            >
-              {again.isPending ? "Starting…" : "Try again"}
-            </Button>
-          ) : null}
-          {canMarkDone(listed) ? (
-            <Button
-              disabled={busy}
-              onClick={() => resolve.mutate({ id: task.id, done: true })}
-              size="sm"
-              variant="ghost"
-            >
-              {resolve.isPending ? "Saving…" : "Mark done"}
-            </Button>
-          ) : null}
+        canTryAgain({ ...task, status }) ? (
           <Button
-            render={
-              <Link
-                params={{ channelId: task.channelId }}
-                to="/channel/$channelId"
-              />
-            }
+            disabled={busy}
+            onClick={() => again.mutate(task.id)}
             size="sm"
-            variant={openFirst ? "default" : "outline"}
           >
-            Open
+            {again.isPending ? "Starting…" : "Try again"}
           </Button>
-        </>
+        ) : null
       }
+      secondary={secondary(openFirst ? "default" : "outline")}
       detail={said.line}
-      // What a waiting task waits for is what the person has to answer: read in full, never cut.
-      readDetail={status === "needs_input"}
+      /*
+       * Read in full, never cut: what a waiting task waits for is what the person has to answer,
+       * and a stopped task's line says what stopping did ("Anything it had already done stays
+       * done"). Cut to one line at a phone's width it read "Anything it had already...".
+       */
+      readDetail={status === "needs_input" || state === "stopped"}
       icon={<Icon />}
       meta={[
         <span key="status">{said.label}</span>,

@@ -1,6 +1,12 @@
 import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
-import { DELEGATE_TOOL, LINK_TOOL, REACT_TOOL } from "./orchestration";
+import {
+  DELEGATE_TOOL,
+  FOLLOW_UP_TOOL,
+  LINK_TOOL,
+  REACT_TOOL,
+  STOP_TOOL,
+} from "./orchestration";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
 import { lowerFirst, nameInWords } from "./tool-name-words";
@@ -563,6 +569,11 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   message_bot: { running: "Asking another Bot", done: "Asked another Bot" },
   [SUBAGENT_TOOL]: { running: "Working on a subtask", done: "Ran a subtask" },
   [DELEGATE_TOOL]: { running: "Starting a task", done: "Started a task" },
+  [FOLLOW_UP_TOOL]: {
+    running: "Telling a task more",
+    done: "Told a task more",
+  },
+  [STOP_TOOL]: { running: "Stopping a task", done: "Stopped a task" },
   [REACT_TOOL]: { running: "Reacting", done: "Reacted" },
   [LINK_TOOL]: {
     running: "Finding the task thread",

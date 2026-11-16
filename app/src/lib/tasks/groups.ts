@@ -31,17 +31,31 @@ export function waitsOnYou(status: TaskStatus): boolean {
 }
 
 /**
+ * Whether a task is one a Bot delegated that has finished. Its result was already said in the
+ * conversation that asked for it, and its Bot's Activity page lists it under Done, so it waits on
+ * nobody: it is not counted, and no list of what needs the person shows it (`onTheBoard`).
+ */
+export function finishedDelegation({ task, status }: ListedTask): boolean {
+  return task.origin === "delegated" && status === "ready_for_review";
+}
+
+/**
+ * Whether the Needs you board lists a task: every task not marked done, less a delegated one that has
+ * finished. Whatever lists the Bot's tasks under the board (OpenFuse's Activity) lists the rest, so
+ * a task is always on one or the other.
+ */
+export function onTheBoard(listed: ListedTask): boolean {
+  return listed.status !== "resolved" && !finishedDelegation(listed);
+}
+
+/**
  * Whether a listed task is one thing waiting on the person, by the rule the Bots badge counts by
  * (the server's task counts): something to read, answer or try again, less a delegated task that is
- * done. Its result was already said in the conversation that asked for it, so it is not one more
- * thing to review. Every count of what waits on the person counts tasks by this, so the numbers
- * agree wherever they are shown.
+ * done (`finishedDelegation`). Every count of what waits on the person counts tasks by this, so the
+ * numbers agree wherever they are shown.
  */
-export function countsAsWaiting({ task, status }: ListedTask): boolean {
-  return (
-    waitsOnYou(status) &&
-    !(task.origin === "delegated" && status === "ready_for_review")
-  );
+export function countsAsWaiting(listed: ListedTask): boolean {
+  return waitsOnYou(listed.status) && !finishedDelegation(listed);
 }
 
 /** Where a question or an action waits: its conversation, its thread, or both. */

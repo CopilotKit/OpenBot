@@ -23,6 +23,7 @@ One word for one thing, everywhere a person can see it.
 |---|---|---|
 | **Bot**, **Bots** (capitalised) | What a person creates, talks to and gives work to. | agent, coworker, assistant, AI |
 | **agent** | Only an outside framework's program, in the places that are about connecting one: "an agent you already run", "AG-UI agent". | Bot, when the thing is a Bot |
+| **agent**, **Agents** | What a Bot hands work to, listed on the Agents page: OpenBot's own, a framework OpenBot runs, or one you run. Never for the Bot itself. | Bot, worker, subagent |
 | **app** | A service a Bot uses: Gmail, Google Drive, Notion. | connector, integration, plugin |
 | **Connections** | The page that lists the apps and accounts every Bot uses as you: the every-Bot page of Apps. On a Bot's page the same thing is the **Apps** row. | connected accounts, linked accounts |
 | **connect / disconnect / reconnect** | What a person does to their own account. | link (except GitHub and Slack identity, where "link" is the vendor's own word) |

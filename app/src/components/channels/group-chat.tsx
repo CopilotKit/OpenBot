@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { Streamdown } from "streamdown";
 import {
   QuestionNotice,
   type WaitingQuestion,
@@ -27,6 +26,7 @@ import {
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPlugins,
@@ -339,13 +339,13 @@ function GroupLine({
             className="w-full"
           >
             <BubbleContent className="w-full">
-              <Streamdown
+              <BotMarkdown
                 components={markdownComponents}
                 plugins={markdownPlugins}
                 remarkPlugins={replyRemarkPlugins}
               >
                 {message.text}
-              </Streamdown>
+              </BotMarkdown>
             </BubbleContent>
           </Bubble>
         )}

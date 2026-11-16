@@ -3,6 +3,7 @@ import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { taskReportMessageId } from "@openbot/shared/orchestration";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -72,6 +73,8 @@ let gatewaySnapshot: readonly Message[] = [];
 let runRequests: { path: string; input: RunAgentInput }[] = [];
 let activityRequests: ActivityRequest[] = [];
 let runEvents: (input: RunAgentInput) => unknown[];
+/** A run's response as it streams, when a test holds part of it back. */
+let runStream: ((input: RunAgentInput) => Response) | null = null;
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
 
 function CoreProbe() {
@@ -136,7 +139,7 @@ beforeAll(() => {
           input instanceof Request ? input : new Request(url, init);
         const body = RunAgentInputSchema.parse(await request.json());
         runRequests.push({ path: url.pathname, input: body });
-        return sse(runEvents(body));
+        return runStream ? runStream(body) : sse(runEvents(body));
       }
       if (
         /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/activity$/.test(
@@ -235,6 +238,7 @@ function mounting(
   gatewaySnapshot = snapshot;
   runRequests = [];
   activityRequests = [];
+  runStream = null;
   runEvents = (input) => [
     { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
     { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
@@ -737,6 +741,116 @@ test.each([
     );
   },
 );
+
+/*
+ * A task the Bot handed off finishes while the person's own turn is still reaching this tab: the
+ * server says the task's result in the conversation the moment the turn lets go of it, and tells the
+ * roster, before the last of the turn's events has arrived here. The result is in the stored thread,
+ * and it must be on screen once the turn is over, not only after a reload.
+ */
+test("a task's result said while this tab's own turn is still ending stays on screen after the turn ends", async () => {
+  const reply = {
+    id: "orchestrator-reply",
+    role: "assistant",
+    content: "I'll calculate the monthly payment and show the formula.",
+  } satisfies Message;
+  const result = {
+    id: taskReportMessageId("result", "task-loan", "once-loan"),
+    role: "assistant",
+    content: "The monthly payment is $489.15.",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  // The turn's reply streams, and its end is held back until the test lets it go.
+  let finish: () => void = () => {
+    throw new Error("The run never started");
+  };
+  const ended = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  runStream = (input) => {
+    const line = (event: unknown) =>
+      new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+    return new NativeResponse(
+      new ReadableStream({
+        async start(controller) {
+          for (const event of [
+            {
+              type: "RUN_STARTED",
+              threadId: input.threadId,
+              runId: input.runId,
+            },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: reply.id,
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: reply.id,
+              delta: reply.content,
+            },
+            { type: "TEXT_MESSAGE_END", messageId: reply.id },
+          ])
+            controller.enqueue(line(event));
+          await ended;
+          // The endpoint ends its run with the thread as it was sent to it (ag-ui-langgraph does).
+          controller.enqueue(
+            line({
+              type: "MESSAGES_SNAPSHOT",
+              messages: [...input.messages, reply],
+            }),
+          );
+          controller.enqueue(
+            line({
+              type: "RUN_FINISHED",
+              threadId: input.threadId,
+              runId: input.runId,
+            }),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  };
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Work out the monthly payment on a $25,000 loan.",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(reply.content);
+  const sent = runRequests[0]?.input.messages.at(-1);
+  if (sent?.role !== "user") throw new Error("Missing the person's message");
+
+  // The task's result is in the stored thread after the turn's reply, and the roster hears of it.
+  history = async () => stored([initial, sent, reply, result]);
+  await announce(30, channel, { text: result.content });
+  // Long enough for the read the announcement asks for to have been made and merged.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  // Then the last of the turn reaches this tab, and the tab reports the turn's reply as it ends.
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  // Every retry of the read the announcement started has had its time.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  });
+
+  expect(view.queryByText(result.content)).not.toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    initial.id,
+    sent.id,
+    reply.id,
+    result.id,
+  ]);
+}, 10000);
 
 test("a ready durable mount adds the newer turn beyond the gateway snapshot", async () => {
   const view = mounting(async () => stored([initial, fresh]), [initial]);

@@ -1303,6 +1303,58 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/turns:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags:
+        - Tasks
+      operationId: listTaskTurns
+      summary: List a task's turns
+      description: "Return one page of the turns a task has finished, oldest
+        first: each time its Bot worked on something it was asked in the
+        task's conversation, the Bot's brief or a line the person said there.
+        Each says how long the Bot worked on it, counting only the time its
+        runs took, never the time it waited on the person, and which model
+        answered. A turn still running is not listed until it ends. Another
+        person's task is not found. A missing cursor starts at the first page
+        and nextCursor null ends the list."
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:read
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the task's turns.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskTurnPage'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskTurnPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/tasks/{taskId}/resolve:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -1409,6 +1461,57 @@ paths:
       description: Run the task's failed turn once more, in the task's own
         conversation. Only a task that failed can be tried again. The answer is
         the task as it stands now, which is working.
+      security:
+        - webSession: []
+        - appOAuth:
+            - tasks:write
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The task as it stands now.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                example:
+                  $ref: '#/components/examples/TaskResponseExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '409':
+          $ref: '#/components/responses/TaskConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/tasks/{taskId}/stop:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags:
+        - Tasks
+      operationId: stopTask
+      summary: Stop a task
+      description: Stop the task's work, as Stop in its conversation does. A
+        step it is in the middle of is cut off; the steps it finished stay done,
+        and its conversation and the one that asked for it say how far it got.
+        What it waits on the person for is no longer asked. Only a task that is
+        working or waiting on the person can be stopped. The answer is the task
+        as it stands now, which is stopped.
       security:
         - webSession: []
         - appOAuth:
@@ -2388,6 +2491,24 @@ components:
         botId:
           type: string
           description: The Bot doing it.
+        agent:
+          type: [object, 'null']
+          description: >-
+            The agent doing the work, when the Bot handed it to one of the
+            agents it may use. Null for a task the Bot does itself, which is
+            every task before agents were a list. Absent from a server that
+            does not name it.
+          additionalProperties: false
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              description: The agent's id.
+            name:
+              type: string
+              description: >-
+                What the agent is called. An agent private to somebody other
+                than the caller is named Private agent.
         conversationId:
           type: string
           description: The task's own conversation, where the person reads it and replies.
@@ -2518,6 +2639,59 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Task'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: Pass as cursor for the next page. Null ends the list. Written
+            in URL-safe base64, the only form the cursor parameter accepts.
+    TaskTurn:
+      type: object
+      description: One finished turn of a task's work, answering one thing it was asked in its conversation.
+      required:
+        - askId
+        - startedAt
+        - endedAt
+        - workedSeconds
+        - runs
+        - model
+      properties:
+        askId:
+          type: string
+          description: The id of the message the turn answered, as the conversation's history names it.
+        startedAt:
+          type: string
+          format: date-time
+          description: When its first run began.
+        endedAt:
+          type: string
+          format: date-time
+          description: When its last run ended.
+        workedSeconds:
+          type: integer
+          minimum: 0
+          description: How long its runs took, added up. A wait on the person between two runs (an approval, a question) is not counted.
+        runs:
+          type: integer
+          minimum: 1
+          description: How many runs it took. More than one when it stopped for the person and carried on after.
+        model:
+          type:
+            - string
+            - 'null'
+          description: The model its last run used. Null when the Bot chooses its own model and did not name it.
+    TaskTurnPage:
+      type: object
+      required:
+        - turns
+        - nextCursor
+      properties:
+        turns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTurn'
         nextCursor:
           type:
             - string
@@ -3106,6 +3280,9 @@ components:
     TaskResponseExample:
       summary: "A task ready to read."
       value: {"task": {"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}}
+    TaskTurnPageExample:
+      summary: "One turn: the Bot's brief, worked on for 52 seconds."
+      value: {"turns": [{"askId": "3a1c9e2b-5d40-4f7a-8b61-0e9d2c4f7a13", "startedAt": "2026-11-14T09:00:02.000Z", "endedAt": "2026-11-14T09:00:54.000Z", "workedSeconds": 52, "runs": 1, "model": "gpt-5.1"}], "nextCursor": null}
     TranscriptionExample:
       summary: "What was said."
       value: {"text": "Remind me to send the forecast on Friday."}

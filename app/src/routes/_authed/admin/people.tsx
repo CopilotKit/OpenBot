@@ -78,7 +78,35 @@ function describe(person: Person, organization: string | undefined): string {
   if (person.configuredAdmin) {
     return `Admin by configuration · ${when}`;
   }
+  if (person.role === "owner")
+    return `Owner · ${providers || "no provider"} · ${when}`;
   return `${providers || "no provider"} · ${when}`;
+}
+
+/**
+ * Under an owner's row, where neither their Admin switch nor Remove can be used: why, and where
+ * ownership changes when it can. A person's own organization keeps them as its one owner. In a
+ * shared one an owner gives somebody the Owner role from the Members list on Organization settings
+ * (organization-settings-page.tsx). Where OpenBot offers no organizations, there is no such page.
+ */
+function ownerHint(
+  person: Person,
+  isSelf: boolean,
+  organization: { personal: boolean } | undefined,
+): string {
+  if (organization?.personal)
+    return isSelf
+      ? "This is your own organization, so you're always its owner."
+      : `This is ${nameOf(person)}'s own organization, so they're always its owner.`;
+  if (organization)
+    return "Owners are always admins. An owner can change a member's role to Owner in Organization settings.";
+  return "Owners are always admins.";
+}
+
+/** The organization the person is working in, where OpenBot offers organizations. */
+function useCurrentOrganization() {
+  const choices = useOrganizationChoices();
+  return choices?.organizations.find((one) => one.id === choices.currentId);
 }
 
 /** What a person is called: their name, or their address when they have not given one. */
@@ -123,6 +151,7 @@ function PeoplePage() {
   const [removing, setRemoving] = useState<Person | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const organization = useRemovalOrganization();
+  const current = useCurrentOrganization();
   /*
    * INITIAL_ADMIN_EMAILS names the admins of the deployment's first organization (`default`, as the
    * API addresses it) and of no other, so only its People page says so.
@@ -217,6 +246,12 @@ function PeoplePage() {
                         {person.name ? `${person.email} · ` : ""}
                         {describe(person, organization)}
                       </ItemDescription>
+                      {/* Why the owner's switch and Remove can't be used here. */}
+                      {owner && !person.configuredAdmin ? (
+                        <ItemDescription>
+                          {ownerHint(person, isSelf, current)}
+                        </ItemDescription>
+                      ) : null}
                     </ItemContent>
                     <ItemActions>
                       {/*

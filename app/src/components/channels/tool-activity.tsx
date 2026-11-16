@@ -32,7 +32,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Streamdown } from "streamdown";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import {
@@ -41,7 +40,11 @@ import {
   folderStepBody,
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
-import { markdownComponents, markdownPlugins } from "@/lib/markdown";
+import {
+  BotMarkdown,
+  markdownComponents,
+  markdownPlugins,
+} from "@/lib/markdown";
 import {
   RESEARCH_RESULTS_LABELS,
   type ResearchSource,
@@ -228,7 +231,7 @@ export function useDrawnTool(): (name: string) => boolean {
  * they cannot use yet (not connected, lost at the vendor, or a team account nobody connected) — and neither may sit behind a disclosure for the same reason: a question
  * nobody can see is a conversation that has stopped without saying so.
  */
-function asksThePerson(result: string | undefined): boolean {
+export function asksThePerson(result: string | undefined): boolean {
   if (result === undefined) return false;
   const answer = asText(result);
   if (!answer.startsWith(REFUSAL_MARKER)) return false;
@@ -872,12 +875,12 @@ export function StepOutput({
           </pre>
         ) : (
           <div className="[&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h4]:text-xs [&_h1]:font-medium [&_h2]:font-medium [&_h3]:font-medium">
-            <Streamdown
+            <BotMarkdown
               components={markdownComponents}
               plugins={markdownPlugins}
             >
               {forDisplay(output)}
-            </Streamdown>
+            </BotMarkdown>
           </div>
         )}
         {long && !open ? (

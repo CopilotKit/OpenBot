@@ -346,6 +346,68 @@ async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
     assert said in message
 
 
+def closed_port():
+    """A loopback port with nothing listening on it."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_a_model_address_with_nothing_listening_is_told_as_unreachable(
+    boundary, monkeypatch
+):
+    """Seen on OpenBot Desktop: an OpenAI-compatible base URL at host.docker.internal:48123 with
+    nothing listening. The harness log said `openai.APIConnectionError` ("All connection attempts
+    failed") and the person read only "The Bot stopped before it finished answering. Try again.",
+    which says nothing about the model or where to change it."""
+    port = closed_port()
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://synthetic-user:synthetic-secret@127.0.0.1:{port}/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # Coded, so the server says it with the step that fits its edition.
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        f"OpenBot couldn't reach the AI model at 127.0.0.1:{port}. "
+        "Check that it's running and the address is right."
+    )
+    # The address is host and port only: never the credentials or the path a URL can carry.
+    assert "synthetic-secret" not in json.dumps(events)
+    assert not boundary["model"], "nothing answered, so nothing was asked"
+
+
+@pytest.mark.asyncio
+async def test_a_model_host_that_does_not_exist_is_told_the_same_way(boundary, monkeypatch):
+    # `.invalid` never resolves (RFC 2606), so this is a DNS failure and never leaves the machine.
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openbot-model.invalid:48123/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        "OpenBot couldn't reach the AI model at openbot-model.invalid:48123. "
+        "Check that it's running and the address is right."
+    )
+
+
+def test_a_model_that_never_answers_in_time_is_unreachable_too():
+    """A timeout is the third way an address can't be reached, and is told the same way."""
+    import openai
+
+    from src.tool_runtime import model_address, model_unreachable
+
+    request = httpx.Request("POST", "http://10.0.0.7:8080/v1/chat/completions")
+    timeout = openai.APITimeoutError(request=request)
+    assert model_unreachable(timeout)
+    assert model_address(timeout) == "10.0.0.7:8080"
+    # A provider that answered, with whatever status, is not unreachable: it said something.
+    refusal = openai.APIStatusError(
+        "Error code: 503", response=httpx.Response(503, request=request), body=None
+    )
+    assert not model_unreachable(refusal)
+
+
 def test_the_provider_is_named_by_who_serves_the_model(monkeypatch):
     from src.tool_runtime import provider_name
 

@@ -52,6 +52,19 @@ export const ListTasksResponse = zod.object({
       .object({
         id: zod.string().describe("The task's id."),
         botId: zod.string().describe("The Bot doing it."),
+        agent: zod
+          .object({
+            id: zod.string().describe("The agent's id."),
+            name: zod
+              .string()
+              .describe(
+                "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+              ),
+          })
+          .nullish()
+          .describe(
+            "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+          ),
         conversationId: zod
           .string()
           .describe(
@@ -212,6 +225,19 @@ export const GetTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
       conversationId: zod
         .string()
         .describe(
@@ -335,6 +361,111 @@ export const GetTaskResponse = zod.object({
 });
 
 /**
+ * Return one page of the turns a task has finished, oldest first: each time its Bot worked on something it was asked in the task's conversation, the Bot's brief or a line the person said there. Each says how long the Bot worked on it, counting only the time its runs took, never the time it waited on the person, and which model answered. A turn still running is not listed until it ends. Another person's task is not found. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a task's turns
+ */
+
+export const listTaskTurnsPathTaskIdMax = 256;
+
+export const listTaskTurnsPathTaskIdRegExp = new RegExp("\\S");
+
+export const ListTaskTurnsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  taskId: zod
+    .string()
+    .min(1)
+    .max(listTaskTurnsPathTaskIdMax)
+    .regex(listTaskTurnsPathTaskIdRegExp)
+    .describe("The task's id."),
+});
+
+export const listTaskTurnsQueryLimitDefault = 50;
+export const listTaskTurnsQueryLimitMax = 100;
+
+export const listTaskTurnsQueryCursorMax = 4096;
+
+export const listTaskTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const ListTaskTurnsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listTaskTurnsQueryLimitMax)
+    .default(listTaskTurnsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listTaskTurnsQueryCursorMax)
+    .regex(listTaskTurnsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const listTaskTurnsResponseTurnsItemWorkedSecondsMin = 0;
+
+export const listTaskTurnsResponseNextCursorMax = 4096;
+
+export const listTaskTurnsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListTaskTurnsResponse = zod.object({
+  turns: zod.array(
+    zod
+      .object({
+        askId: zod
+          .string()
+          .describe(
+            "The id of the message the turn answered, as the conversation's history names it.",
+          ),
+        startedAt: zod.iso
+          .datetime({ offset: true })
+          .describe("When its first run began."),
+        endedAt: zod.iso
+          .datetime({ offset: true })
+          .describe("When its last run ended."),
+        workedSeconds: zod
+          .int()
+          .min(listTaskTurnsResponseTurnsItemWorkedSecondsMin)
+          .describe(
+            "How long its runs took, added up. A wait on the person between two runs (an approval, a question) is not counted.",
+          ),
+        runs: zod
+          .int()
+          .min(1)
+          .describe(
+            "How many runs it took. More than one when it stopped for the person and carried on after.",
+          ),
+        model: zod
+          .string()
+          .nullable()
+          .describe(
+            "The model its last run used. Null when the Bot chooses its own model and did not name it.",
+          ),
+      })
+      .describe(
+        "One finished turn of a task's work, answering one thing it was asked in its conversation.",
+      ),
+  ),
+  nextCursor: zod
+    .string()
+    .max(listTaskTurnsResponseNextCursorMax)
+    .regex(listTaskTurnsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});
+
+/**
  * Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
  * @summary Mark a task done
  */
@@ -375,6 +506,19 @@ export const ResolveTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
       conversationId: zod
         .string()
         .describe(
@@ -538,6 +682,19 @@ export const ReopenTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
       conversationId: zod
         .string()
         .describe(
@@ -701,6 +858,195 @@ export const RetryTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
+      conversationId: zod
+        .string()
+        .describe(
+          "The task's own conversation, where the person reads it and replies.",
+        ),
+      threadId: zod
+        .string()
+        .nullable()
+        .describe("That conversation's thread. Null once it is gone."),
+      title: zod.string().describe("What the task is."),
+      why: zod.string().nullable().describe("Why it was raised."),
+      origin: zod
+        .enum(["check_in", "delegated"])
+        .describe(
+          "Whether the person started it from a check-in, or a Bot was asked to do it.",
+        ),
+      suggestionId: zod
+        .string()
+        .nullable()
+        .describe("The check-in item it was started from."),
+      sourceApp: zod
+        .string()
+        .nullable()
+        .describe("The app the item came from."),
+      sourceLink: zod
+        .string()
+        .nullable()
+        .describe("Where the item is in that app."),
+      originConversationId: zod
+        .string()
+        .nullable()
+        .describe(
+          "The conversation a delegated task was asked for in, where its result is said.",
+        ),
+      status: zod
+        .enum([
+          "needs_input",
+          "working",
+          "resolved",
+          "failed",
+          "ready_for_review",
+        ])
+        .describe(
+          "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
+        ),
+      failure: zod
+        .string()
+        .nullable()
+        .describe("Why its turn could not finish, while it is failed."),
+      failedAt: zod.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      canTryAgain: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether trying a failed task again could change how it ends. False when it couldn't finish for a reason asking again gets the same answer to, such as a Bot it asked that isn't shared with the person, or this Bot no longer being shared with them. Absent from a server that does not say, which reads as true.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
+      next: zod.string().nullable().describe("One line on what comes next."),
+      resolvedAt: zod.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
+      createdAt: zod.iso
+        .datetime({ offset: true })
+        .describe("When it was started."),
+      updatedAt: zod.iso
+        .datetime({ offset: true })
+        .describe("When it last changed."),
+    })
+    .describe(
+      "A piece of work a Bot does for a person in a conversation of its own.",
+    ),
+});
+
+/**
+ * Stop the task's work, as Stop in its conversation does. A step it is in the middle of is cut off; the steps it finished stay done, and its conversation and the one that asked for it say how far it got. What it waits on the person for is no longer asked. Only a task that is working or waiting on the person can be stopped. The answer is the task as it stands now, which is stopped.
+ * @summary Stop a task
+ */
+
+export const stopTaskPathTaskIdMax = 256;
+
+export const stopTaskPathTaskIdRegExp = new RegExp("\\S");
+
+export const StopTaskParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  taskId: zod
+    .string()
+    .min(1)
+    .max(stopTaskPathTaskIdMax)
+    .regex(stopTaskPathTaskIdRegExp)
+    .describe("The task's id."),
+});
+
+export const stopTaskHeaderIdempotencyKeyMax = 128;
+
+export const StopTaskHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(stopTaskHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const StopTaskResponse = zod.object({
+  task: zod
+    .object({
+      id: zod.string().describe("The task's id."),
+      botId: zod.string().describe("The Bot doing it."),
+      agent: zod
+        .object({
+          id: zod.string().describe("The agent's id."),
+          name: zod
+            .string()
+            .describe(
+              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+        ),
       conversationId: zod
         .string()
         .describe(

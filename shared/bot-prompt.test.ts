@@ -359,15 +359,16 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     // tools could do all of it.
     expect(said).not.toContain("smartlead");
     expect(said).not.toContain("partly");
-    // A finished job: the result and its gaps, not a tour of what was built or an offer of more.
+    // A finished job: the result and what to check, not a tour of what was built or an offer of more.
     expect(said).toContain(
-      "then anything you could not confirm, a sentence each",
+      "add a sentence only for what the person must check",
     );
     expect(said).toContain(
-      "do not describe what you made when the link shows it",
+      "do not list again what the link, a sheet, a message or a component already holds",
     );
     expect(said).toContain("or offer more work");
-    expect(said).toContain("recap your steps, repeat a summary");
+    expect(said).toContain("recap your steps");
+    expect(said).toContain("repeat a summary you already gave");
     expect(said).toContain("do not announce or narrate your steps");
     // No preamble either: on GPT-6.1 a "one short line before a long job" became a message of its own.
     expect(said).not.toContain("one short line");
@@ -376,6 +377,54 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     expect(said).toContain(
       "a chart, table or card the answer calls for under the rules above is still drawn",
     );
+  });
+
+  test("a finished job is reported in a few sentences, with one for what to check, shown by example", () => {
+    // Claude Sonnet 5.5 reported a three-app job in 166 to 252 words, on OpenBot's runner and on the
+    // Claude Agent SDK alike: the rows again, "I read the sheet back", what it left out and why, and
+    // each inference as a bullet, where GPT-5.6 Terra took 45 to 84.
+    const said = flat(REPLY_GUIDANCE);
+    expect(said).not.toContain(
+      "then anything you could not confirm, a sentence each",
+    );
+    expect(said).toContain("say what you checked, read back or left out");
+    expect(said).toContain(
+      "a whole report is: 'i saved this week's 4 invoices to [invoices, week 46](link) and posted the list in #finance.",
+    );
+    // The example keeps the claims rule: an inference is said to be one.
+    expect(said).toContain(
+      "two vendor names come from their email addresses, so check those.'",
+    );
+    // On apps no test asks about.
+    for (const app of ["gmail", "sheets", "slack", "smartlead"])
+      expect(said).not.toContain(app);
+  });
+
+  test("an inference, however likely, is still called unconfirmed, on every model", () => {
+    // GPT-5.6 Terra took company names from email domains and reported them "reliably inferred, so
+    // none remain unconfirmed", which the claims grader fails.
+    for (const model of [
+      "claude-sonnet-5-5",
+      "gpt-5.6-terra",
+      "claude-opus-5-5",
+      undefined,
+    ]) {
+      const howTo = flat(howToWorkGuidance(model));
+      expect(howTo).toContain(
+        "call anything you could not check unconfirmed; an inference, however likely, is still unconfirmed",
+      );
+      // The rest of the claims rule is as it was.
+      expect(howTo).toContain(
+        "report what you did, scoped to what you checked",
+      );
+      expect(howTo).toContain(
+        "only when a tool result in this conversation showed it",
+      );
+      expect(howTo).toContain("do not say there were no replies");
+      expect(howTo).toContain(
+        "end with what you could not confirm, if anything",
+      );
+    }
   });
 
   test("a spreadsheet gets live formulas, labelled inputs, units, formats, one tab and a read-back", () => {
