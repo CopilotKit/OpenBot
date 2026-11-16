@@ -223,7 +223,8 @@ function AgentFlow({
       ? { auth: { header: "Authorization", value: key.trim() } }
       : {};
     const chosenModel = model === DEFAULT_MODEL ? null : model;
-    const shown: BotAgentVisibility = personal ? "private" : visibility;
+    // One person, and the Bot they start with is the install's own: an agent here is for every Bot.
+    const shown: BotAgentVisibility = personal ? "public" : visibility;
     if (editing) {
       await update.mutateAsync({
         botAgentId: editing.id,
