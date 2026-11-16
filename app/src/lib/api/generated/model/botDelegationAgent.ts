@@ -9,13 +9,13 @@ import type { BotAgentKind } from "./botAgentKind";
 export interface BotDelegationAgent {
   /** The agent's id. */
   id: string;
-  /** What the agent is called. An agent the caller can no longer see is named "Unavailable agent". */
+  /** What the agent is called. An agent private to somebody other than the caller is named Private agent. */
   name: string;
-  /** What it is good at. Empty for an agent the caller can no longer see. */
+  /** What it is good at. Empty for an agent private to somebody other than the caller. */
   description: string;
   kind: BotAgentKind;
   /** What runs it, by the name a person reads. Absent when OpenBot doesn't know. */
   framework?: string;
-  /** Whether the caller may still use it. The Bot never hands the caller's work to an agent they can't use. */
+  /** Whether the Bot may still hand it work: false once the agent is deleted, or private to somebody other than the Bot's owner. */
   available: boolean;
 }

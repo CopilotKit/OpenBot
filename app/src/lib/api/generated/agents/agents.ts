@@ -1263,7 +1263,7 @@ export const getGetBotDelegationUrl = (
 };
 
 /**
- * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Bot names no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a group conversation). An agent the caller can no longer use is listed with available false.
+ * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Bot names no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a group conversation). Whoever uses a Bot uses its agents: an agent that is private to the Bot's owner still does the work for everybody the Bot is shared with, and to anybody else it is named Private agent, with its description withheld. An agent that was deleted, or that the Bot's owner can no longer use, is listed with available false, and the Bot hands it nothing.
  * @summary Read a Bot's delegation
  */
 export const getBotDelegation = async (
@@ -1496,7 +1496,7 @@ export const getReplaceBotDelegationUrl = (
 };
 
 /**
- * Replace how a Bot works. Mode self takes exactly one agent, which the Bot runs on with its apps, as every Bot did before agents were a list. Mode orchestrate takes one to twenty agents, in order, the first being the default: the Bot then answers on its own model with only the tools for replying, reacting, finding a task's thread and handing work to an agent, plus reading the person's memory, and each agent works with the Bot's apps as the person who asked. model and effort are the Bot's own when it orchestrates, one the model catalogue offers, or null for the organization's default; they are ignored in mode self. instructions steer how it hands work out and answers, and are read only in mode orchestrate. Every agent named must be one the caller can see. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed.
+ * Replace how a Bot works. Mode self takes exactly one agent, which the Bot runs on with its apps, as every Bot did before agents were a list. Mode orchestrate takes one to twenty agents, in order, the first being the default: the Bot then answers on its own model with only the tools for replying, reacting, finding a task's thread and handing work to an agent, plus reading the person's memory, and each agent works with the Bot's apps as the person who asked. model and effort are the Bot's own when it orchestrates, one the model catalogue offers, or null for the organization's default; they are ignored in mode self. instructions steer how it hands work out and answers, and are read only in mode orchestrate. Every agent named must be one the caller can see, or one the Bot already has. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed.
  * @summary Set a Bot's delegation
  */
 export const replaceBotDelegation = async (
