@@ -90,6 +90,26 @@ function serving(
     if (url.includes("/bots/") && url.includes("/grants")) {
       return botGrantsResponse();
     }
+    if (url.endsWith("/bots/expenses/delegation")) {
+      return Response.json({
+        botId: "expenses",
+        mode: "self",
+        model: null,
+        effort: null,
+        instructions: "",
+        agents: [
+          {
+            id: "bag_openbot",
+            name: "OpenBot",
+            description: "OpenBot's own agent.",
+            kind: "openbot",
+            framework: "OpenBot",
+            available: true,
+          },
+        ],
+        canManage: true,
+      });
+    }
     const reach = notificationsResponse("GET", url, {
       bindings: [
         { id: "b1", transport: "slack", channelId: "c1", agentId: "expenses" },
@@ -170,7 +190,7 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
-test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and Setup, in that order", async () => {
+test("the personal edition shows Routines, Skills, Apps, Computer, Approvals, Setup and Agents, in that order", async () => {
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -192,6 +212,7 @@ test("the personal edition shows Routines, Skills, Apps, Computer, Approvals and
     "Computer",
     "Approvals",
     "Setup",
+    "Agents",
   ]);
   expect(view.container.querySelector('a[href$="/memory"]')).toBeNull();
 });
@@ -211,6 +232,7 @@ test("the team edition keeps the order, with Memory, then Sharing and Reaching y
     "Apps",
     "Approvals",
     "Setup",
+    "Agents",
     "Sharing",
     "Reaching you",
   ]);
@@ -229,7 +251,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   expect(await view.findByText("Everyone in the organization")).toBeTruthy();
 });
 
-test("the rows for routines, reach, memory and approvals say what this Bot has and open their pages", async () => {
+test("the rows for routines, reach, memory, approvals and agents say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
   const row = async (title: string, summary: string, path: string) => {
@@ -242,6 +264,7 @@ test("the rows for routines, reach, memory and approvals say what this Bot has a
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approvals", "1 rule", "approvals");
+  await row("Agents", "Does the work itself on OpenBot", "agents");
 });
 
 /** The personal starter on the harness picked at setup, as OpenBot Desktop on Windows starts it. */

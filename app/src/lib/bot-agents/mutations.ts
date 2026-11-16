@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/agents/queries";
 import {
   createBotAgent,
   deleteBotAgent,
@@ -13,7 +14,6 @@ import type {
   UpdateBotAgentRequest,
 } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { agentKeys } from "@/lib/agents/queries";
 import { type AgentRecord, botAgentKeys, type Delegation } from "./queries";
 
 /** What an agent is added with, and changed with: the spec's own request bodies. */

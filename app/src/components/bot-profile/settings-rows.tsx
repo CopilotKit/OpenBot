@@ -1,6 +1,7 @@
 import {
   IconChevronRight,
   IconDeviceMobile,
+  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +28,10 @@ import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import {
+  botDelegationQueryOptions,
+  delegationSummary,
+} from "@/lib/bot-agents/queries";
 import { destinationsQueryOptions } from "@/lib/delivery";
 import {
   deploymentCapabilitiesQueryOptions,
@@ -52,6 +57,7 @@ type Row = {
     | "/bots/$agentId/computer"
     | "/bots/$agentId/approvals"
     | "/bots/$agentId/setup"
+    | "/bots/$agentId/agents"
     | "/bots/$agentId/sharing"
     | "/bots/$agentId/reach";
   title: string;
@@ -86,6 +92,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ...destinationsQueryOptions(),
     enabled: !personal,
   });
+  const delegation = useQuery(botDelegationQueryOptions(agent.id));
   const published = teamBots.data?.find((bot) => bot.botId === agent.id);
   const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
@@ -187,6 +194,12 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       title: SETUP.label,
       icon: SETUP.icon,
       summary: setupSummary(agent, personal ? "personal" : "team"),
+    },
+    {
+      to: "/bots/$agentId/agents",
+      title: "Agents",
+      icon: IconSitemap,
+      summary: delegation.data ? delegationSummary(delegation.data) : "",
     },
     ...(canShare
       ? [

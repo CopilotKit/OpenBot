@@ -181,6 +181,25 @@ beforeAll(() => {
       if (bots) return bots;
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({ bot: bot });
+      // How the Bot works: on its own agent, so a model is picked per conversation.
+      if (url.pathname === `${botPath(BOT)}/delegation`)
+        return NativeResponse.json({
+          botId: BOT,
+          mode: "self",
+          model: null,
+          effort: null,
+          instructions: "",
+          agents: [
+            {
+              id: "bag_openbot",
+              name: "OpenBot",
+              description: "OpenBot's own agent.",
+              kind: "openbot",
+              available: true,
+            },
+          ],
+          canManage: true,
+        });
       if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (url.pathname === botComponentsPath(BOT))
         return botComponentsResponse();

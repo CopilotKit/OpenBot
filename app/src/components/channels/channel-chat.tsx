@@ -46,6 +46,7 @@ import {
   carryingOnAfterApproval,
   leftAnswers,
 } from "@/lib/approvals";
+import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -70,10 +71,6 @@ import {
 } from "@/lib/channels/turns-finished-away";
 import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import { useConversationActivity } from "@/lib/computers/activity";
-import {
-  useConnectionLost,
-  useReconnected,
-} from "@/lib/desktop/connection-lost";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
   observeApprovalAgent,
@@ -105,6 +102,10 @@ import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
+import {
+  useConnectionLost,
+  useReconnected,
+} from "@/lib/desktop/connection-lost";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -1011,13 +1012,18 @@ export function ChannelChat({
    * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
    */
+  /*
+   * Not a Bot that hands work to agents either: its own model is set on its Agents page, and each
+   * agent keeps its own.
+   */
+  const picksModel = useBotTakesModelChoice(botProfile);
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: botProfile?.runsOnOpenBotModel === true,
+    enabled: picksModel,
   });
   const runModel = useConversationModel(
     channel.id,
-    botProfile?.runsOnOpenBotModel ? models.data : undefined,
+    picksModel ? models.data : undefined,
   );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
@@ -1871,9 +1877,7 @@ export function ChannelChat({
             commands={skillCommands}
             modelPicker={
               <ModelPicker
-                catalogue={
-                  botProfile?.runsOnOpenBotModel ? models.data : undefined
-                }
+                catalogue={picksModel ? models.data : undefined}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}

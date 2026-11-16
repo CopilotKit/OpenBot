@@ -27,8 +27,7 @@ export const botAgentKeys = {
   all: ["bot-agents"] as const,
   list: (scope: ListBotAgentsScope = "caller") =>
     ["bot-agents", "list", { scope }] as const,
-  detail: (botAgentId: string) =>
-    ["bot-agents", "detail", botAgentId] as const,
+  detail: (botAgentId: string) => ["bot-agents", "detail", botAgentId] as const,
   delegation: (botId: string) => ["bot-agents", "delegation", botId] as const,
 };
 
@@ -129,4 +128,14 @@ export function whereItRuns(agent: {
   if (agent.framework && host) return `${agent.framework} at ${host}`;
   if (host) return `At ${host}`;
   return agent.framework ?? "At its own address";
+}
+
+/** A Bot's Agents row, in a line: "Does the work itself on OpenBot", "Hands work to 2 agents". */
+export function delegationSummary(delegation: Delegation): string {
+  if (delegation.mode === "orchestrate") {
+    const count = delegation.agents.length;
+    return `Hands work to ${count} ${count === 1 ? "agent" : "agents"}`;
+  }
+  const own = delegation.agents[0];
+  return own ? `Does the work itself on ${own.name}` : "Does the work itself";
 }

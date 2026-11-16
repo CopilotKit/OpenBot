@@ -377,10 +377,7 @@ function AgentFlow({
         {step === "about" && !editing ? (
           <div className="mt-auto pt-10">
             {kind === "openbot" ? (
-              <CustomAgentCta
-                disabled={busy}
-                onConnect={() => go("runtime")}
-              />
+              <CustomAgentCta disabled={busy} onConnect={() => go("runtime")} />
             ) : (
               <Button
                 disabled={busy}
@@ -426,7 +423,12 @@ function AgentFlow({
           </Button>
         )}
         {step !== "runtime" ? (
-          <Button className="ml-auto px-4" disabled={busy} size="lg" type="submit">
+          <Button
+            className="ml-auto px-4"
+            disabled={busy}
+            size="lg"
+            type="submit"
+          >
             {primary}
           </Button>
         ) : null}
@@ -547,7 +549,9 @@ function AboutFields({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value={DEFAULT_MODEL}>Organization default</SelectItem>
+                <SelectItem value={DEFAULT_MODEL}>
+                  Organization default
+                </SelectItem>
                 {catalogue.map((option) => (
                   <SelectItem key={option.id} value={option.id}>
                     {option.label}
