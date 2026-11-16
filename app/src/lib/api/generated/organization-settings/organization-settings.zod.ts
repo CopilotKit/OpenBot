@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
  * @summary Read what this OpenBot offers
  */
 
@@ -13,7 +13,7 @@ export const GetDeploymentParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -65,11 +65,16 @@ export const GetDeploymentResponse = zod
       .describe(
         "Whether this OpenBot can give a Bot a computer of its own. Whether a person may is their Isolated Bots switch.",
       ),
+    botComputers: zod
+      .boolean()
+      .describe(
+        "Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).",
+      ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
 
 /**
- * Return the settings an administrator sets for everybody: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator may read them.
+ * Return the settings the organization's administrators set for its members: single sign-on, recording computer actions, stopping idle computers, the model and app allowlists, sharing learned skills, check-ins a day and choosing a model. Each organization has its own, and a new one starts with OpenBot's defaults. Beside them, read only, what an administrator needs to set them: the model OpenBot runs on, the directory groups of the organization's members, the apps an allowlist can name, the hosts every computer may reach, and whether SCIM and OpenTelemetry are set up. Only an administrator of the organization may read them.
  * @summary Read the organization's settings
  */
 
@@ -78,7 +83,7 @@ export const GetOrganizationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -101,10 +106,53 @@ export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
 
 export const GetOrganizationSettingsResponse = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -172,56 +220,13 @@ export const GetOrganizationSettingsResponse = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
-  .and(
-    zod.object({
-      context: zod
-        .object({
-          builtInModel: zod
-            .string()
-            .nullable()
-            .describe("The model OpenBot's own Bots run on, when one is set."),
-          directoryGroups: zod
-            .array(zod.string())
-            .describe("The directory groups people belong to, by name."),
-          apps: zod
-            .array(
-              zod.object({
-                id: zod.string(),
-                title: zod.string(),
-                url: zod.string(),
-              }),
-            )
-            .describe("The apps an allowlist can name."),
-          defaultDestinations: zod
-            .array(zod.string())
-            .describe(
-              "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
-            ),
-          scim: zod.object({
-            configured: zod.boolean(),
-            connectionId: zod.string(),
-            baseUrl: zod.string().nullable(),
-            rotating: zod
-              .boolean()
-              .describe(
-                "Whether a second token is set while the first is being replaced.",
-              ),
-          }),
-          otel: zod.object({
-            configured: zod.boolean(),
-          }),
-          actionRecordRetentionDays: zod
-            .int()
-            .describe("How many days recorded computer actions are kept."),
-        })
-        .describe(
-          "What an administrator needs to set the settings. Read only.",
-        ),
-    }),
-  );
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
+  .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Only an administrator may change them.
+ * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
  * @summary Change the organization's settings
  */
 
@@ -230,7 +235,7 @@ export const UpdateOrganizationSettingsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -265,11 +270,55 @@ export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
 
 export const UpdateOrganizationSettingsBody = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .optional()
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .optional()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -346,6 +395,9 @@ export const UpdateOrganizationSettingsBody = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
   .describe("The settings to change. At least one; the rest stay as they are.");
 
 export const updateOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
@@ -367,10 +419,53 @@ export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
 
 export const UpdateOrganizationSettingsResponse = zod
   .object({
+    context: zod
+      .object({
+        builtInModel: zod
+          .string()
+          .nullable()
+          .describe("The model OpenBot's own Bots run on, when one is set."),
+        directoryGroups: zod
+          .array(zod.string())
+          .describe(
+            "The directory groups the organization's members belong to, by name.",
+          ),
+        apps: zod
+          .array(
+            zod.object({
+              id: zod.string(),
+              title: zod.string(),
+              url: zod.string(),
+            }),
+          )
+          .describe("The apps an allowlist can name."),
+        defaultDestinations: zod
+          .array(zod.string())
+          .describe(
+            "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
+          ),
+        scim: zod.object({
+          configured: zod.boolean(),
+          connectionId: zod.string(),
+          baseUrl: zod.string().nullable(),
+          rotating: zod
+            .boolean()
+            .describe(
+              "Whether a second token is set while the first is being replaced.",
+            ),
+        }),
+        otel: zod.object({
+          configured: zod.boolean(),
+        }),
+        actionRecordRetentionDays: zod
+          .int()
+          .describe("How many days recorded computer actions are kept."),
+      })
+      .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the organization's identity provider. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -442,53 +537,10 @@ export const UpdateOrganizationSettingsResponse = zod
         "Whether people may pick the model a built-in Bot answers on, per conversation.",
       ),
   })
-  .and(
-    zod.object({
-      context: zod
-        .object({
-          builtInModel: zod
-            .string()
-            .nullable()
-            .describe("The model OpenBot's own Bots run on, when one is set."),
-          directoryGroups: zod
-            .array(zod.string())
-            .describe("The directory groups people belong to, by name."),
-          apps: zod
-            .array(
-              zod.object({
-                id: zod.string(),
-                title: zod.string(),
-                url: zod.string(),
-              }),
-            )
-            .describe("The apps an allowlist can name."),
-          defaultDestinations: zod
-            .array(zod.string())
-            .describe(
-              "The package registries and source hosts every computer may reach unless the list is the only thing allowed.",
-            ),
-          scim: zod.object({
-            configured: zod.boolean(),
-            connectionId: zod.string(),
-            baseUrl: zod.string().nullable(),
-            rotating: zod
-              .boolean()
-              .describe(
-                "Whether a second token is set while the first is being replaced.",
-              ),
-          }),
-          otel: zod.object({
-            configured: zod.boolean(),
-          }),
-          actionRecordRetentionDays: zod
-            .int()
-            .describe("How many days recorded computer actions are kept."),
-        })
-        .describe(
-          "What an administrator needs to set the settings. Read only.",
-        ),
-    }),
-  );
+  .describe(
+    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+  )
+  .and(zod.unknown());
 
 /**
  * Stop now every Bot computer idle for longer than the organization's setting allows, as the hourly sweep does. Nothing is stopped while another server is sweeping or the setting is off, and the answer says so. Only an administrator may do this.
@@ -500,7 +552,7 @@ export const StopInactiveComputersParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -527,7 +579,7 @@ export const StopInactiveComputersResponse = zod.object({
 });
 
 /**
- * Return which models Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator may read it.
+ * Return which models the organization's Bots ran on over the last days, with how many runs, refusals and people each had, and the newest 50 runs. Only an administrator of the organization may read it.
  * @summary Read which models Bots ran on
  */
 
@@ -536,7 +588,7 @@ export const GetModelUsageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -580,7 +632,7 @@ export const GetModelUsageResponse = zod.object({
 });
 
 /**
- * Return one page of the actions recorded on Bot computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator may read them. A missing cursor starts at the newest and nextCursor null ends the list.
+ * Return one page of the actions recorded on the organization's Bots' computers while recording computer actions is on, newest first. Records are kept for actionRecordRetentionDays. Only an administrator of the organization may read them. A missing cursor starts at the newest and nextCursor null ends the list.
  * @summary List recorded computer actions
  */
 
@@ -589,7 +641,7 @@ export const ListComputerActionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -660,7 +712,7 @@ export const GetSetupChecklistParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -711,7 +763,7 @@ export const CheckSetupParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

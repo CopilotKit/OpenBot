@@ -12,6 +12,8 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+
 export type ClientOptions = {
   /** Absent means GET. */
   method?: string;
@@ -26,17 +28,44 @@ export type ClientOptions = {
   fallback?: string;
   /** For the calls a Bot makes on a person's behalf, which are abandoned when the turn is. */
   signal?: AbortSignal;
+  /**
+   * Headers a request carries beside the content type: the organization a tab works in, for the
+   * runtime's addresses (lib/organizations/current.ts, `organizationHeaders`).
+   */
+  headers?: Record<string, string>;
 };
+
+/**
+ * The one `fetch`. Each outcome is reported to `lib/desktop/reachability.ts`, which is how the app
+ * knows the OpenBot it is connected to stopped answering, and answers again.
+ *
+ * A 502 is read before it is handed back, so a read failing on the relay's own answer fails with
+ * the connection already known to be lost, and waits for OpenBot (`connection-lost.ts`).
+ */
+async function request(path: string, init: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, credentials: "include" });
+  } catch (error) {
+    noteNoAnswer(error);
+    throw error;
+  }
+  const noted = noteAnswer(response);
+  if (response.status === 502) await noted;
+  return response;
+}
 
 /** Every request in this app is authenticated, and every one of them is JSON or nothing. */
 async function send(path: string, options: ClientOptions): Promise<Response> {
-  return fetch(path, {
+  const headers = {
+    ...options.headers,
+    ...(options.body === undefined
+      ? {}
+      : { "content-type": "application/json" }),
+  };
+  return request(path, {
     method: options.method,
-    credentials: "include",
-    headers:
-      options.body === undefined
-        ? undefined
-        : { "content-type": "application/json" },
+    headers: Object.keys(headers).length === 0 ? undefined : headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     ...(options.signal ? { signal: options.signal } : {}),
   });
@@ -129,7 +158,7 @@ export async function clientRequest(
   init: RequestInit,
   fallback?: string,
 ): Promise<Response> {
-  const response = await fetch(path, { ...init, credentials: "include" });
+  const response = await request(path, init);
   if (!response.ok) throw await refusal(response, fallback);
   return response;
 }

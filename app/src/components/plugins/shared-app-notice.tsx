@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   botSharedAppsQueryOptions,
   requestSharedUseMutationOptions,
@@ -28,7 +29,7 @@ export function SharedAppNotice({
   const apps = shared.data?.apps ?? [];
   if (apps.length === 0) return null;
 
-  if (me?.role === "admin") {
+  if (isOrganizationAdmin(me?.role)) {
     return (
       <div className="space-y-1 text-sm">
         {apps.map((app) => (

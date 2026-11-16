@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { SkillFields } from "@/components/skills/skill-fields";
+import { SkillTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +36,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
@@ -59,9 +61,11 @@ export function SkillPage({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const skillList = useQuery(skillListQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
 
@@ -89,7 +93,7 @@ export function SkillPage({ slug }: { slug: string }) {
     return (
       <PageShell backButton={back} title="Skill">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Reload the page.
+          Couldn't load this skill. Try again in a moment.
         </p>
       </PageShell>
     );
@@ -210,6 +214,14 @@ export function SkillPage({ slug }: { slug: string }) {
       {/* A row that opens the confirmation, as deleting a Bot is on its own page. */}
       <PageSection title="Manage">
         <PageRows>
+          {/* Teams are the team edition's: with one person there is nobody to grant a skill to. */}
+          {paths.edition === "team" ? (
+            <SkillTeamGrantsRow
+              separator="after"
+              skillId={skill.slug}
+              title={skill.title}
+            />
+          ) : null}
           <Item
             render={<button onClick={() => setRemoving(true)} type="button" />}
             size="sm"

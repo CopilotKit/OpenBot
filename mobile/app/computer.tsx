@@ -9,7 +9,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { type ComputerControl, ORGANIZATION_ID } from "../src/api";
+import {
+  type ComputerControl,
+  ORGANIZATION_ID,
+  organizationAddress,
+} from "../src/api";
 import {
   getComputerControl,
   getComputerScreenshot,
@@ -27,7 +31,7 @@ type Frame = { uri: string; width: number; height: number };
 
 /** The Bot's screen, live: the API's `computers/{botId}/screen` socket (api/asyncapi.yaml). */
 const screenSocketPath = (botId: string) =>
-  `/api/v2/organizations/default/computers/${encodeURIComponent(botId)}/screen`;
+  organizationAddress(`/computers/${encodeURIComponent(botId)}/screen`);
 
 /**
  * The live screen: frames from the same authenticated stream the web view uses, with a screenshot
@@ -44,8 +48,10 @@ function useLiveFrame(botId: string, enabled: boolean) {
     streaming.current = false;
     void (async () => {
       const cookie = await authClient.getCookie();
-      if (closed) return;
-      const url = `${serverUrl.replace(/^http/, "ws")}${screenSocketPath(botId)}`;
+      // Which organization could not be read: the screenshot poll below says why.
+      const path = await screenSocketPath(botId).catch(() => undefined);
+      if (closed || path === undefined) return;
+      const url = `${serverUrl.replace(/^http/, "ws")}${path}`;
       // React Native's WebSocket accepts headers, which is how the session cookie reaches the upgrade.
       const Native = WebSocket as unknown as new (
         url: string,

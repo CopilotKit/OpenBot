@@ -21,7 +21,7 @@ import type {
   CreateCheckInRequest,
   UpdateCheckInRequest,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { everyPage } from "@/lib/routines/queries";
 import { taskKeys } from "@/lib/tasks/queries";
@@ -98,7 +98,7 @@ const proactiveSettingsQuery = {
   }): Promise<ProactiveSettingsBody> => {
     let allowed: boolean | undefined;
     const settings = await everyPage(async (params) => {
-      const page = await listCheckIns(ORGANIZATION_ID, params, {
+      const page = await listCheckIns(organizationId(), params, {
         signal,
         fallback: "Couldn't load your check-ins",
       });
@@ -128,7 +128,7 @@ export const proactiveSuggestionsQueryOptions = () =>
     queryKey: proactiveKeys.suggestions,
     queryFn: ({ signal }): Promise<ProactiveSuggestion[]> =>
       everyPage(async (params) => {
-        const page = await listCheckInItems(ORGANIZATION_ID, params, {
+        const page = await listCheckInItems(organizationId(), params, {
           signal,
           fallback: "Couldn't load what your Bots found",
         });
@@ -153,7 +153,7 @@ export const createProactiveSetting = (
   { refuseExisting = false }: { refuseExisting?: boolean } = {},
 ) =>
   createCheckIn(
-    ORGANIZATION_ID,
+    organizationId(),
     input,
     once(),
     refuseExisting ? { refuseExisting } : undefined,
@@ -163,15 +163,15 @@ export const updateProactiveSetting = (
   id: string,
   input: UpdateCheckInRequest,
 ) =>
-  updateCheckIn(ORGANIZATION_ID, id, input, once(), {
+  updateCheckIn(organizationId(), id, input, once(), {
     fallback: "Couldn't change check-ins",
   });
 export const runProactiveNow = (id: string): Promise<RunNowAnswer> =>
-  runCheckIn(ORGANIZATION_ID, id, once(), {
+  runCheckIn(organizationId(), id, once(), {
     fallback: "Couldn't start a check-in",
   });
 export const removeProactiveSetting = (id: string) =>
-  deleteCheckIn(ORGANIZATION_ID, id, once(), {
+  deleteCheckIn(organizationId(), id, once(), {
     fallback: "Couldn't remove check-ins",
   });
 
@@ -185,11 +185,11 @@ export const resolveSuggestion = async (
   action: "start" | "dismiss",
 ): Promise<void> => {
   if (action === "start")
-    await startCheckInItem(ORGANIZATION_ID, id, once(), {
+    await startCheckInItem(organizationId(), id, once(), {
       fallback: "Couldn't start this. Try again.",
     });
   else
-    await dismissCheckInItem(ORGANIZATION_ID, id, once(), {
+    await dismissCheckInItem(organizationId(), id, once(), {
       fallback: "Couldn't hide this. Try again.",
     });
 };

@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { skillTitle } from "@/lib/learning/display";
+import { proposalReason, skillTitle } from "@/lib/learning/display";
 
 /** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
 function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
@@ -104,6 +104,8 @@ export function ProposalDialog<TKey extends QueryKey>({
   const proposal = detail.data;
   const status = decided ?? proposal?.status;
   const removal = proposal?.operation === "remove";
+  // Left out where Learning's reason only names the insights shown under Learned from.
+  const reason = proposal ? proposalReason(proposal.reason) : null;
   return (
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
       <DialogContent>
@@ -124,10 +126,12 @@ export function ProposalDialog<TKey extends QueryKey>({
             </p>
           ) : (
             <>
-              <section className="grid gap-1.5">
-                <h3 className="font-medium text-sm">Why</h3>
-                <p className="text-pretty text-sm">{proposal?.reason}</p>
-              </section>
+              {reason ? (
+                <section className="grid gap-1.5">
+                  <h3 className="font-medium text-sm">Why</h3>
+                  <p className="text-pretty text-sm">{reason}</p>
+                </section>
+              ) : null}
               {proposal && (
                 <SkillFiles
                   files={proposal.files.map((file) => ({

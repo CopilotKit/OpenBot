@@ -96,6 +96,11 @@ const SCREENS: Record<
   },
 };
 
+/** Whether OpenBot clears this one itself, and so comes back to it after the restart it costs. */
+export function fixesItself(blocker: Blocker): boolean {
+  return SCREENS[blocker].fix !== undefined;
+}
+
 /** The commands the native instruction names, in order: each one sits in backticks there. */
 export function commandsIn(instruction: string): string[] {
   return [...instruction.matchAll(/`([^`]+)`/g)].map((match) => match[1]);

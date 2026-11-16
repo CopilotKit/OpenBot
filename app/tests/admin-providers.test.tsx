@@ -383,7 +383,7 @@ test("Permissions holds the organization's switches", async () => {
       body: { organization: false },
     }),
   );
-  expect(view.getByRole("button", { name: /Role and group overrides/ }));
+  expect(view.getByRole("button", { name: /Role and team overrides/ }));
 });
 
 test("the allowed-models row names the first few models", () => {

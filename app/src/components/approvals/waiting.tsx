@@ -55,6 +55,7 @@ import {
 } from "@/lib/approvals";
 import { readFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import type { WaitingWhere } from "@/lib/tasks/groups";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -285,8 +286,15 @@ function RequestRow({
 /**
  * The waiting questions and actions under each Bot's header on the Needs you board, questions first,
  * each with when it was asked so the header can say how long it has waited.
+ *
+ * `heldByTask` names a conversation one of the person's tasks runs in. What waits there is the task
+ * waiting, and the board lists it once, as the task, the way the badge counts it: listed here too,
+ * one question read as two rows and "2 waiting" beside a badge of 1.
  */
-export function useWaitingByBot(agentId: string | undefined) {
+export function useWaitingByBot(
+  agentId: string | undefined,
+  heldByTask: (where: WaitingWhere) => boolean = () => false,
+) {
   const waiting = useWaiting(agentId);
   const byBot = new Map<string, { rows: ReactNode[]; times: string[] }>();
   const add = (botId: string, row: ReactNode, at: string) => {
@@ -295,13 +303,21 @@ export function useWaitingByBot(agentId: string | undefined) {
     group.times.push(at);
     byBot.set(botId, group);
   };
-  for (const question of waiting.questions)
+  for (const question of waiting.questions.filter(
+    (question) =>
+      !heldByTask({
+        channelId: question.channelId,
+        threadId: question.threadId,
+      }),
+  ))
     add(
       question.conversationBotId ?? question.botId,
       <QuestionBoardRow key={`question-${question.id}`} question={question} />,
       question.createdAt,
     );
-  for (const request of waiting.pending)
+  for (const request of waiting.pending.filter(
+    (request) => !heldByTask({ threadId: request.action.threadId }),
+  ))
     add(
       request.action.botId,
       <RequestBoardRow key={`request-${request.id}`} request={request} />,
@@ -480,102 +496,119 @@ function AnswerDialog({
 }
 
 /**
- * An action on the board: what it wants to do and where, with Deny and Allow on the right, and
- * Allow for this conversation and Always allow here in the menu. Where it acts and what it would send are always on screen, whole:
- * nobody allows something they were not shown.
+ * The answers to an action waiting on the person, as a board row offers them: Deny and Allow, with
+ * Allow for this conversation and Always allow here in the menu; for a hand-off, Don't do it and I
+ * did it myself. The action's own row and the row of a task waiting on it both answer with these.
  */
-function RequestBoardRow({ request }: { request: WaitingRequest }) {
+function RequestAnswers({ request }: { request: WaitingRequest }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
   const handOff = request.action.policy?.behaviour === "hand_off";
   const decide = (choice: ApprovalDecision) =>
     decision.mutate({ id: request.id, choice });
+  return (
+    <>
+      {decision.error ? (
+        <span className="text-destructive text-xs" role="alert">
+          {decision.error.message}
+        </span>
+      ) : null}
+      {handOff ? (
+        <>
+          <Button
+            disabled={decision.isPending}
+            onClick={() => decide("deny")}
+            size="sm"
+            variant="outline"
+          >
+            Don't do it
+          </Button>
+          <Button
+            disabled={decision.isPending}
+            onClick={() => decide("handled")}
+            size="sm"
+          >
+            I did it myself
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button
+            disabled={decision.isPending}
+            onClick={() => decide("deny")}
+            size="sm"
+            variant="outline"
+          >
+            Deny
+          </Button>
+          <Button
+            disabled={decision.isPending}
+            onClick={() => decide("allow_once")}
+            size="sm"
+          >
+            Allow
+          </Button>
+          {offersStandingRule(request.action) ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    aria-label={`More for ${words.action}`}
+                    size="icon-sm"
+                    variant="ghost"
+                  />
+                }
+              >
+                <IconDots />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={decision.isPending}
+                  onClick={() => decide("allow_conversation")}
+                >
+                  Allow for this conversation
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={decision.isPending}
+                  onClick={() => decide("allow_always")}
+                >
+                  Always allow here
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Why an action waits on the person, in the words its policy gives, for a row's quiet line. */
+function requestReason(request: WaitingRequest): ReactNode {
+  const { policy } = request.action;
+  if (!policy) return null;
+  return (
+    <span key="why">
+      {policy.behaviour === "hand_off" ? "Handed to you: " : ""}
+      {policy.reason}
+    </span>
+  );
+}
+
+/**
+ * An action on the board: what it wants to do and where, with its answers on the right
+ * (`RequestAnswers`). Where it acts and what it would send are always on screen, whole: nobody
+ * allows something they were not shown.
+ */
+function RequestBoardRow({ request }: { request: WaitingRequest }) {
+  const words = approvalWords(request.action);
   const action = words.action.charAt(0).toUpperCase() + words.action.slice(1);
   return (
     <BoardRow
-      actions={
-        handOff ? (
-          <>
-            <Button
-              disabled={decision.isPending}
-              onClick={() => decide("deny")}
-              size="sm"
-              variant="outline"
-            >
-              Don't do it
-            </Button>
-            <Button
-              disabled={decision.isPending}
-              onClick={() => decide("handled")}
-              size="sm"
-            >
-              I did it myself
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              disabled={decision.isPending}
-              onClick={() => decide("deny")}
-              size="sm"
-              variant="outline"
-            >
-              Deny
-            </Button>
-            <Button
-              disabled={decision.isPending}
-              onClick={() => decide("allow_once")}
-              size="sm"
-            >
-              Allow
-            </Button>
-            {offersStandingRule(request.action) ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      aria-label={`More for ${words.action}`}
-                      size="icon-sm"
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <IconDots />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    disabled={decision.isPending}
-                    onClick={() => decide("allow_conversation")}
-                  >
-                    Allow for this conversation
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={decision.isPending}
-                    onClick={() => decide("allow_always")}
-                  >
-                    Always allow here
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
-          </>
-        )
-      }
+      actions={<RequestAnswers request={request} />}
       detail={words.place}
       icon={<IconHandStop />}
-      meta={[
-        request.action.policy ? (
-          <span key="why">
-            {handOff ? "Handed to you: " : ""}
-            {request.action.policy.reason}
-          </span>
-        ) : null,
-        decision.error ? (
-          <span className="text-destructive" key="error" role="alert">
-            {decision.error.message}
-          </span>
-        ) : null,
-      ]}
+      meta={[requestReason(request)]}
       more={<ApprovalDetails args={request.action.args} />}
       open
       title={action}
@@ -585,27 +618,127 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
   );
 }
 
-/** The waiting questions and actions as rows, questions first, for a card that may hold more. */
-export function useWaitingRows(agentId: string | undefined) {
+/**
+ * Answer, for a question a task waits on, from the board: the dialog with the whole question and
+ * the box to answer in, so the person answers without opening the thread. And Dismiss beside it.
+ */
+function QuestionAnswers({ question }: { question: WaitingQuestion }) {
+  const [answering, setAnswering] = useState(false);
+  const dismiss = useMutation(
+    dismissPersonQuestionMutationOptions(queryClient),
+  );
+  return (
+    <>
+      {dismiss.error ? (
+        <span className="text-destructive text-xs" role="alert">
+          {dismiss.error.message}
+        </span>
+      ) : null}
+      <Button onClick={() => setAnswering(true)} size="sm">
+        Answer
+      </Button>
+      <Button
+        aria-label={`Dismiss ${question.question}`}
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate({ id: question.id })}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <IconX />
+      </Button>
+      <AnswerDialog
+        onOpenChange={setAnswering}
+        open={answering}
+        question={question}
+      />
+    </>
+  );
+}
+
+/**
+ * What a task's row on the board answers with: the controls of the wait it stands for. A question or
+ * an action waiting in a task's own conversation is listed once, as the task's row, and that row
+ * carries its answers, so the person answers it there without opening the thread.
+ */
+export type HeldAnswer = {
+  actions: ReactNode;
+  meta: ReactNode[];
+  more?: ReactNode;
+};
+
+/**
+ * For each task, the wait inside its conversation and how its row answers it, or undefined when
+ * nothing waits there. An action waiting is answered first, since the task cannot go on without it;
+ * then a question.
+ */
+export function useHeldAnswers(): (task: {
+  channelId: string;
+  threadId: string | null;
+}) => HeldAnswer | undefined {
+  const waiting = useWaiting(undefined);
+  return (task) => {
+    const request = task.threadId
+      ? waiting.pending.find(
+          (pending) => pending.action.threadId === task.threadId,
+        )
+      : undefined;
+    if (request)
+      return {
+        actions: <RequestAnswers request={request} />,
+        meta: [requestReason(request)],
+        more: <ApprovalDetails args={request.action.args} />,
+      };
+    const question = waiting.questions.find(
+      (asked) =>
+        asked.channelId === task.channelId ||
+        (task.threadId !== null && asked.threadId === task.threadId),
+    );
+    if (question)
+      return {
+        actions: <QuestionAnswers question={question} />,
+        meta: question.why ? [<span key="why">{question.why}</span>] : [],
+      };
+    return undefined;
+  };
+}
+
+/**
+ * The waiting questions and actions as rows, questions first, for a card that may hold more. One
+ * held by a task (`heldByTask`) is left to that task's own row.
+ */
+export function useWaitingRows(
+  agentId: string | undefined,
+  heldByTask: (where: WaitingWhere) => boolean = () => false,
+) {
   const waiting = useWaiting(agentId);
   const botName = useBotNames();
   return {
     error: waiting.error,
     rows: [
-      ...waiting.questions.map((question) => (
-        <QuestionRow
-          botName={botName(question.botId)}
-          key={`question-${question.id}`}
-          question={question}
-        />
-      )),
-      ...waiting.pending.map((request) => (
-        <RequestRow
-          botName={botName(request.action.botId)}
-          key={`request-${request.id}`}
-          request={request}
-        />
-      )),
+      ...waiting.questions
+        .filter(
+          (question) =>
+            !heldByTask({
+              channelId: question.channelId,
+              threadId: question.threadId,
+            }),
+        )
+        .map((question) => (
+          <QuestionRow
+            botName={botName(question.botId)}
+            key={`question-${question.id}`}
+            question={question}
+          />
+        )),
+      ...waiting.pending
+        .filter((request) => !heldByTask({ threadId: request.action.threadId }))
+        .map((request) => (
+          <RequestRow
+            botName={botName(request.action.botId)}
+            key={`request-${request.id}`}
+            request={request}
+          />
+        )),
     ],
   };
 }
@@ -616,8 +749,15 @@ export function useWaitingRows(agentId: string | undefined) {
  * same requests the conversation draws inline, so a decision made in either place is the one
  * decision.
  */
-export function WaitingForYou({ agentId }: { agentId?: string }) {
-  const { error, rows } = useWaitingRows(agentId);
+export function WaitingForYou({
+  agentId,
+  heldByTask,
+}: {
+  agentId?: string;
+  /** Leaves out what waits inside a task, for a list that shows the task itself. */
+  heldByTask?: (where: WaitingWhere) => boolean;
+}) {
+  const { error, rows } = useWaitingRows(agentId, heldByTask);
   return (
     <>
       {error ? (

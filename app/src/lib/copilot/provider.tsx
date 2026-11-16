@@ -6,6 +6,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  organizationHeaders,
+  useCurrentOrganizationId,
+} from "@/lib/organizations/current";
 import { generativeUiProviderOptions } from "./a2ui";
 import { ActiveBotProvider } from "./active-bot";
 import { BotOffers } from "./bot-offer";
@@ -39,12 +43,24 @@ import { SkillTools } from "./skill-tools";
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const properties = useMemo(() => runProperties(deviceTimeZone()), []);
+  /*
+   * Every runtime request names the organization this tab is working in. The session works in one
+   * organization for every tab, so a tab left in one after a switch in another wrote its message
+   * where it said and ran the Bot where the session said, which had no such Bot. The server runs
+   * it in the one named, when the person is a member of it.
+   */
+  const organization = useCurrentOrganizationId();
+  const headers = useMemo(
+    () => organizationHeaders(organization),
+    [organization],
+  );
 
   return (
     <CopilotKitProvider
       enableInspector={false}
       runtimeUrl="/api/copilotkit"
       credentials="include"
+      headers={headers}
       properties={properties}
       {...generativeUiProviderOptions(capabilities?.generativeUi)}
       /*

@@ -653,7 +653,7 @@ test("an admin's press that cannot be carried out says what is missing", async (
 test.each([
   [
     { state: "shared_not_connected", requestKind: "connect_shared" },
-    "Connect the team Gmail account",
+    "Connect the shared Gmail account",
     "/admin/plugins/composio-gmail",
   ],
   [

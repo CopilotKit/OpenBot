@@ -3,7 +3,7 @@ import {
   deleteReviewerGuidance,
   replaceReviewerGuidance,
 } from "@/lib/api/generated/reviewer-guidance/reviewer-guidance";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { reviewerGuidanceKeys } from "./queries";
 
 const FALLBACK = "The guidance for auto-review couldn't be saved.";
@@ -19,7 +19,7 @@ export const saveReviewerGuidanceMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: (text: string) =>
       replaceReviewerGuidance(
-        ORGANIZATION_ID,
+        organizationId(),
         { text },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -34,7 +34,7 @@ export const removeReviewerGuidanceMutationOptions = (
   mutationOptions({
     mutationFn: () =>
       deleteReviewerGuidance(
-        ORGANIZATION_ID,
+        organizationId(),
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "The guidance for auto-review couldn't be removed." },
       ),

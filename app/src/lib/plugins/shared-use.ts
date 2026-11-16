@@ -3,6 +3,11 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import type {
+  SharedUseApproval as ApiSharedUseApproval,
+  SharedUseAudience,
+  SharedUseMember,
+} from "@/lib/api/generated/model";
 import {
   approveSharedUseRequest,
   createSharedUseRequest,
@@ -10,15 +15,18 @@ import {
   getBotSharedUse,
   listSharedUseRequests,
 } from "@/lib/api/generated/shared-use/shared-use";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { teamName } from "@/lib/teams/names";
 
-export type SharedAudience = "owner" | "people" | "team";
-export type ApprovalMember = { kind: "user" | "group"; value: string };
-export type SharedUseApproval = {
-  audience: SharedAudience;
-  outsideInput: boolean;
-  members: ApprovalMember[];
-};
+/**
+ * Who may steer a Bot that uses a shared account: the API's own audience. `team` is everyone in the
+ * organization, never one team. A team is named as a member of a `people` audience.
+ */
+export type SharedAudience = SharedUseAudience;
+/** A person by id, a team by id, or a directory group by its name: the API's own member. */
+export type ApprovalMember = SharedUseMember;
+/** An audience for a Bot's use of a shared account: the API's `SharedUseApproval`. */
+export type SharedUseApproval = ApiSharedUseApproval;
 export type SharedUseRequestReason =
   | "refused_call"
   | "publish"
@@ -63,7 +71,7 @@ async function waitingRequests(
   let cursor: string | undefined;
   do {
     const page = await listSharedUseRequests(
-      ORGANIZATION_ID,
+      organizationId(),
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { signal, fallback: "Couldn't load shared account requests." },
     );
@@ -86,7 +94,7 @@ export function botSharedAppsQueryOptions(botId: string) {
   return queryOptions({
     queryKey: sharedUseKeys.bot(botId),
     queryFn: ({ signal }): Promise<BotSharedApps> =>
-      getBotSharedUse(ORGANIZATION_ID, botId, {
+      getBotSharedUse(organizationId(), botId, {
         signal,
         fallback: "Couldn't load this Bot's shared apps.",
       }),
@@ -105,7 +113,7 @@ export function decideSharedUseMutationOptions(queryClient: QueryClient) {
       (decision === "approve"
         ? approveSharedUseRequest
         : declineSharedUseRequest)(
-        ORGANIZATION_ID,
+        organizationId(),
         id,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't save that decision." },
@@ -122,7 +130,7 @@ export function requestSharedUseMutationOptions(queryClient: QueryClient) {
       reason: "publish" | "trigger";
     }) =>
       createSharedUseRequest(
-        ORGANIZATION_ID,
+        organizationId(),
         body,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't send the request." },
@@ -134,10 +142,43 @@ export function requestSharedUseMutationOptions(queryClient: QueryClient) {
   });
 }
 
-export function describeApproval(approval: SharedUseApproval): string {
+/** Whether an approval names a team, so its reader needs the organization's teams to say which. */
+export function approvalNamesTeam(
+  approval: SharedUseApproval | null | undefined,
+): boolean {
+  return (
+    approval?.audience === "people" &&
+    approval.members.some((member) => member.kind === "team")
+  );
+}
+
+/** Whether an approval is for named teams and people and names nobody, which covers no one. */
+export function approvalNamesNobody(approval: SharedUseApproval): boolean {
+  return approval.audience === "people" && approval.members.length === 0;
+}
+
+/**
+ * Who an approval covers, in a line. A team is called by its name, looked up in the organization's
+ * `teams`, never by its id: one that is not among them has been deleted since and says so. Before
+ * the teams have arrived the line says how many teams, which is all it knows. Directory groups and
+ * people read as they always have.
+ */
+export function describeApproval(
+  approval: SharedUseApproval,
+  teams?: readonly { id: string; name: string }[],
+): string {
   const outside = approval.outsideInput ? ", and outside input" : "";
   if (approval.audience === "owner") return `Only its owner${outside}`;
   if (approval.audience === "team") return `Everyone${outside}`;
+  const teamIds = approval.members
+    .filter((member) => member.kind === "team")
+    .map((member) => member.value);
+  const known = teams
+    ? teamIds
+        .filter((id) => teams.some((team) => team.id === id))
+        .map((id) => teamName(teams, id))
+    : [];
+  const gone = teams ? teamIds.length - known.length : 0;
   const groups = approval.members
     .filter((member) => member.kind === "group")
     .map((member) => member.value);
@@ -145,10 +186,25 @@ export function describeApproval(approval: SharedUseApproval): string {
     (member) => member.kind === "user",
   ).length;
   const parts = [
+    ...(teams === undefined && teamIds.length
+      ? [`${teamIds.length} ${teamIds.length === 1 ? "team" : "teams"}`]
+      : []),
+    ...(known.length
+      ? [`the team${known.length > 1 ? "s" : ""} ${known.join(", ")}`]
+      : []),
+    ...(gone === 1 ? ["a team that no longer exists"] : []),
+    ...(gone > 1 ? [`${gone} teams that no longer exist`] : []),
     ...(groups.length
-      ? [`The group${groups.length > 1 ? "s" : ""} ${groups.join(", ")}`]
+      ? [`the group${groups.length > 1 ? "s" : ""} ${groups.join(", ")}`]
       : []),
     ...(people ? [`${people} ${people === 1 ? "person" : "people"}`] : []),
   ];
-  return `${parts.join(" and ") || "Nobody named"}${outside}`;
+  const last = parts.pop();
+  const named =
+    last === undefined
+      ? "Nobody named"
+      : parts.length
+        ? `${parts.join(", ")} and ${last}`
+        : last;
+  return `${named.charAt(0).toUpperCase()}${named.slice(1)}${outside}`;
 }

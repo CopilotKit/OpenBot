@@ -25,8 +25,8 @@ export function sharingSummary(
     return visibility === "public" ? "Everyone (public)" : "Not shared";
   }
   return published.audience === "team"
-    ? "Whole team"
-    : "Specific people and groups";
+    ? "Everyone in the organization"
+    : "Specific people and teams";
 }
 
 /**

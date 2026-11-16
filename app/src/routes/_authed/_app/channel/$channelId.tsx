@@ -1,5 +1,5 @@
 import { IconSettings } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { z } from "zod";
@@ -15,9 +15,17 @@ import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen"
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { conversationLoadFailure } from "@/lib/channels/load-failure";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
-import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import {
+  type AgentChannel,
+  channelQueryOptions,
+  listedChannel,
+} from "@/lib/channels/queries";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
+import { useNoBotComputers } from "@/lib/deployment/queries";
+import { useConnectionLost } from "@/lib/desktop/connection-lost";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -45,12 +53,29 @@ function RouteComponent() {
   const { channelId } = Route.useParams();
   const { settings, watch } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
+  /*
+   * While the conversation's own read is on its way, it is named from the sidebar's list when the
+   * list has it: for as long as OpenBot can't be reached that read waits, and the header stayed bare.
+   */
+  const listed = listedChannel(useQueryClient(), channelId);
+  const named = channel.data ?? listed;
+  // The connection line says why nothing loads; the pane says only that the conversation will show.
+  const { lost } = useConnectionLost();
+  // Named in a failure only for somebody with another organization the conversation could be in.
+  const organizations = useOrganizationChoices();
+  const organization =
+    organizations && organizations.organizations.length > 1
+      ? organizations.organizations.find(
+          (one) => one.id === organizations.currentId,
+        )?.name
+      : undefined;
   const navigate = Route.useNavigate();
   const isSettingsOpen = settings === true;
   const prefersReducedMotion = useReducedMotion();
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
+  const noComputers = useNoBotComputers() === true;
 
   useMarkOpenChannelRead(channelId);
 
@@ -129,16 +154,13 @@ function RouteComponent() {
               animate={{ opacity: 1 }}
               className="shrink-0"
               initial={{ opacity: 0 }}
-              key={`avatar:${channel.data?.name ?? channelId}`}
+              key={`avatar:${named?.name ?? channelId}`}
               transition={{
                 duration: HEADING_ENTRANCE_SECONDS,
                 ease: EASE_OUT,
               }}
             >
-              <ChannelAvatar
-                participantIds={channel.data?.agentIds ?? []}
-                size={22}
-              />
+              <ChannelAvatar participantIds={named?.agentIds ?? []} size={22} />
             </motion.div>
             <motion.span
               animate={
@@ -152,18 +174,20 @@ function RouteComponent() {
                   ? { opacity: 0 }
                   : { opacity: 0, transform: HEADING_ENTRANCE_OFFSET }
               }
-              key={`name:${channel.data?.name ?? channelId}`}
+              key={`name:${named?.name ?? channelId}`}
               transition={{
                 duration: HEADING_ENTRANCE_SECONDS,
                 ease: EASE_OUT,
               }}
             >
-              {channel.data?.name ?? "Channel"}
+              {/* Nothing while it loads, unless the list names it; one that could not load is still a conversation. */}
+              {named?.name ?? (channel.error ? "Conversation" : null)}
             </motion.span>
           </div>
           <div className="flex flex-row gap-1.5">
             <ComputerChatControls
               computerId={agentId}
+              noComputers={noComputers}
               open={isWatching}
               onOpenChange={(open) => show(open ? "watch" : null)}
             />
@@ -187,7 +211,12 @@ function RouteComponent() {
       <ChannelBody
         channel={channel.data}
         isPending={channel.isPending}
-        hasError={Boolean(channel.error)}
+        waitingForOpenBot={lost}
+        failure={
+          channel.error
+            ? conversationLoadFailure(channel.error, organization)
+            : null
+        }
       />
     </DetailPanel>
   );
@@ -200,18 +229,29 @@ function RouteComponent() {
 function ChannelBody({
   channel,
   isPending,
-  hasError,
+  waitingForOpenBot,
+  failure,
 }: {
   channel: AgentChannel | undefined;
   isPending: boolean;
-  hasError: boolean;
+  /** The connection line shows: the read waits for OpenBot, however long that takes. */
+  waitingForOpenBot: boolean;
+  /** What to say when there is no conversation to draw (`conversationLoadFailure`). */
+  failure: string | null;
 }) {
-  // Nothing while the channel loads: a placeholder inside a local round-trip is a flicker.
-  if (isPending) return null;
-  if (hasError || !channel) {
+  if (isPending) {
+    // Nothing while the channel loads: a placeholder inside a local round-trip is a flicker. While
+    // OpenBot can't be reached the wait has no end in sight, and the line above already says why.
+    return waitingForOpenBot ? (
+      <p className="p-8 text-sm text-muted-foreground">
+        This conversation will show here when OpenBot answers.
+      </p>
+    ) : null;
+  }
+  if (failure || !channel) {
     return (
       <p className="p-8 text-sm text-destructive" role="alert">
-        Couldn't load this conversation. Reload the page.
+        {failure ?? conversationLoadFailure(undefined)}
       </p>
     );
   }

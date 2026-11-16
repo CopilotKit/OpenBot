@@ -251,7 +251,8 @@ mod stop_ipc {
         let compose = fixture.compose_barrier();
 
         // The command Settings > This computer invokes.
-        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()));
+        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()))
+            .expect("OpenBot on this computer stops as it did");
         await_compose(&compose).write_all(&[0]).unwrap();
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
 

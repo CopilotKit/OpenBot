@@ -261,7 +261,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
   const view = renderScreen(failingQueryClient());
 
   expect(
-    await view.findByText("Couldn't load apps. Reload the page."),
+    await view.findByText("Couldn't load apps. Try again in a moment."),
   ).toBeTruthy();
 
   // The whole point: an app that may be enabled, with grants on it right now, must never be
@@ -273,7 +273,7 @@ test("a failed plugin read reports the failure instead of claiming the app is no
 test("a failed plugin read draws no switches, so nothing reads as a Bot holding nothing", async () => {
   const view = renderScreen(failingQueryClient());
 
-  await view.findByText("Couldn't load apps. Reload the page.");
+  await view.findByText("Couldn't load apps. Try again in a moment.");
 
   expect(view.container.querySelectorAll('[role="switch"]').length).toBe(0);
   expect(view.queryByText("Turn on every read-only action")).toBeNull();
@@ -295,7 +295,7 @@ test("an answer that genuinely lacks the app still says the app is not enabled",
     await view.findByText("No app with that name is turned on."),
   ).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load plugins. Reload the page."),
+    view.queryByText("Couldn't load plugins. Try again in a moment."),
   ).toBeNull();
 });
 
@@ -316,7 +316,7 @@ test("a failed REFETCH keeps the grant list it already had, not the error", asyn
 
   expect(await view.findByText("list_channels")).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load plugins. Reload the page."),
+    view.queryByText("Couldn't load plugins. Try again in a moment."),
   ).toBeNull();
   expect(view.queryByText("No app with that name is turned on.")).toBeNull();
 });

@@ -1,4 +1,9 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import {
   getConversation,
   listConversations,
@@ -7,7 +12,7 @@ import type {
   Conversation,
   ConversationSummary,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A channel as the browser sees it.
@@ -152,7 +157,7 @@ export function channelListQueryOptions() {
     queryFn: async ({ pageParam }): Promise<ChannelPage> =>
       channelPageOf(
         await listConversations(
-          ORGANIZATION_ID,
+          organizationId(),
           pageParam ? { cursor: pageParam as string } : undefined,
           { fallback: "Couldn't load your conversations." },
         ),
@@ -212,7 +217,7 @@ export function channelSearchInfiniteQueryOptions(
     queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
       channelPageOf(
         await listConversations(
-          ORGANIZATION_ID,
+          organizationId(),
           {
             q: normalized,
             limit,
@@ -233,12 +238,27 @@ export function channelQueryOptions(channelId: string) {
     queryFn: async (): Promise<AgentChannel> =>
       channelOf(
         (
-          await getConversation(ORGANIZATION_ID, channelId, {
+          await getConversation(organizationId(), channelId, {
             fallback: "Couldn't load this conversation.",
           })
         ).conversation,
       ),
   });
+}
+
+/**
+ * A conversation as the sidebar's list already holds it, or undefined when the list has not read it.
+ * Nothing is asked: for a screen to name a conversation while its own read is still on its way, as
+ * it is for as long as OpenBot Desktop can't reach the OpenBot it is connected to.
+ */
+export function listedChannel(
+  queryClient: QueryClient,
+  channelId: string,
+): ChannelSummary | undefined {
+  return queryClient
+    .getQueryData<InfiniteData<ChannelPage>>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((one) => one.id === channelId);
 }
 
 /**

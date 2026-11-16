@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the audit trail, newest first, narrowed by the filters given. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator may read the trail.
+ * Return one page of the organization's audit trail, newest first, narrowed by the filters given. Each organization has its own trail, and an event is on the trail of the organization it happened in. What happens to the organization itself is on its trail too: organization.created, organization.renamed, organization.member_invited, organization.invitation_canceled, organization.member_joined, organization.member_removed and organization.member_role_changed. Each filter narrows the events, and a filter that takes several values separated by commas matches any of them. A value that names nothing in the trail matches no event rather than being refused. A missing cursor starts at the newest event and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Only an administrator of the organization may read its trail.
  * @summary List audit events
  */
 
@@ -13,7 +13,7 @@ export const ListAuditEventsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -86,7 +86,7 @@ export const ListAuditEventsQueryParams = zod.object({
     .regex(listAuditEventsQueryEventTypeRegExp)
     .optional()
     .describe(
-      "Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected.",
+      "Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected or organization.member_invited,organization.member_removed.",
     ),
   excludeEventType: zod
     .string()
@@ -254,7 +254,7 @@ export const ListAuditEventsResponse = zod.object({
 });
 
 /**
- * Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator may export the trail.
+ * Return every event the filters match, newest first, as one CSV file (RFC 4180): the same filters as listing audit events, without its paging, so the file and the list agree. The file holds at most 5,000 events; when more match, OpenBot-Export-Truncated says how many it holds, and narrowing the dates exports the rest. A cell a spreadsheet would run as a formula starts with an apostrophe. Each export is recorded on the trail. Only an administrator of the organization may export its trail.
  * @summary Export audit events as CSV
  */
 
@@ -263,7 +263,7 @@ export const ExportAuditEventsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -319,7 +319,7 @@ export const ExportAuditEventsQueryParams = zod.object({
     .regex(exportAuditEventsQueryEventTypeRegExp)
     .optional()
     .describe(
-      "Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected.",
+      "Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected or organization.member_invited,organization.member_removed.",
     ),
   excludeEventType: zod
     .string()
@@ -431,7 +431,7 @@ export const GetAuditEventVocabularyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -512,7 +512,7 @@ export const AskAuditEventsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

@@ -4,7 +4,7 @@
 
 export interface SendConversationMessageRequest {
   /**
-   * The caller's own id for the message, so a retry is the same message.
+   * The caller's own id for the message, any string, so a retry in the same conversation is the same message. The conversation's messages list it under this id.
    * @minLength 1
    * @maxLength 160
    */

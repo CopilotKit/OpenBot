@@ -1,7 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
 import { batchUpdateCapabilities } from "@/lib/api/generated/capabilities/capabilities";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { enterpriseKeys } from "@/lib/enterprise/queries";
 import { capabilityChangeKeys } from "./queries";
 import type { CapabilityChange } from "./translate";
@@ -24,7 +24,7 @@ export const saveCapabilityChangesMutationOptions = (
       authoring?: CapabilityChangeAuthoring;
     }) =>
       batchUpdateCapabilities(
-        ORGANIZATION_ID,
+        organizationId(),
         variables,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },

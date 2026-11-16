@@ -26,10 +26,35 @@ info:
     limit, and every write takes an Idempotency-Key.
 
 
-    Until multi-organization lands, an OpenBot install has exactly one
-    organization, and organizationId is that organization. Clients address it
-    as `default`; the server treats any other value as an organization that
-    does not exist.
+    An OpenBot install holds one or more organizations, and a person may be a
+    member of several. Where an install allows more than one, everybody has
+    an organization of their own, made for them when they first sign in, and
+    joins others by invitation. Otherwise, and on an install for one person
+    with no sign-in, everybody works in the organization `default`.
+    organizationId is an organization's id or its slug, and the caller must
+    be a member of it: an organization the caller is not in answers exactly
+    as one that does not exist, `default` included.
+
+
+    A program of your own signs its requests in one of two ways. An API key
+    acts as the person who made it, in every organization they are a member
+    of, like a personal access token: the address names the organization
+    each request is for. Keys start `obk_` and are sent as
+    `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+    and on the socket a join token is spent on (createConversationJoinToken).
+    To get a first key, sign in to OpenBot's web app, open Settings, then API
+    keys, and create one. The key is shown once. Only a person signed in to
+    the web app can make or delete keys: a key or an app's sign-in cannot.
+    An app that signs people in uses OAuth 2.1 instead, described under the
+    appOAuth security scheme: its client ids, redirect addresses, endpoints,
+    how long tokens last and the four addresses outside /api/v2 a token also
+    works at.
+
+
+    An install for one person on one computer has no sign-in. It signs
+    nobody in, so it has neither OAuth nor API keys, and the operations
+    that manage keys and sessions answer 503 with the code
+    SIGN_IN_UNAVAILABLE.
 
 
     This file is the single source of truth: the clients, the server's types,
@@ -46,7 +71,7 @@ tags:
   - { name: People, description: "The people in the organization: who they are, what they may do, and what is theirs alone (their standing instructions, preferences and first-run onboarding). An administrator sees everybody; anybody else sees themselves, as me." }
   - { name: Linked accounts, description: "A person's accounts at other services, such as Slack and GitHub, that OpenBot knows are theirs, so a Bot answering there knows who it is talking to." }
   - { name: Identity providers, description: "The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them." }
-  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, inside the organization, on the API only, and only a person signed in to OpenBot can make or manage one." }
+  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one." }
   - { name: Sessions, description: "Where a person is signed in to OpenBot, so they can see each browser and device and sign one out." }
   - { name: Organization settings, description: "What an administrator sets for everybody, and what this OpenBot offers: sign-in, recording, idle computers, allowlists, the setup checklist, and which models Bots ran on." }
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
@@ -54,9 +79,9 @@ tags:
   - { name: Conversations, description: "A person's conversations with Bots. What a Bot is doing in one streams over a WebSocket, described in api/asyncapi.yaml; the operations here hand out what that socket needs." }
   - { name: Tasks, description: "The work a Bot does for a person in a conversation of its own: started from something a check-in found, or handed to the Bot by another. Where a task stands is read from its conversation, never stored." }
   - { name: Voice, description: "Voice calls with a conversation's Bot: how a call connects, and the calls a person saved in a conversation with their transcripts." }
-  - { name: Credentials, description: "The vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
+  - { name: Credentials, description: "The organization's vault: the model keys, app keys and app tokens OpenBot keeps encrypted for its Bots. A secret goes in and is never read back out. Only an administrator manages them." }
   - { name: Models, description: "The models Bots can run on, and the one a person chose for each of their conversations." }
-  - { name: Apps, description: "The apps this OpenBot has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here." }
+  - { name: Apps, description: "The apps the organization has added for its Bots to use, from the directory of apps it can add or by a server's address, and how apps are set up here." }
   - { name: Connections, description: "A person's connections to apps: the accounts they signed in with so their Bots can act there for them, and an app's one shared account when an administrator connects it for everybody." }
   - { name: Bot grants, description: "What each Bot may use: the app actions, skills and other Bots it was given, and each app as it stands for the person asking." }
   - { name: App access requests, description: "A person asking an administrator to turn an app on, give it to a Bot, or connect its shared account." }
@@ -70,6 +95,8 @@ tags:
   - { name: Check-ins, description: "A Bot's check-ins: quiet looks through what a person connected, the items a check-in raised for them, and an administrator's numbers for how check-ins are going." }
   - { name: Goals, description: "A person's goals: an outcome a Bot works toward, run on request, on a routine's schedule or when an outside event arrives through one of the goal's triggers." }
   - { name: Follow-ups, description: "Work a Bot scheduled for itself to come back to later in a conversation." }
+  - { name: Organizations, description: "The organizations the caller is a member of, and each one's members. An organization keeps its own Bots and conversations, apart from every other's." }
+  - { name: Teams, description: "An organization's teams: named groups of its members, and each team's people. What is granted to a team is its people's to use, and nobody else's in the organization. A team is made here or kept in step with a group of the company's directory." }
   - { name: Approvals, description: "What a person's Bots are waiting on them for: the actions that ask before they run, the questions a Bot asked, and what the person set for themselves about asking (their preferences, their own rules, and what they allowed for one conversation). Each person's are theirs alone." }
   - { name: Approval rules, description: "The organization's approval rules: which actions every member's Bots take without asking, ask a person about first, or hand to the person. An administrator can describe rules in English, test them against what Bots already did, and save several as one change." }
   - { name: Reviewer guidance, description: "What an administrator tells auto-review, in plain English: what to ask about and what is routine for the organization. Checked by an independent reading before it is saved, and never able to switch built-in safety off." }
@@ -194,6 +221,7 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/give: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1give' }
   /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/take-back: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1take-back' }
   /api/v2/organizations/{organizationId}/bots/{botId}/apps/{appId}/approve: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1apps~1{appId}~1approve' }
+  /api/v2/organizations/{organizationId}/apps/{appId}/team-grants: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1team-grants' }
   /api/v2/organizations/{organizationId}/people/{personId}/giveable-apps: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1giveable-apps' }
   /api/v2/organizations/{organizationId}/app-access-requests: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests' }
   /api/v2/organizations/{organizationId}/app-access-requests/{appAccessRequestId}: { $ref: './bot-grants.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-access-requests~1{appAccessRequestId}' }
@@ -213,6 +241,7 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/components/{componentId}/call: { $ref: './components.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1components~1{componentId}~1call' }
   /api/v2/organizations/{organizationId}/skills: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills' }
   /api/v2/organizations/{organizationId}/skills/{skillId}: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills~1{skillId}' }
+  /api/v2/organizations/{organizationId}/skills/{skillId}/team-grants: { $ref: './skills.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1skills~1{skillId}~1team-grants' }
   /api/v2/organizations/{organizationId}/people/{personId}/devices: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices' }
   /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1devices~1{deviceId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/destinations: { $ref: './notifications.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1destinations' }
@@ -253,6 +282,20 @@ paths:
   /api/v2/organizations/{organizationId}/github-event-sources: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources' }
   /api/v2/organizations/{organizationId}/github-event-sources/{githubEventSourceId}: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1github-event-sources~1{githubEventSourceId}' }
   /api/v2/organizations/{organizationId}/bots/{botId}/follow-ups/{followUpId}/cancel: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1follow-ups~1{followUpId}~1cancel' }
+  /api/v2/people/me/organizations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1organizations' }
+  /api/v2/organizations/{organizationId}/members: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members' }
+  /api/v2/organizations/{organizationId}/profile: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1profile' }
+  /api/v2/organizations/{organizationId}/members/{personId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members~1{personId}' }
+  /api/v2/organizations/{organizationId}/invitations: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1invitations' }
+  /api/v2/organizations/{organizationId}/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1invitations~1{invitationId}' }
+  /api/v2/people/me/invitations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations' }
+  /api/v2/people/me/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}' }
+  /api/v2/people/me/invitations/{invitationId}/accept: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1accept' }
+  /api/v2/people/me/invitations/{invitationId}/decline: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1decline' }
+  /api/v2/organizations/{organizationId}/teams: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members' }
+  /api/v2/organizations/{organizationId}/teams/{teamId}/members/{memberId}: { $ref: './teams.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1teams~1{teamId}~1members~1{memberId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals' }
   /api/v2/organizations/{organizationId}/people/{personId}/approvals/{approvalId}/decide: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1approvals~1{approvalId}~1decide' }
   /api/v2/organizations/{organizationId}/people/{personId}/questions: { $ref: './approvals.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1questions' }
@@ -420,6 +463,63 @@ components:
       description: >-
         Desktop and mobile. OAuth 2.1 authorization code with PKCE
         (RFC 7636, S256 only); the access token is sent as a bearer token.
+
+
+        Clients. Three public clients are registered: `openbot-desktop-oauth`,
+        `openbot-mobile` and `openbot-cli`. A public client has no secret and
+        must use PKCE with S256. Dynamic client registration is off, so an
+        app uses one of these ids.
+
+
+        Redirect addresses. A client on the person's own computer listens on
+        a loopback address and any port:
+        `http://127.0.0.1:<any port>/callback` or
+        `http://[::1]:<any port>/callback`. `localhost` is not accepted.
+
+
+        Endpoints. The authorization server's metadata (RFC 8414) is at
+        `/.well-known/oauth-authorization-server/api/auth`. The person is
+        sent to `/api/auth/oauth2/authorize`. The code is exchanged, and a
+        token refreshed, at `/api/auth/oauth2/token`, with a form-encoded
+        body (`application/x-www-form-urlencoded`) that carries `client_id`
+        and no secret: the token and revocation endpoints take no client
+        authentication (`none` in the metadata's
+        `token_endpoint_auth_methods_supported`). A wrong `code_verifier` is
+        answered 400 `invalid_grant`, and the code cannot be used again. A
+        token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`; revoking a
+        token the server does not know, or one already revoked, answers 200.
+
+
+        Tokens. An access token starts `oba_` and lasts one hour. A refresh
+        token starts `obr_`, is issued only when the `offline_access` scope
+        is asked for, and rotates on every use: each refresh answers a new
+        refresh token and ends the one it was given. Access tokens work on
+        /api/v2, and on four addresses outside it that an app's screens need,
+        each with the scope given: `GET /api/me`, who is signed in
+        (people:read); the chat runtime at `/api/copilotkit` and everything
+        under it (conversations:write); a file's download at
+        `GET /api/attachments/{attachmentId}`, the address a sent message
+        keeps (conversations:read); and the relayed realtime socket at
+        `/api/intelligence/client/websocket` (conversations:read). They work
+        nowhere else.
+
+
+        Organization. An access token carries no memory of which
+        organization the person is working in. An address under
+        `/api/v2/organizations/{organizationId}` names it. Where an address
+        names none, such as the list of the person's own organizations, an
+        app sends the header `OpenBot-Organization` with the organization's
+        id. It is checked against the person's membership on every request,
+        and an organization they are not in answers not found. With no
+        header, the app works in the person's own organization.
+
+
+        Consent. The person is asked once for each app, and not again for
+        scopes they already allowed it.
+
+
+        An install for one person on one computer has no sign-in, so it has
+        no OAuth: there is nobody to authorize an app as.
       flows:
         authorizationCode:
           authorizationUrl: /api/auth/oauth2/authorize
@@ -458,7 +558,7 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
-            apps:read: Read the apps this OpenBot has added, the directory of apps it can add, and how apps are set up here.
+            apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
             connections:write: Connect and disconnect the signed-in person's apps, and an app's shared account when the signed-in person is an administrator.
@@ -483,6 +583,8 @@ components:
             check-ins:write: Turn the signed-in person's check-ins on and off, change and run them, and start or hide the items they raised.
             goals:read: Read the signed-in person's goals, their runs, their triggers and their GitHub event sources. Reading a trigger's secret needs goals:write.
             goals:write: Create, change, pause, resume, complete, run and delete the signed-in person's goals, their triggers and their GitHub event sources.
+            organizations:read: Read the organizations the signed-in person is a member of, and their members.
+            organizations:write: Create organizations and add members to them, where the signed-in person may.
             approvals:read: Read what the signed-in person's Bots are waiting on them for, and their own approval preferences and rules.
             approvals:write: Decide the signed-in person's approvals, answer their Bots' questions, and change their own approval preferences and rules.
             approval-rules:read: Read the organization's approval rules and its guidance for auto-review, and describe, check and test them, when the signed-in person is an administrator.
@@ -508,8 +610,15 @@ components:
       scheme: bearer
       bearerFormat: OpenBot API key
       description: >-
-        Automation. An API key acts as the person who created it, inside one
-        organization.
+        Automation. An API key acts as the person who created it, in every
+        organization they are a member of, like a personal access token: the
+        address of each request names the organization, and one the person
+        is not in answers not found. A key starts `obk_` and is sent as
+        `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+        and on the relayed realtime socket at
+        `/api/intelligence/client/websocket`, where a join token the key made
+        is spent (createConversationJoinToken). A person makes one in the web
+        app, signed in, under Settings, then API keys (createApiKey).
     recorderConnection:
       type: http
       scheme: bearer
@@ -528,8 +637,8 @@ components:
       in: path
       required: true
       description: >-
-        The organization. Until multi-organization lands every install has one,
-        addressed as `default`.
+        The organization, by its id or its slug. One the caller is not a
+        member of answers as one that does not exist, `default` included.
       schema:
         type: string
         minLength: 1
@@ -706,8 +815,8 @@ components:
       description: >-
         The person's role as a member of the organization. An owner or an
         admin governs it: its people, its sign-in and its policy. A member
-        uses it. Nobody is an owner yet; the role is listed so that a client
-        reads it when it arrives.
+        uses it. The owner is whoever created the organization; `default`
+        has admins and no owner.
     AssignableRole: { $ref: './accounts.yaml#/components/schemas/AssignableRole' }
     OnboardingStatus: { $ref: './accounts.yaml#/components/schemas/OnboardingStatus' }
     Person: { $ref: './accounts.yaml#/components/schemas/Person' }
@@ -1109,6 +1218,27 @@ components:
     InvalidCapabilityChanges: { $ref: './admin-settings.yaml#/components/responses/InvalidCapabilityChanges' }
     NetworkPolicyNotFound: { $ref: './admin-settings.yaml#/components/responses/NetworkPolicyNotFound' }
     NoTrailToReplay: { $ref: './admin-settings.yaml#/components/responses/NoTrailToReplay' }
+    PayloadTooLarge:
+      description: >-
+        The body is larger than this address takes. Only an address that
+        limits its body answers this; the detail says how much it takes where
+        the limit is a person's to meet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tooLarge:
+              value:
+                type: https://open.bot/errors/payload-too-large
+                title: The request is too large.
+                status: 413
+                detail: That request is too large.
+                code: PAYLOAD_TOO_LARGE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     ServerError:
       description: The server could not complete the request.
       content:

@@ -10,7 +10,7 @@ import {
   takeOverSignIn,
   useSavedLogin,
 } from "@/lib/api/generated/sign-in-requests/sign-in-requests";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { ME, passwordKeys, type SignInRequest } from "./queries";
 
@@ -46,7 +46,7 @@ export function submitSignInMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: { id: string; input: SignInSubmission }) =>
       (
         await submitSignIn(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           variables.id,
           variables.input,
@@ -65,7 +65,7 @@ export function submitSignInCodeMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: { id: string; code: string }) =>
       (
         await submitSignInCode(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           variables.id,
           { code: variables.code },
@@ -84,7 +84,7 @@ export function confirmSavedLoginMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: { id: string; loginId: string }) =>
       (
         await useSavedLogin(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           variables.id,
           { savedLoginId: variables.loginId },
@@ -100,7 +100,7 @@ export function confirmSavedLoginMutationOptions(queryClient: QueryClient) {
 export function takeOverSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (id: string) =>
-      (await takeOverSignIn(ORGANIZATION_ID, ME, id, once(), said))
+      (await takeOverSignIn(organizationId(), ME, id, once(), said))
         .signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
@@ -109,7 +109,8 @@ export function takeOverSignInMutationOptions(queryClient: QueryClient) {
 export function finishSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (id: string) =>
-      (await finishSignIn(ORGANIZATION_ID, ME, id, once(), said)).signInRequest,
+      (await finishSignIn(organizationId(), ME, id, once(), said))
+        .signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
 }
@@ -117,7 +118,8 @@ export function finishSignInMutationOptions(queryClient: QueryClient) {
 export function cancelSignInMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (id: string) =>
-      (await cancelSignIn(ORGANIZATION_ID, ME, id, once(), said)).signInRequest,
+      (await cancelSignIn(organizationId(), ME, id, once(), said))
+        .signInRequest,
     onSuccess: () => invalidate(queryClient),
   });
 }
@@ -125,7 +127,7 @@ export function cancelSignInMutationOptions(queryClient: QueryClient) {
 export function deleteSavedLoginMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (loginId: string) => {
-      await deleteSavedLogin(ORGANIZATION_ID, ME, loginId, once(), {
+      await deleteSavedLogin(organizationId(), ME, loginId, once(), {
         fallback: "Could not delete that password",
       });
     },
@@ -146,7 +148,7 @@ export async function requestSignIn(
   // A refusal is the answer here, in the server's own sentence, which is what the model is told.
   try {
     const { signInRequest } = await createSignInRequest(
-      ORGANIZATION_ID,
+      organizationId(),
       ME,
       input,
       once(),
@@ -174,7 +176,7 @@ export async function readSignIn(
 ): Promise<SignInRequest | null> {
   try {
     return (
-      await getSignInRequest(ORGANIZATION_ID, ME, id, {
+      await getSignInRequest(organizationId(), ME, id, {
         ...(signal ? { signal } : {}),
       })
     ).signInRequest;

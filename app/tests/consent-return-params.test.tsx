@@ -20,6 +20,7 @@ import {
   disconnectPreviewResponse,
   MY_CONNECTIONS_PATH,
 } from "./connections-api";
+import { answerNoTeamGrants } from "./team-grants-api";
 
 /**
  * THE BROKER'S RETURN PARAMETERS ARE DROPPED FROM THE ADDRESS ONCE THE PAGE IS BACK, AND THE
@@ -91,6 +92,9 @@ function install() {
       return json({ user: { id: "u", role: "admin", email: "u@x.io" } });
     const apps = answerAppsApi(input, init, page);
     if (apps) return apps;
+    // The admin page's Teams row: no teams here, and the app granted to none.
+    const teamGrants = answerNoTeamGrants(input, init);
+    if (teamGrants) return teamGrants;
     if (path === MY_CONNECTIONS_PATH) {
       return connectionPage([
         {

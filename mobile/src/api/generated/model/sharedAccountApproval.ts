@@ -5,7 +5,7 @@ import type { SharedAccountApprovalAudience } from "./sharedAccountApprovalAudie
 import type { SharedAccountApprovalMembersItem } from "./sharedAccountApprovalMembersItem";
 
 /**
- * Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people and directory groups, or everybody; and whether the Bot may act on what people outside the organization send it.
+ * Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.
  */
 export interface SharedAccountApproval {
   audience: SharedAccountApprovalAudience;

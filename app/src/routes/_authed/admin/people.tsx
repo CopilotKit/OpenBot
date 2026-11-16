@@ -17,6 +17,14 @@ import {
 } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -29,11 +37,13 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
 import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
 } from "@/lib/people/mutations";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { type Person, peopleListQueryOptions } from "@/lib/people/queries";
 import { queryClient } from "@/query-client";
 
@@ -54,7 +64,7 @@ const PROVIDER_NAMES: Record<string, string> = {
  * The address is the title, so this is everything else worth knowing at a glance while deciding
  * whether somebody should still have access.
  */
-function describe(person: Person): string {
+function describe(person: Person, organization: string | undefined): string {
   const providers = person.providers
     .map((provider) => PROVIDER_NAMES[provider] ?? provider)
     .join(", ");
@@ -63,11 +73,30 @@ function describe(person: Person): string {
     : "never signed in";
 
   if (person.revoked)
-    return `Access removed · ${providers || "no provider"} · ${when}`;
+    return `${organization ? `Removed from ${organization}` : "Access removed"} · ${providers || "no provider"} · ${when}`;
   if (person.configuredAdmin) {
     return `Admin by configuration · ${when}`;
   }
   return `${providers || "no provider"} · ${when}`;
+}
+
+/** What a person is called: their name, or their address when they have not given one. */
+function nameOf(person: Person): string {
+  return person.name?.trim() || person.email;
+}
+
+/**
+ * The organization a removal takes somebody out of, where that is all it does: an OpenBot where
+ * everybody has an organization of their own and may create others (`canCreate`, the server's
+ * verdict). There, Remove ends the person's membership of this organization alone, and their
+ * account, sessions, API keys and other organizations stay theirs. Undefined where OpenBot keeps one
+ * organization, where removing somebody still takes them out of OpenBot.
+ */
+function useRemovalOrganization(): string | undefined {
+  const choices = useOrganizationChoices();
+  if (!choices?.canCreate) return undefined;
+  return choices.organizations.find((one) => one.id === choices.currentId)
+    ?.name;
 }
 
 function PeoplePage() {
@@ -89,6 +118,10 @@ function PeoplePage() {
   const setAccess = useMutation(setPersonAccessMutationOptions(queryClient));
   // Offboarding: stops this person's Bots' computers, keeping their disks. Access is unchanged.
   const terminate = useMutation(terminateMemberComputersMutationOptions());
+  // Kept while its dialog closes, so the question does not lose its name on the way out.
+  const [removing, setRemoving] = useState<Person | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const organization = useRemovalOrganization();
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -132,7 +165,7 @@ function PeoplePage() {
 
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load people. Reload the page.
+            Couldn't load people. Try again in a moment.
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty
@@ -155,17 +188,17 @@ function PeoplePage() {
                     <ItemMedia variant="icon">
                       {person.revoked ? (
                         <IconLock />
-                      ) : person.role === "admin" ? (
+                      ) : isOrganizationAdmin(person.role) ? (
                         <IconShieldCheck />
                       ) : (
                         <IconUser />
                       )}
                     </ItemMedia>
                     <ItemContent>
-                      <ItemTitle>{person.name ?? person.email}</ItemTitle>
+                      <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription>
                         {person.name ? `${person.email} · ` : ""}
-                        {describe(person)}
+                        {describe(person, organization)}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
@@ -183,13 +216,20 @@ function PeoplePage() {
                         Stop computers
                       </Button>
                       <Button
+                        aria-label={`${person.revoked ? "Restore" : "Remove"} ${nameOf(person)}`}
                         disabled={busy || isSelf || person.configuredAdmin}
-                        onClick={() =>
-                          setAccess.mutate({
-                            userId: person.id,
-                            revoked: !person.revoked,
-                          })
-                        }
+                        onClick={() => {
+                          // Removing is asked about first. Restoring ends nothing, so it applies at once.
+                          if (person.revoked) {
+                            setAccess.mutate({
+                              userId: person.id,
+                              revoked: false,
+                            });
+                            return;
+                          }
+                          setRemoving(person);
+                          setRemoveOpen(true);
+                        }}
                         size="sm"
                         variant={person.revoked ? "outline" : "destructive"}
                       >
@@ -230,8 +270,97 @@ function PeoplePage() {
             {people.isFetchingNextPage ? "Loading…" : "Show more"}
           </Button>
         ) : null}
+        {removing ? (
+          <RemovePersonDialog
+            onOpenChange={setRemoveOpen}
+            open={removeOpen}
+            organization={organization}
+            person={removing}
+          />
+        ) : null}
       </PageSection>
     </PageShell>
+  );
+}
+
+/**
+ * Asks before removing somebody's access, naming them and saying what ends, and then removes it.
+ * A refusal stays in the dialog. Where everybody has an organization of their own (`organization`
+ * given), what ends is their membership of this one; where OpenBot keeps one, it is OpenBot.
+ */
+function RemovePersonDialog({
+  onOpenChange,
+  open,
+  organization,
+  person,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  organization: string | undefined;
+  person: Person;
+}) {
+  const remove = useMutation(setPersonAccessMutationOptions(queryClient));
+  const { reset } = remove;
+  // A refusal from a previous attempt is not news about this one.
+  useEffect(() => {
+    if (open) reset();
+  }, [open, reset]);
+
+  const confirm = async () => {
+    try {
+      await remove.mutateAsync({ userId: person.id, revoked: true });
+    } catch {
+      // The error is on the mutation and drawn below; staying open says "not done".
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Remove {nameOf(person)} from {organization ?? "OpenBot"}?
+          </DialogTitle>
+          {organization ? (
+            <DialogDescription>
+              They lose access to {organization}'s Bots and conversations, and
+              the apps they connected here are disconnected. They keep their
+              account, their own organization and any other they're in. Restore
+              puts them back with their role and teams.
+            </DialogDescription>
+          ) : (
+            <DialogDescription>
+              They're signed out everywhere and can't sign in again. Their API
+              keys, app sign-ins and connected credentials stop working. They
+              keep their record and history, and Restore lets them sign in
+              again.
+            </DialogDescription>
+          )}
+        </DialogHeader>
+        {remove.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {remove.error.message}
+          </p>
+        ) : null}
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            disabled={remove.isPending}
+            onClick={() => {
+              void confirm();
+            }}
+            size="sm"
+            variant="destructive"
+          >
+            {remove.isPending ? "Removing…" : "Remove"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

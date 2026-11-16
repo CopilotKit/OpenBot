@@ -32,4 +32,6 @@ export interface Deployment {
   builtInBots: boolean;
   /** Whether this OpenBot can give a Bot a computer of its own. Whether a person may is their Isolated Bots switch. */
   isolatedBots: boolean;
+  /** Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false). */
+  botComputers: boolean;
 }

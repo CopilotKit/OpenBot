@@ -1,17 +1,17 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import { previewCapabilityChanges } from "@/lib/api/generated/capabilities/capabilities";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import type { CapabilityAnswer as ApiCapabilityAnswer } from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 import type { CapabilityChange, CapabilityChangesCheck } from "./translate";
 
-/** What the switches decide for one person, and which switch decided it. */
-export type CapabilityAnswer = {
-  allowed: boolean;
-  decidedBy: "default" | "organization" | "role" | "group";
-  /** The role or group that decided it. Empty otherwise. */
-  scopeId: string;
-};
+/**
+ * What the switches decide for one person, and which switch decided it: the API's
+ * `CapabilityAnswer`. `scopeId` is the role, the team's id or the directory group's name that
+ * decided it, and empty otherwise.
+ */
+export type CapabilityAnswer = ApiCapabilityAnswer;
 
 /** A person's own recent use of a permission they would lose, as the trail records it. */
 export type CapabilityActivity = {
@@ -87,7 +87,7 @@ export function capabilityChangesPreviewQueryOptions(
     queryFn: ({ signal }): Promise<CapabilityPreview> =>
       // An action that saves nothing: each ask is its own, so each gets its own key.
       previewCapabilityChanges(
-        ORGANIZATION_ID,
+        organizationId(),
         { changes: [...changes] },
         { "Idempotency-Key": idempotencyKey() },
         { signal, fallback: "Couldn't work out who these changes affect." },

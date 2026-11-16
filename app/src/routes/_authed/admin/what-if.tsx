@@ -204,7 +204,7 @@ function WhatIfPage() {
         >
           {vocabulary.isError ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load this OpenBot's Bots and apps. Reload the page.
+              Couldn't load this OpenBot's Bots and apps. Try again in a moment.
             </p>
           ) : (
             <ActionChips

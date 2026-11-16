@@ -9,7 +9,7 @@ import {
   getHostAccess,
   stopHostAccess,
 } from "@/lib/api/generated/host-access/host-access";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /** Folder access is a person's own: the API answers it for the person asking, as `me`. */
 const ME = "me";
@@ -68,7 +68,7 @@ export function hostAccessQueryOptions() {
     queryKey: hostAccessKeys.status(),
     refetchInterval: 2_000,
     queryFn: ({ signal }): Promise<HostAccessStatus> =>
-      getHostAccess(ORGANIZATION_ID, ME, {
+      getHostAccess(organizationId(), ME, {
         signal,
         fallback: "Folder access could not be loaded.",
       }),
@@ -82,7 +82,7 @@ export function requestHostFolderGrantMutationOptions(
     // Answered once the person has chosen a folder in the desktop app, or turned it down.
     mutationFn: (variables: { botId: string }): Promise<unknown> =>
       createHostAccessGrant(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         { botId: variables.botId },
         { "Idempotency-Key": idempotencyKey() },
@@ -97,7 +97,7 @@ export function revokeHostFolderGrantMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { grantId: string }) => {
       await deleteHostAccessGrant(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         variables.grantId,
         { "Idempotency-Key": idempotencyKey() },
@@ -112,7 +112,7 @@ export function stopHostAccessMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async () => {
       await stopHostAccess(
-        ORGANIZATION_ID,
+        organizationId(),
         ME,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Folder access could not be stopped." },

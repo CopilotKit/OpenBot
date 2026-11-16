@@ -37,7 +37,7 @@ export function EditSkill({ slug }: { slug: string }) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Reload the page.
+          Couldn't load this skill. Try again in a moment.
         </p>
       </div>
     );

@@ -72,6 +72,7 @@ import type {
   ListPublishedSkillsParams,
   ListSkillSharingRequestsParams,
   OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   PersonForbiddenResponse,
   PersonLearning,
   PersonLearningChoices,
@@ -2222,6 +2223,7 @@ export const getApproveSkillSharingMutationOptions = <
     | AdminOnlyResponse
     | SharingRequestNotFoundResponse
     | SharingRequestChangedResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -2277,6 +2279,7 @@ export type ApproveSkillSharingMutationError =
   | AdminOnlyResponse
   | SharingRequestNotFoundResponse
   | SharingRequestChangedResponse
+  | PayloadTooLargeResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 export type ApproveSkillSharingMutationVariables = {
@@ -2296,6 +2299,7 @@ export const useApproveSkillSharing = <
     | AdminOnlyResponse
     | SharingRequestNotFoundResponse
     | SharingRequestChangedResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -2385,6 +2389,7 @@ export const getDeclineSkillSharingMutationOptions = <
     | AdminOnlyResponse
     | SharingRequestNotFoundResponse
     | SharingRequestChangedResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -2440,6 +2445,7 @@ export type DeclineSkillSharingMutationError =
   | AdminOnlyResponse
   | SharingRequestNotFoundResponse
   | SharingRequestChangedResponse
+  | PayloadTooLargeResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 export type DeclineSkillSharingMutationVariables = {
@@ -2459,6 +2465,7 @@ export const useDeclineSkillSharing = <
     | AdminOnlyResponse
     | SharingRequestNotFoundResponse
     | SharingRequestChangedResponse
+    | PayloadTooLargeResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,

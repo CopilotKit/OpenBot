@@ -4,7 +4,16 @@ import {
   listCapabilities,
 } from "@/lib/api/generated/capabilities/capabilities";
 import { getCheckInUsage } from "@/lib/api/generated/check-ins/check-ins";
-import type { BotCheckInUsage, CheckInUsage } from "@/lib/api/generated/model";
+import type {
+  NetworkPolicy as ApiNetworkPolicy,
+  BotCheckInUsage,
+  Capability,
+  CapabilityId,
+  CheckInUsage,
+  EgressRule as EgressRuleEntry,
+  NetworkMode as NetworkModeName,
+  NetworkPolicyScopeKind,
+} from "@/lib/api/generated/model";
 import {
   listNetworkPolicies,
   replayNetworkPolicy,
@@ -14,53 +23,32 @@ import {
   getOrganizationSettings,
   listComputerActions,
 } from "@/lib/api/generated/organization-settings/organization-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
-export type CapabilityKey =
-  | "useBots"
-  | "cloudBrowser"
-  | "cloudNetwork"
-  | "cloudComputer"
-  | "localComputer"
-  | "customRules"
-  | "passwordManager"
-  | "slackTeams"
-  | "teamBots"
-  | "ownerApps"
-  | "isolatedComputers"
-  | "proactive";
+/** A permission switch's id: the API's `CapabilityId`. */
+export type CapabilityKey = CapabilityId;
 
-/** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
-export type CapabilitySetting = {
+/**
+ * One switch as the server stored it at each scope: the API's `Capability`, under the name the
+ * screens know its id by. `null` means no row: the scope inherits. `roles` is by member role,
+ * `teams` by team id (a team that sets nothing is absent), and `groups` by directory group name, for
+ * the rules made before there were teams.
+ */
+export type CapabilitySetting = Omit<Capability, "id" | "teams"> & {
   capability: CapabilityKey;
-  title: string;
-  description: string;
-  default: boolean;
-  organization: boolean | null;
-  /** Each member role's switch, by role. */
-  roles: Partial<Record<"owner" | "admin" | "member", boolean>>;
-  groups: Record<string, boolean>;
+  teams: Record<string, boolean>;
 };
 
 /** One allowlist entry. Either kind can name ports (`443`, `5432,8000-8100`); without them, every port. */
-export type EgressRule =
-  | { type: "domain"; value: string; ports?: string }
-  | { type: "cidr"; value: string; ports?: string };
+export type EgressRule = EgressRuleEntry;
 
-export type NetworkMode =
-  | "allow_all"
-  | "defaults_plus_allowlist"
-  | "allowlist_only";
+export type NetworkMode = NetworkModeName;
 
-export type NetworkPolicy = {
-  scopeKind: "organization" | "group";
-  scopeId: string;
-  mode: NetworkMode;
-  rules: EgressRule[];
-  locked: boolean;
-  updatedBy: string | null;
-  updatedAt: string;
-};
+/** Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name). */
+export type NetworkScopeKind = NetworkPolicyScopeKind;
+
+/** One network policy: the API's `NetworkPolicy`, without its address. */
+export type NetworkPolicy = Omit<ApiNetworkPolicy, "id">;
 
 export type EnterpriseSettings = {
   ssoRequired: boolean;
@@ -167,7 +155,7 @@ export const enterpriseKeys = {
 
 /** A network policy as the dialog holds it, not yet saved. */
 export type NetworkCandidate = {
-  scopeKind: "organization" | "group";
+  scopeKind: NetworkScopeKind;
   scopeId: string;
   mode: NetworkMode;
   rules: EgressRule[];
@@ -212,7 +200,7 @@ export function networkReplayQueryOptions(candidate: NetworkCandidate) {
     queryFn: ({ signal }): Promise<NetworkReplayReport> =>
       // An action that saves nothing: each ask is its own, so each gets its own key.
       replayNetworkPolicy(
-        ORGANIZATION_ID,
+        organizationId(),
         candidate,
         { "Idempotency-Key": idempotencyKey() },
         {
@@ -252,10 +240,10 @@ export function enterpriseOverviewQueryOptions() {
     queryFn: async ({ signal }): Promise<EnterpriseOverview> => {
       const options = { signal, fallback: OVERVIEW_FALLBACK };
       const [settings, capabilities, network] = await Promise.all([
-        getOrganizationSettings(ORGANIZATION_ID, options),
+        getOrganizationSettings(organizationId(), options),
         everyPage(async (cursor) => {
           const page = await listCapabilities(
-            ORGANIZATION_ID,
+            organizationId(),
             { limit: 100, ...(cursor ? { cursor } : {}) },
             options,
           );
@@ -263,7 +251,7 @@ export function enterpriseOverviewQueryOptions() {
         }),
         everyPage(async (cursor) => {
           const page = await listNetworkPolicies(
-            ORGANIZATION_ID,
+            organizationId(),
             { limit: 100, ...(cursor ? { cursor } : {}) },
             options,
           );
@@ -272,9 +260,10 @@ export function enterpriseOverviewQueryOptions() {
       ]);
       const { context, ...values } = settings;
       return {
-        capabilities: capabilities.map(({ id, ...capability }) => ({
+        capabilities: capabilities.map(({ id, teams, ...capability }) => ({
           capability: id,
           ...capability,
+          teams: teams ?? {},
         })),
         settings: values,
         groups: context.directoryGroups,
@@ -300,7 +289,7 @@ export function modelUsageQueryOptions(days = 30) {
       recent: ModelUsageRow[];
     }> => {
       const usage = await getModelUsage(
-        ORGANIZATION_ID,
+        organizationId(),
         { days },
         { signal, fallback: "Could not load model usage" },
       );
@@ -318,7 +307,7 @@ export function checkInMetricsQueryOptions(days: 7 | 30) {
     queryKey: enterpriseKeys.checkIns(days),
     queryFn: ({ signal }): Promise<CheckInMetrics> =>
       getCheckInUsage(
-        ORGANIZATION_ID,
+        organizationId(),
         { days },
         { signal, fallback: "Couldn't load check-ins" },
       ),
@@ -332,7 +321,7 @@ export function actionRecordsQueryOptions() {
     queryFn: async ({ signal }): Promise<ActionRecord[]> =>
       (
         await listComputerActions(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 50 },
           { signal, fallback: "Could not load recorded actions" },
         )
@@ -356,7 +345,7 @@ export function myCapabilitiesQueryOptions() {
   return queryOptions({
     queryKey: ["enterprise", "me"] as const,
     queryFn: ({ signal }): Promise<MyCapabilities> =>
-      getPersonCapabilities(ORGANIZATION_ID, "me", {
+      getPersonCapabilities(organizationId(), "me", {
         signal,
         fallback: "Couldn't load what OpenBot allows.",
       }),

@@ -45,6 +45,7 @@ import {
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -308,7 +309,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     ...currentUserQueryOptions(),
     enabled: perActionGrants && sharedHere,
   }).data;
-  const isAdmin = me?.role === "admin";
+  const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
@@ -391,8 +392,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Reload the page, or ask an admin if it
-          keeps happening.
+          Couldn't load this connection. Try again in a moment, or ask an admin
+          if it keeps happening.
         </p>
       </PageShell>
     );
@@ -407,8 +408,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Reload the page, or ask an admin if it keeps
-          happening.
+          Couldn't load this app. Try again in a moment, or ask an admin if it
+          keeps happening.
         </p>
       </PageShell>
     );
@@ -471,9 +472,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           <PageRows className="mt-0">
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Team account</ItemTitle>
+                <ItemTitle>Shared account</ItemTitle>
                 <ItemDescription>
-                  Shared by your organisation. Bots act as the team account.
+                  Shared by your organization. Bots act as this account.
                 </ItemDescription>
               </ItemContent>
             </Item>

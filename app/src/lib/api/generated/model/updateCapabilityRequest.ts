@@ -4,6 +4,7 @@
 import type { SwitchValue } from "./switchValue";
 import type { UpdateCapabilityRequestGroups } from "./updateCapabilityRequestGroups";
 import type { UpdateCapabilityRequestRoles } from "./updateCapabilityRequestRoles";
+import type { UpdateCapabilityRequestTeams } from "./updateCapabilityRequestTeams";
 
 /**
  * The levels to set or clear. At least one.
@@ -11,6 +12,8 @@ import type { UpdateCapabilityRequestRoles } from "./updateCapabilityRequestRole
 export interface UpdateCapabilityRequest {
   organization?: SwitchValue | null;
   roles?: UpdateCapabilityRequestRoles;
-  /** By directory group name, 1 to 200 characters. Team scopes will be added when teams arrive. */
+  /** By directory group name, 1 to 200 characters. */
   groups?: UpdateCapabilityRequestGroups;
+  /** By team id. A team that is not one of this organization's is not found. */
+  teams?: UpdateCapabilityRequestTeams;
 }

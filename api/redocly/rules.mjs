@@ -13,6 +13,19 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 const ORGANIZATION_PREFIX = "/api/v2/organizations/{organizationId}/";
+/**
+ * The addresses outside an organization. The organizations the caller is a member of, and
+ * creating one: a person has to be able to ask which organizations they are in before they can
+ * name one. And the invitations sent to the caller: they answer one before they are a member of
+ * the organization it is for, so neither can sit under an organization's address.
+ */
+const OUTSIDE_AN_ORGANIZATION = [
+  "/api/v2/people/me/organizations",
+  "/api/v2/people/me/invitations",
+  "/api/v2/people/me/invitations/{invitationId}",
+  "/api/v2/people/me/invitations/{invitationId}/accept",
+  "/api/v2/people/me/invitations/{invitationId}/decline",
+];
 const WRITE_METHODS = ["post", "put", "patch", "delete"];
 const METHODS = ["get", "head", "options", "trace", ...WRITE_METHODS];
 const PROBLEM_JSON = "application/problem+json";
@@ -64,7 +77,10 @@ function OrganizationScoped() {
       enter(paths, ctx) {
         for (const path of Object.keys(paths)) {
           const location = ctx.location.child([path]).key();
-          if (!path.startsWith(ORGANIZATION_PREFIX)) {
+          if (
+            !path.startsWith(ORGANIZATION_PREFIX) &&
+            !OUTSIDE_AN_ORGANIZATION.includes(path)
+          ) {
             ctx.report({
               message: `${path} is not under ${ORGANIZATION_PREFIX}. Every OpenBot resource belongs to an organization, as every Intelligence v2 resource does.`,
               location,

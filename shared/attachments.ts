@@ -66,6 +66,18 @@ export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_FILE_BYTES = 1024 * 1024;
 
 /**
+ * How large a PDF may be uploaded.
+ *
+ * A PDF is not read the way a text file is: its words are extracted on the server and only those
+ * reach the model, capped by `MAX_EXTRACTED_CHARACTERS` like any text. Most of a PDF's bytes are
+ * fonts, images and layout, so a one-page invoice can run to hundreds of kilobytes and a scanned
+ * statement to several megabytes, and `MAX_FILE_BYTES` would refuse files whose text is short. The
+ * image ceiling is used because it is already the largest file the upload route takes, so the
+ * route's body limit holds a PDF at this size without a second number.
+ */
+export const MAX_DOCUMENT_BYTES = MAX_IMAGE_BYTES;
+
+/**
  * How much extracted text may reach the model from one file.
  *
  * The real limit on a text attachment is tokens, not bytes: a one-megabyte file is a few hundred
@@ -128,6 +140,15 @@ export const ACCEPTED_TEXT_MIME = [
 ] as const;
 
 /**
+ * Documents whose text the server extracts before the model sees them. Today that is PDF alone.
+ *
+ * Accepted only when the bytes start with the PDF signature (`attachment-mime.ts` on the server);
+ * a claim of `application/pdf` on anything else is refused. Served back as a download, never inline,
+ * like every type that is not an image.
+ */
+export const ACCEPTED_DOCUMENT_MIME = ["application/pdf"] as const;
+
+/**
  * THE MEDIA TYPE ON ITS OWN: LOWER CASE, PARAMETERS GONE — AND THE ONLY FORM ANYTHING HERE COMPARES.
  *
  * A `File`'s type is whatever produced it. Bun's constructor appends `;charset=utf-8` to
@@ -172,6 +193,7 @@ export function namesNoFormat(mimeType: string): boolean {
 export type AttachmentKind =
   | "image"
   | "text"
+  | "document"
   | "unsupported-image"
   | "unsupported";
 
@@ -202,6 +224,9 @@ export function classifyAttachment(mimeType: string): AttachmentKind {
   if (mediaType.startsWith("image/")) return "unsupported-image";
   if ((ACCEPTED_TEXT_MIME as readonly string[]).includes(mediaType)) {
     return "text";
+  }
+  if ((ACCEPTED_DOCUMENT_MIME as readonly string[]).includes(mediaType)) {
+    return "document";
   }
   return "unsupported";
 }

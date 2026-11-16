@@ -164,7 +164,7 @@ export function connectionRows(input: {
       (server): ConnectionRow => ({
         key: server.id,
         title: server.title,
-        summary: "Your organisation's account. Bots act as the team here.",
+        summary: "Your organization's shared account. Bots act as it here.",
         state: "team",
         mark: { kind: "logo", logo: server.logo },
       }),

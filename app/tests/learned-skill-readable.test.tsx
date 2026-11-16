@@ -7,10 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import type {
-  LearnedSkillDetail,
-  PersonalLearningSharing,
-} from "@openbot/shared/learning";
+import type { LearnedSkillDetail } from "@openbot/shared/learning";
 import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -29,8 +26,16 @@ import {
 } from "@testing-library/react";
 import { LearningSharing } from "@/components/settings/learning-sharing";
 import { readableSkillBody, skillTitle } from "@/lib/learning/display";
+import type { PersonalLearningSharing } from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  learningContract,
+  personLearning,
+  problem,
+  requestOf,
+  served,
+} from "./learning-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -75,6 +80,7 @@ const RECORDING_TITLE = "Open example.com and follow Learn more";
 const listing: PersonalLearningSharing = {
   mode: "closed",
   sharingAllowed: false,
+  autoApprove: true,
   skills: [
     {
       name: NAME,
@@ -96,14 +102,19 @@ const originalFetch = global.fetch;
 beforeEach(() => {
   queryClient.clear();
   global.fetch = Object.assign(
-    async (path: Parameters<typeof fetch>[0]) => {
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
       if (url === DEPLOYMENT_PATH)
         return Response.json({ edition: "personal" });
-      if (url === "/api/settings/learning") return Response.json(listing);
-      if (url === `/api/settings/learning/skills/${NAME}`)
-        return Response.json({ skill: detail });
-      return new Response(null, { status: 404 });
+      const request = requestOf(path, init);
+      if (request.path === personLearning().settings)
+        return served(
+          learningContract.GetPersonLearningSettingsResponse,
+          listing,
+        );
+      if (request.path === personLearning().learnedSkill(NAME))
+        return served(learningContract.GetLearnedSkillResponse, detail);
+      return problem(404, "Not found.", "NOT_FOUND");
     },
     { preconnect: originalFetch.preconnect },
   );

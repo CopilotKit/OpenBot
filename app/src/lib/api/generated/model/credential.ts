@@ -5,7 +5,7 @@ import type { CredentialKind } from "./credentialKind";
 import type { CredentialMetadata } from "./credentialMetadata";
 
 /**
- * A credential in the vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.
+ * A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.
  */
 export interface Credential {
   id: string;

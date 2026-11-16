@@ -593,8 +593,8 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Reload the
-            page.
+            Couldn't load GitHub and Slack, so they aren't listed. Try again in
+            a moment.
           </p>
         ) : null}
       </PageSection>
@@ -819,7 +819,9 @@ function ConnectionStateLabel({
     );
   }
   if (state === "team") {
-    return <span className="text-xs text-muted-foreground">Team account</span>;
+    return (
+      <span className="text-xs text-muted-foreground">Shared account</span>
+    );
   }
   const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">

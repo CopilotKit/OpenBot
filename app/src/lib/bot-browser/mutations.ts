@@ -11,7 +11,7 @@ import {
   navigateBotBrowser,
   recordInBotBrowser,
 } from "@/lib/api/generated/browsers/browsers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   type NarrationAnswer,
   type NarrationPost,
@@ -49,7 +49,7 @@ export function startBotBrowserRecordingMutationOptions(
       language?: string;
     }): Promise<BotBrowserApiState> =>
       recordInBotBrowser(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         {
           action: "start",
@@ -75,7 +75,7 @@ export function stopBotBrowserRecordingMutationOptions(
   return mutationOptions({
     mutationFn: (): Promise<BotBrowserApiState> =>
       recordInBotBrowser(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         { action: "stop" },
         { "Idempotency-Key": idempotencyKey() },
@@ -93,7 +93,7 @@ export function botBrowserTabsMutationOptions(
   return mutationOptions({
     mutationFn: (request: BrowserTabsRequest): Promise<BotBrowserApiState> =>
       changeBotBrowserTabs(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         request,
         { "Idempotency-Key": idempotencyKey() },
@@ -113,7 +113,7 @@ export function navigateBotBrowserMutationOptions(
       request: BrowserNavigateRequest,
     ): Promise<BotBrowserApiState> =>
       navigateBotBrowser(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         request,
         { "Idempotency-Key": idempotencyKey() },
@@ -134,7 +134,7 @@ export function clearBotBrowserMutationOptions(
   return mutationOptions({
     mutationFn: (): Promise<BotBrowserApiState> =>
       clearBotBrowser(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't clear the browser. Try again." },
@@ -154,7 +154,7 @@ export function sendBotBrowserNarration(
   return sendNarrationWith(
     (narration, options) =>
       narrateInBotBrowser(
-        ORGANIZATION_ID,
+        organizationId(),
         botId,
         narration,
         { "Idempotency-Key": idempotencyKey() },

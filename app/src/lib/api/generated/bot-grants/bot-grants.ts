@@ -21,7 +21,10 @@ import type {
   AdminOnlyResponse,
   AppAccessApproval,
   AppDirectoryUnavailableResponse,
+  AppOrTeamNotFoundResponse,
   AppServiceFailedResponse,
+  AppTeamGrants,
+  AppTeamGrantsInput,
   ApproveBotAppHeaders,
   BatchUpdateBotGrantsHeaders,
   BotApp,
@@ -56,6 +59,7 @@ import type {
   ModelNotConfiguredResponse,
   OrganizationNotFoundResponse,
   OwnOnlyResponse,
+  ReplaceAppTeamGrantsHeaders,
   ReplaceBotGrantHeaders,
   ReplayBotGrantsHeaders,
   ServerErrorResponse,
@@ -2020,6 +2024,401 @@ export const useApproveBotApp = <
   TContext
 > => {
   return useMutation(getApproveBotAppMutationOptions(options), queryClient);
+};
+export const getGetAppTeamGrantsUrl = (
+  organizationId: string,
+  appId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/apps/${encodeURIComponent(String(appId))}/team-grants`;
+};
+
+/**
+ * Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin of the organization may read them.
+ * @summary Read the teams the app is granted to
+ */
+export const getAppTeamGrants = async (
+  organizationId: string,
+  appId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppTeamGrants> => {
+  return apiRequest<AppTeamGrants>(
+    getGetAppTeamGrantsUrl(organizationId, appId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAppTeamGrantsQueryKey = (
+  organizationId: string,
+  appId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/apps/${appId}/team-grants`,
+  ] as const;
+};
+
+export const getGetAppTeamGrantsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAppTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  appId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAppTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetAppTeamGrantsQueryKey(organizationId, appId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAppTeamGrants>>
+  > = ({ signal }) =>
+    getAppTeamGrants(organizationId, appId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      appId !== null &&
+      appId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAppTeamGrants>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetAppTeamGrantsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAppTeamGrants>>
+>;
+export type GetAppTeamGrantsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AppOrTeamNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetAppTeamGrants<
+  TData = Awaited<ReturnType<typeof getAppTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  appId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAppTeamGrants>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppTeamGrants>>,
+          TError,
+          Awaited<ReturnType<typeof getAppTeamGrants>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAppTeamGrants<
+  TData = Awaited<ReturnType<typeof getAppTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  appId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAppTeamGrants>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppTeamGrants>>,
+          TError,
+          Awaited<ReturnType<typeof getAppTeamGrants>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAppTeamGrants<
+  TData = Awaited<ReturnType<typeof getAppTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  appId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAppTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read the teams the app is granted to
+ */
+
+export function useGetAppTeamGrants<
+  TData = Awaited<ReturnType<typeof getAppTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  appId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAppTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetAppTeamGrantsQueryOptions(
+    organizationId,
+    appId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getReplaceAppTeamGrantsUrl = (
+  organizationId: string,
+  appId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/apps/${encodeURIComponent(String(appId))}/team-grants`;
+};
+
+/**
+ * Grant the app to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+ * @summary Grant an app to teams
+ */
+export const replaceAppTeamGrants = async (
+  organizationId: string,
+  appId: string,
+  appTeamGrantsInput: AppTeamGrantsInput,
+  headers: ReplaceAppTeamGrantsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AppTeamGrants> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AppTeamGrants>(
+    getReplaceAppTeamGrantsUrl(organizationId, appId),
+    {
+      ...options,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(appTeamGrantsInput),
+    },
+  );
+};
+
+export const getReplaceAppTeamGrantsMutationKey = () =>
+  ["replaceAppTeamGrants"] as const;
+
+export const getReplaceAppTeamGrantsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replaceAppTeamGrants>>,
+    TError,
+    ReplaceAppTeamGrantsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replaceAppTeamGrants>>,
+  TError,
+  ReplaceAppTeamGrantsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReplaceAppTeamGrantsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replaceAppTeamGrants>>,
+    ReplaceAppTeamGrantsMutationVariables
+  > = (props) => {
+    const { organizationId, appId, data, headers } = props ?? {};
+
+    return replaceAppTeamGrants(
+      organizationId,
+      appId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplaceAppTeamGrantsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replaceAppTeamGrants>>
+>;
+export type ReplaceAppTeamGrantsMutationBody = AppTeamGrantsInput;
+export type ReplaceAppTeamGrantsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AppOrTeamNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ReplaceAppTeamGrantsMutationVariables = {
+  organizationId: string;
+  appId: string;
+  data: AppTeamGrantsInput;
+  headers: ReplaceAppTeamGrantsHeaders;
+};
+
+/**
+ * @summary Grant an app to teams
+ */
+export const useReplaceAppTeamGrants = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AppOrTeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof replaceAppTeamGrants>>,
+      TError,
+      ReplaceAppTeamGrantsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof replaceAppTeamGrants>>,
+  TError,
+  ReplaceAppTeamGrantsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getReplaceAppTeamGrantsMutationOptions(options),
+    queryClient,
+  );
 };
 export const getListGiveableAppsUrl = (
   organizationId: string,

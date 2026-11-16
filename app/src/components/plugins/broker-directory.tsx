@@ -12,7 +12,7 @@ import {
   type ConnectInNewTab,
   useConnectInNewTab,
 } from "@/components/plugins/connect-in-new-tab";
-import { AppInitial } from "@/components/plugins/plugin-logo";
+import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,6 +34,11 @@ import {
 } from "@/lib/apps/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
+  type DirectoryAppState,
+  directoryAppState,
+  directoryConnect,
+} from "@/lib/plugins/directory-state";
+import {
   consentBreadth,
   coverageWarning,
   keyNeededLine,
@@ -46,11 +51,6 @@ import {
   type PluginsProvider,
   providerVocabulary,
 } from "@/lib/plugins/provider-vocabulary";
-import {
-  type DirectoryAppState,
-  directoryAppState,
-  directoryConnect,
-} from "@/lib/plugins/directory-state";
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
 
 /**
@@ -318,7 +318,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
           >
             {query
               ? `No app matches "${query}".`
-              : "No apps to show yet. Reload the page to try again."}
+              : "No apps to show yet. Try again in a moment."}
           </PageEmpty>
         ) : (
           <>
@@ -346,7 +346,10 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                     >
                       {/* The vendor's own mark where the broker supplies one, and its initial where it
                         does not, so a list of third parties still has a fixed left edge. */}
-                      <ItemMedia variant={entry.logo ? "image" : "icon"}>
+                      <ItemMedia
+                        variant={entry.logo ? "image" : "icon"}
+                        className={entry.logo ? LOGO_TILE : undefined}
+                      >
                         {entry.logo ? (
                           <img alt="" src={entry.logo} />
                         ) : (

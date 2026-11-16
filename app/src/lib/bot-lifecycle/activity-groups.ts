@@ -1,5 +1,6 @@
 import type { ProactiveSetting } from "@/lib/proactive";
 import type { ListedTask } from "@/lib/tasks/groups";
+import { stoppedByYou } from "@/lib/tasks/queries";
 import type { ActivityItem, BotActivity } from "./queries";
 
 /*
@@ -16,10 +17,14 @@ export type ActivityGroupId =
   | "working"
   | "scheduled"
   | "done"
+  | "stopped"
   | "failed"
   | "recurring";
 
-/** Top to bottom: what waits on the person, what is running, what is lined up, then how it ended. */
+/**
+ * Top to bottom: what waits on the person, what is running, what is lined up, then how it ended. A
+ * task the person stopped ended by their own choice, so it is listed apart from what failed.
+ */
 export const ACTIVITY_GROUPS: readonly {
   id: ActivityGroupId;
   title: string;
@@ -28,6 +33,7 @@ export const ACTIVITY_GROUPS: readonly {
   { id: "working", title: "Working" },
   { id: "scheduled", title: "Scheduled" },
   { id: "done", title: "Done" },
+  { id: "stopped", title: "Stopped" },
   { id: "failed", title: "Failed" },
   { id: "recurring", title: "Recurring" },
 ];
@@ -68,11 +74,15 @@ const at = (entry: ActivityEntry) =>
       ? time(entry.item.at)
       : time(entry.checkIn.nextRunAt);
 
-/** Where a task stands on this page. One whose Bot has replied is done, as its card says. */
-function taskGroup({ status }: ListedTask): ActivityGroupId {
+/**
+ * Where a task stands on this page. One whose Bot has replied is done, as its card says. One the
+ * person stopped reads Stopped, as its card and row say, so it is not listed under Failed. Read off
+ * the live status, so a stopped task whose conversation is running a turn again is Working.
+ */
+function taskGroup({ task, status }: ListedTask): ActivityGroupId {
   if (status === "needs_input") return "needs_you";
   if (status === "working") return "working";
-  if (status === "failed") return "failed";
+  if (status === "failed") return stoppedByYou(task) ? "stopped" : "failed";
   return "done";
 }
 
@@ -111,6 +121,7 @@ export function groupActivity({
     working: [],
     scheduled: [],
     done: [],
+    stopped: [],
     failed: [],
     recurring: [],
   };
@@ -158,7 +169,13 @@ export function groupActivity({
   for (const item of activity.completed)
     groups[item.status === "failed" ? "failed" : "done"].push(entry(item));
 
-  for (const id of ["needs_you", "working", "done", "failed"] as const)
+  for (const id of [
+    "needs_you",
+    "working",
+    "done",
+    "stopped",
+    "failed",
+  ] as const)
     groups[id].sort((a, b) => at(b) - at(a));
   groups.scheduled.sort((a, b) => at(a) - at(b));
 

@@ -2,7 +2,7 @@ import {
   checkReviewerGuidance as checkReviewerGuidanceRequest,
   replayReviewerGuidance,
 } from "@/lib/api/generated/reviewer-guidance/reviewer-guidance";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { GuidanceBacktest } from "./queries";
 
 /**
@@ -26,7 +26,7 @@ export async function checkReviewerGuidance(
   text: string,
 ): Promise<GuidanceReading> {
   const reading = await checkReviewerGuidanceRequest(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't check the guidance. Try again." },
@@ -43,7 +43,7 @@ export function backtestReviewerGuidance(
   text: string,
 ): Promise<GuidanceBacktest> {
   return replayReviewerGuidance(
-    ORGANIZATION_ID,
+    organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't test the guidance on recent requests." },

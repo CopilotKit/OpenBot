@@ -1,7 +1,7 @@
 import { knowShortenedToolNames } from "@openbot/shared/tool-name";
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import { getShortenedToolNames } from "@/lib/api/generated/apps/apps";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * What shortened tool names stand for, so a step is drawn by the action's own name.
@@ -21,7 +21,7 @@ export const shortenedToolNamesQueryOptions = () =>
     staleTime: 60_000,
     queryFn: async ({ signal }): Promise<Record<string, string>> => {
       try {
-        const body = await getShortenedToolNames(ORGANIZATION_ID, { signal });
+        const body = await getShortenedToolNames(organizationId(), { signal });
         const names =
           body.names && typeof body.names === "object" ? body.names : {};
         knowShortenedToolNames(names);

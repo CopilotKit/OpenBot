@@ -29,7 +29,6 @@ import type {
   BrowserNotAnsweringResponse,
   BrowserRecordingRequest,
   BrowserRequestNotJsonResponse,
-  BrowserRequestTooLargeResponse,
   BrowserTabsRequest,
   BrowserTooManyConnectionsResponse,
   BrowserUnavailableResponse,
@@ -45,6 +44,7 @@ import type {
   NavigatePersonBrowserHeaders,
   OpenPersonBrowserHeaders,
   OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   PersonBrowser,
   PersonBrowserOpened,
   RecordInBotBrowserHeaders,
@@ -354,7 +354,7 @@ export const getChangeBotBrowserTabsMutationOptions = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -413,7 +413,7 @@ export type ChangeBotBrowserTabsMutationError =
   | BrowserForbiddenResponse
   | BotNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -437,7 +437,7 @@ export const useChangeBotBrowserTabs = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -531,7 +531,7 @@ export const getNavigateBotBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -590,7 +590,7 @@ export type NavigateBotBrowserMutationError =
   | BrowserForbiddenResponse
   | BotNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -614,7 +614,7 @@ export const useNavigateBotBrowser = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -708,7 +708,7 @@ export const getRecordInBotBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserTooManyConnectionsResponse
     | BrowserUnfinishedResponse
@@ -768,7 +768,7 @@ export type RecordInBotBrowserMutationError =
   | BrowserForbiddenResponse
   | BotNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserTooManyConnectionsResponse
   | BrowserUnfinishedResponse
@@ -793,7 +793,7 @@ export const useRecordInBotBrowser = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserTooManyConnectionsResponse
     | BrowserUnfinishedResponse
@@ -888,7 +888,7 @@ export const getNarrateInBotBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -947,7 +947,7 @@ export type NarrateInBotBrowserMutationError =
   | BrowserForbiddenResponse
   | BotNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -971,7 +971,7 @@ export const useNarrateInBotBrowser = <
     | BrowserForbiddenResponse
     | BotNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -1607,7 +1607,7 @@ export const getChangePersonBrowserTabsMutationOptions = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -1666,7 +1666,7 @@ export type ChangePersonBrowserTabsMutationError =
   | BrowserForbiddenResponse
   | OrganizationNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -1690,7 +1690,7 @@ export const useChangePersonBrowserTabs = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -1784,7 +1784,7 @@ export const getNavigatePersonBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -1843,7 +1843,7 @@ export type NavigatePersonBrowserMutationError =
   | BrowserForbiddenResponse
   | OrganizationNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -1867,7 +1867,7 @@ export const useNavigatePersonBrowser = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -1961,7 +1961,7 @@ export const getRecordInPersonBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserTooManyConnectionsResponse
     | BrowserUnfinishedResponse
@@ -2021,7 +2021,7 @@ export type RecordInPersonBrowserMutationError =
   | BrowserForbiddenResponse
   | OrganizationNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserTooManyConnectionsResponse
   | BrowserUnfinishedResponse
@@ -2046,7 +2046,7 @@ export const useRecordInPersonBrowser = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserTooManyConnectionsResponse
     | BrowserUnfinishedResponse
@@ -2141,7 +2141,7 @@ export const getNarrateInPersonBrowserMutationOptions = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse
@@ -2200,7 +2200,7 @@ export type NarrateInPersonBrowserMutationError =
   | BrowserForbiddenResponse
   | OrganizationNotFoundResponse
   | BrowserConflictResponse
-  | BrowserRequestTooLargeResponse
+  | PayloadTooLargeResponse
   | BrowserRequestNotJsonResponse
   | BrowserUnfinishedResponse
   | BrowserUnreachableResponse
@@ -2224,7 +2224,7 @@ export const useNarrateInPersonBrowser = <
     | BrowserForbiddenResponse
     | OrganizationNotFoundResponse
     | BrowserConflictResponse
-    | BrowserRequestTooLargeResponse
+    | PayloadTooLargeResponse
     | BrowserRequestNotJsonResponse
     | BrowserUnfinishedResponse
     | BrowserUnreachableResponse

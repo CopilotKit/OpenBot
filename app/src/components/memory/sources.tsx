@@ -95,7 +95,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
   const add = useMutation(addMemorySourceMutationOptions(queryClient));
   const action = useMutation(memorySourceActionMutationOptions(queryClient));
   const shown = (sources.data ?? []).filter(
-    (source) => fixedBot === undefined || source.agentId === fixedBot,
+    (source) => fixedBot === undefined || source.botId === fixedBot,
   );
   return (
     <PageSection
@@ -262,7 +262,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   setError("");
                   add.mutate(
                     {
-                      agentId,
+                      botId: agentId,
                       toolRef,
                       title,
                       args: values,

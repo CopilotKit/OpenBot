@@ -1,5 +1,5 @@
 import { startVoiceCall } from "@/lib/api/generated/voice/voice";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { decodePcm, encodePcm } from "./pcm";
 import type { ConnectVoice, VoiceEvent } from "./types";
 
@@ -120,7 +120,7 @@ export const connectWebSocket: ConnectVoice = async ({
     onOutput(output.stream);
 
     const body: unknown = await startVoiceCall(
-      ORGANIZATION_ID,
+      organizationId(),
       channelId,
       {},
       { "Idempotency-Key": idempotencyKey() },

@@ -6,7 +6,7 @@ import {
   stopComputer,
   updateComputer,
 } from "@/lib/api/generated/computers/computers";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
@@ -89,7 +89,7 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
         update: updateComputer,
       }[variables.action];
       await act(
-        ORGANIZATION_ID,
+        organizationId(),
         {
           computer: variables.computer,
           ...(variables.botId ? { botId: variables.botId } : {}),
@@ -127,7 +127,7 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
       next: ActionPolicy & { authoring?: PolicyAuthoring },
     ): Promise<ActionPolicy> =>
       replaceBoundaries(
-        ORGANIZATION_ID,
+        organizationId(),
         next,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "The boundary could not be saved." },

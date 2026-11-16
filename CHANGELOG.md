@@ -34,6 +34,16 @@ every deployment:
 
 ### OpenBot Desktop
 
+- **OpenBot Desktop can connect to an OpenBot that runs somewhere else.** At set-up, and later in
+  Settings, Computer, choose between OpenBot on this computer, as before, and an OpenBot at an
+  address you type, such as your company's. Connected, nothing is installed or started on this
+  computer and no CopilotKit account is asked for: you sign in to that OpenBot in your browser, and
+  the app keeps the sign-in in Keychain or Windows Credential Manager, never in a file. Settings
+  shows where the app is connected, with Sign out and a way back to OpenBot on this computer,
+  which loses nothing. Starting, stopping and updating OpenBot's services, model keys and local
+  folders for Bots belong to OpenBot on this computer and are not shown while connected. It needs
+  an OpenBot whose server honours an app's sign-in for its screens; an earlier one is refused with
+  a sentence saying so.
 - **A file change or command too long to approve says how long it is.** A Bot saving a file to
   your computer, or running a command there, was refused with "This operation is too large for
   native approval. Ask the Bot for a smaller edit or command." and guessed at a size, retrying for
@@ -357,6 +367,11 @@ earlier release's is one top-level line in it, `x-openbot-scheduled-work: server
   person, is sent as `Authorization: Bearer` or `x-api-key`, and works on `/api/v2` only. The
   server also issues access tokens through OAuth 2.1 with PKCE, which work on `/api/v2` only too.
   Both end when the person is removed.
+- **Settings has an API keys page.** Under You, a signed-in person lists their keys, creates one
+  by name and revokes one. A new key is shown once, with Copy. OpenBot on one computer for one
+  person has no sign-in and says it has no keys, and OpenBot Desktop connected to an OpenBot
+  elsewhere opens the page in your browser. The spec now lists what an app needs for OAuth: the
+  client ids, redirect addresses, endpoints and how long tokens last.
 - **The web app calls the new addresses**, through a client generated from the spec, for Bots,
   the audit trail, accounts, admin settings, model connections, notifications, routines,
   conversations and approvals, and opens its sockets there. Apps, connections, a Bot's grants,

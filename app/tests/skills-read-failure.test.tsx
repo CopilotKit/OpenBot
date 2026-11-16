@@ -129,7 +129,7 @@ test("a person's skills page says the skills failed to load, not that they have 
 
   expect(
     await view.findByText(
-      "Couldn't load the skills you wrote. Reload the page.",
+      "Couldn't load the skills you wrote. Try again in a moment.",
     ),
   ).toBeTruthy();
   expect(
@@ -150,7 +150,9 @@ test("a person with genuinely no skills is still told so", async () => {
     ),
   ).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load the skills you wrote. Reload the page."),
+    view.queryByText(
+      "Couldn't load the skills you wrote. Try again in a moment.",
+    ),
   ).toBeNull();
 });
 
@@ -163,7 +165,7 @@ test("the admin skills page says the skills failed to load, not that there are n
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load skills. Reload the page."),
+    await view.findByText("Couldn't load skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText("No skills yet")).toBeNull();
 });
@@ -177,7 +179,9 @@ test("a deployment with genuinely no skills still says so on the admin page", as
   await waitForFailedRead(client);
 
   expect(await view.findByText("No skills yet")).toBeTruthy();
-  expect(view.queryByText("Couldn't load skills. Reload the page.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load skills. Try again in a moment."),
+  ).toBeNull();
 });
 
 test("opening a skill to edit says it failed to load, not that it no longer exists", async () => {
@@ -186,7 +190,7 @@ test("opening a skill to edit says it failed to load, not that it no longer exis
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load this skill. Reload the page."),
+    await view.findByText("Couldn't load this skill. Try again in a moment."),
   ).toBeTruthy();
   expect(
     view.queryByText("This skill was deleted, or it isn't yours to edit."),

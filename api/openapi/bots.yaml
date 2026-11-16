@@ -14,9 +14,15 @@ paths:
         Return one page of the Bots the caller can see: theirs, the ones shared
         with them, the ones assigned to them and the ones that come with
         OpenBot, oldest first, and by id among Bots made at the same moment.
-        hidden=true lists only the Bots the caller hid from their own list
-        instead. A missing cursor starts at the first page and nextCursor null
-        ends the list.
+        Somebody else's private Bot is never among them, an admin's list
+        included. hidden=true lists only the Bots the caller hid from their own
+        list instead. scope=organization lists every Bot in the organization,
+        people's private Bots included, for an admin's screens that decide what
+        Bots may hold; it is refused to anybody who is not an admin of the
+        organization. Somebody else's private Bot comes withheld there: its
+        name and avatar, and nothing from inside it (see the Bot's withheld).
+        A missing cursor starts at the first page and nextCursor null ends the
+        list.
       security:
         - webSession: []
         - appOAuth: [bots:read]
@@ -28,6 +34,15 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: scope
+          in: query
+          description: >-
+            Whose Bots: caller, the Bots the caller can see; organization, every
+            Bot in the organization, for an admin of it only.
+          schema:
+            type: string
+            enum: [caller, organization]
+            default: caller
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -1081,7 +1096,8 @@ paths:
       description: >-
         Return one page of the published Bots the caller may use or manages:
         their own publications, the ones published to them by name, to a
-        group they are in or to the whole team, and the ones an administrator
+        group or team they are in or to everyone in the organization, and the
+        ones an administrator
         assigned them. An administrator sees every one. Who a Team Bot reaches
         (people, groups and assignments) is shown only to its owner and
         administrators. Ordered by name, then the Bot's id. A missing cursor
@@ -1161,13 +1177,14 @@ paths:
     put:
       tags: [Team Bots]
       operationId: publishTeamBot
-      summary: Publish a Bot to the team
+      summary: Publish a Bot to everyone in the organization, or to some of them
       description: >-
-        Publish one of the caller's own Bots to the whole team, or to named
-        people and directory groups, or change who it is published to. Each
-        person's conversations with it are private to them; its owner can't
-        read them. Needs the caller's Team Bots switch, and a Bot with a real
-        name and a description, which is how teammates tell it apart. Every
+        Publish one of the caller's own Bots to everyone in the organization,
+        or to named people, teams and directory groups, or change who it is
+        published to. Each person's conversations with it are private to them;
+        its owner can't read them. Needs the caller's Team Bots switch, and a
+        Bot with a real name and a description, which is how the people it is
+        published to tell it apart. Every
         person named must have signed in here. Publishing can widen who
         reaches the shared app accounts the Bot uses, and the answer says
         which an administrator still has to approve.
@@ -1185,7 +1202,7 @@ paths:
               $ref: '#/components/schemas/TeamBotPublication'
             examples:
               team:
-                summary: To the whole team.
+                summary: To everyone in the organization.
                 value:
                   audience: team
               people:
@@ -1226,8 +1243,8 @@ paths:
       operationId: unpublishTeamBot
       summary: Unpublish a Team Bot
       description: >-
-        Stop publishing a Bot: teammates can't use it until it is published
-        again, and its assignments wait, doing nothing. Its owner or an
+        Stop publishing a Bot: the people it was published to can't use it
+        until it is published again, and its assignments wait, doing nothing. Its owner or an
         administrator may unpublish it. Unpublishing a Bot that is not
         published changes nothing.
       security:
@@ -1434,7 +1451,8 @@ components:
       required: true
       description: >-
         A directory group, by the name the identity provider gives it, or *
-        for everybody.
+        for everybody. A team is written team: followed by the team's id, as
+        in team:Tm4Qx8LpV2nWc7RbY1sKd0Ze.
       schema:
         type: string
         minLength: 1
@@ -1502,6 +1520,16 @@ components:
         systemOwned:
           type: boolean
           description: Whether it comes with OpenBot rather than belonging to a person.
+        packageBotId:
+          type: [string, 'null']
+          readOnly: true
+          description: >-
+            Which of the Bots an OpenBot starts with this one is, so a client
+            recognises it in whichever organization it is in. It is the id
+            that Bot has in the install package: the same as id in the
+            organization `default`, and the package's id on another
+            organization's copy, whose own id is generated. Null for a Bot
+            somebody made. Never accepted when a Bot is created or changed.
         endpoint:
           type: [string, 'null']
           description: >-
@@ -1541,6 +1569,16 @@ components:
           description: >-
             Whether the caller created it. Separate from canManage, which is
             also true for an administrator on everybody's Bots.
+        withheld:
+          type: boolean
+          description: >-
+            Whether it is somebody else's private Bot, listed for an admin's
+            screens (listBots with scope=organization) and nothing more. Such
+            a Bot carries its id, name, avatar and the caller's own state with
+            it only: title and roleDescription are empty, endpoint is null,
+            instructions and framework are absent, hasAuth, hasCallbackToken,
+            isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage
+            are false. Absent or false on every other Bot.
         assignedToMe:
           type: boolean
           description: Whether an administrator assigned this Bot to the caller.
@@ -1629,6 +1667,7 @@ components:
       description: >-
         A key the Bot's address sits behind. Write-only: stored encrypted and
         never returned. A blank value sets no key.
+      additionalProperties: false
       required: [value]
       properties:
         header:
@@ -1639,88 +1678,118 @@ components:
           type: string
           writeOnly: true
           description: The header's value.
+    BotName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: What the Bot is called, 1 to 80 characters once trimmed.
+    BotTitle:
+      type: string
+      maxLength: 120
+      description: The subtitle under its name, up to 120 characters. May be empty.
+    BotRoleDescription:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint
+        runs on these words.
+    BotEndpoint:
+      type: string
+      description: >-
+        The AG-UI address it runs at: empty, or an absolute http or https
+        address, the only kinds the server has ever taken. Empty or absent on
+        create means it runs inside OpenBot; empty or absent on a change leaves
+        it as it is. An address that fits can still be refused: the server
+        refuses one this deployment may not reach, such as a private network
+        address on a deployment that keeps Bots off it.
+      anyOf:
+        - type: string
+          maxLength: 0
+        - type: string
+          format: uri
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+    BotIsolated:
+      type: boolean
+      description: >-
+        Whether it gets a computer of its own. Absent leaves it as it is. True
+        needs the owner's Isolated Bots switch.
+    BotInstructions:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        New instructions for the starter Bot, 1 to 1000 characters once
+        trimmed. Absent leaves them as they are; every other Bot ignores them.
     BotFields:
       type: object
+      additionalProperties: false
       required: [name, title, roleDescription, visibility]
       properties:
         name:
-          type: string
-          minLength: 1
-          maxLength: 80
-          description: What the Bot is called, 1 to 80 characters once trimmed.
+          $ref: '#/components/schemas/BotName'
         title:
-          type: string
-          maxLength: 120
-          description: The subtitle under its name, up to 120 characters. May be empty.
+          $ref: '#/components/schemas/BotTitle'
         roleDescription:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: >-
-            What it does, 1 to 1000 characters once trimmed. A Bot with no
-            endpoint runs on these words.
+          $ref: '#/components/schemas/BotRoleDescription'
         visibility:
           $ref: '#/components/schemas/BotVisibility'
         endpoint:
-          type: string
-          description: >-
-            The AG-UI address it runs at: empty, or an absolute http or https
-            address, the only kinds the server has ever taken. Empty or absent
-            on create means it runs inside OpenBot; empty or absent on a
-            change leaves it as it is. An address that fits can still be
-            refused: the server refuses one this deployment may not reach,
-            such as a private network address on a deployment that keeps Bots
-            off it.
-          anyOf:
-            - type: string
-              maxLength: 0
-            - type: string
-              format: uri
-              pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+          $ref: '#/components/schemas/BotEndpoint'
         auth:
           $ref: '#/components/schemas/BotKey'
         isolated:
-          type: boolean
-          description: >-
-            Whether it gets a computer of its own. Absent leaves it as it is.
-            True needs the owner's Isolated Bots switch.
+          $ref: '#/components/schemas/BotIsolated'
         instructions:
-          type: string
-          minLength: 1
-          maxLength: 1000
-          description: >-
-            New instructions for the starter Bot, 1 to 1000 characters once
-            trimmed. Absent leaves them as they are; every other Bot ignores
-            them.
+          $ref: '#/components/schemas/BotInstructions'
     CreateBotRequest:
-      description: A new Bot.
-      allOf:
-        - $ref: '#/components/schemas/BotFields'
-        - type: object
-          properties:
-            harness:
-              type: string
-              description: >-
-                The framework an agent somebody runs themselves is built on,
-                by its id in OpenBot's harness list (shared/harnesses.json),
-                which the server checks every create against. Empty means none
-                was named, as for an agent somebody already runs. "byo-url" is
-                not one: it names no framework. Kept only with an endpoint.
-              enum:
-                - ''
-                - crewai
-                - llamaindex
-                - agno
-                - langgraph
-                - google-adk
-                - antigravity
-                - pydantic-ai
-                - microsoft-agent-framework
-                - claude-agent-sdk
-                - strands
-                - ag2
-                - langroid
-                - mastra
+      description: >-
+        A new Bot: a Bot's fields, and the framework it is built on. One closed
+        object, not BotFields with harness added in an allOf, because each
+        closed part of an allOf would refuse the other's fields.
+      type: object
+      additionalProperties: false
+      required: [name, title, roleDescription, visibility]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotName'
+        title:
+          $ref: '#/components/schemas/BotTitle'
+        roleDescription:
+          $ref: '#/components/schemas/BotRoleDescription'
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          $ref: '#/components/schemas/BotIsolated'
+        instructions:
+          $ref: '#/components/schemas/BotInstructions'
+        harness:
+          type: string
+          description: >-
+            The framework an agent somebody runs themselves is built on, by
+            its id in OpenBot's harness list (shared/harnesses.json), which
+            the server checks every create against. Empty means none was
+            named, as for an agent somebody already runs. "byo-url" is not
+            one: it names no framework. Kept only with an endpoint.
+          enum:
+            - ''
+            - crewai
+            - llamaindex
+            - agno
+            - langgraph
+            - google-adk
+            - antigravity
+            - pydantic-ai
+            - microsoft-agent-framework
+            - claude-agent-sdk
+            - strands
+            - ag2
+            - langroid
+            - mastra
     UpdateBotRequest:
       description: A Bot's fields after the change.
       allOf:
@@ -2090,12 +2159,14 @@ components:
     TeamBotAudience:
       type: string
       enum: [team, people]
-      description: team is everybody in the organization; people is the people and groups named.
+      description: >-
+        team is everyone in the organization; people is the people, teams and
+        groups named.
     TeamBot:
       type: object
       description: >-
-        A Bot published to the team, as the caller sees it. Who it reaches
-        (people, groups and assignedGroups) is present only for its owner and
+        A published Bot, as the caller sees it. Who it reaches (people, teams,
+        groups and assignedGroups) is present only for its owner and
         administrators.
       required:
         - botId
@@ -2130,8 +2201,8 @@ components:
         visibleToTeam:
           type: boolean
           description: >-
-            False while its name or description would leave teammates unable
-            to tell it apart, so they can't see it.
+            False while its name or description would leave the people it is
+            published to unable to tell it apart, so they can't see it.
         people:
           type: array
           description: The people it is published to, by email.
@@ -2140,6 +2211,11 @@ components:
         groups:
           type: array
           description: The directory groups it is published to.
+          items:
+            type: string
+        teams:
+          type: array
+          description: The teams it is published to, by each team's id.
           items:
             type: string
         assignedGroups:
@@ -2189,6 +2265,19 @@ components:
           items:
             type: string
             maxLength: 200
+        teams:
+          type: array
+          maxItems: 100
+          description: >-
+            With people, the teams to publish to, by each team's id. Every
+            one must be a team of this organization. The people in a team,
+            and in the teams under it, can use the Bot, and nobody else in
+            the organization can.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
     PublishedTeamBot:
       type: object
       required: [teamBot, sharedApps]
@@ -2640,7 +2729,7 @@ components:
             assignedGroups: []
         nextCursor: null
     TeamBotExample:
-      summary: Published to the whole team, seen by a teammate.
+      summary: Published to everyone in the organization, seen by one of them.
       value:
         teamBot:
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21

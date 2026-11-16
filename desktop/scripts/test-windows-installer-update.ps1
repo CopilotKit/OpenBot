@@ -6,9 +6,16 @@
 # "Delete the application data" box in the middle of an update, and the data kept. And the
 # installer's own window must stay on screen while it runs: hidden, a person saw nothing at all for
 # minutes and took it for a crash. A passive install of the same version over itself takes that
-# path with nothing to click: "Already Installed", then the old version uninstalled first. While
-# the old uninstaller runs, the installer's window is checked every few milliseconds. Two things
-# tell how the old uninstaller ran:
+# path with nothing to click: "Already Installed", then the old version uninstalled first.
+#
+# The old uninstaller is done in well under a tenth of a second, so looking for its process every few
+# milliseconds saw it once on most runs and not at all on some, and the test then failed having
+# checked nothing. So the installer is held where it runs the old uninstaller instead. The command
+# it runs is the UninstallString in OpenBot's uninstall registry key, and for this one install that
+# is a script of this test's ($holdScript): it says the installer has asked for the old uninstaller,
+# waits while the installer's window is checked, then runs the old uninstaller with exactly what the
+# installer gave it and exits as it did. Three things tell how the old uninstaller ran:
+#   - what the installer gave it: /UPDATE /S and the folder, as written down by the script;
 #   - a value added to OpenBot's uninstall registry key is gone afterwards, since any uninstall
 #     removes the key and the install writes it again without the value: the old uninstaller ran;
 #   - OpenBot's start-at-sign-in value (HKCU Run) is still there, since only an uninstall that is
@@ -53,31 +60,67 @@ function Invoke-Waited([string]$File, [string]$Arguments, [int]$Seconds, [string
     $process.ExitCode
 }
 
-# Run an installer and watch it. Whenever the old uninstaller (uninstall.exe in $Folder) is running,
-# note whether the installer has a window on screen. Answers its exit code and the notes.
-function Invoke-Watched([string]$File, [string]$Arguments, [string]$Folder, [int]$Seconds) {
+# What the installer runs as the old uninstaller while it is watched, with what the installer gave
+# it as its arguments. It writes those down, says it was asked for ({NAME}-asked), waits to be let
+# go ({NAME}-go), then runs the old uninstaller in the folder it was given (`_?=`, last) with the
+# same arguments, and exits as it did.
+$holdScript = @'
+$ErrorActionPreference = 'Stop'
+$given = $args -join ' '
+Set-Content -LiteralPath "$PSCommandPath.given" -Value $given
+$asked = [System.Threading.EventWaitHandle]::OpenExisting('{NAME}-asked')
+$go = [System.Threading.EventWaitHandle]::OpenExisting('{NAME}-go')
+$null = $asked.Set()
+if (-not $go.WaitOne(900000)) { exit 98 }
+$at = $given.IndexOf('_?=')
+if ($at -lt 0) { exit 97 }
+$old = Start-Process -FilePath (Join-Path $given.Substring($at + 3) 'uninstall.exe') -ArgumentList $given -PassThru
+$null = $old.Handle
+$old.WaitForExit()
+Set-Content -LiteralPath "$PSCommandPath.exit" -Value $old.ExitCode
+exit $old.ExitCode
+'@
+
+# Run an installer and watch it. Once it has asked for the old uninstaller ($Asked), which waits
+# until it is let go ($Go), note several times whether the installer has a window on screen.
+# Answers its exit code and the notes: none when it never asked for the old uninstaller.
+function Invoke-Watched(
+    [string]$File,
+    [string]$Arguments,
+    [System.Threading.EventWaitHandle]$Asked,
+    [System.Threading.EventWaitHandle]$Go,
+    [int]$Seconds
+) {
     $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru
     $null = $process.Handle
-    $uninstaller = Join-Path $Folder 'uninstall.exe'
     $shown = [System.Collections.Generic.List[bool]]::new()
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
-    while (-not $process.HasExited) {
+    try {
+        while (-not $Asked.WaitOne(50) -and -not $process.HasExited) {
+            if ([DateTime]::UtcNow -gt $deadline) {
+                $process.Kill($true)
+                throw "$File $Arguments did not finish in $Seconds seconds."
+            }
+        }
+        if ($Asked.WaitOne(0)) {
+            # The installer is waiting for the old uninstaller, for as long as this takes.
+            foreach ($check in 1..10) {
+                # A process's main window is its first top-level window that is shown.
+                $process.Refresh()
+                $shown.Add($process.MainWindowHandle -ne [IntPtr]::Zero)
+                Start-Sleep -Milliseconds 20
+            }
+        }
+    }
+    finally {
+        $null = $Go.Set()
+    }
+    while (-not $process.WaitForExit(1000)) {
         if ([DateTime]::UtcNow -gt $deadline) {
             $process.Kill($true)
             throw "$File $Arguments did not finish in $Seconds seconds."
         }
-        $running = $false
-        foreach ($candidate in [System.Diagnostics.Process]::GetProcessesByName('uninstall')) {
-            try { if ($candidate.Path -ieq $uninstaller) { $running = $true } } catch { }
-        }
-        if ($running) {
-            # A process's main window is its first top-level window that is shown.
-            $process.Refresh()
-            $shown.Add($process.MainWindowHandle -ne [IntPtr]::Zero)
-        }
-        Start-Sleep -Milliseconds 20
     }
-    $process.WaitForExit()
     [pscustomobject]@{ ExitCode = $process.ExitCode; Shown = $shown }
 }
 
@@ -98,6 +141,10 @@ if ($runKeyMade) { New-Item -Path $runKey -Force | Out-Null }
 $dataFolders = @((Join-Path $env:APPDATA $bundleId), (Join-Path $env:LOCALAPPDATA $bundleId))
 $dataBefore = @($dataFolders | Where-Object { Test-Path -LiteralPath $_ })
 $installDir = $null
+$hold = Join-Path $scratch "openbot-old-uninstaller-$PID.ps1"
+$holdName = "OpenBotUpdateCheck-$PID"
+$asked = [System.Threading.EventWaitHandle]::new($false, [System.Threading.EventResetMode]::ManualReset, "$holdName-asked")
+$go = [System.Threading.EventWaitHandle]::new($false, [System.Threading.EventResetMode]::ManualReset, "$holdName-go")
 
 try {
     # 1. Install.
@@ -117,13 +164,21 @@ try {
         Set-Content -LiteralPath (Join-Path $folder 'update-check.txt') -Value 'kept'
     }
 
-    # 3. The same installer again, over itself, passively, watched.
-    $watched = Invoke-Watched $installer '/P' $installDir 900
+    # 3. The same installer again, over itself, passively, held where it runs the old uninstaller
+    # and watched there. The install writes OpenBot's own UninstallString again.
+    Set-Content -LiteralPath $hold -Value $holdScript.Replace('{NAME}', $holdName)
+    $shell = (Get-Process -Id $PID).Path
+    Set-ItemProperty -LiteralPath $uninstallKey -Name 'UninstallString' -Value "`"$shell`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$hold`""
+    $watched = Invoke-Watched $installer '/P' $asked $go 900
     Assert-True ($watched.ExitCode -eq 0) "Installing over OpenBot exited with $($watched.ExitCode)."
     $hidden = @($watched.Shown | Where-Object { -not $_ }).Count
-    Write-Host "While the old uninstaller ran, the installer's window was checked $($watched.Shown.Count) times and was hidden $hidden of them."
-    Assert-True ($watched.Shown.Count -gt 0) 'The old uninstaller was never seen running, so this test checked nothing.'
+    Write-Host "While the installer waited for the old uninstaller, its window was checked $($watched.Shown.Count) times and was hidden $hidden of them."
+    Assert-True ($watched.Shown.Count -gt 0) 'The installer never asked for the old uninstaller, so this test checked nothing.'
     Assert-True ($hidden -eq 0) 'The installer hid its window while the old uninstaller ran: a person sees nothing on screen and takes it for a crash.'
+    $given = (Get-Content -Raw -LiteralPath "$hold.given").Trim()
+    Assert-True ($given -eq "/UPDATE /S _?=$installDir") "The installer ran the old uninstaller with '$given': not silently, as an update, in $installDir."
+    $ended = if (Test-Path -LiteralPath "$hold.exit") { (Get-Content -Raw -LiteralPath "$hold.exit").Trim() } else { 'no exit code' }
+    Assert-True ($ended -eq '0') "The old uninstaller ended with $ended."
     Assert-True (Test-Path -LiteralPath $uninstallKey) 'Installing over OpenBot left it uninstalled.'
     Assert-True (Test-Path -LiteralPath $app) "Installing over OpenBot left no $app."
     Assert-True ($null -eq (Get-Value $uninstallKey $marker)) 'Installing over OpenBot did not run the old uninstaller first, so this test checked nothing.'
@@ -149,6 +204,11 @@ try {
     Write-Host 'Uninstalled, with the stop run first.'
 }
 finally {
+    # Nothing this test started is left waiting on it.
+    $null = $go.Set()
+    foreach ($file in $hold, "$hold.given", "$hold.exit") {
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    }
     if ($installDir -and (Test-Path -LiteralPath $uninstallKey)) {
         try { $null = Invoke-Waited (Join-Path $installDir 'uninstall.exe') "/S _?=$installDir" 900 } catch { Write-Warning $_ }
     }

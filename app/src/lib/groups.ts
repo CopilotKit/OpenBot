@@ -15,7 +15,7 @@ import type {
   ConversationMember,
   ConversationMessage,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   type AgentChannel,
   channelKeys,
@@ -34,7 +34,7 @@ async function everyMember(channelId: string): Promise<ConversationMember[]> {
   let cursor: string | undefined;
   do {
     const page = await listConversationMembers(
-      ORGANIZATION_ID,
+      organizationId(),
       channelId,
       { limit: 100, ...(cursor ? { cursor } : {}) },
       { fallback: "This group conversation could not be loaded." },
@@ -112,7 +112,7 @@ export function groupQueryOptions(channelId: string) {
       const [members, newestFirst] = await Promise.all([
         everyMember(channelId),
         listConversationMessages(
-          ORGANIZATION_ID,
+          organizationId(),
           channelId,
           { limit: TRANSCRIPT_LINES },
           { fallback: "This group conversation could not be loaded." },
@@ -170,7 +170,7 @@ export function sendGroupMessageMutationOptions(
       agentId: string | null;
     }) => {
       await sendConversationMessage(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         { id: input.id, text: input.text, botId: input.agentId },
         once(),
@@ -187,7 +187,7 @@ export function createGroupMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentIds: string[]): Promise<AgentChannel> => {
       const made = await createConversation(
-        ORGANIZATION_ID,
+        organizationId(),
         { botIds: agentIds, group: true },
         once(),
         { fallback: "The group could not be started." },
@@ -207,7 +207,7 @@ export function addGroupMemberMutationOptions(
   return mutationOptions({
     mutationFn: async (email: string) => {
       await addConversationMember(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         { email },
         once(),
@@ -228,7 +228,7 @@ export function removeGroupMemberMutationOptions(
   return mutationOptions({
     mutationFn: async (userId: string) => {
       await removeConversationMember(
-        ORGANIZATION_ID,
+        organizationId(),
         channelId,
         userId,
         once(),

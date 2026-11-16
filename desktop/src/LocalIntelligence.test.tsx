@@ -390,7 +390,7 @@ test("a backend an older app installed is updated to this app's release before O
     )?.args,
   ).toMatchObject({ stack: "local-abc123" });
   expect(
-    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+    screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
   ).toBeNull();
 });
 
@@ -489,13 +489,67 @@ test("an update that fails says so and starts OpenBot on the release the backend
       "run_local_eval:update",
       "run_local_eval:status",
     ]);
-    expect(row(screen, "Updating OpenBot").textContent).toContain(
-      "OpenBot couldn't finish updating, so it runs the version it had. Your data is kept, and OpenBot tries again the next time it starts.",
+    expect(row(screen, "Updating OpenBot's services").textContent).toContain(
+      "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.",
     );
     expect(calls).toBe(2);
     cleanup();
     invokeCalls = [];
   }
+});
+
+/**
+ * Found on Windows K, updating Desktop over a local install: the CLI refused the services' update
+ * (`release_unavailable`: it could not get the release this app installs) and a red "Updating
+ * OpenBot · Failed" row came up while OpenBot's own update was still running at step 4. The services
+ * kept the version they had and OpenBot started on it. The row names the part, and says it as a
+ * note while the Start runs and after it: nothing failed that stops OpenBot.
+ */
+test("a services update the CLI refuses is a note on their own row while the Start runs, never Failed", async () => {
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update")
+      return report({
+        outcome: "blocked",
+        stack: null,
+        reason: "release-unavailable",
+      });
+    return onRelease("0.16.0-rc.11", "0.16.0-rc.13");
+  };
+  const opening = deferred<StartOutcome>();
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: () => opening.promise,
+  });
+  const services = await screen.findByRole("listitem", {
+    name: "Updating OpenBot's services",
+  });
+  // OpenBot's own start, its update included, is still running.
+  expect(row(screen, START).querySelector(".step-spinner")).not.toBeNull();
+  const said =
+    "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.";
+  const isNote = () => {
+    const now = row(screen, "Updating OpenBot's services");
+    expect(now.querySelector(".step-status")?.textContent).toBe("Not updated");
+    expect(now.querySelector(".mark.bad, .step-status.bad")).toBeNull();
+    expect(now.querySelector(".detail")?.textContent).toBe(said);
+  };
+  isNote();
+  expect(services.textContent).not.toContain("Failed");
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+  ).toBeNull();
+  expect(screen.container.textContent).not.toContain("Failed");
+  // And once OpenBot has started on the version the services had.
+  opening.resolve("started");
+  await waitFor(() =>
+    expect(row(screen, START).textContent).toContain("Complete"),
+  );
+  isNote();
+  expect(screen.container.textContent).not.toContain("Failed");
 });
 
 /**
@@ -538,8 +592,8 @@ test("an update that fails says the step it stopped at and that the data is kept
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await waitFor(() =>
-    expect(row(screen, "Updating OpenBot").textContent).toContain(
-      "OpenBot couldn't finish updating. It stopped while pausing OpenBot's services. Your data is kept. Retry to try the update again.",
+    expect(row(screen, "Updating OpenBot's services").textContent).toContain(
+      "OpenBot's services couldn't finish updating. The update stopped while pausing OpenBot's services. Your data is kept. Retry to try the update again.",
     ),
   );
 });
@@ -766,7 +820,7 @@ test("a backend an update left not working runs the update again, and opens once
     "run_local_eval:status",
   ]);
   expect(
-    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+    screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
   ).toBeNull();
 });
 
@@ -797,10 +851,10 @@ test("an update that stops again is tried once per Start, and Retry tries it onc
   });
   const retry = await screen.findByRole("button", { name: "Retry" });
   // The failed update's row, and the wait stopped at once: no second update, no start.
-  expect(row(screen, "Updating OpenBot").textContent).toContain(
-    "OpenBot couldn't finish updating. It stopped while updating where OpenBot keeps your data. Your data is kept. Retry to try the update again.",
+  expect(row(screen, "Updating OpenBot's services").textContent).toContain(
+    "OpenBot's services couldn't finish updating. The update stopped while updating where OpenBot keeps your data. Your data is kept. Retry to try the update again.",
   );
-  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+  expect(row(screen, "Updating OpenBot's services").textContent).not.toContain(
     "runs the version it had",
   );
   expect(row(screen, WAIT).textContent).toContain(
@@ -870,10 +924,10 @@ test("an update that fails again says Retry once the back end settles not workin
     "run_local_eval:status",
     "run_local_eval:status",
   ]);
-  expect(row(screen, "Updating OpenBot").textContent).toContain(
-    "OpenBot couldn't finish updating. Your data is kept. Retry to try the update again.",
+  expect(row(screen, "Updating OpenBot's services").textContent).toContain(
+    "OpenBot's services couldn't finish updating. Your data is kept. Retry to try the update again.",
   );
-  expect(row(screen, "Updating OpenBot").textContent).not.toContain(
+  expect(row(screen, "Updating OpenBot's services").textContent).not.toContain(
     "runs the version it had",
   );
   expect(row(screen, WAIT).textContent).toContain(
@@ -901,7 +955,7 @@ test("a back end that starts and then is not working, with no update on record, 
     "run_local_eval:status",
   ]);
   expect(
-    screen.queryByRole("listitem", { name: "Updating OpenBot" }),
+    screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
   ).toBeNull();
   expect(screen.queryByText(/couldn't finish updating/)).toBeNull();
 });
@@ -1100,8 +1154,8 @@ test("an update whose download stopped says so, and that the next start continue
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
-  expect(row(screen, "Updating OpenBot").textContent).toContain(
-    "The update stopped downloading, so OpenBot runs the version it had. It picks up the download the next time it starts.",
+  expect(row(screen, "Updating OpenBot's services").textContent).toContain(
+    "The update of OpenBot's services stopped downloading, so they run the version they had. OpenBot picks up the download the next time it starts.",
   );
   expect(calls).toBe(2);
 });

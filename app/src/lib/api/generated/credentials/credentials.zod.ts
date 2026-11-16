@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the credentials the vault keeps, live and revoked, oldest first. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the credentials the organization's vault keeps, live and revoked, oldest first. Each organization has its own vault, and another organization's credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the credentials in the vault
  */
 
@@ -13,7 +13,7 @@ export const ListCredentialsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -88,7 +88,7 @@ export const ListCredentialsResponse = zod.object({
             .describe("When it was revoked. Null while it is live."),
         })
         .describe(
-          "A credential in the vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
+          "A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
         ),
     )
     .describe(
@@ -105,7 +105,7 @@ export const ListCredentialsResponse = zod.object({
 });
 
 /**
- * Encrypt a secret and keep it in the vault under one key: a kind, a provider and a key id. A key holds one live credential, so adding one for a key that already has one replaces it, and the one it replaces is revoked in the same write. A model key sent without a key id is filed under the name OpenBot's own Bots read (getModelKey). The secret is write-only: no answer includes it, now or later. Recorded on the audit trail. Only an administrator may add one.
+ * Encrypt a secret and keep it in the organization's vault under one key: a kind, a provider and a key id. A key holds one live credential, so adding one for a key that already has one replaces it, and the one it replaces is revoked in the same write. A model key sent without a key id is filed under the name OpenBot's own Bots read (getModelKey). The secret is write-only: no answer includes it, now or later. Recorded on the audit trail. Only an administrator of the organization may add one.
  * @summary Add a credential to the vault
  */
 
@@ -114,7 +114,7 @@ export const CreateCredentialParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -211,11 +211,11 @@ export const CreateCredentialResponse = zod
       .describe("When it was revoked. Null while it is live."),
   })
   .describe(
-    "A credential in the vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
+    "A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
   );
 
 /**
- * Stop a live credential being used, and keep its record. Nothing reads a revoked credential again. Recorded on the audit trail. Only an administrator may revoke one. One that does not exist, or is revoked already, is not found.
+ * Stop a live credential being used, and keep its record. Nothing reads a revoked credential again. Recorded on the audit trail. Only an administrator of the organization may revoke one. One that does not exist, is in another organization's vault, or is revoked already, is not found.
  * @summary Revoke a credential
  */
 
@@ -224,7 +224,7 @@ export const RevokeCredentialParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   credentialId: zod.uuid().describe("The credential's id."),
 });
@@ -276,11 +276,11 @@ export const RevokeCredentialResponse = zod
       .describe("When it was revoked. Null while it is live."),
   })
   .describe(
-    "A credential in the vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
+    "A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
   );
 
 /**
- * Return the provider OpenBot's own Bots run on, the key id their model key is filed under in the vault, and whether a live key is kept there. Never the key. A model key added without a key id is filed here. Only an administrator may read it.
+ * Return the provider OpenBot's own Bots run on, the key id their model key is filed under in the organization's vault, and whether a live key is kept there. Never the key. A model key added without a key id is filed here. Only an administrator of the organization may read it.
  * @summary Read where the Bots find their model key
  */
 
@@ -289,7 +289,7 @@ export const GetModelKeyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

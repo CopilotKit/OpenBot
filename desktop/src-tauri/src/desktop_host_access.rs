@@ -188,9 +188,7 @@ impl<R: tauri::Runtime> NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         Ok(window)
     }
 
@@ -200,9 +198,7 @@ impl<R: tauri::Runtime> NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         let allowed = self
             .0
             .dialog()
@@ -231,9 +227,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         let picked = self
             .0
             .dialog()

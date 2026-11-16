@@ -122,7 +122,7 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load this Bot's settings. Reload the page.
+            Couldn't load this Bot's settings. Try again in a moment.
           </p>
         ) : (
           <PageRows>

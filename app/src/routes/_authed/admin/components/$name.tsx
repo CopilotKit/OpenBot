@@ -46,6 +46,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   saveComponentDraftMutationOptions,
@@ -80,7 +81,7 @@ export const Route = createFileRoute("/_authed/admin/components/$name")({
 function RouteComponent() {
   const { name } = Route.useParams();
   const components = useQuery(componentListQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const dataFunctions = useQuery(componentFunctionsQueryOptions(name));
 
   const setGrant = useMutation(setComponentGrantMutationOptions(queryClient));
@@ -108,7 +109,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Reload the page.
+          Couldn't load components. Try again in a moment.
         </p>
       </PageShell>
     );

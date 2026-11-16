@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
+  redirect,
   useNavigate,
   useRouter,
   useSearch,
@@ -41,6 +42,7 @@ import {
 import { useStartChannel } from "@/lib/channels/start";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
+import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { newId } from "@/lib/new-id";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
@@ -56,6 +58,16 @@ export const Route = createFileRoute("/_authed/_app/")({
   // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
   // composer never moves when it arrives.
   beforeLoad: async ({ context }) => {
+    /*
+     * Somebody who opened an invitation's link before signing in lands here once they have, and
+     * is handed on to the invitation they came for (lib/organizations/invitation-link.ts).
+     */
+    const invitationId = takeInvitationLink();
+    if (invitationId)
+      throw redirect({
+        to: "/invitations/$invitationId",
+        params: { invitationId },
+      });
     await editionOf(context.queryClient);
   },
   component: RouteComponent,
@@ -162,7 +174,9 @@ function RouteComponent() {
         agentId = fallback?.id;
       }
       if (!agentId)
-        throw new Error("There's no Bot to send this to. Reload the page.");
+        throw new Error(
+          "There's no Bot to send this to. Try again in a moment.",
+        );
       await start(agentId, draft.text, undefined, pendingId, draft.attachments);
     } catch (caught) {
       stashFailedStart({
@@ -208,7 +222,7 @@ function RouteComponent() {
           }}
         >
           <StarterSuggestions
-            agentId={fallback?.id}
+            bot={fallback}
             disabled={pending}
             onSelect={async (message) => {
               if (!fallback) return;
@@ -276,8 +290,8 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              Couldn't load your Bots, so there's no one to send this to. Reload
-              the page.
+              Couldn't load your Bots, so there's no one to send this to. Try
+              again in a moment.
             </p>
           ) : null}
         </div>

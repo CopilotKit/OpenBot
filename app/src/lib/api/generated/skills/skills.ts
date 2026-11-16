@@ -18,6 +18,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminOnlyResponse,
   DeleteSkillHeaders,
   ForbiddenResponse,
   IdempotencyConflictResponse,
@@ -26,12 +27,16 @@ import type {
   ListSkillsParams,
   OrganizationNotFoundResponse,
   ReplaceSkillHeaders,
+  ReplaceSkillTeamGrantsHeaders,
   ServerErrorResponse,
   Skill,
   SkillForbiddenResponse,
   SkillInput,
   SkillNotFoundResponse,
+  SkillOrTeamNotFoundResponse,
   SkillPage,
+  SkillTeamGrants,
+  SkillTeamGrantsInput,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
 } from "../model";
@@ -82,7 +87,7 @@ export const getListSkillsUrl = (
 };
 
 /**
- * Return one page of the skills the caller can see: the organization's and their own. An admin sees everybody's. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 export const listSkills = async (
@@ -284,7 +289,7 @@ export const getGetSkillUrl = (organizationId: string, skillId: string) => {
 };
 
 /**
- * Return one skill the caller can see: the organization's or their own. An admin can read anybody's. Somebody else's skill is not found.
+ * Return one skill the caller can see, as the list shows them. An admin can read any. One the caller can't see is not found.
  * @summary Read a skill
  */
 export const getSkill = async (
@@ -764,4 +769,399 @@ export const useDeleteSkill = <
   TContext
 > => {
   return useMutation(getDeleteSkillMutationOptions(options), queryClient);
+};
+export const getGetSkillTeamGrantsUrl = (
+  organizationId: string,
+  skillId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/${encodeURIComponent(String(skillId))}/team-grants`;
+};
+
+/**
+ * Return the teams the skill is granted to, by id. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. Only an admin of the organization may read them.
+ * @summary Read the teams the skill is granted to
+ */
+export const getSkillTeamGrants = async (
+  organizationId: string,
+  skillId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<SkillTeamGrants> => {
+  return apiRequest<SkillTeamGrants>(
+    getGetSkillTeamGrantsUrl(organizationId, skillId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSkillTeamGrantsQueryKey = (
+  organizationId: string,
+  skillId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/skills/${skillId}/team-grants`,
+  ] as const;
+};
+
+export const getGetSkillTeamGrantsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSkillTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  skillId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSkillTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetSkillTeamGrantsQueryKey(organizationId, skillId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSkillTeamGrants>>
+  > = ({ signal }) =>
+    getSkillTeamGrants(organizationId, skillId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      skillId !== null &&
+      skillId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSkillTeamGrants>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetSkillTeamGrantsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSkillTeamGrants>>
+>;
+export type GetSkillTeamGrantsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | SkillOrTeamNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetSkillTeamGrants<
+  TData = Awaited<ReturnType<typeof getSkillTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  skillId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSkillTeamGrants>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSkillTeamGrants>>,
+          TError,
+          Awaited<ReturnType<typeof getSkillTeamGrants>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetSkillTeamGrants<
+  TData = Awaited<ReturnType<typeof getSkillTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  skillId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSkillTeamGrants>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSkillTeamGrants>>,
+          TError,
+          Awaited<ReturnType<typeof getSkillTeamGrants>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetSkillTeamGrants<
+  TData = Awaited<ReturnType<typeof getSkillTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  skillId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSkillTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read the teams the skill is granted to
+ */
+
+export function useGetSkillTeamGrants<
+  TData = Awaited<ReturnType<typeof getSkillTeamGrants>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  skillId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSkillTeamGrants>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetSkillTeamGrantsQueryOptions(
+    organizationId,
+    skillId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getReplaceSkillTeamGrantsUrl = (
+  organizationId: string,
+  skillId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/skills/${encodeURIComponent(String(skillId))}/team-grants`;
+};
+
+/**
+ * Grant the skill to exactly these teams of the organization, taking it from any team left out. An empty list takes it from every team. A person in one of those teams, or in a team beneath one, may put the skill on a Bot they own, and the Bot is offered it only while they stay in such a team. A team of another organization is not found. Only an admin of the organization may do this. Recorded on the audit trail.
+ * @summary Grant a skill to teams
+ */
+export const replaceSkillTeamGrants = async (
+  organizationId: string,
+  skillId: string,
+  skillTeamGrantsInput: SkillTeamGrantsInput,
+  headers: ReplaceSkillTeamGrantsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<SkillTeamGrants> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<SkillTeamGrants>(
+    getReplaceSkillTeamGrantsUrl(organizationId, skillId),
+    {
+      ...options,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(skillTeamGrantsInput),
+    },
+  );
+};
+
+export const getReplaceSkillTeamGrantsMutationKey = () =>
+  ["replaceSkillTeamGrants"] as const;
+
+export const getReplaceSkillTeamGrantsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replaceSkillTeamGrants>>,
+    TError,
+    ReplaceSkillTeamGrantsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replaceSkillTeamGrants>>,
+  TError,
+  ReplaceSkillTeamGrantsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReplaceSkillTeamGrantsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replaceSkillTeamGrants>>,
+    ReplaceSkillTeamGrantsMutationVariables
+  > = (props) => {
+    const { organizationId, skillId, data, headers } = props ?? {};
+
+    return replaceSkillTeamGrants(
+      organizationId,
+      skillId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplaceSkillTeamGrantsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replaceSkillTeamGrants>>
+>;
+export type ReplaceSkillTeamGrantsMutationBody = SkillTeamGrantsInput;
+export type ReplaceSkillTeamGrantsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | SkillOrTeamNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ReplaceSkillTeamGrantsMutationVariables = {
+  organizationId: string;
+  skillId: string;
+  data: SkillTeamGrantsInput;
+  headers: ReplaceSkillTeamGrantsHeaders;
+};
+
+/**
+ * @summary Grant a skill to teams
+ */
+export const useReplaceSkillTeamGrants = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | SkillOrTeamNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof replaceSkillTeamGrants>>,
+      TError,
+      ReplaceSkillTeamGrantsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof replaceSkillTeamGrants>>,
+  TError,
+  ReplaceSkillTeamGrantsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getReplaceSkillTeamGrantsMutationOptions(options),
+    queryClient,
+  );
 };

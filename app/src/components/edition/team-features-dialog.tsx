@@ -53,15 +53,18 @@ export const TEAM_FEATURE_GROUPS: readonly {
   features: readonly { title: string; icon: Icon }[];
 }[] = [
   {
-    title: "For your whole team",
+    title: "For your whole organization",
     features: [
       {
         title: "Sign-in with Google, Microsoft or custom SSO",
         icon: IconLogin2,
       },
       { title: "People, roles and admins", icon: IconUsers },
-      { title: "Bots shared with your whole team", icon: IconUsersGroup },
-      { title: "Learning shared across the team", icon: IconSchool },
+      {
+        title: "Bots shared with your whole organization",
+        icon: IconUsersGroup,
+      },
+      { title: "Learning shared across your organization", icon: IconSchool },
     ],
   },
   {

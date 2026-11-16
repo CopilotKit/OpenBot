@@ -144,9 +144,9 @@ function draw() {
   );
 }
 
-test("an administrator sets the team-wide controls", async () => {
+test("an administrator sets the organization-wide controls", async () => {
   const view = draw();
-  await view.findByText("Team settings");
+  await view.findByText("Organization settings");
   const user = userEvent.setup({ document });
   await user.click(
     view.getByRole("combobox", {
@@ -161,15 +161,17 @@ test("an administrator sets the team-wide controls", async () => {
       body: { hostCommandsCap: "never" },
     }),
   );
-  // Team rules only: a member's own rules are theirs, in Settings.
+  // Organization rules only: a member's own rules are theirs, in Settings.
   expect(view.getAllByRole("button", { name: "Remove" }).length).toBe(1);
 });
 
-test("an administrator adds a team rule for every Bot", async () => {
+test("an administrator adds an organization rule for every Bot", async () => {
   const view = draw();
-  await view.findByText("Add a team rule");
+  await view.findByText("Add an organization rule");
   const user = userEvent.setup({ document });
-  await user.click(view.getByRole("button", { name: /Add a team rule/ }));
+  await user.click(
+    view.getByRole("button", { name: /Add an organization rule/ }),
+  );
   await user.type(
     await view.findByRole("textbox", { name: "Tool or app" }),
     "mcp/slack/*",

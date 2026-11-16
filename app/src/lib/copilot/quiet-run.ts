@@ -1,5 +1,5 @@
 import { createConversationJoinToken } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /**
@@ -60,7 +60,7 @@ export async function askRunLiveness(
     options.join ??
     ((id: string, signal: AbortSignal) =>
       createConversationJoinToken(
-        ORGANIZATION_ID,
+        organizationId(),
         id,
         // Each ask is its own: the answer is about now.
         { "Idempotency-Key": idempotencyKey() },

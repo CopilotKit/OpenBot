@@ -178,7 +178,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : "A teammate"
+                    : "Someone else"
               }
               answeredBy={
                 message.answeredBy
@@ -323,7 +323,7 @@ function GroupLine({
             />
           ) : (
             <p className="text-sm text-muted-foreground">
-              Asked a teammate for permission to use their own{" "}
+              Asked someone else for permission to use their own{" "}
               {message.consent.serverId} account.
             </p>
           )
