@@ -246,6 +246,15 @@ every deployment:
   meanwhile started a second run on the same conversation. The conversation now picks the Bot's
   work up as soon as it continues, so the answer streams in as it is written, and a message typed
   while the Bot works waits for it, as it does when you never left.
+- **A model nothing answers at says so, and where to change it.** With the AI model's address
+  pointing at nothing (a local model server that isn't running, a host that doesn't exist, or one
+  that never answers), the conversation said only "The Bot stopped before it finished answering. Try
+  again." It now says "OpenBot couldn't reach the AI model at host.docker.internal:48123" and what
+  to do: on OpenBot Desktop, check it's running or change the address in Settings under AI model;
+  elsewhere, ask an admin. Only the host and port are shown, never a key or password in the URL.
+  This covers built-in Bots and Bots on the LangChain and Claude Agent SDK harnesses. A task that
+  meets it stops rather than trying again. On the Claude Agent SDK harness the sentence can take
+  about three minutes to appear, because Claude Code retries the connection itself first.
 
 ### The server migrates and does the scheduled work itself
 
